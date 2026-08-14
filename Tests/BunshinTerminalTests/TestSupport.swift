@@ -28,10 +28,14 @@ final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
         return ScriptedChannel(host: self)
     }
 
+    /// Réaction scriptée aux signaux (« l'agent sort sur SIGINT », « ignore tout sauf SIGKILL »…).
+    var onSignal: (@Sendable (PTYSignal, ScriptedPTYHost) -> Void)?
+
     // Pilotage par le test : chaque événement part sur la queue de session, comme en prod.
     func emit(_ text: String) { deliver(.bytes(Array(text.utf8))) }
     func emitEOF() { deliver(.endOfFile) }
     func exit(code: Int32) { deliver(.terminated(ExitStatus(code: code))) }
+    func exit(bySignal signal: Int32) { deliver(.terminated(ExitStatus(code: nil, signal: signal))) }
 
     private func deliver(_ event: PTYEvent) {
         lock.lock()
@@ -49,7 +53,9 @@ final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
     fileprivate func record(signal: PTYSignal) {
         lock.lock()
         receivedSignals.append(signal)
+        let handler = onSignal
         lock.unlock()
+        handler?(signal, self)
     }
 }
 
@@ -63,6 +69,38 @@ private final class ScriptedChannel: PTYChannel, @unchecked Sendable {
     var capabilities: PTYCapabilities { [.signals, .cpuSampling] }
     var processGroup: pid_t? { 4242 }
     func cpuFraction() -> Double { 0 }
+}
+
+/// Moteur de test : buffer de lignes en clair, pas d'ANSI hors CR/LF. Rend les
+/// assertions d'écran lisibles sans dépendre du parseur d'un tiers.
+final class LineEngine: TerminalEngine {
+    private let geometry: TerminalGeometry
+    private var text = ""
+    private var revision: UInt64 = 0
+
+    init(geometry: TerminalGeometry) { self.geometry = geometry }
+
+    func feed(_ bytes: ArraySlice<UInt8>) {
+        text += String(decoding: bytes, as: UTF8.self)
+        revision += 1
+    }
+
+    func snapshot() -> TerminalScreen {
+        let lines = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line in TerminalLine(cells: line.map { TerminalCell(character: $0) }) }
+        return TerminalScreen(geometry: geometry,
+                              lines: lines,
+                              cursor: CursorPosition(col: 0, row: max(0, lines.count - 1)),
+                              revision: revision)
+    }
+
+    func resize(cols: Int, rows: Int) {}
+    func takeDirtyRows() -> IndexSet { IndexSet() }
+    func setScrollback(_ lines: Int) {}
+    var title: String { "" }
+    var delegate: TerminalEngineDelegate?
 }
 
 final class MemoryTranscriptSink: TranscriptSink, @unchecked Sendable {
