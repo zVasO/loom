@@ -45,7 +45,57 @@ public final class SessionRuntime: @unchecked Sendable {
     private var sawEOF = false
     private var exitStatus: ExitStatus?
     private let geometry: TerminalGeometry
+    /// Géométrie de lancement, lisible par la fabrique de surfaces (MainActor).
+    var launchGeometry: TerminalGeometry { geometry }
+    /// Projections partagées, confinées au MainActor (une par TerminalID).
+    @MainActor var surfaces: [TerminalID: TerminalSurface] = [:]
+    /// Terminaux avec au moins une surface attachée — lu sur la queue à chaque lot
+    /// d'octets, protégé par le verrou (pas de rendu pour les sessions non visibles).
+    private var attachedTerminals: Set<TerminalID> = []
+    /// Coalescence : au plus une frame en vol (confiné à la queue de session).
+    private var frameScheduled = false
     private let lock = NSLock()
+
+    /// Écriture vers le PTY du terminal (frappe, message rapide SES-05).
+    /// Non bloquant : un saut sur la queue de session puis le canal.
+    func write(_ text: String, to terminal: TerminalID) {
+        let bytes = Array(text.utf8)
+        queue.async { self.channel.write(bytes[...]) }
+    }
+
+    /// Appelé depuis le MainActor par les surfaces ; l'attachement peint immédiatement
+    /// l'écran courant (chemin du réattachement < 100 ms, TRM-03).
+    func setAttachment(_ terminal: TerminalID, attached: Bool) {
+        lock.withLock {
+            if attached { attachedTerminals.insert(terminal) } else { attachedTerminals.remove(terminal) }
+        }
+        if attached {
+            queue.async { self.deliverFrame() }
+        }
+    }
+
+    /// Sur la queue de session : programme au plus une livraison de frame.
+    private func scheduleFrame() {
+        let anyoneWatching = lock.withLock { !attachedTerminals.isEmpty }
+        guard anyoneWatching, !frameScheduled else { return }
+        frameScheduled = true
+        queue.async {
+            self.frameScheduled = false
+            self.deliverFrame()
+        }
+    }
+
+    /// Sur la queue de session : copie l'écran et le livre aux surfaces attachées.
+    private func deliverFrame() {
+        let watching = lock.withLock { attachedTerminals }
+        guard !watching.isEmpty, let engine else { return }
+        let snapshot = engine.snapshot()
+        Task { @MainActor in
+            for terminal in watching {
+                self.surfaces[terminal]?.receive(snapshot)
+            }
+        }
+    }
 
     /// Appelé sur la queue de session. Conclut quand exit ET EOF sont là : ferme le
     /// canal, fixe le transcript, émet `.terminated`, termine le flux.
@@ -212,6 +262,7 @@ public final class SessionRuntime: @unchecked Sendable {
                 // aucun octet déjà lu (NFR-R).
                 dependencies.transcript.append(bytes[...], terminal: .primary)
                 runtime.engine?.feed(bytes[...])
+                runtime.scheduleFrame()
             case .endOfFile:
                 runtime.sawEOF = true
                 runtime.concludeIfDrained(transcript: dependencies.transcript, continuation: continuation)
