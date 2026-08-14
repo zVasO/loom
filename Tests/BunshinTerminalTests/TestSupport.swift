@@ -96,11 +96,9 @@ final class LineEngine: TerminalEngine {
                               revision: revision)
     }
 
-    func resize(cols: Int, rows: Int) {}
+    func resize(to geometry: TerminalGeometry) {}
     func takeDirtyRows() -> IndexSet { IndexSet() }
     func setScrollback(_ lines: Int) {}
-    var title: String { "" }
-    var delegate: TerminalEngineDelegate?
 }
 
 final class MemoryTranscriptSink: TranscriptSink, @unchecked Sendable {

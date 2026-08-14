@@ -1,9 +1,10 @@
 import Foundation
 
 /// Classifie le `last_assistant_message` du hook `Stop` : l'agent attend-il une réponse ?
-/// Le réducteur d'état reçoit le fait (`stop(endsWithQuestion:)`), jamais le texte.
+/// (question directe, choix à faire, invitation à décider — pas seulement un « ? » final.)
+/// Le réducteur d'état reçoit le fait (`stop(awaitsReply:)`), jamais le texte.
 public enum TurnEndClassifier {
-    public static func endsWithQuestion(_ message: String) -> Bool {
+    public static func awaitsUserReply(_ message: String) -> Bool {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasSuffix("?") || trimmed.hasSuffix("？") { return true }
 

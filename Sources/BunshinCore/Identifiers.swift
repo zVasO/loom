@@ -16,11 +16,6 @@ public struct TerminalID: Hashable, Sendable, Codable {
     public init(rawValue: Int) { self.rawValue = rawValue }
 }
 
-public enum TerminalKind: String, Sendable, Codable {
-    case agent
-    case shell
-}
-
 public struct TerminalGeometry: Sendable, Equatable, Codable {
     public var cols: Int
     public var rows: Int

@@ -20,7 +20,7 @@ struct TurnEndClassifierTests {
 
         Laquelle préfères-tu ?
         """
-        #expect(TurnEndClassifier.endsWithQuestion(message))
+        #expect(TurnEndClassifier.awaitsUserReply(message))
     }
 
     @Test("un point d'interrogation en milieu de message ne fait pas une question")
@@ -31,7 +31,7 @@ struct TurnEndClassifierTests {
 
         Les 42 tests passent, le correctif est committé.
         """
-        #expect(!TurnEndClassifier.endsWithQuestion(message),
+        #expect(!TurnEndClassifier.awaitsUserReply(message),
                 "le tour est fini : la carte doit passer à idle, pas réclamer une intervention")
     }
 
@@ -42,13 +42,13 @@ struct TurnEndClassifierTests {
 
         Dis-moi si tu veux que je l'applique aussi à la branche de release.
         """
-        #expect(TurnEndClassifier.endsWithQuestion(fr))
+        #expect(TurnEndClassifier.awaitsUserReply(fr))
 
         let en = """
         I've drafted both migration scripts in the worktree.
 
         Let me know which option you'd like and I'll proceed.
         """
-        #expect(TurnEndClassifier.endsWithQuestion(en))
+        #expect(TurnEndClassifier.awaitsUserReply(en))
     }
 }

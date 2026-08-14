@@ -55,11 +55,11 @@ struct StateEngineTests {
     @Test("Stop classe la fin de tour : question → needs_input, sinon → idle")
     func stopClasseLaFinDeTour() {
         var q = StateEngine.State(session: .working)
-        q = StateEngine.reduce(q, .hook(.stop(endsWithQuestion: true)), at: t0)
+        q = StateEngine.reduce(q, .hook(.stop(awaitsReply: true)), at: t0)
         #expect(q.session == .needsInput, "« … lequel préférez-vous ? » doit badger la carte")
 
         var done = StateEngine.State(session: .working)
-        done = StateEngine.reduce(done, .hook(.stop(endsWithQuestion: false)), at: t0)
+        done = StateEngine.reduce(done, .hook(.stop(awaitsReply: false)), at: t0)
         #expect(done.session == .idle)
     }
 

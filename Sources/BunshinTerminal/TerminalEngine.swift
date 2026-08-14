@@ -9,30 +9,18 @@ import Foundation
 // sur la queue sérielle de la session, sans exception. Le protocole est volontairement
 // non-Sendable : le type dit le confinement.
 
+// Le seam de fabrique est la closure `SessionRuntime.Dependencies.makeEngine` — un seul
+// mécanisme (ADR-0008). Le canal de retour vers le PTY (réponses DA/DSR) et le titre
+// arriveront avec l'adapter SwiftTerm, dictés par ses besoins réels, pas avant.
 public protocol TerminalEngine: AnyObject {
     func feed(_ bytes: ArraySlice<UInt8>)
-    func resize(cols: Int, rows: Int)
+    func resize(to geometry: TerminalGeometry)
     /// Écran visible uniquement — jamais le scrollback. Incrémente `revision`.
     func snapshot() -> TerminalScreen
     /// Lignes modifiées depuis le dernier appel, et remise à zéro du marqueur.
     func takeDirtyRows() -> IndexSet
     /// Réduit l'empreinte d'un terminal détaché (NFR-M) sans toucher au transcript.
     func setScrollback(_ lines: Int)
-    var title: String { get }
-    var delegate: TerminalEngineDelegate? { get set }
-}
-
-public protocol TerminalEngineDelegate: AnyObject {
-    /// Octets que le terminal renvoie en amont vers le PTY (réponses DA/DSR, bracketed paste…).
-    func engine(_ engine: TerminalEngine, send bytes: ArraySlice<UInt8>)
-    func engine(_ engine: TerminalEngine, titleDidChange title: String)
-    func engineDidRing(_ engine: TerminalEngine)
-}
-
-public protocol TerminalEngineFactory: Sendable {
-    /// `queue` est la queue sérielle de la session ; l'adapter SwiftTerm la transmet
-    /// telle quelle (la queue par défaut de SwiftTerm est la main queue — piège documenté).
-    func makeEngine(geometry: TerminalGeometry, scrollback: Int, confinedTo queue: DispatchQueue) -> any TerminalEngine
 }
 
 // MARK: - Écran
@@ -42,20 +30,15 @@ public struct TerminalScreen: Sendable, Equatable {
     public let geometry: TerminalGeometry
     public let lines: [TerminalLine]
     public let cursor: CursorPosition
-    public let cursorVisible: Bool
     /// Monotone par terminal ; égal ⇒ rien à redessiner.
     public let revision: UInt64
-    /// Vrai pour le dernier écran connu d'un terminal détaché (affiché avant le snapshot frais).
-    public let isStale: Bool
 
     public init(geometry: TerminalGeometry, lines: [TerminalLine], cursor: CursorPosition,
-                cursorVisible: Bool = true, revision: UInt64, isStale: Bool = false) {
+                revision: UInt64) {
         self.geometry = geometry
         self.lines = lines
         self.cursor = cursor
-        self.cursorVisible = cursorVisible
         self.revision = revision
-        self.isStale = isStale
     }
 
     /// `TerminalSurface.screen` n'est jamais optionnel ni vide : avant le premier

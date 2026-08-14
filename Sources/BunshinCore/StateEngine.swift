@@ -44,10 +44,11 @@ public enum StateEngine {
     /// Signal émis par l'agent lui-même via ses hooks — source d'état prioritaire (STA-03).
     public enum AgentSignal: Sendable, Equatable {
         case userPromptSubmit
-        /// Hook `Stop` : l'agent a fini de répondre. La classification du message final
-        /// (`last_assistant_message`) est faite en amont par l'AgentAdapter ; le réducteur
-        /// reçoit un fait, pas un texte (docs/research/claude-code-hooks.md §4).
-        case stop(endsWithQuestion: Bool)
+        /// Hook `Stop` : l'agent a fini de répondre. `awaitsReply` = le tour se conclut en
+        /// attendant une réponse de l'utilisateur (question, choix, invitation). La
+        /// classification du `last_assistant_message` est faite en amont par l'AgentAdapter ;
+        /// le réducteur reçoit un fait, pas un texte (docs/research/claude-code-hooks.md §4).
+        case stop(awaitsReply: Bool)
         /// Hooks `PermissionRequest` / `Notification(permission_prompt)` : l'agent est bloqué.
         case permissionRequested
     }
@@ -67,16 +68,8 @@ public enum StateEngine {
         guard !terminalStates.contains(state.session) else { return state }
         var next = state
         switch event {
-        case .hook(.userPromptSubmit):
-            next.session = .working
-            next.lastHookAt = instant
-            next.candidate = nil
-        case .hook(.stop(let endsWithQuestion)):
-            next.session = endsWithQuestion ? .needsInput : .idle
-            next.lastHookAt = instant
-            next.candidate = nil
-        case .hook(.permissionRequested):
-            next.session = .needsInput
+        case .hook(let signal):
+            next.session = sessionState(after: signal)
             next.lastHookAt = instant
             next.candidate = nil
         case .process(.exited(let code)):
@@ -104,6 +97,15 @@ public enum StateEngine {
             }
         }
         return next
+    }
+
+    private static func sessionState(after signal: AgentSignal) -> SessionState {
+        switch signal {
+        case .userPromptSubmit: .working
+        case .stop(awaitsReply: true): .needsInput
+        case .stop(awaitsReply: false): .idle
+        case .permissionRequested: .needsInput
+        }
     }
 
     private static func sessionState(for guess: HeuristicGuess) -> SessionState {

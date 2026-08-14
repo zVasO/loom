@@ -66,8 +66,6 @@ public struct ExitStatus: Sendable, Equatable {
         self.code = code
         self.signal = signal
     }
-    /// exit 0 → `completed`, sinon `failed` (STA-05) — décision prise par le StateEngine.
-    public var isSuccess: Bool { code == 0 }
 }
 
 /// L'escalade d'arrêt est une donnée, pas du code : testable sous horloge injectée (SES-06).
