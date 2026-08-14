@@ -27,5 +27,7 @@ let package = Package(
             ]
         ),
         .testTarget(name: "BunshinCoreTests", dependencies: ["BunshinCore"]),
+        .testTarget(name: "BunshinAgentsTests", dependencies: ["BunshinAgents"]),
+        .testTarget(name: "BunshinTerminalTests", dependencies: ["BunshinTerminal"]),
     ]
 )
