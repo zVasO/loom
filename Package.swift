@@ -1,0 +1,31 @@
+// swift-tools-version: 5.10
+import PackageDescription
+
+// Frontières imposées par l'architecture (§6.1 du cahier des charges) :
+// les services ne dépendent jamais de BunshinUI ; tout le monde peut dépendre de BunshinCore.
+let package = Package(
+    name: "Bunshin",
+    platforms: [.macOS(.v14)],
+    products: [
+        .executable(name: "BunshinApp", targets: ["BunshinApp"]),
+        .library(name: "BunshinCore", targets: ["BunshinCore"]),
+    ],
+    targets: [
+        .target(name: "BunshinCore"),
+        .target(name: "BunshinTerminal", dependencies: ["BunshinCore"]),
+        .target(name: "BunshinAgents", dependencies: ["BunshinCore"]),
+        .target(name: "BunshinGit", dependencies: ["BunshinCore"]),
+        .target(name: "BunshinWeb", dependencies: ["BunshinCore"]),
+        .target(name: "BunshinPersistence", dependencies: ["BunshinCore"]),
+        .target(name: "BunshinIPC", dependencies: ["BunshinCore"]),
+        .target(name: "BunshinUI", dependencies: ["BunshinCore"]),
+        .executableTarget(
+            name: "BunshinApp",
+            dependencies: [
+                "BunshinCore", "BunshinUI", "BunshinTerminal", "BunshinAgents",
+                "BunshinGit", "BunshinWeb", "BunshinPersistence", "BunshinIPC",
+            ]
+        ),
+        .testTarget(name: "BunshinCoreTests", dependencies: ["BunshinCore"]),
+    ]
+)
