@@ -10,9 +10,27 @@ final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
     private let lock = NSLock()
     private var sink: (@Sendable (PTYEvent) -> Void)?
     private var queue: DispatchQueue?
+    struct SignalDelivery: Equatable {
+        let signal: PTYSignal
+        let scope: PTYSignalScope
+    }
+
     private(set) var writtenBytes: [UInt8] = []
-    private(set) var receivedSignals: [PTYSignal] = []
+    private(set) var receivedSignals: [SignalDelivery] = []
     private(set) var openedEnvironment: [String: String] = [:]
+    private(set) var closeCount = 0
+
+    fileprivate func recordClose() {
+        lock.lock()
+        closeCount += 1
+        lock.unlock()
+    }
+
+    fileprivate func releaseSink() {
+        lock.lock()
+        sink = nil
+        lock.unlock()
+    }
 
     func open(command: Command,
               workingDirectory: URL,
@@ -32,10 +50,19 @@ final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
     var onSignal: (@Sendable (PTYSignal, ScriptedPTYHost) -> Void)?
 
     // Pilotage par le test : chaque événement part sur la queue de session, comme en prod.
+    // `exit` livre terminated puis EOF (l'ordre courant) ; pour l'ordre adverse, composer
+    // avec les primitives brutes deliverTerminated/emit/emitEOF.
     func emit(_ text: String) { deliver(.bytes(Array(text.utf8))) }
     func emitEOF() { deliver(.endOfFile) }
-    func exit(code: Int32) { deliver(.terminated(ExitStatus(code: code))) }
-    func exit(bySignal signal: Int32) { deliver(.terminated(ExitStatus(code: nil, signal: signal))) }
+    func exit(code: Int32) {
+        deliver(.terminated(ExitStatus(code: code)))
+        deliver(.endOfFile)
+    }
+    func exit(bySignal signal: Int32) {
+        deliver(.terminated(ExitStatus(code: nil, signal: signal)))
+        deliver(.endOfFile)
+    }
+    func deliverTerminated(code: Int32) { deliver(.terminated(ExitStatus(code: code))) }
 
     private func deliver(_ event: PTYEvent) {
         lock.lock()
@@ -50,9 +77,9 @@ final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
         lock.unlock()
     }
 
-    fileprivate func record(signal: PTYSignal) {
+    fileprivate func record(signal: PTYSignal, scope: PTYSignalScope) {
         lock.lock()
-        receivedSignals.append(signal)
+        receivedSignals.append(SignalDelivery(signal: signal, scope: scope))
         let handler = onSignal
         lock.unlock()
         handler?(signal, self)
@@ -64,8 +91,11 @@ private final class ScriptedChannel: PTYChannel, @unchecked Sendable {
     init(host: ScriptedPTYHost) { self.host = host }
     func write(_ bytes: ArraySlice<UInt8>) { host?.record(write: bytes) }
     func resize(to geometry: TerminalGeometry) {}
-    func signal(_ signal: PTYSignal) { host?.record(signal: signal) }
-    func close() {}
+    func signal(_ signal: PTYSignal, scope: PTYSignalScope) { host?.record(signal: signal, scope: scope) }
+    func close() {
+        host?.releaseSink()
+        host?.recordClose()
+    }
     var capabilities: PTYCapabilities { [.signals, .cpuSampling] }
     var processGroup: pid_t? { 4242 }
     func cpuFraction() -> Double { 0 }
@@ -105,6 +135,8 @@ final class MemoryTranscriptSink: TranscriptSink, @unchecked Sendable {
     private let lock = NSLock()
     private var bytes: [UInt8] = []
     private(set) var isFinished = false
+    /// Vrai si un append est arrivé APRÈS finish() — violation de la barrière de drainage.
+    private(set) var appendedAfterFinish = false
 
     var text: String {
         lock.lock()
@@ -114,13 +146,12 @@ final class MemoryTranscriptSink: TranscriptSink, @unchecked Sendable {
 
     func append(_ bytes: ArraySlice<UInt8>, terminal: TerminalID) {
         lock.lock()
+        if isFinished { appendedAfterFinish = true }
         self.bytes.append(contentsOf: bytes)
         lock.unlock()
     }
 
     func finish(terminal: TerminalID) async {
-        lock.lock()
-        isFinished = true
-        lock.unlock()
+        lock.withLock { isFinished = true }
     }
 }

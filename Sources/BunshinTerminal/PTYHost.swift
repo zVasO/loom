@@ -33,9 +33,13 @@ public protocol PTYChannel: AnyObject, Sendable {
     func write(_ bytes: ArraySlice<UInt8>)
     /// TIOCSWINSZ (forkpty) / refresh-client (tmux). Le moteur est redimensionné à part.
     func resize(to geometry: TerminalGeometry)
-    /// Délivré au groupe de process dédié (TRM-02), pas seulement au pid.
-    func signal(_ signal: PTYSignal)
-    /// Idempotent ; ne délivre plus rien après retour.
+    /// SES-06 distingue la cible : SIGINT gracieux à l'agent seul (`.process`),
+    /// l'escalade SIGTERM/SIGKILL au groupe entier (`.group`) pour atteindre les
+    /// descendants (TRM-02) — sans quoi un SIGINT frapperait aussi les builds/tests
+    /// que l'agent a lancés.
+    func signal(_ signal: PTYSignal, scope: PTYSignalScope)
+    /// Idempotent ; ne délivre plus rien après retour, et LIBÈRE la référence au sink
+    /// (c'est ce qui rompt le cycle de rétention sink → runtime à la conclusion).
     func close()
     var capabilities: PTYCapabilities { get }
     /// `nil` pour un backend sans process group joignable (tmux).
@@ -48,6 +52,13 @@ public enum PTYSignal: Sendable {
     case interrupt   // SIGINT
     case terminate   // SIGTERM
     case kill        // SIGKILL
+}
+
+public enum PTYSignalScope: Sendable {
+    /// Le process de l'agent seul (kill(pid, …)).
+    case process
+    /// Le groupe de process entier (kill(-pgid, …)).
+    case group
 }
 
 public struct PTYCapabilities: OptionSet, Sendable {
@@ -72,20 +83,22 @@ public struct ExitStatus: Sendable, Equatable {
 public struct ShutdownLadder: Sendable, Equatable {
     public struct Step: Sendable, Equatable {
         public let signal: PTYSignal
+        public let scope: PTYSignalScope
         public let grace: Duration
-        public init(signal: PTYSignal, grace: Duration) {
+        public init(signal: PTYSignal, scope: PTYSignalScope, grace: Duration) {
             self.signal = signal
+            self.scope = scope
             self.grace = grace
         }
     }
     public var steps: [Step]
     public init(steps: [Step]) { self.steps = steps }
 
-    /// SES-06 : SIGINT, puis SIGTERM après 5 s, puis SIGKILL.
+    /// SES-06 : SIGINT gracieux à l'agent, puis SIGTERM au groupe après 5 s, puis SIGKILL.
     public static let graceful = ShutdownLadder(steps: [
-        Step(signal: .interrupt, grace: .seconds(5)),
-        Step(signal: .terminate, grace: .seconds(5)),
-        Step(signal: .kill, grace: .seconds(1)),
+        Step(signal: .interrupt, scope: .process, grace: .seconds(5)),
+        Step(signal: .terminate, scope: .group, grace: .seconds(5)),
+        Step(signal: .kill, scope: .group, grace: .seconds(1)),
     ])
-    public static let immediate = ShutdownLadder(steps: [Step(signal: .kill, grace: .seconds(1))])
+    public static let immediate = ShutdownLadder(steps: [Step(signal: .kill, scope: .group, grace: .seconds(1))])
 }

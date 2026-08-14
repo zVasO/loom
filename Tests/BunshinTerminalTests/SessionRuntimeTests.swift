@@ -66,13 +66,18 @@ struct SessionRuntimeTests {
             using: SessionRuntime.Dependencies(ptyHost: pty, transcript: MemoryTranscriptSink()))
 
         let ladder = ShutdownLadder(steps: [
-            .init(signal: .interrupt, grace: .milliseconds(20)),
-            .init(signal: .terminate, grace: .milliseconds(20)),
-            .init(signal: .kill, grace: .milliseconds(200)),
+            .init(signal: .interrupt, scope: .process, grace: .milliseconds(20)),
+            .init(signal: .terminate, scope: .group, grace: .milliseconds(20)),
+            .init(signal: .kill, scope: .group, grace: .milliseconds(200)),
         ])
         let report = await runtime.stop(ladder)
 
-        #expect(pty.receivedSignals == [.interrupt, .terminate, .kill])
+        // SES-06 : SIGINT gracieux à l'agent seul, l'escalade frappe le groupe entier.
+        #expect(pty.receivedSignals == [
+            .init(signal: .interrupt, scope: .process),
+            .init(signal: .terminate, scope: .group),
+            .init(signal: .kill, scope: .group),
+        ])
         #expect(report.exitStatus.code == nil)
         #expect(report.exitStatus.signal == 9)
     }
@@ -90,7 +95,8 @@ struct SessionRuntimeTests {
 
         let report = await runtime.stop(.graceful)
 
-        #expect(pty.receivedSignals == [.interrupt], "ni SIGTERM ni SIGKILL pour un agent qui obéit")
+        #expect(pty.receivedSignals == [.init(signal: .interrupt, scope: .process)],
+                "ni SIGTERM ni SIGKILL pour un agent qui obéit, et le SIGINT ne frappe que l'agent")
         #expect(report.exitStatus.code == 130)
     }
 
@@ -116,5 +122,100 @@ struct SessionRuntimeTests {
         let texts = screen.lines.map(\.text)
         #expect(texts.contains("Analyse du dépôt…"))
         #expect(texts.contains("Correctif appliqué."), "le dernier chunk est déjà parsé au retour du snapshot")
+    }
+
+    @Test("des octets tardifs après l'exit sont drainés avant la conclusion (course EOF/exit)")
+    func drainageAvantConclusion() async throws {
+        let pty = ScriptedPTYHost()
+        let transcript = MemoryTranscriptSink()
+        let (_, events) = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree")),
+            using: SessionRuntime.Dependencies(ptyHost: pty, transcript: transcript))
+        var iterator = events.makeAsyncIterator()
+        guard case .started = await iterator.next() else {
+            Issue.record("pas de .started")
+            return
+        }
+
+        // Ordre adverse documenté par la recherche (§7.4) : l'exit arrive AVANT
+        // les derniers octets du PTY, l'EOF ferme la marche.
+        pty.deliverTerminated(code: 0)
+        pty.emit("dernier lot d'octets en vol")
+        pty.emitEOF()
+
+        guard case .terminated = await iterator.next() else {
+            Issue.record("pas de .terminated")
+            return
+        }
+        #expect(transcript.text.contains("dernier lot d'octets en vol"),
+                "les octets en vol après l'exit font partie du transcript")
+        #expect(!transcript.appendedAfterFinish,
+                "aucun octet n'est écrit après la fermeture du transcript (barrière)")
+        #expect(pty.closeCount == 1, "le canal PTY est fermé à la conclusion")
+    }
+
+    @Test("deux stop() concurrents ne rejouent pas l'échelle : un seul SIGINT part")
+    func stopConcurrentsSingleFlight() async throws {
+        let pty = ScriptedPTYHost()
+        pty.onSignal = { signal, host in
+            guard case .interrupt = signal else { return }
+            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(30)) {
+                host.exit(code: 130)
+            }
+        }
+        let (runtime, _) = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree")),
+            using: SessionRuntime.Dependencies(ptyHost: pty, transcript: MemoryTranscriptSink()))
+
+        async let first = runtime.stop(.graceful)     // confirmation utilisateur
+        async let second = runtime.stop(.graceful)    // fermeture de l'app au même moment
+        let (r1, r2) = await (first, second)
+
+        #expect(pty.receivedSignals == [.init(signal: .interrupt, scope: .process)],
+                "le second appel attend l'issue du premier, il ne re-signale pas")
+        #expect(r1.exitStatus.code == 130)
+        #expect(r2.exitStatus.code == 130, "tous les appelants reçoivent le même rapport")
+    }
+
+    @Test("stop() annulé n'invente pas d'issue : il attend la vraie sortie")
+    func stopAnnuleAttendLaVraieSortie() async throws {
+        let pty = ScriptedPTYHost()
+        pty.onSignal = { signal, host in
+            if case .kill = signal { host.exit(bySignal: 9) }
+        }
+        let (runtime, _) = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree")),
+            using: SessionRuntime.Dependencies(ptyHost: pty, transcript: MemoryTranscriptSink()))
+
+        let ladder = ShutdownLadder(steps: [
+            .init(signal: .interrupt, scope: .process, grace: .milliseconds(50)),
+            .init(signal: .kill, scope: .group, grace: .milliseconds(200)),
+        ])
+        let stopTask = Task { await runtime.stop(ladder) }
+        try await Task.sleep(for: .milliseconds(10))
+        stopTask.cancel()
+
+        let report = await stopTask.value
+        #expect(report.exitStatus.signal == 9,
+                "malgré l'annulation de la tâche, le rapport est l'issue réelle du process")
+    }
+
+    @Test("l'environnement enfant est complet : PATH garanti, l'overlay de la session gagne")
+    func environnementCompletAvecPath() async throws {
+        let pty = ScriptedPTYHost()
+        _ = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude",
+                                               environment: ["BUNSHIN_EXTRA": "oui", "LANG": "fr_FR.UTF-8"]),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree")),
+            using: SessionRuntime.Dependencies(ptyHost: pty, transcript: MemoryTranscriptSink()))
+
+        #expect(pty.openedEnvironment["PATH"]?.isEmpty == false,
+                "SwiftTerm omet PATH ; le runtime doit le garantir (recherche §7.3)")
+        #expect(pty.openedEnvironment["BUNSHIN_EXTRA"] == "oui", "les variables de la session passent")
+        #expect(pty.openedEnvironment["LANG"] == "fr_FR.UTF-8", "l'overlay gagne sur la base en cas de collision")
+        #expect(pty.openedEnvironment["TERM"] == "xterm-256color", "la base terminal est posée")
     }
 }

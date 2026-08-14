@@ -34,6 +34,17 @@ struct StateEngineTests {
         #expect(s.session == .idle, "silence maintenu 2,5 s hors fenêtre hook : la session est idle")
     }
 
+    @Test("une proposition périmée ne compte pas comme observation soutenue (STA-02)")
+    func propositionPerimeeNeSAppliquePas() {
+        var s = StateEngine.State(session: .working)
+        s = StateEngine.reduce(s, .heuristic(.idle), at: t0)
+        s = StateEngine.reduce(s, .heuristic(.idle), at: t0.advanced(by: .seconds(100)))
+        #expect(s.session == .working,
+                "100 s sans aucune observation : la proposition initiale est périmée, pas confirmée")
+        s = StateEngine.reduce(s, .heuristic(.idle), at: t0.advanced(by: .milliseconds(102_500)))
+        #expect(s.session == .idle, "la proposition repartie à t+100 s, soutenue 2,5 s, s'applique")
+    }
+
     @Test("l'exit du process conclut : code 0 → completed, code ≠ 0 → failed (STA-05)")
     func exitDuProcessConclut() {
         var ok = StateEngine.State(session: .working)

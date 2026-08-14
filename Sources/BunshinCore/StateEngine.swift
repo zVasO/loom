@@ -6,6 +6,10 @@ public enum StateEngine {
     public static let hookPriorityWindow: Duration = .seconds(10)
     /// Une proposition heuristique doit être maintenue au moins 2 s avant de s'appliquer (STA-02).
     public static let heuristicHysteresis: Duration = .seconds(2)
+    /// Au-delà de cet écart entre deux observations d'une même proposition, elle est
+    /// périmée et repart de zéro : l'hystérésis mesure une observation SOUTENUE,
+    /// pas l'âge d'un candidat oublié.
+    public static let heuristicStaleness: Duration = .seconds(4)
 
     public struct State: Sendable, Equatable {
         public var session: SessionState
@@ -19,6 +23,7 @@ public enum StateEngine {
     struct Candidate: Sendable, Equatable {
         var guess: HeuristicGuess
         var since: ContinuousClock.Instant
+        var lastObserved: ContinuousClock.Instant
     }
 
     public enum Event: Sendable, Equatable {
@@ -87,13 +92,16 @@ public enum StateEngine {
             if let lastHookAt = state.lastHookAt, instant - lastHookAt < hookPriorityWindow {
                 break
             }
-            if let candidate = state.candidate, candidate.guess == guess {
+            if let candidate = state.candidate, candidate.guess == guess,
+               instant - candidate.lastObserved <= heuristicStaleness {
                 if instant - candidate.since >= heuristicHysteresis {
                     next.session = sessionState(for: guess)
                     next.candidate = nil
+                } else {
+                    next.candidate?.lastObserved = instant
                 }
             } else {
-                next.candidate = Candidate(guess: guess, since: instant)
+                next.candidate = Candidate(guess: guess, since: instant, lastObserved: instant)
             }
         }
         return next
