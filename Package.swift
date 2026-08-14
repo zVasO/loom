@@ -10,9 +10,14 @@ let package = Package(
         .executable(name: "BunshinApp", targets: ["BunshinApp"]),
         .library(name: "BunshinCore", targets: ["BunshinCore"]),
     ],
+    dependencies: [
+        // Épinglé en minor : cadence de release rapide et refonte I/O annoncée
+        // (docs/research/swiftterm-pty.md §1.6, recommandation 8).
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", .upToNextMinor(from: "1.18.0")),
+    ],
     targets: [
         .target(name: "BunshinCore"),
-        .target(name: "BunshinTerminal", dependencies: ["BunshinCore"]),
+        .target(name: "BunshinTerminal", dependencies: ["BunshinCore", .product(name: "SwiftTerm", package: "SwiftTerm")]),
         .target(name: "BunshinAgents", dependencies: ["BunshinCore"]),
         .target(name: "BunshinGit", dependencies: ["BunshinCore"]),
         .target(name: "BunshinWeb", dependencies: ["BunshinCore"]),

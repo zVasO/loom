@@ -11,11 +11,13 @@ public final class SessionRuntime: @unchecked Sendable {
     public struct Dependencies: Sendable {
         public var ptyHost: any PTYHost
         public var transcript: any TranscriptSink
-        /// `nil` tant que l'adapter SwiftTerm n'existe pas ; deviendra le défaut de production.
-        public var makeEngine: (@Sendable (TerminalGeometry, DispatchQueue) -> any TerminalEngine)?
+        /// Défaut de production : SwiftTermEngine, scrollback TRM-05 (10 000 lignes —
+        /// jamais les 500 par défaut de SwiftTerm, pensés mono-session).
+        public var makeEngine: @Sendable (TerminalGeometry, DispatchQueue) -> any TerminalEngine
         public init(ptyHost: any PTYHost,
                     transcript: any TranscriptSink,
-                    makeEngine: (@Sendable (TerminalGeometry, DispatchQueue) -> any TerminalEngine)? = nil) {
+                    makeEngine: @escaping @Sendable (TerminalGeometry, DispatchQueue) -> any TerminalEngine
+                        = { geometry, _ in SwiftTermEngine(geometry: geometry, scrollback: 10_000) }) {
             self.ptyHost = ptyHost
             self.transcript = transcript
             self.makeEngine = makeEngine
@@ -188,7 +190,7 @@ public final class SessionRuntime: @unchecked Sendable {
         // structurellement tout événement que le sink pourra délivrer — même un
         // exit immédiat (exec échoué) ne peut pas le devancer.
         queue.async {
-            runtime.engine = dependencies.makeEngine?(plan.geometry, queue)
+            runtime.engine = dependencies.makeEngine(plan.geometry, queue)
             continuation.yield(.started)
         }
 

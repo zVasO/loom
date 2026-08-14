@@ -124,6 +124,25 @@ struct SessionRuntimeTests {
         #expect(texts.contains("Correctif appliqué."), "le dernier chunk est déjà parsé au retour du snapshot")
     }
 
+    @Test("sans configuration, le moteur de production parse la sortie (défaut SwiftTerm)")
+    func moteurParDefaut() async throws {
+        let pty = ScriptedPTYHost()
+        let (runtime, events) = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree")),
+            using: SessionRuntime.Dependencies(ptyHost: pty, transcript: MemoryTranscriptSink()))
+        var iterator = events.makeAsyncIterator()
+        guard case .started = await iterator.next() else {
+            Issue.record("pas de .started")
+            return
+        }
+
+        pty.emit("\u{1B}[32mprêt\u{1B}[0m")
+        let screen = await runtime.snapshot()
+        #expect(screen.lines[0].text.hasPrefix("prêt"), "le défaut n'est pas un écran vierge : SwiftTerm parse")
+        #expect(screen.lines[0].cells[0].style.foreground == .ansi(2))
+    }
+
     @Test("des octets tardifs après l'exit sont drainés avant la conclusion (course EOF/exit)")
     func drainageAvantConclusion() async throws {
         let pty = ScriptedPTYHost()
