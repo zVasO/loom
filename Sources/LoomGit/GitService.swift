@@ -1,16 +1,16 @@
 import LoomCore
 import Foundation
 
-/// Opérations Git par shell-out vers le binaire de l'utilisateur (ADR-0003) :
-/// compatibilité maximale avec sa config réelle (credentials helpers, hooks, SSH).
-/// Toutes les commandes sont journalisables ; aucune n'est interactive
+/// Git operations by shelling out to the user's binary (ADR-0003):
+/// maximum compatibility with their real config (credential helpers, hooks, SSH).
+/// All commands are loggable; none is interactive
 /// (`GIT_TERMINAL_PROMPT=0`).
 public struct GitService: Sendable {
 
-    /// Résolution PATH depuis le shell de login : à venir avec l'EnvironmentResolver ;
-    /// /usr/bin/git est le shim système présent sur tout macOS avec les CLT.
+    /// PATH resolution from the login shell: coming with the EnvironmentResolver;
+    /// /usr/bin/git is the system shim present on every macOS with the CLT.
     public var gitPath: String
-    /// Préfixe des branches de session (GIT-02), configurable par projet à terme.
+    /// Prefix for session branches (GIT-02), per-project configurable eventually.
     public var branchPrefix: String
 
     public init(gitPath: String = "/usr/bin/git", branchPrefix: String = "loom") {
@@ -18,9 +18,9 @@ public struct GitService: Sendable {
         self.branchPrefix = branchPrefix
     }
 
-    /// GIT-01 : crée `<root>/<slug>` sur une branche `<prefix>/<slug>`, en résolvant
-    /// les collisions de branche ET de dossier par suffixe (GIT-02) — jamais d'échec
-    /// sur collision.
+    /// GIT-01: creates `<root>/<slug>` on a `<prefix>/<slug>` branch, resolving
+    /// branch AND directory collisions with a suffix (GIT-02) — never fails
+    /// on collision.
     public func createWorktree(repo: URL, root: URL, slug: String,
                                baseBranch: String? = nil) async throws -> Worktree {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -42,8 +42,8 @@ public struct GitService: Sendable {
         return Worktree(path: directory, branch: candidate)
     }
 
-    /// GIT-03 : fichiers modifiés via `status --porcelain=v2`, parsing minimal
-    /// (entrées changées « 1 », renommées « 2 », non suivies « ? »).
+    /// GIT-03: changed files via `status --porcelain=v2`, minimal parsing
+    /// (changed entries "1", renamed "2", untracked "?").
     public func status(in worktree: URL) async throws -> [FileChange] {
         let output = try await run(["status", "--porcelain=v2", "--untracked-files=all"], in: worktree)
         return output.split(separator: "\n").compactMap { line in
@@ -68,18 +68,18 @@ public struct GitService: Sendable {
         }
     }
 
-    /// PRJ-01 : la branche courante du repo au moment de l'ajout du projet.
+    /// PRJ-01: the repo's current branch at the time the project was added.
     public func currentBranch(in repo: URL) async throws -> String {
         try await run(["rev-parse", "--abbrev-ref", "HEAD"], in: repo)
     }
 
-    /// GIT-03 : diff unifié en lecture seule — les fichiers non suivis y figurent
-    /// aussi (via `--no-index` contre /dev/null, sans jamais toucher l'index).
+    /// GIT-03: read-only unified diff — untracked files are included
+    /// too (via `--no-index` against /dev/null, never touching the index).
     public func diff(in worktree: URL) async throws -> String {
         var output = try await run(["diff", "HEAD"], in: worktree)
         let untracked = try await status(in: worktree).filter { $0.kind == .untracked }
         for change in untracked {
-            // `--no-index` sort en 1 quand il y a des différences : c'est le cas nominal.
+            // `--no-index` exits with 1 when there are differences: that is the nominal case.
             if let piece = try? await run(["diff", "--no-index", "--", "/dev/null", change.path],
                                           in: worktree, successCodes: [0, 1]), !piece.isEmpty {
                 output += (output.isEmpty ? "" : "\n") + piece
@@ -88,8 +88,8 @@ public struct GitService: Sendable {
         return output
     }
 
-    /// GIT-05 : suppression refusée si le worktree porte des modifications non
-    /// commitées ; `force: true` est le SEUL chemin destructif, toujours explicite.
+    /// GIT-05: removal is refused if the worktree carries uncommitted
+    /// changes; `force: true` is the ONLY destructive path, always explicit.
     public func removeWorktree(_ worktree: Worktree, repo: URL, force: Bool = false) async throws {
         if !force {
             let changes = try await status(in: worktree.path)
@@ -102,7 +102,7 @@ public struct GitService: Sendable {
         _ = try await run(arguments, in: repo)
     }
 
-    // MARK: - Exécution
+    // MARK: - Execution
 
     @discardableResult
     private func run(_ arguments: [String], in directory: URL,

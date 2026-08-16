@@ -4,13 +4,13 @@ import LoomTerminal
 import LoomTerminalTestSupport
 import Foundation
 
-// Tests au seam convenu : l'interface publique de SessionRuntime, via ScriptedPTYHost.
-// Aucun test ne franchit la queue de session ni ne touche le moteur.
+// Tests at the agreed seam: SessionRuntime's public interface, via ScriptedPTYHost.
+// No test crosses the session queue or touches the engine.
 
-@Suite("SessionRuntime — cycle de vie")
+@Suite("SessionRuntime — lifecycle")
 struct SessionRuntimeTests {
 
-    @Test("launch démarre l'agent et émet .started en premier")
+    @Test("launch starts the agent and emits .started first")
     func launchEmetStarted() async throws {
         let pty = ScriptedPTYHost()
         let (_, events) = try SessionRuntime.launch(
@@ -20,12 +20,12 @@ struct SessionRuntimeTests {
 
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else {
-            Issue.record("le premier événement doit être .started")
+            Issue.record("the first event must be .started")
             return
         }
     }
 
-    @Test("l'exit conclut : transcript complet et flushé avant .terminated, flux terminé après")
+    @Test("exit concludes: transcript complete and flushed before .terminated, stream ends after")
     func exitConclutAvecTranscriptComplet() async throws {
         let pty = ScriptedPTYHost()
         let transcript = MemoryTranscriptSink()
@@ -36,30 +36,30 @@ struct SessionRuntimeTests {
 
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else {
-            Issue.record("pas de .started")
+            Issue.record("no .started")
             return
         }
 
-        pty.emit("Analyse du dépôt…\r\n")
-        pty.emit("Correctif appliqué, 42 tests verts.\r\n")
+        pty.emit("Analyzing the repository…\r\n")
+        pty.emit("Fix applied, 42 tests green.\r\n")
         pty.exit(code: 0)
 
         guard case .terminated(let report) = await iterator.next() else {
-            Issue.record("l'exit du process doit émettre .terminated")
+            Issue.record("process exit must emit .terminated")
             return
         }
         #expect(report.exitStatus.code == 0)
-        #expect(transcript.isFinished, "le transcript est flushé et fermé AVANT .terminated (NFR-R)")
-        #expect(transcript.text.contains("42 tests verts"),
-                "aucun octet émis avant l'exit ne manque au transcript")
-        #expect(await iterator.next() == nil, "le flux se termine juste après .terminated")
+        #expect(transcript.isFinished, "the transcript is flushed and closed BEFORE .terminated (NFR-R)")
+        #expect(transcript.text.contains("42 tests green"),
+                "no byte emitted before the exit is missing from the transcript")
+        #expect(await iterator.next() == nil, "the stream ends right after .terminated")
     }
 
-    @Test("un agent sourd à SIGINT et SIGTERM finit SIGKILLé, dans l'ordre de l'échelle (SES-06)")
+    @Test("an agent deaf to SIGINT and SIGTERM ends up SIGKILLed, in ladder order (SES-06)")
     func escaladeJusquAuKill() async throws {
         let pty = ScriptedPTYHost()
         pty.onSignal = { signal, host in
-            if case .kill = signal { host.exit(bySignal: 9) }   // seul SIGKILL a raison de lui
+            if case .kill = signal { host.exit(bySignal: 9) }   // only SIGKILL gets the better of it
         }
         let (runtime, _) = try SessionRuntime.launch(
             SessionLaunchPlan(command: Command(executable: "/fake/claude"),
@@ -73,7 +73,7 @@ struct SessionRuntimeTests {
         ])
         let report = await runtime.stop(ladder)
 
-        // SES-06 : SIGINT gracieux à l'agent seul, l'escalade frappe le groupe entier.
+        // SES-06: graceful SIGINT to the agent alone, escalation hits the whole group.
         #expect(pty.receivedSignals == [
             .init(signal: .interrupt, scope: .process),
             .init(signal: .terminate, scope: .group),
@@ -83,11 +83,11 @@ struct SessionRuntimeTests {
         #expect(report.exitStatus.signal == 9)
     }
 
-    @Test("l'escalade s'arrête dès que l'agent sort")
+    @Test("escalation stops as soon as the agent exits")
     func escaladeInterrompueParLaSortie() async throws {
         let pty = ScriptedPTYHost()
         pty.onSignal = { signal, host in
-            if case .interrupt = signal { host.exit(code: 130) }   // agent poli
+            if case .interrupt = signal { host.exit(code: 130) }   // polite agent
         }
         let (runtime, _) = try SessionRuntime.launch(
             SessionLaunchPlan(command: Command(executable: "/fake/claude"),
@@ -97,11 +97,11 @@ struct SessionRuntimeTests {
         let report = await runtime.stop(.graceful)
 
         #expect(pty.receivedSignals == [.init(signal: .interrupt, scope: .process)],
-                "ni SIGTERM ni SIGKILL pour un agent qui obéit, et le SIGINT ne frappe que l'agent")
+                "no SIGTERM or SIGKILL for an agent that obeys, and the SIGINT hits the agent only")
         #expect(report.exitStatus.code == 130)
     }
 
-    @Test("les octets du PTY alimentent le moteur ; snapshot() rend l'écran courant")
+    @Test("PTY bytes feed the engine; snapshot() returns the current screen")
     func snapshotRefleteLEcran() async throws {
         let pty = ScriptedPTYHost()
         let (runtime, events) = try SessionRuntime.launch(
@@ -112,20 +112,20 @@ struct SessionRuntimeTests {
                                                makeEngine: { geometry, _ in LineEngine(geometry: geometry) }))
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else {
-            Issue.record("pas de .started")
+            Issue.record("no .started")
             return
         }
 
-        pty.emit("Analyse du dépôt…\r\n")
-        pty.emit("Correctif appliqué.")
+        pty.emit("Analyzing the repository…\r\n")
+        pty.emit("Fix applied.")
 
         let screen = await runtime.snapshot()
         let texts = screen.lines.map(\.text)
-        #expect(texts.contains("Analyse du dépôt…"))
-        #expect(texts.contains("Correctif appliqué."), "le dernier chunk est déjà parsé au retour du snapshot")
+        #expect(texts.contains("Analyzing the repository…"))
+        #expect(texts.contains("Fix applied."), "the last chunk is already parsed when snapshot returns")
     }
 
-    @Test("sans configuration, le moteur de production parse la sortie (défaut SwiftTerm)")
+    @Test("without configuration, the production engine parses the output (SwiftTerm default)")
     func moteurParDefaut() async throws {
         let pty = ScriptedPTYHost()
         let (runtime, events) = try SessionRuntime.launch(
@@ -134,17 +134,17 @@ struct SessionRuntimeTests {
             using: SessionRuntime.Dependencies(ptyHost: pty, transcript: MemoryTranscriptSink()))
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else {
-            Issue.record("pas de .started")
+            Issue.record("no .started")
             return
         }
 
-        pty.emit("\u{1B}[32mprêt\u{1B}[0m")
+        pty.emit("\u{1B}[32mready\u{1B}[0m")
         let screen = await runtime.snapshot()
-        #expect(screen.lines[0].text.hasPrefix("prêt"), "le défaut n'est pas un écran vierge : SwiftTerm parse")
+        #expect(screen.lines[0].text.hasPrefix("ready"), "the default is not a blank screen: SwiftTerm parses")
         #expect(screen.lines[0].cells[0].style.foreground == .ansi(2))
     }
 
-    @Test("le runtime échantillonne : octets, silence, queue d'écran (STA-02)")
+    @Test("the runtime samples: bytes, silence, screen tail (STA-02)")
     func echantillonnageHeuristique() async throws {
         let pty = ScriptedPTYHost()
         var plan = SessionLaunchPlan(command: Command(executable: "/fake/codex"),
@@ -156,7 +156,7 @@ struct SessionRuntimeTests {
                                                transcript: MemoryTranscriptSink(),
                                                makeEngine: { geometry, _ in LineEngine(geometry: geometry) }))
 
-        pty.emit("invite $ ")
+        pty.emit("prompt $ ")
 
         var sawActivity = false
         var sawQuietTail = false
@@ -165,17 +165,17 @@ struct SessionRuntimeTests {
                 sawActivity = true
                 if sample.bytesSinceLastSample == 0,
                    sample.silence >= .milliseconds(30),
-                   sample.visibleTail.last?.hasPrefix("invite $") == true {
+                   sample.visibleTail.last?.hasPrefix("prompt $") == true {
                     sawQuietTail = true
                     break
                 }
             }
         }
-        #expect(sawActivity, "des échantillons arrivent sur le flux d'événements")
-        #expect(sawQuietTail, "après le calme : zéro octet, silence mesuré, motif d'invite visible")
+        #expect(sawActivity, "samples arrive on the event stream")
+        #expect(sawQuietTail, "after the calm: zero bytes, measured silence, prompt pattern visible")
     }
 
-    @Test("des octets tardifs après l'exit sont drainés avant la conclusion (course EOF/exit)")
+    @Test("late bytes after exit are drained before conclusion (EOF/exit race)")
     func drainageAvantConclusion() async throws {
         let pty = ScriptedPTYHost()
         let transcript = MemoryTranscriptSink()
@@ -185,28 +185,28 @@ struct SessionRuntimeTests {
             using: SessionRuntime.Dependencies(ptyHost: pty, transcript: transcript))
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else {
-            Issue.record("pas de .started")
+            Issue.record("no .started")
             return
         }
 
-        // Ordre adverse documenté par la recherche (§7.4) : l'exit arrive AVANT
-        // les derniers octets du PTY, l'EOF ferme la marche.
+        // Adversarial order documented by the research (§7.4): the exit arrives
+        // BEFORE the last PTY bytes, the EOF closes the parade.
         pty.deliverTerminated(code: 0)
-        pty.emit("dernier lot d'octets en vol")
+        pty.emit("last batch of bytes in flight")
         pty.emitEOF()
 
         guard case .terminated = await iterator.next() else {
-            Issue.record("pas de .terminated")
+            Issue.record("no .terminated")
             return
         }
-        #expect(transcript.text.contains("dernier lot d'octets en vol"),
-                "les octets en vol après l'exit font partie du transcript")
+        #expect(transcript.text.contains("last batch of bytes in flight"),
+                "bytes in flight after the exit are part of the transcript")
         #expect(!transcript.appendedAfterFinish,
-                "aucun octet n'est écrit après la fermeture du transcript (barrière)")
-        #expect(pty.closeCount == 1, "le canal PTY est fermé à la conclusion")
+                "no byte is written after the transcript is closed (barrier)")
+        #expect(pty.closeCount == 1, "the PTY channel is closed at conclusion")
     }
 
-    @Test("deux stop() concurrents ne rejouent pas l'échelle : un seul SIGINT part")
+    @Test("two concurrent stop() calls do not replay the ladder: a single SIGINT goes out")
     func stopConcurrentsSingleFlight() async throws {
         let pty = ScriptedPTYHost()
         pty.onSignal = { signal, host in
@@ -220,17 +220,17 @@ struct SessionRuntimeTests {
                               workingDirectory: URL(fileURLWithPath: "/tmp/worktree")),
             using: SessionRuntime.Dependencies(ptyHost: pty, transcript: MemoryTranscriptSink()))
 
-        async let first = runtime.stop(.graceful)     // confirmation utilisateur
-        async let second = runtime.stop(.graceful)    // fermeture de l'app au même moment
+        async let first = runtime.stop(.graceful)     // user confirmation
+        async let second = runtime.stop(.graceful)    // app closing at the same moment
         let (r1, r2) = await (first, second)
 
         #expect(pty.receivedSignals == [.init(signal: .interrupt, scope: .process)],
-                "le second appel attend l'issue du premier, il ne re-signale pas")
+                "the second call waits for the first one's outcome, it does not re-signal")
         #expect(r1.exitStatus.code == 130)
-        #expect(r2.exitStatus.code == 130, "tous les appelants reçoivent le même rapport")
+        #expect(r2.exitStatus.code == 130, "every caller receives the same report")
     }
 
-    @Test("stop() annulé n'invente pas d'issue : il attend la vraie sortie")
+    @Test("a cancelled stop() does not invent an outcome: it waits for the real exit")
     func stopAnnuleAttendLaVraieSortie() async throws {
         let pty = ScriptedPTYHost()
         pty.onSignal = { signal, host in
@@ -251,22 +251,22 @@ struct SessionRuntimeTests {
 
         let report = await stopTask.value
         #expect(report.exitStatus.signal == 9,
-                "malgré l'annulation de la tâche, le rapport est l'issue réelle du process")
+                "despite the task cancellation, the report is the process's real outcome")
     }
 
-    @Test("l'environnement enfant est complet : PATH garanti, l'overlay de la session gagne")
+    @Test("the child environment is complete: PATH guaranteed, the session overlay wins")
     func environnementCompletAvecPath() async throws {
         let pty = ScriptedPTYHost()
         _ = try SessionRuntime.launch(
             SessionLaunchPlan(command: Command(executable: "/fake/claude",
-                                               environment: ["LOOM_EXTRA": "oui", "LANG": "fr_FR.UTF-8"]),
+                                               environment: ["LOOM_EXTRA": "yes", "LANG": "fr_FR.UTF-8"]),
                               workingDirectory: URL(fileURLWithPath: "/tmp/worktree")),
             using: SessionRuntime.Dependencies(ptyHost: pty, transcript: MemoryTranscriptSink()))
 
         #expect(pty.openedEnvironment["PATH"]?.isEmpty == false,
-                "SwiftTerm omet PATH ; le runtime doit le garantir (recherche §7.3)")
-        #expect(pty.openedEnvironment["LOOM_EXTRA"] == "oui", "les variables de la session passent")
-        #expect(pty.openedEnvironment["LANG"] == "fr_FR.UTF-8", "l'overlay gagne sur la base en cas de collision")
-        #expect(pty.openedEnvironment["TERM"] == "xterm-256color", "la base terminal est posée")
+                "SwiftTerm omits PATH; the runtime must guarantee it (research §7.3)")
+        #expect(pty.openedEnvironment["LOOM_EXTRA"] == "yes", "the session's variables pass through")
+        #expect(pty.openedEnvironment["LANG"] == "fr_FR.UTF-8", "the overlay wins over the base on collision")
+        #expect(pty.openedEnvironment["TERM"] == "xterm-256color", "the terminal base is set")
     }
 }

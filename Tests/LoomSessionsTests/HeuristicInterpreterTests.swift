@@ -4,10 +4,10 @@ import LoomSessions
 import LoomTerminal
 import Foundation
 
-// L'interprète du canal de repli STA-02 : pur, un échantillon → une proposition
-// (ou rien). Les attendus viennent de la table STA-02 du cahier des charges.
+// The interpreter of the STA-02 fallback channel: pure, one sample → one proposal
+// (or nothing). Expectations come from the STA-02 table in the spec.
 
-@Suite("HeuristicInterpreter — échantillon → proposition")
+@Suite("HeuristicInterpreter — sample → proposal")
 struct HeuristicInterpreterTests {
 
     let interpreter = HeuristicInterpreter(silenceThreshold: .seconds(2))
@@ -18,39 +18,39 @@ struct HeuristicInterpreterTests {
                                       silence: silence, visibleTail: tail, cpuFraction: cpu)
     }
 
-    @Test("des octets qui coulent = l'agent travaille")
+    @Test("bytes flowing = the agent is working")
     func fluxActif() {
-        let proposal = interpreter.propose(sample(bytes: 512, silence: .zero, tail: ["…génération…"]))
+        let proposal = interpreter.propose(sample(bytes: 512, silence: .zero, tail: ["…generating…"]))
         #expect(proposal == .heuristic(.working))
     }
 
-    @Test("silence prolongé sur un motif d'invite = l'agent attend une entrée")
+    @Test("prolonged silence on a prompt pattern = the agent awaits input")
     func silenceSurInvite() {
-        for invite in ["❯", "$", "utilisateur@mac ~ %", "continue? (y/n)", "> "] {
+        for invite in ["❯", "$", "user@mac ~ %", "continue? (y/n)", "> "] {
             let proposal = interpreter.propose(sample(bytes: 0, silence: .seconds(3),
-                                                      tail: ["sortie précédente", invite]))
-            #expect(proposal == .heuristic(.needsInput), "« \(invite) » est un motif d'invite")
+                                                      tail: ["previous output", invite]))
+            #expect(proposal == .heuristic(.needsInput), "\"\(invite)\" is a prompt pattern")
         }
     }
 
-    @Test("silence prolongé sans invite = simplement inactif")
+    @Test("prolonged silence without a prompt = simply idle")
     func silenceSansInvite() {
         let proposal = interpreter.propose(sample(bytes: 0, silence: .seconds(3),
-                                                  tail: ["Compilation terminée."]))
+                                                  tail: ["Build finished."]))
         #expect(proposal == .heuristic(.idle))
     }
 
-    @Test("un bref silence ne propose rien : pas de bruit vers la machine à états")
+    @Test("a brief silence proposes nothing: no noise toward the state machine")
     func silenceBref() {
         let proposal = interpreter.propose(sample(bytes: 0, silence: .milliseconds(400),
                                                   tail: ["…"]))
-        #expect(proposal == nil, "en dessous du seuil, aucun signal — l'hystérésis n'a pas à filtrer du bruit")
+        #expect(proposal == nil, "below the threshold, no signal — hysteresis has no noise to filter")
     }
 
-    @Test("silencieux à l'écran mais CPU actif = l'agent réfléchit, il travaille")
+    @Test("silent on screen but CPU busy = the agent is thinking, it is working")
     func silencieuxMaisCpuActif() {
         let proposal = interpreter.propose(sample(bytes: 0, silence: .seconds(3),
                                                   tail: ["$"], cpu: 0.8))
-        #expect(proposal == .heuristic(.working), "le CPU du groupe prime sur le motif d'invite")
+        #expect(proposal == .heuristic(.working), "the process group's CPU wins over the prompt pattern")
     }
 }

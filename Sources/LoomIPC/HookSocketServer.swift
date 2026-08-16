@@ -2,12 +2,12 @@ import LoomCore
 import Dispatch
 import Foundation
 
-/// Serveur des hooks agents (ADR-0005) : socket Unix en 0600, une ligne JSON
-/// `{token, payload}` par hook. Le token est vérifié AVANT toute livraison —
-/// un payload au token inconnu ne franchit jamais le serveur (NFR-S).
+/// Server for agent hooks (ADR-0005): Unix socket with 0600 permissions, one JSON
+/// line `{token, payload}` per hook. The token is verified BEFORE any delivery —
+/// a payload with an unknown token never gets past the server (NFR-S).
 ///
-/// Implémentation sockets BSD + DispatchSource, délibérément sans dépendance :
-/// un flux local ligne-à-ligne ne justifie ni SwiftNIO ni Network.framework.
+/// BSD sockets + DispatchSource implementation, deliberately dependency-free:
+/// a local line-by-line stream justifies neither SwiftNIO nor Network.framework.
 public final class HookSocketServer: @unchecked Sendable {
 
     public typealias Validate = @Sendable (_ token: String) -> SessionID?
@@ -31,9 +31,9 @@ public final class HookSocketServer: @unchecked Sendable {
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw IPCError.socketCreationFailed(errno: errno) }
 
-        // Ne JAMAIS voler le socket d'une instance vivante : l'unlink ci-dessous
-        // laisserait son serveur orphelin et tous ses hooks en errno 61. Un
-        // fichier mort (personne ne répond), lui, est une épave à remplacer.
+        // NEVER steal the socket of a live instance: the unlink below would
+        // orphan its server and leave all its hooks failing with errno 61. A
+        // dead file (nobody answering), however, is a wreck to be replaced.
         if FileManager.default.fileExists(atPath: socketPath.path),
            Self.isServerAlive(at: socketPath.path) {
             close(descriptor)
@@ -87,7 +87,7 @@ public final class HookSocketServer: @unchecked Sendable {
         }
     }
 
-    // MARK: - Sur la queue IPC
+    // MARK: - On the IPC queue
 
     private func acceptConnection() {
         let client = accept(listeningDescriptor, nil, nil)
@@ -128,7 +128,7 @@ public final class HookSocketServer: @unchecked Sendable {
               let payload = fields["payload"],
               let session = validate(token),
               let payloadData = try? JSONSerialization.data(withJSONObject: payload) else {
-            return   // token inconnu ou ligne corrompue : silence, jamais de livraison
+            return   // unknown token or corrupted line: silence, never a delivery
         }
         handler(session, payloadData)
     }
@@ -139,12 +139,12 @@ public enum IPCError: Error, Sendable {
     case socketPathTooLong(String)
     case bindFailed(errno: Int32)
     case listenFailed(errno: Int32)
-    /// Un serveur répond déjà sur ce chemin : une autre instance de l'app tourne.
+    /// A server already answers on this path: another instance of the app is running.
     case anotherInstanceRunning(String)
 }
 
 extension HookSocketServer {
-    /// Sonde de vie : `connect` réussit ⇔ un serveur écoute derrière le fichier.
+    /// Liveness probe: `connect` succeeds ⇔ a server is listening behind the file.
     static func isServerAlive(at path: String) -> Bool {
         let probe = socket(AF_UNIX, SOCK_STREAM, 0)
         guard probe >= 0 else { return false }

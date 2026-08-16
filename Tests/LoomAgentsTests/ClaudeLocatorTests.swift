@@ -3,10 +3,10 @@ import LoomAgents
 import LoomCore
 import Foundation
 
-// UIX-06 : le diagnostic guidé « Claude Code est-il installé ? » — recherche dans
-// un PATH donné + emplacements connus, pur et testable avec de faux binaires.
+// UIX-06: the guided "is Claude Code installed?" diagnostic — searches a given
+// PATH + well-known locations, pure and testable with fake binaries.
 
-@Suite("ClaudeLocator — diagnostic d'installation")
+@Suite("ClaudeLocator — install diagnostic")
 struct ClaudeLocatorTests {
 
     private func makeFakeClaude() throws -> URL {
@@ -19,36 +19,36 @@ struct ClaudeLocatorTests {
         return binary
     }
 
-    @Test("trouvé dans le PATH fourni")
+    @Test("found in the provided PATH")
     func trouveDansLePath() throws {
         let binary = try makeFakeClaude()
         let path = binary.deletingLastPathComponent().path + ":/usr/bin"
         #expect(ClaudeLocator.locate(searchPath: path) == binary)
     }
 
-    @Test("absent : nil, avec les emplacements cherchés pour le diagnostic guidé")
+    @Test("absent: nil, with the searched locations for the guided diagnostic")
     func absent() {
         let empty = FileManager.default.temporaryDirectory
-            .appendingPathComponent("loom-vide-\(UUID().uuidString.prefix(8))").path
+            .appendingPathComponent("loom-empty-\(UUID().uuidString.prefix(8))").path
         #expect(ClaudeLocator.locate(searchPath: empty, extraLocations: []) == nil)
         #expect(!ClaudeLocator.wellKnownLocations.isEmpty,
-                "le diagnostic doit pouvoir dire OÙ il a cherché")
+                "the diagnostic must be able to say WHERE it looked")
     }
 
-    @Test("un dossier nommé claude n'est pas un binaire")
+    @Test("a directory named claude is not a binary")
     func dossierHomonyme() throws {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("loom-homonyme-\(UUID().uuidString.prefix(8))")
+            .appendingPathComponent("loom-namesake-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: dir.appendingPathComponent("claude"),
                                                 withIntermediateDirectories: true)
         #expect(ClaudeLocator.locate(searchPath: dir.path, extraLocations: []) == nil)
     }
 }
 
-@Suite("ClaudeNativeSessions — la Reprise sait si claude a quelque chose à reprendre")
+@Suite("ClaudeNativeSessions — Resume knows whether claude has anything to resume")
 struct ClaudeNativeSessionsTests {
 
-    @Test("une session native existe si son .jsonl est dans un projet claude")
+    @Test("a native session exists if its .jsonl is in a claude project")
     func detectionDeSessionNative() throws {
         let projects = FileManager.default.temporaryDirectory
             .appendingPathComponent("loom-native-\(UUID().uuidString.prefix(8))")
@@ -61,10 +61,10 @@ struct ClaudeNativeSessionsTests {
 
         #expect(ClaudeNativeSessions.exists(id, projectsDirectory: projects))
         #expect(!ClaudeNativeSessions.exists(SessionID(), projectsDirectory: projects),
-                "un UUID jamais persisté → rien à reprendre → il faut relancer à neuf")
+                "a never-persisted UUID → nothing to resume → must relaunch fresh")
     }
 
-    @Test("la casse de l'UUID ne compte pas")
+    @Test("UUID case does not matter")
     func casseIgnoree() throws {
         let projects = FileManager.default.temporaryDirectory
             .appendingPathComponent("loom-native-\(UUID().uuidString.prefix(8))")

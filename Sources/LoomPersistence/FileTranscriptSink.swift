@@ -3,11 +3,11 @@ import LoomTerminal
 import Dispatch
 import Foundation
 
-/// Puits de transcript de production (DAT-01) : flux brut + version dé-ANSI-isée
-/// pour la recherche, rotation par taille, batch d'écriture (250 ms par défaut).
-/// `append` est appelé sur la queue de session et rend la main immédiatement ;
-/// les écritures partent sur une queue disque dédiée. Ne lève jamais après init :
-/// une panne d'écriture dégrade, elle ne tue pas la session (NFR-R).
+/// Production transcript sink (DAT-01): raw stream + de-ANSI-fied version
+/// for search, size-based rotation, batched writes (250 ms by default).
+/// `append` is called on the session queue and returns immediately;
+/// writes go out on a dedicated disk queue. Never throws after init:
+/// a write failure degrades, it does not kill the session (NFR-R).
 public final class FileTranscriptSink: TranscriptSink, @unchecked Sendable {
 
     private let directory: URL
@@ -15,7 +15,7 @@ public final class FileTranscriptSink: TranscriptSink, @unchecked Sendable {
     private let queue = DispatchQueue(label: "app.loom.transcript")
     private let flushTimer: DispatchSourceTimer
 
-    // Confinés à `queue`.
+    // Confined to `queue`.
     private var buffers: [TerminalID: Data] = [:]
     private var rawHandles: [TerminalID: FileHandle] = [:]
     private var plainHandles: [TerminalID: FileHandle] = [:]
@@ -55,7 +55,7 @@ public final class FileTranscriptSink: TranscriptSink, @unchecked Sendable {
         }
     }
 
-    // MARK: - Sur la queue disque
+    // MARK: - On the disk queue
 
     private func flushAll() {
         for terminal in buffers.keys { flush(terminal: terminal) }
@@ -104,8 +104,8 @@ public final class FileTranscriptSink: TranscriptSink, @unchecked Sendable {
         }
     }
 
-    /// Retire CSI (`ESC [ … lettre`), OSC (`ESC ] … BEL|ST`), les autres échappements
-    /// courts et le retour chariot — ne garde que le texte pour la FTS (DAT-01).
+    /// Strips CSI (`ESC [ … letter`), OSC (`ESC ] … BEL|ST`), the other short
+    /// escapes and the carriage return — keeps only the text for FTS (DAT-01).
     static func strippingANSI(_ data: Data) -> Data {
         var output = Data(capacity: data.count)
         var index = data.startIndex
@@ -135,11 +135,11 @@ public final class FileTranscriptSink: TranscriptSink, @unchecked Sendable {
                         }
                     }
                 default:
-                    index = data.index(after: index)   // échappement court (ESC x)
+                    index = data.index(after: index)   // short escape (ESC x)
                 }
                 continue
             }
-            if byte == 0x0D {   // CR : le LF suffit à la version texte
+            if byte == 0x0D {   // CR: the LF is enough for the text version
                 index = data.index(after: index)
                 continue
             }

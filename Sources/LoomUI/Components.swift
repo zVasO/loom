@@ -1,18 +1,18 @@
 import LoomCore
 import SwiftUI
 
-// Le vocabulaire visuel de la référence : pilules d'onglets, tags mono,
-// points de statut, boutons pleins à l'accent. Tout ce qui est cliquable
-// répond au survol — même recette partout : fond qui se lève, texte qui
-// s'éclaire, 120 ms easeOut.
+// The visual vocabulary of the reference: tab pills, mono tags,
+// status dots, accent-filled buttons. Everything clickable
+// responds to hover — same recipe everywhere: background rises, text
+// lights up, 120 ms easeOut.
 
 public extension Animation {
-    /// La transition de survol commune à tous les contrôles.
+    /// The hover transition shared by all controls.
     static var hover: Animation { .easeOut(duration: 0.12) }
 }
 
-/// Éclaircit le contrôle au survol — pour les boutons pleins faits main
-/// (le « + » de la barre, ⌘K…) qui ne passent pas par un composant.
+/// Brightens the control on hover — for hand-rolled filled buttons
+/// (the bar's "+", ⌘K…) that do not go through a component.
 public struct HoverBrightnessModifier: ViewModifier {
     let amount: Double
     @State private var hovered = false
@@ -25,7 +25,7 @@ public struct HoverBrightnessModifier: ViewModifier {
     }
 }
 
-/// Lève la surface au survol — pour les lignes cliquables (piles, listes).
+/// Raises the surface on hover — for clickable rows (stacks, lists).
 public struct HoverSurfaceModifier: ViewModifier {
     let opacity: Double
     @State private var hovered = false
@@ -48,7 +48,7 @@ public extension View {
     }
 }
 
-/// Onglet de la barre de navigation (Projects / Sessions).
+/// Navigation bar tab (Projects / Sessions).
 public struct NavTab: View {
     let title: String
     let isActive: Bool
@@ -81,7 +81,7 @@ public struct NavTab: View {
     }
 }
 
-/// Bouton plein à l'accent (« + Add Project », « Lancer »).
+/// Accent-filled button ("+ Add Project", "Launch").
 public struct AccentButton: View {
     let title: String
     let systemImage: String?
@@ -113,7 +113,7 @@ public struct AccentButton: View {
     }
 }
 
-/// Bouton discret (« Import », « Git », icônes de la barre).
+/// Discreet button ("Import", "Git", bar icons).
 public struct GhostButton: View {
     let title: String?
     let systemImage: String?
@@ -152,7 +152,7 @@ public struct GhostButton: View {
     }
 }
 
-/// Point + libellé de statut (● working).
+/// Dot + status label (● working).
 public struct StatusLabel: View {
     let state: SessionState
 
@@ -170,7 +170,7 @@ public struct StatusLabel: View {
     }
 }
 
-/// Tag mono (branche `loom/corrige-cache`, chemin…).
+/// Mono tag (`loom/corrige-cache` branch, path…).
 public struct MonoTag: View {
     let text: String
     let systemImage: String?

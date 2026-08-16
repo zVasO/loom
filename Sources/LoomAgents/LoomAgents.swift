@@ -1,1 +1,1 @@
-// Package LoomAgents — voir §6.1 du cahier des charges. Interfaces à définir via codebase-design.
+// LoomAgents package — see spec §6.1. Interfaces to be defined via codebase-design.

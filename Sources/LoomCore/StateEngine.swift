@@ -1,16 +1,16 @@
-/// Machine à états des sessions : réducteur pur `(état, événement horodaté) → état`,
-/// porté depuis le prototype validé (docs/research/state-engine-prototype.md).
+/// Session state machine: pure reducer `(state, timestamped event) → state`,
+/// ported from the validated prototype (docs/research/state-engine-prototype.md).
 public enum StateEngine {
 
-    /// Constantes du lissage, injectables (tests en millisecondes, réglages par
-    /// agent à terme). Les valeurs standard sont celles du cahier des charges.
+    /// Smoothing constants, injectable (millisecond values in tests, per-agent
+    /// tuning eventually). The standard values are the ones from the spec.
     public struct Tuning: Sendable {
-        /// Un état posé par un hook n'est jamais écrasé par une heuristique dans cette fenêtre (STA-03).
+        /// A state set by a hook is never overwritten by a heuristic within this window (STA-03).
         public var hookPriorityWindow: Duration
-        /// Une proposition heuristique doit être maintenue au moins ce temps avant de s'appliquer (STA-02).
+        /// A heuristic proposal must be sustained at least this long before it applies (STA-02).
         public var heuristicHysteresis: Duration
-        /// Au-delà de cet écart entre deux observations d'une même proposition, elle est
-        /// périmée et repart de zéro : l'hystérésis mesure une observation SOUTENUE.
+        /// Beyond this gap between two observations of the same proposal, it is
+        /// stale and starts over from zero: the hysteresis measures a SUSTAINED observation.
         public var heuristicStaleness: Duration
         public init(hookPriorityWindow: Duration = .seconds(10),
                     heuristicHysteresis: Duration = .seconds(2),
@@ -44,47 +44,47 @@ public enum StateEngine {
         case user(UserAction)
     }
 
-    /// Événement du cycle de vie du process de l'agent (waitpid / SessionRuntime).
+    /// Lifecycle event of the agent's process (waitpid / SessionRuntime).
     public enum ProcessEvent: Sendable, Equatable {
         case exited(code: Int32?)
-        /// L'app s'est arrêtée alors que la session vivait : le PTY est mort avec elle
-        /// (ADR-0006), la session devient candidate à la Reprise.
+        /// The app stopped while the session was alive: the PTY died with it
+        /// (ADR-0006), and the session becomes a candidate for Resume.
         case interrupted
     }
 
-    /// Action explicite de l'utilisateur dans l'app.
+    /// Explicit user action in the app.
     public enum UserAction: Sendable, Equatable {
         case resume
         case archive
     }
 
-    /// Signal émis par l'agent lui-même via ses hooks — source d'état prioritaire (STA-03).
+    /// Signal emitted by the agent itself via its hooks — highest-priority state source (STA-03).
     public enum AgentSignal: Sendable, Equatable {
         case userPromptSubmit
-        /// Hook `Stop` : l'agent a fini de répondre. `awaitsReply` = le tour se conclut en
-        /// attendant une réponse de l'utilisateur (question, choix, invitation). La
-        /// classification du `last_assistant_message` est faite en amont par l'AgentAdapter ;
-        /// le réducteur reçoit un fait, pas un texte (docs/research/claude-code-hooks.md §4).
+        /// `Stop` hook: the agent finished responding. `awaitsReply` = the turn ends
+        /// waiting for a reply from the user (question, choice, invitation). The
+        /// classification of the `last_assistant_message` is done upstream by the AgentAdapter;
+        /// the reducer receives a fact, not a text (docs/research/claude-code-hooks.md §4).
         case stop(awaitsReply: Bool)
-        /// Hooks `PermissionRequest` / `Notification(permission_prompt)` : l'agent est bloqué.
+        /// `PermissionRequest` / `Notification(permission_prompt)` hooks: the agent is blocked.
         case permissionRequested
     }
 
-    /// Proposition d'état inférée par observation du PTY — source de repli (STA-02).
+    /// State proposal inferred from observing the PTY — fallback source (STA-02).
     public enum HeuristicGuess: Sendable, Equatable {
         case working
         case idle
         case needsInput
     }
 
-    /// États dont on ne sort plus par signal (seule une action utilisateur — Reprise,
-    /// archivage — crée une nouvelle trajectoire).
+    /// States no signal can leave (only a user action — Resume, archiving —
+    /// creates a new trajectory).
     private static let terminalStates: Set<SessionState> = [.completed, .failed, .archived]
 
     public static func reduce(_ state: State, _ event: Event, at instant: ContinuousClock.Instant,
                               tuning: Tuning = .standard) -> State {
-        // SES-07 : l'archivage est la seule action qui traverse un état terminal —
-        // son cas nominal est précisément la session terminée.
+        // SES-07: archiving is the only action that crosses a terminal state —
+        // its nominal case is precisely the completed session.
         if event == .user(.archive) {
             var next = state
             next.session = .archived
@@ -110,7 +110,7 @@ public enum StateEngine {
                 next.candidate = nil
             }
         case .user(.archive):
-            break   // traité avant le switch (traverse les états terminaux)
+            break   // handled before the switch (crosses terminal states)
         case .heuristic(let guess):
             if let lastHookAt = state.lastHookAt, instant - lastHookAt < tuning.hookPriorityWindow {
                 break

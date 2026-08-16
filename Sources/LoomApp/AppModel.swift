@@ -10,23 +10,23 @@ import Foundation
 import Observation
 import UserNotifications
 
-/// STA-04 : notification système quand une session attend une réponse.
-/// Second adapter du seam SessionNotifier (l'espion de test est le premier).
+/// STA-04: system notification when a session needs input.
+/// Second adapter of the SessionNotifier seam (the test spy is the first).
 struct UserNotificationsNotifier: SessionNotifier {
     func sessionNeedsInput(_ session: SessionID, title: String) {
-        guard Bundle.main.bundleIdentifier != nil else { return }   // swift run sans bundle
+        guard Bundle.main.bundleIdentifier != nil else { return }   // swift run without a bundle
         let content = UNMutableNotificationContent()
         content.title = title
-        content.body = "La session attend une réponse"
+        content.body = "The session needs input"
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: session.rawValue.uuidString,
                                   content: content, trigger: nil))
     }
 }
 
-/// Racine de composition de l'app : démarre le store (marquage `interrupted` à
-/// l'ouverture — UC-7), le manager, le serveur IPC des hooks, et projette les
-/// sessions pour SwiftUI.
+/// Composition root of the app: starts the store (marking `interrupted` on
+/// open — UC-7), the manager, the hooks IPC server, and projects the
+/// sessions for SwiftUI.
 @MainActor
 @Observable
 public final class AppModel {
@@ -37,20 +37,20 @@ public final class AppModel {
         public var state: SessionState
         public var projectID: ProjectID?
         public var branch: String?
-        /// SES-04 : un terminal secondaire (shell libre) rattaché à une session agent.
+        /// SES-04: a secondary terminal (free shell) attached to an agent session.
         public var parentID: SessionID?
         public var isShell: Bool = false
-        /// Fermée mais pas détruite (« inactif ») : cliquer reprend la session.
+        /// Closed but not destroyed ("inactive"): clicking resumes the session.
         public var isDormant: Bool = false
     }
 
     public private(set) var sessions: [SessionItem] = []
-    /// PRJ-03 : la sidebar regroupe par projet.
+    /// PRJ-03: the sidebar groups by project.
     public private(set) var projects: [ProjectRecord] = []
     public var selectedProject: ProjectID?
-    /// UC-7 : proposées à la Reprise au relancement.
+    /// UC-7: offered for Resume on relaunch.
     public private(set) var interruptedSessions: [SessionRecord] = []
-    /// SES-07 : terminées/échouées/archivées, consultables.
+    /// SES-07: completed/failed/archived, browsable.
     public private(set) var historySessions: [SessionRecord] = []
     public private(set) var startupError: String?
 
@@ -63,9 +63,9 @@ public final class AppModel {
     private let supportDirectory: URL
     private var socketURL: URL { supportDirectory.appendingPathComponent("loom.sock") }
 
-    /// La grille réellement affichée, mémorisée à chaque mesure de la vue : les
-    /// sessions suivantes NAISSENT à la bonne taille — claude peint sa bannière
-    /// directement pour la vraie grille, plus de reflow mutilant au démarrage.
+    /// The grid actually displayed, remembered at each view measurement: the
+    /// next sessions are BORN at the right size — claude paints its banner
+    /// directly for the real grid, no more mangling reflow at startup.
     public private(set) var preferredGrid: TerminalGeometry = {
         let cols = UserDefaults.standard.integer(forKey: "loom.terminal.cols")
         let rows = UserDefaults.standard.integer(forKey: "loom.terminal.rows")
@@ -73,29 +73,29 @@ public final class AppModel {
     }()
 
     public func noteTerminalGrid(cols: Int, rows: Int) {
-        // Seule une grille plausible pour une vraie fenêtre est mémorisée : une
-        // mesure transitoire (layout en cours) ne doit jamais empoisonner la
-        // géométrie de lancement des sessions suivantes.
+        // Only a grid plausible for a real window is remembered: a transient
+        // measurement (layout in progress) must never poison the launch
+        // geometry of the next sessions.
         guard cols >= 40, rows >= 10 else { return }
         preferredGrid = TerminalGeometry(cols: cols, rows: rows)
         UserDefaults.standard.set(cols, forKey: "loom.terminal.cols")
         UserDefaults.standard.set(rows, forKey: "loom.terminal.rows")
     }
 
-    /// UIX-06 : le binaire claude localisé au lancement (les apps GUI ne voient pas
-    /// le PATH du shell — un chemin absolu est la seule voie fiable).
+    /// UIX-06: the claude binary located at launch (GUI apps don't see the
+    /// shell's PATH — an absolute path is the only reliable way).
     public private(set) var claudePath: URL? = ClaudeLocator.locate()
     public var claudeSearchedLocations: [String] { ClaudeLocator.wellKnownLocations }
 
-    /// L'adapter parle au CLI avec le câblage hooks complet (ADR-0005).
+    /// The adapter talks to the CLI with the full hooks wiring (ADR-0005).
     private var adapter: ClaudeCodeAdapter {
         ClaudeCodeAdapter(executable: claudePath?.path ?? "claude",
                           hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
                                        socket: socketURL))
     }
 
-    /// En développement, `loom-hook` est un produit frère de l'app ; empaqueté,
-    /// il vivra dans le bundle puis sera copié dans Application Support.
+    /// In development, `loom-hook` is a sibling product of the app; packaged,
+    /// it will live in the bundle and then be copied to Application Support.
     static func helperBinaryURL(fallback supportDirectory: URL) -> URL {
         let sibling = Bundle.main.executableURL?
             .deletingLastPathComponent()
@@ -107,8 +107,8 @@ public final class AppModel {
     }
 
     public init(supportDirectory: URL? = nil) {
-        // LOOM_SUPPORT_DIR : injection pour les tests de bout en bout —
-        // FileManager ignore $HOME pour Application Support.
+        // LOOM_SUPPORT_DIR: injection for end-to-end tests —
+        // FileManager ignores $HOME for Application Support.
         let injected = ProcessInfo.processInfo.environment["LOOM_SUPPORT_DIR"]
             .map { URL(fileURLWithPath: $0) }
         let resolved = supportDirectory ?? injected
@@ -118,9 +118,9 @@ public final class AppModel {
         self.supportDirectory = resolved
     }
 
-    /// L'app s'appelait Bunshin : au premier lancement sous le nouveau nom, les
-    /// données existantes (base, transcripts) sont déplacées telles quelles —
-    /// l'historique de sessions survit au renommage. Le socket périmé est purgé.
+    /// The app used to be called Bunshin: on first launch under the new name, the
+    /// existing data (database, transcripts) is moved as-is — the session
+    /// history survives the rename. The stale socket is purged.
     private static func migrateLegacySupportDirectory(to destination: URL) {
         let fm = FileManager.default
         let legacy = destination.deletingLastPathComponent().appendingPathComponent("Bunshin")
@@ -134,7 +134,7 @@ public final class AppModel {
         }
     }
 
-    /// Appelé au lancement de l'app. Toute erreur est affichée, jamais fatale.
+    /// Called at app launch. Any error is displayed, never fatal.
     public func start() {
         do {
             try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
@@ -174,15 +174,15 @@ public final class AppModel {
         }
     }
 
-    /// Tous les enregistrements connus — compteurs et dates des cartes projet.
+    /// All known records — counters and dates for the project cards.
     public private(set) var allRecords: [SessionRecord] = []
 
     private func reloadPersistedSessions() {
         let all = ((try? store?.allSessions()) ?? nil) ?? []
         allRecords = all
-        // Une session fermée sans conversation persistée n'a rien à montrer ni à
-        // reprendre : elle n'encombre pas les listes (les épaves d'identifiants
-        // d'avant-correctif disparaissent du même coup).
+        // A closed session with no persisted conversation has nothing to show or
+        // to resume: it doesn't clutter the lists (pre-fix identifier wrecks
+        // disappear at the same time).
         interruptedSessions = all.filter {
             $0.state == .interrupted && ClaudeNativeSessions.exists($0.id)
         }
@@ -194,21 +194,21 @@ public final class AppModel {
         if selectedProject == nil { selectedProject = projects.first?.id }
     }
 
-    /// Fiche d'une session pour le panneau d'infos (chevron du fil d'Ariane).
+    /// A session's record for the info panel (breadcrumb chevron).
     public func sessionInfo(_ id: SessionID) -> SessionRecord? {
         (try? store?.session(id: id)) ?? nil
     }
 
-    /// Retire le projet de l'app (archivage en base) : le dossier local et les
-    /// enregistrements de sessions restent intacts.
+    /// Removes the project from the app (archived in the database): the local
+    /// folder and the session records stay intact.
     public func removeProject(_ id: ProjectID) {
         try? store?.archiveProject(id)
         if selectedProject == id { selectedProject = nil }
         reloadPersistedSessions()
     }
 
-    /// L'ordre de la sidebar appartient à l'utilisateur (glisser-déposer) : simple
-    /// préférence d'affichage, persistée hors base — les inconnus vont à la fin.
+    /// The sidebar order belongs to the user (drag and drop): a simple display
+    /// preference, persisted outside the database — unknowns go to the end.
     public func reorderProjects(dragged: ProjectID, before target: ProjectID) {
         guard let from = projects.firstIndex(where: { $0.id == dragged }),
               let to = projects.firstIndex(where: { $0.id == target }), from != to else { return }
@@ -228,9 +228,9 @@ public final class AppModel {
         }.map(\.element)
     }
 
-    /// SES-04 : un shell libre dans le worktree de la session parente — la carte
-    /// apparaît indentée sous elle (« Term n »). Les shells meurent avec l'app et
-    /// ne sont jamais proposés à la Reprise (aucune conversation native).
+    /// SES-04: a free shell in the parent session's worktree — the card
+    /// appears indented under it ("Term n"). Shells die with the app and
+    /// are never offered for Resume (no native conversation).
     @discardableResult
     public func launchShell(for parent: SessionItem, title: String? = nil) async -> SessionID? {
         guard let manager else { return nil }
@@ -262,10 +262,10 @@ public final class AppModel {
         }
     }
 
-    // MARK: - Mémoire de la pile (le nom, les tabs Term/Web survivent au relancement)
+    // MARK: - Stack memory (the name, the Term/Web tabs survive relaunch)
 
-    /// Un terminal de pile dont le PTY est mort avec l'app : la LIGNE survit —
-    /// cliquer relance un shell du même nom dans le même worktree.
+    /// A stack terminal whose PTY died with the app: the ROW survives —
+    /// clicking relaunches a shell with the same name in the same worktree.
     public struct DormantShell: Identifiable, Codable, Equatable {
         public var id = UUID()
         public var title: String
@@ -274,9 +274,9 @@ public final class AppModel {
 
     public private(set) var dormantShells: [DormantShell] = []
 
-    /// Sessions claude fermées mais pas détruites (« inactif ») : elles restent
-    /// dans leur pile avec leurs tabs — seules celles sans conversation (jamais
-    /// un message) disparaissent, via le filtre ClaudeNativeSessions.exists.
+    /// Claude sessions closed but not destroyed ("inactive"): they stay in
+    /// their stack with their tabs — only those without a conversation (never
+    /// a single message) disappear, via the ClaudeNativeSessions.exists filter.
     public var dormantSessions: [SessionRecord] {
         (interruptedSessions + historySessions).filter { record in
             record.state != .archived && !sessions.contains { $0.id == record.id }
@@ -318,8 +318,8 @@ public final class AppModel {
         var panes: [PersistedPane]
     }
 
-    /// Photographie les enfants de pile à chaque mutation : au prochain
-    /// lancement, les shells vivants d'aujourd'hui seront les dormants de demain.
+    /// Snapshots the stack children on every mutation: at the next launch,
+    /// today's live shells will be tomorrow's dormant ones.
     func saveStackChildren() {
         let shells = sessions.filter(\.isShell).compactMap { item in
             item.parentID.map { DormantShell(title: item.title, parentID: $0) }
@@ -338,7 +338,7 @@ public final class AppModel {
         guard let data = UserDefaults.standard.data(forKey: "loom.stack.children"),
               let payload = try? JSONDecoder().decode(PersistedChildren.self, from: data)
         else { return }
-        // Un dormant n'a de sens que si son parent existe encore quelque part.
+        // A dormant only makes sense if its parent still exists somewhere.
         dormantShells = payload.shells.filter { shell in
             allRecords.contains { $0.id == shell.parentID }
         }
@@ -349,7 +349,7 @@ public final class AppModel {
         }
     }
 
-    // MARK: - Panneaux navigateur (WEB-03 : un navigateur dédié DANS la pile d'une session)
+    // MARK: - Browser panes (WEB-03: a dedicated browser INSIDE a session's stack)
 
     public struct BrowserPane: Identifiable {
         public let id = UUID()
@@ -367,7 +367,7 @@ public final class AppModel {
 
     public private(set) var browserPanes: [BrowserPane] = []
 
-    /// Chaque ouverture crée un panneau dédié, enfant de la session (ou global si nil).
+    /// Each open creates a dedicated pane, child of the session (or global if nil).
     @discardableResult
     public func openBrowserPane(for parent: SessionID?) -> UUID {
         let count = browserPanes.filter { $0.parentID == parent }.count + 1
@@ -386,7 +386,7 @@ public final class AppModel {
         browserPanes.first { $0.id == id }
     }
 
-    /// SES-05 : renommage — la carte, le fil d'Ariane et la base suivent.
+    /// SES-05: renaming — the card, the breadcrumb, and the database follow.
     public func renameSession(_ id: SessionID, to title: String) {
         let cleaned = title.trimmingCharacters(in: .whitespaces)
         guard !cleaned.isEmpty else { return }
@@ -397,14 +397,14 @@ public final class AppModel {
         reloadPersistedSessions()
     }
 
-    /// Nom auto à la naissance, dans la vibe de la référence : `<projet>-<hex>`.
+    /// Auto name at birth, in the vibe of the reference: `<project>-<hex>`.
     static func generatedName(project: ProjectRecord?) -> String {
         let suffix = UUID().uuidString.prefix(4).lowercased()
         return "\(project?.name ?? "session")-\(suffix)"
     }
 
-    /// Le helper `/` du champ de saisie : skills du worktree de la session (le
-    /// checkout embarque ceux du projet — SKL-08) + skills globaux.
+    /// The input field's `/` helper: skills from the session's worktree (the
+    /// checkout carries the project's — SKL-08) + global skills.
     public func skills(for id: SessionID) -> [SkillEntry] {
         let record = (try? store?.session(id: id)) ?? nil
         let projectDirectory = (record?.worktreePath
@@ -414,8 +414,8 @@ public final class AppModel {
                                   projectDirectory: projectDirectory)
     }
 
-    /// SKL-01 au niveau projet : skills du projet (racine/.claude/skills) devant
-    /// les globaux — même règle d'ombrage que pour les sessions.
+    /// SKL-01 at the project level: project skills (root/.claude/skills) ahead
+    /// of global ones — same shadowing rule as for sessions.
     public func skills(forProject id: ProjectID) -> [SkillEntry] {
         let projectDirectory = project(id).map {
             URL(fileURLWithPath: $0.path).appendingPathComponent(".claude/skills")
@@ -429,8 +429,8 @@ public final class AppModel {
         public var changes: [FileChange]
     }
 
-    /// Git du dossier RACINE du projet (les worktrees des sessions ont leur
-    /// panneau dédié dans la vue session).
+    /// Git for the project's ROOT folder (session worktrees have their
+    /// dedicated panel in the session view).
     public func projectGit(_ id: ProjectID) async -> ProjectGitData? {
         guard let path = project(id)?.path else { return nil }
         let root = URL(fileURLWithPath: path)
@@ -443,12 +443,12 @@ public final class AppModel {
     public struct FileEntry: Identifiable, Equatable, Sendable {
         public var id: String { path }
         public var name: String
-        public var path: String       // relatif à la racine du projet
+        public var path: String       // relative to the project root
         public var isDirectory: Bool
     }
 
-    /// Listing lecture seule d'un dossier du projet — dossiers d'abord, cachés
-    /// exclus (sauf .claude, utile pour retrouver skills et règles).
+    /// Read-only listing of a project folder — directories first, hidden ones
+    /// excluded (except .claude, useful for finding skills and rules).
     public func listFiles(in id: ProjectID, at relativePath: String) -> [FileEntry] {
         guard let rootPath = project(id)?.path else { return [] }
         let directory = URL(fileURLWithPath: rootPath).appendingPathComponent(relativePath)
@@ -473,8 +473,8 @@ public final class AppModel {
         public var content: String
     }
 
-    /// Les règles que les agents liront dans ce projet : fichiers d'instructions
-    /// connus, présents à la racine (ou .claude/).
+    /// The rules that agents will read in this project: known instruction
+    /// files present at the root (or .claude/).
     public func ruleFiles(for id: ProjectID) -> [RuleFile] {
         guard let rootPath = project(id)?.path else { return [] }
         let root = URL(fileURLWithPath: rootPath)
@@ -487,7 +487,7 @@ public final class AppModel {
         }
     }
 
-    // MARK: - Compteurs des cartes projet (référence : « 2 active · 4 sessions »)
+    // MARK: - Project card counters (reference: "2 active · 4 sessions")
 
     public func activeCount(for projectID: ProjectID) -> Int {
         sessions.filter { $0.projectID == projectID && [.working, .needsInput, .starting, .idle].contains($0.state) }.count
@@ -501,8 +501,8 @@ public final class AppModel {
         allRecords.filter { $0.projectID == projectID }.map(\.createdAt).max()
     }
 
-    /// PRJ-01 : ajoute un projet en pointant un dossier ; s'il est un repo Git, la
-    /// branche courante est détectée. L'app ne modifie jamais le dossier.
+    /// PRJ-01: adds a project by pointing at a folder; if it is a Git repo, the
+    /// current branch is detected. The app never modifies the folder.
     public func addProject(at url: URL) async {
         let isGit = FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
         let branch = isGit ? try? await GitService().currentBranch(in: url) : nil
@@ -517,10 +517,10 @@ public final class AppModel {
         projects.first { $0.id == id }
     }
 
-    /// UC-7 : la Reprise — même identifiant, hooks ré-injectés, worktree d'origine.
-    /// Si claude n'a jamais persisté la conversation (session lancée mais jamais
-    /// utilisée), `--resume` n'aurait rien à reprendre : on relance À NEUF sous le
-    /// même UUID dans le même worktree — « Reprendre » ne peut plus échouer.
+    /// UC-7: Resume — same identifier, hooks re-injected, original worktree.
+    /// If claude never persisted the conversation (session launched but never
+    /// used), `--resume` would have nothing to resume: we relaunch FRESH under
+    /// the same UUID in the same worktree — "Resume" can no longer fail.
     public func resumeSession(_ record: SessionRecord) async {
         guard let manager else { return }
         let token = UUID().uuidString
@@ -542,15 +542,15 @@ public final class AppModel {
         }
     }
 
-    /// SES-07 : archive et bascule dans l'historique.
+    /// SES-07: archives and moves to history.
     public func archiveSession(_ id: SessionID) async {
         await manager?.archive(id)
         sessions.removeAll { $0.id == id }
         reloadPersistedSessions()
     }
 
-    /// Le serveur IPC valide de façon SYNCHRONE sur sa propre queue : le registre des
-    /// tokens vit derrière un verrou, jamais derrière le MainActor.
+    /// The IPC server validates SYNCHRONOUSLY on its own queue: the token
+    /// registry lives behind a lock, never behind the MainActor.
     private let tokenRegistry = TokenRegistry()
 
     final class TokenRegistry: @unchecked Sendable {
@@ -568,9 +568,9 @@ public final class AppModel {
         let updates = await manager.stateUpdates()
         for await update in updates {
             guard let index = sessions.firstIndex(where: { $0.id == update.id }) else { continue }
-            // Le process est mort (⌃C⌃C, exit, crash) : la carte vivante se ferme
-            // d'elle-même — la session réapparaît « inactif » dans sa pile si elle
-            // a une conversation, disparaît sinon (filtre du rechargement).
+            // The process is dead (⌃C⌃C, exit, crash): the live card closes
+            // on its own — the session reappears "inactive" in its stack if it
+            // has a conversation, disappears otherwise (reload filter).
             if [.completed, .failed, .interrupted].contains(update.state) {
                 sessions.remove(at: index)
                 saveStackChildren()
@@ -583,10 +583,10 @@ public final class AppModel {
 
     // MARK: - Actions (UC-1, SES-06)
 
-    /// UC-1, à la référence : un clic lance claude immédiatement dans le projet —
-    /// aucune saisie préalable ; l'objectif se tape ensuite dans le terminal.
-    /// (`prompt` reste possible pour la palette ou des raccourcis futurs.)
-    /// Retourne l'identifiant de la session créée.
+    /// UC-1, per the reference: one click launches claude immediately in the
+    /// project — no prior input; the goal is then typed in the terminal.
+    /// (`prompt` remains possible for the palette or future shortcuts.)
+    /// Returns the identifier of the created session.
     @discardableResult
     public func launchSession(prompt: String? = nil, in projectID: ProjectID? = nil) async -> SessionID? {
         guard let manager else { return nil }
@@ -606,10 +606,10 @@ public final class AppModel {
                 samplingInterval: .milliseconds(500),
                 hookToken: token)
             spec.projectID = project?.id
-            // Un seul UUID de bout en bout : celui de `--session-id` — la Reprise en dépend.
+            // A single UUID end to end: the `--session-id` one — Resume depends on it.
             spec.sessionID = sessionID
             spec.title = initialPrompt ?? Self.generatedName(project: project)
-            // GIT-01 : un repo Git → un worktree isolé par session, jamais le dossier nu.
+            // GIT-01: a Git repo → an isolated worktree per session, never the bare folder.
             if FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
                 spec.worktree = .create(repo: directory, slug: Self.slug(from: initialPrompt ?? ""))
             }
@@ -627,7 +627,7 @@ public final class AppModel {
         }
     }
 
-    /// « Corrige le bug de cache ! » → `corrige-le-bug-de-cache` (GIT-02).
+    /// "Fix the cache bug!" → `fix-the-cache-bug` (GIT-02).
     static func slug(from prompt: String) -> String {
         let cleaned = prompt.lowercased()
             .folding(options: .diacriticInsensitive, locale: nil)
@@ -638,15 +638,15 @@ public final class AppModel {
 
     private var store: SessionStore?
 
-    /// Historique de la barre d'adresse (WEB-01) — best-effort, jamais bloquant.
+    /// Address bar history (WEB-01) — best-effort, never blocking.
     public func recordVisit(url: String, title: String) {
-        saveStackChildren()   // les tabs des panes font partie de la pile mémorisée
+        saveStackChildren()   // the panes' tabs are part of the remembered stack
         try? store?.recordVisit(url: url, title: title, at: Date())
     }
 
     public func stopSession(_ id: SessionID) async {
-        // Fermer un onglet = le double Ctrl+C de l'utilisateur : claude sort
-        // proprement en ~½ s au lieu d'attendre l'escalade SIGTERM à 5 s.
+        // Closing a tab = the user's double Ctrl+C: claude exits cleanly
+        // in ~½ s instead of waiting for the SIGTERM escalation at 5 s.
         await manager?.stop(id, ladder: .close)
     }
 
@@ -655,7 +655,7 @@ public final class AppModel {
         public let diff: String
     }
 
-    /// GIT-03 : status + diff du worktree de la session, en lecture seule.
+    /// GIT-03: status + diff of the session's worktree, read-only.
     public func gitPanel(for id: SessionID) async -> GitPanelData? {
         let record = (try? store?.session(id: id)) ?? nil
         guard let path = record?.worktreePath else { return nil }

@@ -3,11 +3,11 @@ import LoomCore
 import LoomIPC
 import Foundation
 
-// Seam : l'interface publique du serveur + le protocole filaire ADR-0005
-// (une ligne JSON {token, payload} par hook). Tests sur un VRAI socket Unix
-// dans un dossier temporaire — c'est le contrat POSIX qu'on vérifie.
+// Seam: the server's public interface + the ADR-0005 wire protocol
+// (one JSON line {token, payload} per hook). Tests run on a REAL Unix socket
+// in a temporary directory — it is the POSIX contract we verify.
 
-@Suite("HookSocketServer — IPC des hooks", .serialized)
+@Suite("HookSocketServer — hook IPC", .serialized)
 struct HookSocketServerTests {
 
     private func socketURL() -> URL {
@@ -15,7 +15,7 @@ struct HookSocketServerTests {
             .appendingPathComponent("loom-test-\(UUID().uuidString.prefix(8)).sock")
     }
 
-    @Test("le socket est créé en permissions 0600 (NFR-S)")
+    @Test("the socket is created with 0600 permissions (NFR-S)")
     func socketEnPermissions0600() throws {
         let url = socketURL()
         let server = HookSocketServer(socketPath: url,
@@ -26,22 +26,22 @@ struct HookSocketServerTests {
 
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         let permissions = (attributes[.posixPermissions] as? NSNumber)?.uint16Value
-        #expect(permissions == 0o600, "le socket des hooks n'est lisible que par l'utilisateur")
+        #expect(permissions == 0o600, "the hooks socket is readable by the user only")
     }
 
-    @Test("un payload au token valide est livré à la session correspondante")
+    @Test("a payload with a valid token is delivered to the matching session")
     func payloadValideLivre() async throws {
         let url = socketURL()
         let id = SessionID()
         let received = Received()
         let server = HookSocketServer(
             socketPath: url,
-            validate: { token in token == "jeton-42" ? id : nil },
+            validate: { token in token == "token-42" ? id : nil },
             handler: { session, payload in received.append((session, payload)) })
         try server.start()
         defer { server.stop() }
 
-        try sendLine(#"{"token":"jeton-42","payload":{"hook_event_name":"Stop"}}"#, to: url)
+        try sendLine(#"{"token":"token-42","payload":{"hook_event_name":"Stop"}}"#, to: url)
 
         let delivered = await pollUntil { received.all().count == 1 }
         #expect(delivered)
@@ -51,7 +51,7 @@ struct HookSocketServerTests {
         #expect(json["hook_event_name"] as? String == "Stop")
     }
 
-    @Test("token invalide : rien n'est livré, jamais (NFR-S)")
+    @Test("invalid token: nothing is delivered, ever (NFR-S)")
     func tokenInvalideIgnore() async throws {
         let url = socketURL()
         let received = Received()
@@ -62,12 +62,12 @@ struct HookSocketServerTests {
         try server.start()
         defer { server.stop() }
 
-        try sendLine(#"{"token":"forgé","payload":{"hook_event_name":"Stop"}}"#, to: url)
+        try sendLine(#"{"token":"forged","payload":{"hook_event_name":"Stop"}}"#, to: url)
         try await Task.sleep(for: .milliseconds(120))
-        #expect(received.all().isEmpty, "un token inconnu ne franchit jamais le serveur")
+        #expect(received.all().isEmpty, "an unknown token never gets past the server")
     }
 
-    @Test("plusieurs lignes sur une même connexion : une livraison chacune")
+    @Test("multiple lines on a single connection: one delivery each")
     func plusieursLignesUneConnexion() async throws {
         let url = socketURL()
         let id = SessionID()
@@ -82,17 +82,17 @@ struct HookSocketServerTests {
         try sendLine(#"{"token":"t","payload":{"n":1}}"# + "\n" + #"{"token":"t","payload":{"n":2}}"#, to: url)
 
         let delivered = await pollUntil { received.all().count == 2 }
-        #expect(delivered, "le découpage se fait sur les fins de ligne, pas sur les paquets")
+        #expect(delivered, "framing happens on line endings, not on packets")
     }
 
-    @Test("le binaire loom-hook relaie un payload stdin jusqu'au serveur (ADR-0005)")
+    @Test("the loom-hook binary relays a stdin payload all the way to the server (ADR-0005)")
     func binaireHelperDeBoutEnBout() async throws {
         let url = socketURL()
         let id = SessionID()
         let received = Received()
         let server = HookSocketServer(
             socketPath: url,
-            validate: { token in token == "jeton-helper" ? id : nil },
+            validate: { token in token == "helper-token" ? id : nil },
             handler: { session, payload in received.append((session, payload)) })
         try server.start()
         defer { server.stop() }
@@ -100,33 +100,33 @@ struct HookSocketServerTests {
         let helper = productsDirectory.appendingPathComponent("loom-hook")
         let process = Process()
         process.executableURL = helper
-        process.arguments = ["--socket", url.path, "--token", "jeton-helper"]
+        process.arguments = ["--socket", url.path, "--token", "helper-token"]
         let stdin = Pipe()
         process.standardInput = stdin
         try process.run()
-        stdin.fileHandleForWriting.write(Data(#"{"hook_event_name":"Stop","last_assistant_message":"fini."}"#.utf8))
+        stdin.fileHandleForWriting.write(Data(#"{"hook_event_name":"Stop","last_assistant_message":"done."}"#.utf8))
         try stdin.fileHandleForWriting.close()
         process.waitUntilExit()
-        #expect(process.terminationStatus == 0, "le helper sort en 0 quand le relais réussit")
+        #expect(process.terminationStatus == 0, "the helper exits 0 when the relay succeeds")
 
         let delivered = await pollUntil { received.all().count == 1 }
         #expect(delivered)
         let (_, payload) = try #require(received.all().first)
         let json = try #require(try JSONSerialization.jsonObject(with: payload) as? [String: Any])
-        #expect(json["hook_event_name"] as? String == "Stop", "le payload traverse intact")
+        #expect(json["hook_event_name"] as? String == "Stop", "the payload crosses intact")
     }
 
-    /// `.build/debug` est le symlink stable de SPM vers les produits — résolu depuis
-    /// #filePath, indépendant du runner de tests.
+    /// `.build/debug` is SPM's stable symlink to the products — resolved from
+    /// #filePath, independent of the test runner.
     private var productsDirectory: URL {
         URL(fileURLWithPath: #filePath)                     // …/Tests/LoomIPCTests/…
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .deletingLastPathComponent()                    // racine du repo
+            .deletingLastPathComponent()                    // repo root
             .appendingPathComponent(".build/debug")
     }
 
-    // MARK: - Outillage
+    // MARK: - Tooling
 
     private final class Received: @unchecked Sendable {
         private let lock = NSLock()
@@ -135,7 +135,7 @@ struct HookSocketServerTests {
         func all() -> [(SessionID, Data)] { lock.withLock { items } }
     }
 
-    /// Client minimal : connexion AF_UNIX, écriture d'une ou plusieurs lignes, fermeture.
+    /// Minimal client: AF_UNIX connect, write one or more lines, close.
     private func sendLine(_ line: String, to url: URL) throws {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         #expect(fd >= 0)
@@ -153,7 +153,7 @@ struct HookSocketServerTests {
                 connect(fd, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        #expect(result == 0, "connexion au socket refusée (errno \(errno))")
+        #expect(result == 0, "connection to the socket refused (errno \(errno))")
         let bytes = Array((line + "\n").utf8)
         #expect(write(fd, bytes, bytes.count) == bytes.count)
     }
@@ -167,13 +167,13 @@ struct HookSocketServerTests {
     }
 }
 
-@Suite("Cohabitation de sockets")
+@Suite("Socket cohabitation")
 struct CohabitationSocketsTests {
 
-    /// Deux instances de l'app ne doivent JAMAIS partager un chemin : la seconde
-    /// refuse de voler le socket de la première (sinon : unlink silencieux,
-    /// serveur orphelin, et tous les hooks en errno 61).
-    @Test("un second serveur sur le même chemin échoue tant que le premier vit")
+    /// Two app instances must NEVER share a path: the second one refuses to
+    /// steal the first one's socket (otherwise: silent unlink, orphaned
+    /// server, and every hook failing with errno 61).
+    @Test("a second server on the same path fails while the first one lives")
     func secondServeurRefuse() throws {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("loom-test-\(UUID().uuidString.prefix(8)).sock")
@@ -186,15 +186,15 @@ struct CohabitationSocketsTests {
         #expect(throws: (any Error).self) { try second.start() }
     }
 
-    @Test("un fichier socket périmé (instance morte) est remplacé sans erreur")
+    @Test("a stale socket file (dead instance) is replaced without error")
     func socketPerimeRemplace() throws {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("loom-test-\(UUID().uuidString.prefix(8)).sock")
         let dead = HookSocketServer(socketPath: path,
                                     validate: { _ in nil }, handler: { _, _ in })
         try dead.start()
-        dead.stop()   // stop() peut laisser ou non le fichier : le suivant doit s'en sortir
-        FileManager.default.createFile(atPath: path.path, contents: nil)   // épave garantie
+        dead.stop()   // stop() may or may not leave the file behind: the next one must cope
+        FileManager.default.createFile(atPath: path.path, contents: nil)   // guaranteed wreck
         let next = HookSocketServer(socketPath: path,
                                     validate: { _ in nil }, handler: { _, _ in })
         try next.start()

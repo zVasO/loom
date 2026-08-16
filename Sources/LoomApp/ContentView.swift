@@ -7,15 +7,15 @@ import LoomUI
 import LoomWeb
 import SwiftUI
 
-// Structure de la référence validée : navbar custom (Projects / Sessions / +),
-// vue Projects en colonne centrée, vue Sessions en sidebar groupée + détail.
+// Structure of the validated reference: custom navbar (Projects / Sessions / +),
+// Projects view as a centered column, Sessions view as grouped sidebar + detail.
 
 enum MainTab {
     case projects, sessions
 }
 
-/// Le détail de la vue Sessions : une session… ou le navigateur, en onglet
-/// comme les autres (WEB-03).
+/// The Sessions view's detail: a session… or the browser, as a tab
+/// like the others (WEB-03).
 enum DetailSelection: Hashable {
     case session(SessionID)
     case webPane(UUID)
@@ -57,16 +57,16 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .onAppear { model.start() }
         .task {
-            // Reproduction autonome (diagnostic) : LOOM_AUTOTEST=1 simule le
-            // clic « + » deux secondes après le lancement — même chemin de code.
+            // Autonomous repro (diagnostics): LOOM_AUTOTEST=1 simulates the
+            // "+" click two seconds after launch — same code path.
             guard ProcessInfo.processInfo.environment["LOOM_AUTOTEST"] == "1" else { return }
             try? await Task.sleep(for: .seconds(1))
             NSApp.windows.first?.setFrame(NSRect(x: 40, y: 40, width: 1500, height: 950),
                                           display: true)
             try? await Task.sleep(for: .seconds(1))
             createSession(in: model.projects.first?.id)
-            // La frappe passe par le VRAI chemin (fenêtre → premier répondant →
-            // PTY) : le dump doit montrer « salut » dans le champ de l'agent.
+            // Keystrokes go through the REAL path (window → first responder →
+            // PTY): the dump must show "salut" in the agent's input field.
             try? await Task.sleep(for: .seconds(8))
             if let win = NSApp.windows.first {
                 let touches: [(String, UInt16)] = [("s", 1), ("a", 0), ("l", 37), ("u", 32), ("t", 17)]
@@ -92,18 +92,18 @@ struct ContentView: View {
             createSession(in: model.selectedProject)
         }
         .sheet(isPresented: $paletteShown) { palette }
-        .alert("Démarrage incomplet", isPresented: .constant(model.startupError != nil)) {
+        .alert("Incomplete startup", isPresented: .constant(model.startupError != nil)) {
             Button("OK") { model.clearError() }
         } message: {
             Text(model.startupError ?? "")
         }
     }
 
-    // MARK: - Barre de navigation
+    // MARK: - Navigation bar
 
     private var navbar: some View {
         HStack(spacing: 10) {
-            // Espace des feux tricolores (barre de titre masquée).
+            // Space for the traffic lights (title bar hidden).
             Spacer().frame(width: 70)
             Image(systemName: "square.stack.3d.down.right.fill")
                 .font(.system(size: 15))
@@ -134,7 +134,7 @@ struct ContentView: View {
             Spacer()
 
             GhostButton(systemImage: "globe") {
-                // WEB-03 : le navigateur naît DANS la pile de la session courante.
+                // WEB-03: the browser is born INSIDE the current session's stack.
                 var parent: SessionID?
                 if case .session(let id) = selected { parent = id }
                 let pane = model.openBrowserPane(for: parent)
@@ -159,11 +159,11 @@ struct ContentView: View {
         .background(DefaultTheme.background)
     }
 
-    // MARK: - Palette ⌘K
+    // MARK: - ⌘K palette
 
     private var palette: some View {
         VStack(spacing: 0) {
-            TextField("Aller à une session…", text: $paletteQuery)
+            TextField("Go to a session…", text: $paletteQuery)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
                 .padding(14)
@@ -195,8 +195,8 @@ struct ContentView: View {
         CommandPalette.rank(query: paletteQuery, in: allSessionTitles.map(\.title))
     }
 
-    /// Le + de la référence : une session claude démarre immédiatement,
-    /// l'objectif se tape dans le terminal.
+    /// The reference's +: a claude session starts immediately,
+    /// the goal is typed in the terminal.
     private func createSession(in projectID: ProjectID?) {
         Task {
             if let id = await model.launchSession(in: projectID) {
@@ -216,7 +216,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Vue Projects (référence : sidebar de projets + détail — objectif → session)
+// MARK: - Projects view (reference: project sidebar + detail — goal → session)
 
 struct ProjectsView: View {
     let model: AppModel
@@ -239,7 +239,7 @@ struct ProjectsView: View {
     }
 
     enum SkillFilter: String, CaseIterable {
-        case all = "Tous", global = "Global", project = "Projet"
+        case all = "All", global = "Global", project = "Project"
     }
     @State private var filesPath = ""
     @State private var gitData: AppModel.ProjectGitData?
@@ -272,11 +272,11 @@ struct ProjectsView: View {
         }
     }
 
-    // MARK: Sidebar des projets
+    // MARK: Project sidebar
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("PROJETS")
+            Text("PROJECTS")
                 .font(.system(size: 10, weight: .semibold))
                 .kerning(0.8)
                 .foregroundStyle(DefaultTheme.groupHeader)
@@ -301,26 +301,26 @@ struct ProjectsView: View {
                     }))
             }
             Spacer()
-            GhostButton("Ajouter un projet", systemImage: "plus") { pickProject() }
+            GhostButton("Add project", systemImage: "plus") { pickProject() }
                 .padding(.bottom, 8)
         }
         .padding(.horizontal, 8)
         .frame(width: 216)
         .background(DefaultTheme.background)
-        .alert("Supprimer « \(removalTarget?.name ?? "") » ?",
+        .alert("Delete “\(removalTarget?.name ?? "")”?",
                isPresented: Binding(get: { removalTarget != nil },
                                     set: { if !$0 { removalTarget = nil } })) {
-            Button("Supprimer", role: .destructive) {
+            Button("Delete", role: .destructive) {
                 if let target = removalTarget { model.removeProject(target.id) }
                 removalTarget = nil
             }
-            Button("Annuler", role: .cancel) { removalTarget = nil }
+            Button("Cancel", role: .cancel) { removalTarget = nil }
         } message: {
-            Text("Le projet disparaît de Loom — le dossier local et l'historique des sessions ne sont pas touchés.")
+            Text("The project disappears from Loom — the local folder and the session history are not touched.")
         }
     }
 
-    // MARK: Détail du projet
+    // MARK: Project detail
 
     private var detail: some View {
         ScrollView {
@@ -349,7 +349,7 @@ struct ProjectsView: View {
             }
         }
         .background(DefaultTheme.background)
-        // Changer de projet remet la navigation des tabs à zéro.
+        // Switching projects resets the tab navigation.
         .onChange(of: current?.id) {
             projectTab = .overview
             filesPath = ""
@@ -364,7 +364,7 @@ struct ProjectsView: View {
         }
     }
 
-    /// La rangée d'onglets de la référence : soulignement accent sur l'actif.
+    /// The reference's tab row: accent underline on the active one.
     private var tabBar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 22) {
@@ -379,7 +379,7 @@ struct ProjectsView: View {
         }
     }
 
-    // MARK: Tab Git — le dossier racine du projet
+    // MARK: Git tab — the project's root folder
 
     @ViewBuilder
     private func gitTab(_ project: ProjectRecord) -> some View {
@@ -387,12 +387,12 @@ struct ProjectsView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 8) {
                     MonoTag(git.branch, systemImage: "arrow.triangle.branch")
-                    Text("· racine du projet (les worktrees vivent dans leurs sessions)")
+                    Text("· project root (worktrees live in their sessions)")
                         .font(.system(size: 11))
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
                 if git.changes.isEmpty {
-                    Text("Aucune modification en attente")
+                    Text("No pending changes")
                         .font(.system(size: 12))
                         .foregroundStyle(DefaultTheme.secondaryText)
                 } else {
@@ -417,20 +417,20 @@ struct ProjectsView: View {
         } else {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Lecture du dépôt…")
+                Text("Reading the repository…")
                     .font(.system(size: 12))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
         }
     }
 
-    // MARK: Tab Files — navigation lecture seule
+    // MARK: Files tab — read-only navigation
 
     private func filesTab(_ project: ProjectRecord) -> some View {
         let entries = model.listFiles(in: project.id, at: filesPath)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                HoverIconButton(systemImage: "house", help: "Racine du projet") { filesPath = "" }
+                HoverIconButton(systemImage: "house", help: "Project root") { filesPath = "" }
                 Text("/" + filesPath)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(DefaultTheme.secondaryText)
@@ -480,7 +480,7 @@ struct ProjectsView: View {
         .onTapGesture(perform: action)
     }
 
-    // MARK: Tab Skills — ce que les agents peuvent invoquer ici (cartes, réf. Xirp)
+    // MARK: Skills tab — what agents can invoke here (cards, Xirp ref.)
 
     private func skillsTab(_ project: ProjectRecord) -> some View {
         let skills = model.skills(forProject: project.id)
@@ -493,12 +493,12 @@ struct ProjectsView: View {
         }
         return VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 6) {
-                filterPill("Tous (\(skills.count))", isActive: skillFilter == .all) { skillFilter = .all }
+                filterPill("All (\(skills.count))", isActive: skillFilter == .all) { skillFilter = .all }
                 filterPill("Global (\(globals.count))", isActive: skillFilter == .global) { skillFilter = .global }
-                filterPill("Projet (\(projets.count))", isActive: skillFilter == .project) { skillFilter = .project }
+                filterPill("Project (\(projets.count))", isActive: skillFilter == .project) { skillFilter = .project }
             }
             if filtered.isEmpty {
-                Text("Aucun skill — ajoute des dossiers dans .claude/skills (projet) ou ~/.claude/skills (global).")
+                Text("No skills — add folders in .claude/skills (project) or ~/.claude/skills (global).")
                     .font(.system(size: 12))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
@@ -515,7 +515,7 @@ struct ProjectsView: View {
         }
     }
 
-    /// Ouvre un fichier DANS l'app : texte affiché en place, binaire signalé.
+    /// Opens a file INSIDE the app: text displayed in place, binary flagged.
     private func openDocument(at url: URL, title: String) {
         if let content = try? String(contentsOf: url, encoding: .utf8) {
             viewedDocument = ViewedDocument(title: title, path: url,
@@ -527,12 +527,12 @@ struct ProjectsView: View {
         }
     }
 
-    /// Lecteur intégré : retour, titre, chemin, Finder — contenu mono, markdown
-    /// léger pour les .md (gras, code…), sélectionnable.
+    /// Built-in viewer: back, title, path, Finder — mono content, light
+    /// markdown for .md files (bold, code…), selectable.
     private func documentViewer(_ document: ViewedDocument) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                HoverIconButton(systemImage: "arrow.left", help: "Retour") {
+                HoverIconButton(systemImage: "arrow.left", help: "Back") {
                     viewedDocument = nil
                 }
                 Text(document.title)
@@ -562,7 +562,7 @@ struct ProjectsView: View {
                     Image(systemName: "doc.zipper")
                         .font(.system(size: 28))
                         .foregroundStyle(DefaultTheme.secondaryText)
-                    Text("Fichier binaire — ouvre-le depuis le Finder")
+                    Text("Binary file — open it from the Finder")
                         .font(.system(size: 12))
                         .foregroundStyle(DefaultTheme.secondaryText)
                 }
@@ -595,13 +595,13 @@ struct ProjectsView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: Tab Rules — les instructions que liront les agents (cartes)
+    // MARK: Rules tab — the instructions agents will read (cards)
 
     private func rulesTab(_ project: ProjectRecord) -> some View {
         let rules = model.ruleFiles(for: project.id)
         return VStack(alignment: .leading, spacing: 16) {
             if rules.isEmpty {
-                Text("Aucun fichier de règles (CLAUDE.md, AGENTS.md, CONTEXT.md…) à la racine.")
+                Text("No rule files (CLAUDE.md, AGENTS.md, CONTEXT.md…) at the root.")
                     .font(.system(size: 12))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
@@ -639,10 +639,10 @@ struct ProjectsView: View {
         }
     }
 
-    /// Le geste central de la référence : décrire l'objectif ICI lance la session —
-    /// le prompt part directement dans le terminal de l'agent.
+    /// The reference's central gesture: describing the goal HERE launches the
+    /// session — the prompt goes straight into the agent's terminal.
     private func goalField(_ project: ProjectRecord) -> some View {
-        TextField("Que construit-on ? Décris ton objectif — Entrée lance une session…",
+        TextField("What are we building? Describe your goal — Enter starts a session…",
                   text: $goal)
             .textFieldStyle(.plain)
             .font(.system(size: 14))
@@ -668,12 +668,12 @@ struct ProjectsView: View {
         }
     }
 
-    // MARK: Sessions actives
+    // MARK: Active sessions
 
     private func activeSection(_ project: ProjectRecord) -> some View {
         let items = model.sessions.filter { $0.projectID == project.id && !$0.isShell }
         return VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("ACTIVES", count: items.count,
+            sectionHeader("ACTIVE", count: items.count,
                           color: DefaultTheme.badgeColor(for: .working))
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12)],
                       alignment: .leading, spacing: 12) {
@@ -685,7 +685,7 @@ struct ProjectsView: View {
         }
     }
 
-    // MARK: Sessions récentes
+    // MARK: Recent sessions
 
     private func recentSection(_ project: ProjectRecord) -> some View {
         let records = (model.interruptedSessions + model.historySessions)
@@ -695,7 +695,7 @@ struct ProjectsView: View {
         return Group {
             if !records.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    sectionHeader("RÉCENTES", count: records.count,
+                    sectionHeader("RECENT", count: records.count,
                                   color: DefaultTheme.secondaryText)
                     VStack(spacing: 2) {
                         ForEach(Array(records), id: \.id) { record in
@@ -731,18 +731,18 @@ struct ProjectsView: View {
             Image(systemName: "square.stack.3d.down.right.fill")
                 .font(.system(size: 40))
                 .foregroundStyle(DefaultTheme.accent)
-            Text("Ajoute ton premier projet")
+            Text("Add your first project")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(DefaultTheme.primaryText)
-            Text("Un dossier local — s'il contient un repo Git, chaque session\ntravaillera isolée sur son propre worktree.")
+            Text("A local folder — if it contains a Git repo, each session\nwill work isolated on its own worktree.")
                 .font(.system(size: 12))
                 .foregroundStyle(DefaultTheme.secondaryText)
                 .multilineTextAlignment(.center)
-            AccentButton("Ajouter un projet", systemImage: "plus") { pickProject() }
+            AccentButton("Add project", systemImage: "plus") { pickProject() }
                 .padding(.top, 6)
             if model.claudePath == nil {
                 VStack(spacing: 4) {
-                    Label("Claude Code introuvable", systemImage: "exclamationmark.triangle.fill")
+                    Label("Claude Code not found", systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 12))
                         .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
                     Text("npm install -g @anthropic-ai/claude-code")
@@ -769,8 +769,8 @@ struct ProjectsView: View {
     }
 }
 
-/// Onglet horizontal d'une pile (référence : barre du Terminal) : icône,
-/// titre, croix visible au survol ou sur l'actif. Dormant = atténué.
+/// Horizontal tab of a stack (reference: the Terminal bar): icon, title,
+/// close cross visible on hover or on the active one. Dormant = dimmed.
 struct StackTab: View {
     let icon: String
     let title: String
@@ -795,7 +795,7 @@ struct StackTab: View {
                 .frame(maxWidth: 150, alignment: .leading)
                 .fixedSize(horizontal: true, vertical: false)
             if hovered || isActive {
-                HoverIconButton(systemImage: "xmark", help: "Fermer", action: onClose)
+                HoverIconButton(systemImage: "xmark", help: "Close", action: onClose)
             }
         }
         .padding(.horizontal, 9).padding(.vertical, 5)
@@ -811,8 +811,8 @@ struct StackTab: View {
     }
 }
 
-/// Carte skill de la référence : étincelle dans un carré teinté, nom, deux
-/// lignes de description, chip de portée.
+/// The reference's skill card: sparkle in a tinted square, name, two
+/// lines of description, scope chip.
 struct SkillCard: View {
     let skill: SkillEntry
     let onOpen: () -> Void
@@ -855,7 +855,7 @@ struct SkillCard: View {
         let isProject = skill.scope == .project
         let color = isProject ? DefaultTheme.accent
                               : Color(red: 0.416, green: 0.635, blue: 0.910)
-        return Label(isProject ? "projet" : "global",
+        return Label(isProject ? "project" : "global",
                      systemImage: isProject ? "folder" : "globe")
             .font(.system(size: 10, weight: .medium))
             .foregroundStyle(color)
@@ -864,7 +864,7 @@ struct SkillCard: View {
     }
 }
 
-/// Carte règle : document dans un carré teinté, nom, aperçu — clic pour ouvrir.
+/// Rule card: document in a tinted square, name, preview — click to open.
 struct RuleCard: View {
     let rule: AppModel.RuleFile
     let onOpen: () -> Void
@@ -903,8 +903,8 @@ struct RuleCard: View {
     }
 }
 
-/// Onglet du détail projet : soulignement accent sur l'actif, texte éclairci
-/// au survol (référence Xirp).
+/// Project detail tab: accent underline on the active one, text lightened
+/// on hover (Xirp reference).
 struct ProjectTabButton: View {
     let title: String
     let isActive: Bool
@@ -930,8 +930,8 @@ struct ProjectTabButton: View {
     }
 }
 
-/// Réordonnancement au survol pendant le drag : la ligne se déplace en direct
-/// dès qu'on la traîne sur une autre — le lâcher ne fait que conclure.
+/// Reorder on hover during drag: the row moves live as soon as it is
+/// dragged over another — the drop only finalizes.
 struct ProjectReorderDelegate: DropDelegate {
     let target: ProjectID
     @Binding var dragged: ProjectID?
@@ -952,7 +952,7 @@ struct ProjectReorderDelegate: DropDelegate {
     }
 }
 
-/// Ligne de la sidebar : barre accent + dossier orange quand le projet est ouvert.
+/// Sidebar row: accent bar + orange folder when the project is open.
 struct ProjectSidebarRow: View {
     let project: ProjectRecord
     let isSelected: Bool
@@ -977,12 +977,12 @@ struct ProjectSidebarRow: View {
                 .lineLimit(1)
             Spacer()
             if hovered {
-                // La poignée (glisser-déposer) + la croix (retrait du projet).
+                // The handle (drag and drop) + the cross (project removal).
                 HStack(spacing: 4) {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 9))
                         .foregroundStyle(DefaultTheme.mutedText)
-                    HoverIconButton(systemImage: "xmark", help: "Supprimer le projet",
+                    HoverIconButton(systemImage: "xmark", help: "Delete project",
                                     action: onRemove)
                 }
             } else if activeCount > 0 {
@@ -1002,7 +1002,7 @@ struct ProjectSidebarRow: View {
     }
 }
 
-/// Carte d'une session vivante : statut, titre, branche — clic pour ouvrir.
+/// Card of a live session: status, title, branch — click to open.
 struct ActiveSessionCard: View {
     let item: AppModel.SessionItem
     let onOpen: () -> Void
@@ -1034,7 +1034,7 @@ struct ActiveSessionCard: View {
     }
 }
 
-/// La carte pointillée de la référence : une session SANS objectif, tout de suite.
+/// The reference's dashed card: a session WITHOUT a goal, right away.
 struct QuickSessionCard: View {
     let onCreate: () -> Void
     @State private var hovered = false
@@ -1042,7 +1042,7 @@ struct QuickSessionCard: View {
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
-            Text("Session vide rapide").font(.system(size: 12, weight: .medium))
+            Text("Quick empty session").font(.system(size: 12, weight: .medium))
         }
         .foregroundStyle(hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
         .frame(maxWidth: .infinity, minHeight: 92)
@@ -1058,7 +1058,7 @@ struct QuickSessionCard: View {
     }
 }
 
-/// Ligne d'une session récente : chip d'état, titre, date relative — clic reprend.
+/// Row of a recent session: state chip, title, relative date — click resumes.
 struct RecentSessionRow: View {
     let record: SessionRecord
     let onOpen: () -> Void
@@ -1099,7 +1099,7 @@ struct RecentSessionRow: View {
     }
 }
 
-// MARK: - Vue Sessions (référence : piles par session — parent + terminaux + webs)
+// MARK: - Sessions view (reference: stacks per session — parent + terminals + webs)
 
 struct SessionsView: View {
     let model: AppModel
@@ -1109,9 +1109,9 @@ struct SessionsView: View {
     let onShowProject: (ProjectID?) -> Void
     @State private var renameTarget: SessionID?
     @State private var renameText = ""
-    /// Groupes repliés (affichage seulement — les sessions continuent de tourner).
+    /// Collapsed groups (display only — the sessions keep running).
     @State private var collapsedGroups: Set<String> = []
-    /// Fermeture demandée mais pas encore confirmée : chaque croix passe ici.
+    /// Close requested but not yet confirmed: every close cross goes through here.
     @State private var pendingClose: PendingClose?
 
     struct PendingClose {
@@ -1143,19 +1143,19 @@ struct SessionsView: View {
                 }
             }
         }
-        .alert("Fermer cet onglet ?",
+        .alert("Close this tab?",
                isPresented: Binding(get: { pendingClose != nil },
                                     set: { if !$0 { pendingClose = nil } })) {
-            Button("Fermer", role: .destructive) {
+            Button("Close", role: .destructive) {
                 pendingClose?.action()
                 pendingClose = nil
             }
-            Button("Annuler", role: .cancel) { pendingClose = nil }
+            Button("Cancel", role: .cancel) { pendingClose = nil }
         } message: {
             Text(pendingClose?.message ?? "")
         }
-        // ⌘T n'existe qu'en contexte terminal ou navigateur, et crée
-        // FORCÉMENT un onglet du même type, dans la barre horizontale.
+        // ⌘T only exists in a terminal or browser context, and NECESSARILY
+        // creates a tab of the same type, in the horizontal bar.
         .onReceive(NotificationCenter.default.publisher(for: .loomNewTab)) { _ in
             guard let context = stripContext else { return }
             switch context.kind {
@@ -1171,9 +1171,9 @@ struct SessionsView: View {
                 }
             }
         }
-        // Le process de la session affichée est mort (⌃C⌃C, exit) : le tab se
-        // ferme tout seul — la carte « inactif » reste dans la pile si la
-        // session a une conversation.
+        // The displayed session's process is dead (⌃C⌃C, exit): the tab
+        // closes on its own — the "inactive" card stays in the stack if the
+        // session has a conversation.
         .onChange(of: model.sessions) { _, live in
             if case .session(let id) = selected,
                !live.contains(where: { $0.id == id }) {
@@ -1182,8 +1182,8 @@ struct SessionsView: View {
         }
     }
 
-    /// Le contexte de la barre horizontale : elle n'existe QUE si l'onglet
-    /// ouvert est un terminal ou un navigateur — jamais sur la session claude.
+    /// The horizontal bar's context: it exists ONLY if the open tab is a
+    /// terminal or a browser — never on the claude session itself.
     enum StripKind { case terminal, web }
 
     private func stackParentItem(_ id: SessionID) -> AppModel.SessionItem? {
@@ -1209,9 +1209,9 @@ struct SessionsView: View {
         }
     }
 
-    /// Barre d'onglets horizontale mono-type (référence Terminal) : sur un
-    /// terminal, les terminaux de la pile ; sur un navigateur, ses navigateurs.
-    /// Le « + » et ⌘T créent toujours un onglet DU MÊME type.
+    /// Single-type horizontal tab bar (Terminal reference): on a terminal,
+    /// the stack's terminals; on a browser, its browsers.
+    /// The "+" and ⌘T always create a tab OF THE SAME type.
     @ViewBuilder
     private var stackTabStrip: some View {
         if let context = stripContext {
@@ -1228,7 +1228,7 @@ struct SessionsView: View {
                                          onSelect: { selected = .session(shell.id) },
                                          onClose: {
                                              pendingClose = PendingClose(
-                                                 message: "« \(shell.title) » sera arrêté.") {
+                                                 message: "“\(shell.title)” will be stopped.") {
                                                  Task { await model.stopSession(shell.id) }
                                              }
                                          })
@@ -1245,7 +1245,7 @@ struct SessionsView: View {
                                          },
                                          onClose: {
                                              pendingClose = PendingClose(
-                                                 message: "« \(dormant.title) » sera retiré de la pile mémorisée.") {
+                                                 message: "“\(dormant.title)” will be removed from the remembered stack.") {
                                                  model.forgetDormantShell(dormant)
                                              }
                                          })
@@ -1259,7 +1259,7 @@ struct SessionsView: View {
                                      onSelect: { selected = .webPane(pane.id) },
                                      onClose: {
                                          pendingClose = PendingClose(
-                                             message: "« \(pane.title) » sera fermé — ses onglets seront perdus.") {
+                                             message: "“\(pane.title)” will be closed — its tabs will be lost.") {
                                              if selected == .webPane(pane.id) { selected = nil }
                                              model.closeBrowserPane(pane.id)
                                          }
@@ -1268,7 +1268,7 @@ struct SessionsView: View {
                     }
                     HoverIconButton(systemImage: "plus",
                                     help: context.kind == .terminal
-                                        ? "Nouveau terminal (⌘T)" : "Nouveau navigateur (⌘T)") {
+                                        ? "New terminal (⌘T)" : "New browser (⌘T)") {
                         switch context.kind {
                         case .terminal:
                             if let parent = context.parent {
@@ -1293,9 +1293,9 @@ struct SessionsView: View {
 
     private var placeholder: some View {
         VStack(spacing: 8) {
-            Text("Aucune session ouverte")
+            Text("No open session")
                 .foregroundStyle(DefaultTheme.secondaryText)
-            Text("Choisis-en une à gauche, ou ⌘K")
+            Text("Pick one on the left, or ⌘K")
                 .font(.system(size: 12))
                 .foregroundStyle(DefaultTheme.mutedText)
         }
@@ -1308,7 +1308,7 @@ struct SessionsView: View {
             VStack(alignment: .leading, spacing: 14) {
                 let globalPanes = model.browserPanes.filter { $0.parentID == nil }
                 if !globalPanes.isEmpty {
-                    group("NAVIGATEUR", projectID: nil) {
+                    group("BROWSER", projectID: nil) {
                         ForEach(globalPanes) { pane in paneRow(pane).stackChrome(
                             isSelected: selected == .webPane(pane.id)) }
                     }
@@ -1323,7 +1323,7 @@ struct SessionsView: View {
                 }
                 let orphans = stackItems(for: nil)
                 if !orphans.isEmpty {
-                    group("SANS PROJET", projectID: nil) {
+                    group("NO PROJECT", projectID: nil) {
                         projectStacks(items: orphans)
                     }
                 }
@@ -1332,21 +1332,21 @@ struct SessionsView: View {
         }
         .frame(width: 280)
         .background(DefaultTheme.background)
-        .alert("Renommer la session", isPresented: Binding(
+        .alert("Rename session", isPresented: Binding(
             get: { renameTarget != nil },
             set: { if !$0 { renameTarget = nil } })) {
-            TextField("Nom", text: $renameText)
-            Button("Renommer") {
+            TextField("Name", text: $renameText)
+            Button("Rename") {
                 if let target = renameTarget { model.renameSession(target, to: renameText) }
                 renameTarget = nil
             }
-            Button("Annuler", role: .cancel) { renameTarget = nil }
+            Button("Cancel", role: .cancel) { renameTarget = nil }
         }
     }
 
-    /// Vivantes + inactives (fermées mais pas détruites) : la pile complète du
-    /// projet, nom et tabs mémorisés — seules les sessions claude sans aucune
-    /// conversation sont écartées (filtre en amont, dans le modèle).
+    /// Live + inactive (closed but not destroyed): the project's complete
+    /// stack, name and tabs remembered — only claude sessions with no
+    /// conversation at all are excluded (filtered upstream, in the model).
     private func stackItems(for projectID: ProjectID?) -> [AppModel.SessionItem] {
         let live = model.sessions.filter {
             projectID != nil ? $0.projectID == projectID : model.project($0.projectID) == nil
@@ -1362,8 +1362,8 @@ struct SessionsView: View {
         return live + dormant
     }
 
-    /// La pile de la référence : la session et ses enfants (terminaux, webs) forment
-    /// UN bloc joint ; chaque pile est séparée de la suivante.
+    /// The reference's stack: the session and its children (terminals, webs)
+    /// form ONE joined block; each stack is separated from the next.
     @ViewBuilder
     private func projectStacks(items: [AppModel.SessionItem]) -> some View {
         ForEach(items.filter { !$0.isShell }) { item in
@@ -1409,16 +1409,16 @@ struct SessionsView: View {
                 onArchive: { Task { await model.archiveSession(item.id) } },
                 onClose: {
                     pendingClose = item.isDormant
-                        ? PendingClose(message: "« \(item.title) » est inactive : elle sera détruite (archivée), définitivement.") {
+                        ? PendingClose(message: "“\(item.title)” is inactive: it will be destroyed (archived), permanently.") {
                             Task { await model.archiveSession(item.id) }
                         }
-                        : PendingClose(message: "claude sera arrêté proprement — « \(item.title) » restera reprenable en « inactif ».") {
+                        : PendingClose(message: "claude will be stopped cleanly — “\(item.title)” will remain resumable as “inactive”.") {
                             Task { await model.stopSession(item.id) }
                         }
                 })
                 .stackChrome(isSelected: selected == .session(item.id))
-            // Les onglets individuels vivent dans la barre HORIZONTALE : la
-            // pile verticale ne montre qu'une ligne de groupe par type.
+            // Individual tabs live in the HORIZONTAL bar: the vertical
+            // stack only shows one group row per type.
             if !shells.isEmpty || !dormantShells.isEmpty {
                 Divider().overlay(DefaultTheme.cardBorder)
                 terminalGroupRow(parent: item, shells: shells, dormants: dormantShells)
@@ -1435,8 +1435,8 @@ struct SessionsView: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
-    /// SES-04 : LE groupe de terminaux de la pile — une seule ligne, le détail
-    /// des onglets vit dans la barre horizontale.
+    /// SES-04: THE stack's terminal group — a single row, the tab detail
+    /// lives in the horizontal bar.
     private func terminalGroupRow(parent: AppModel.SessionItem,
                                   shells: [AppModel.SessionItem],
                                   dormants: [AppModel.DormantShell]) -> some View {
@@ -1447,7 +1447,7 @@ struct SessionsView: View {
                 .foregroundStyle(shells.isEmpty ? DefaultTheme.mutedText : DefaultTheme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(count > 1 ? "Terminaux" : (shells.first?.title ?? dormants.first?.title ?? "Terminal"))
+                    Text(count > 1 ? "Terminals" : (shells.first?.title ?? dormants.first?.title ?? "Terminal"))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(shells.isEmpty ? DefaultTheme.secondaryText
                                                         : DefaultTheme.primaryText)
@@ -1474,8 +1474,8 @@ struct SessionsView: View {
             onOpenBrowser: { selected = .webPane(model.openBrowserPane(for: parent.id)) },
             onClose: {
                 pendingClose = PendingClose(
-                    message: count > 1 ? "Les \(count) terminaux de la pile seront fermés."
-                                       : "Le terminal de la pile sera fermé.") {
+                    message: count > 1 ? "The stack's \(count) terminals will be closed."
+                                       : "The stack's terminal will be closed.") {
                     Task {
                         for shell in shells { await model.stopSession(shell.id) }
                         for dormant in dormants { model.forgetDormantShell(dormant) }
@@ -1495,7 +1495,7 @@ struct SessionsView: View {
         }
     }
 
-    /// WEB-03 : LE groupe de navigateurs de la pile — même principe.
+    /// WEB-03: THE stack's browser group — same principle.
     private func webGroupRow(parent: AppModel.SessionItem,
                              panes: [AppModel.BrowserPane]) -> some View {
         HStack(spacing: 8) {
@@ -1530,8 +1530,8 @@ struct SessionsView: View {
             onOpenBrowser: { selected = .webPane(model.openBrowserPane(for: parent.id)) },
             onClose: {
                 pendingClose = PendingClose(
-                    message: panes.count > 1 ? "Les \(panes.count) navigateurs de la pile seront fermés — onglets perdus."
-                                             : "Le navigateur de la pile sera fermé — onglets perdus.") {
+                    message: panes.count > 1 ? "The stack's \(panes.count) browsers will be closed — tabs lost."
+                                             : "The stack's browser will be closed — tabs lost.") {
                     for pane in panes {
                         if selected == .webPane(pane.id) { selected = nil }
                         model.closeBrowserPane(pane.id)
@@ -1543,7 +1543,7 @@ struct SessionsView: View {
         }
     }
 
-    /// WEB-03 : le navigateur dédié dans la pile (« 🌐 Web n · parent »).
+    /// WEB-03: the dedicated browser in the stack ("🌐 Web n · parent").
     private func paneRow(_ pane: AppModel.BrowserPane,
                          parent: AppModel.SessionItem? = nil) -> some View {
         let parentTitle = parent?.title
@@ -1567,7 +1567,7 @@ struct SessionsView: View {
                         .lineLimit(1)
                 }
                 if !pane.controller.tabs.isEmpty {
-                    Text("\(pane.controller.tabs.count) onglet\(pane.controller.tabs.count > 1 ? "s" : "")")
+                    Text("\(pane.controller.tabs.count) tab\(pane.controller.tabs.count > 1 ? "s" : "")")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(DefaultTheme.secondaryText)
                 }
@@ -1586,15 +1586,15 @@ struct SessionsView: View {
             })
         .onTapGesture { selected = .webPane(pane.id) }
         .contextMenu {
-            Button("Fermer") {
+            Button("Close") {
                 if selected == .webPane(pane.id) { selected = nil }
                 model.closeBrowserPane(pane.id)
             }
         }
     }
 
-    /// Un groupe repliable : chevron + titre cliquables (affichage seulement,
-    /// les sessions continuent de tourner) ; écart resserré entre les piles.
+    /// A collapsible group: clickable chevron + title (display only, the
+    /// sessions keep running); tightened gap between the stacks.
     @ViewBuilder
     private func group(_ title: String, projectID: ProjectID?,
                        @ViewBuilder content: () -> some View) -> some View {
@@ -1622,7 +1622,7 @@ struct SessionsView: View {
                 Spacer()
                 if let projectID {
                     HoverIconButton(systemImage: "plus",
-                                    help: "Nouvelle session dans ce projet") {
+                                    help: "New session in this project") {
                         onNewSession(projectID)
                     }
                 }
@@ -1636,8 +1636,8 @@ struct SessionsView: View {
 
 }
 
-/// La sélection d'un élément de pile : liseré accent inséré, fond teinté — comme
-/// la référence.
+/// Selection of a stack element: inset accent outline, tinted background — like
+/// the reference.
 private struct StackChrome: ViewModifier {
     let isSelected: Bool
     func body(content: Content) -> some View {
@@ -1656,7 +1656,7 @@ private extension View {
     }
 }
 
-// MARK: - Détail de session (référence : fil d'Ariane + terminal + actions)
+// MARK: - Session detail (reference: breadcrumb + terminal + actions)
 
 struct SessionDetailView: View {
     let model: AppModel
@@ -1667,7 +1667,7 @@ struct SessionDetailView: View {
     @State private var gitShown = false
     @State private var gitData: AppModel.GitPanelData?
     @State private var firstResizeDone = false
-    /// Incrémenté à chaque clic sur le terminal : la capture clavier reprend le focus.
+    /// Incremented on each click on the terminal: the key capture regains focus.
     @State private var focusTick = 0
 
     private var item: AppModel.SessionItem? {
@@ -1682,18 +1682,18 @@ struct SessionDetailView: View {
                 HSplitView {
                     GeometryReader { proxy in
                         TerminalScreenView(screen: surface.screen, history: surface.history)
-                            // TRM-02 : la vue annonce sa grille au PTY ; le task(id:)
-                            // s'annule à chaque changement de taille — debounce gratuit
-                            // pendant le redimensionnement de la fenêtre.
+                            // TRM-02: the view announces its grid to the PTY; the task(id:)
+                            // cancels on every size change — free debounce
+                            // while the window is being resized.
                             .task(id: proxy.size) {
-                                // GeometryReader publie un placeholder (100×100) avant
-                                // le vrai layout : ne JAMAIS l'appliquer — l'agent
-                                // recevrait un SIGWINCH 20×5 en plein démarrage et
-                                // peindrait son interface pour cinq lignes.
+                                // GeometryReader publishes a placeholder (100×100) before
+                                // the real layout: NEVER apply it — the agent
+                                // would receive a 20×5 SIGWINCH mid-startup and
+                                // paint its interface for five lines.
                                 guard proxy.size.width >= 300, proxy.size.height >= 200 else { return }
-                                // Première mesure réelle : immédiate, pour corriger la
-                                // grille de lancement avant la bannière de l'agent.
-                                // Les suivantes sont debouncées (annulation du task).
+                                // First real measurement: immediate, to correct the
+                                // launch grid before the agent's banner.
+                                // The following ones are debounced (task cancellation).
                                 if firstResizeDone {
                                     try? await Task.sleep(for: .milliseconds(80))
                                     guard !Task.isCancelled else { return }
@@ -1703,10 +1703,10 @@ struct SessionDetailView: View {
                                 surface.resize(cols: grid.cols, rows: grid.rows)
                                 model.noteTerminalGrid(cols: grid.cols, rows: grid.rows)
                             }
-                            // SES-05bis : la frappe va au champ de saisie de
-                            // l'agent — pas de barre à nous. La capture vit SOUS
-                            // le feed (le clavier suit le premier répondant, pas
-                            // la géométrie) ; cliquer le terminal reprend le focus.
+                            // SES-05bis: keystrokes go to the agent's input
+                            // field — no bar of our own. The capture lives UNDER
+                            // the feed (the keyboard follows the first responder,
+                            // not the geometry); clicking the terminal regains focus.
                             .background(KeyCaptureView(focusTick: focusTick) { surface.send($0) })
                             .contentShape(Rectangle())
                             .onTapGesture { focusTick += 1 }
@@ -1725,8 +1725,8 @@ struct SessionDetailView: View {
 
     private var breadcrumb: some View {
         HStack(spacing: 10) {
-            // ← retour à la page du projet (référence Xirp).
-            HoverIconButton(systemImage: "arrow.left", help: "Retour au projet") {
+            // ← back to the project page (Xirp reference).
+            HoverIconButton(systemImage: "arrow.left", help: "Back to project") {
                 onBack(item?.projectID)
             }
             Divider().frame(height: 16).overlay(DefaultTheme.cardBorder)
@@ -1741,8 +1741,8 @@ struct SessionDetailView: View {
             if let branch = item?.branch {
                 MonoTag(branch, systemImage: "arrow.triangle.branch")
             }
-            // ⌄ la fiche de la session : identité, worktree, dates.
-            HoverIconButton(systemImage: "chevron.down", help: "Infos de la session") {
+            // ⌄ the session's record: identity, worktree, dates.
+            HoverIconButton(systemImage: "chevron.down", help: "Session info") {
                 infoShown.toggle()
             }
             .popover(isPresented: $infoShown, arrowEdge: .bottom) { sessionInfoPanel }
@@ -1763,41 +1763,41 @@ struct SessionDetailView: View {
         .background(DefaultTheme.background)
     }
 
-    /// La fiche de la session (référence Xirp) : ce qu'on sait de vrai —
-    /// identité, worktree, agent, dates. Rien d'inventé.
+    /// The session's record (Xirp reference): what we actually know —
+    /// identity, worktree, agent, dates. Nothing invented.
     private var sessionInfoPanel: some View {
         let record = model.sessionInfo(sessionID)
         let workingDir = record?.worktreePath
             ?? model.project(item?.projectID ?? record?.projectID)?.path
         return VStack(alignment: .leading, spacing: 10) {
-            infoRow("ID de session", record?.id.rawValue.uuidString.lowercased() ?? "—") {
-                HoverIconButton(systemImage: "doc.on.doc", help: "Copier l'identifiant") {
+            infoRow("Session ID", record?.id.rawValue.uuidString.lowercased() ?? "—") {
+                HoverIconButton(systemImage: "doc.on.doc", help: "Copy identifier") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(record?.id.rawValue.uuidString.lowercased() ?? "",
                                                    forType: .string)
                 }
             }
-            infoRow("Dossier de travail", workingDir ?? "—") {
+            infoRow("Working directory", workingDir ?? "—") {
                 if let workingDir {
-                    HoverIconButton(systemImage: "folder", help: "Ouvrir dans le Finder") {
+                    HoverIconButton(systemImage: "folder", help: "Open in Finder") {
                         NSWorkspace.shared.open(URL(fileURLWithPath: workingDir))
                     }
                 }
             }
-            if let branch = record?.branch { infoRow("Branche", branch) }
+            if let branch = record?.branch { infoRow("Branch", branch) }
             infoRow("Agent", record?.agentID ?? "claude-code")
             HStack(spacing: 10) {
-                Text("État")
+                Text("State")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .frame(width: 110, alignment: .leading)
                 StatusLabel(item?.state ?? record?.state ?? .starting)
             }
             if let created = record?.createdAt {
-                infoRow("Créée", Self.infoDate.string(from: created))
+                infoRow("Created", Self.infoDate.string(from: created))
             }
             if let code = record?.exitCode {
-                infoRow("Code de sortie", "\(code)")
+                infoRow("Exit code", "\(code)")
             }
         }
         .padding(16)
@@ -1832,7 +1832,7 @@ struct SessionDetailView: View {
     private var gitPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Modifications")
+                Text("Changes")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DefaultTheme.primaryText)
                 Spacer()
@@ -1842,7 +1842,7 @@ struct SessionDetailView: View {
             }
             if let gitData {
                 if gitData.changes.isEmpty {
-                    Text("Worktree propre").font(.system(size: 12))
+                    Text("Clean worktree").font(.system(size: 12))
                         .foregroundStyle(DefaultTheme.secondaryText)
                 } else {
                     ForEach(gitData.changes, id: \.path) { change in
@@ -1858,7 +1858,7 @@ struct SessionDetailView: View {
                     }
                 }
             } else {
-                Text("Pas de worktree pour cette session")
+                Text("No worktree for this session")
                     .font(.system(size: 12))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
@@ -1880,8 +1880,8 @@ struct SessionDetailView: View {
     }
 }
 
-/// Actions rapides d'une ligne de pile, révélées au survol : petit bloc à
-/// droite (terminal, navigateur, croix) — disponibles sur TOUS les onglets.
+/// Quick actions of a stack row, revealed on hover: small block on the
+/// right (terminal, browser, cross) — available on ALL tabs.
 struct StackQuickActionsModifier: ViewModifier {
     var onNewTerminal: (() -> Void)?
     var onOpenBrowser: (() -> Void)?
@@ -1895,15 +1895,15 @@ struct StackQuickActionsModifier: ViewModifier {
                     HStack(spacing: 2) {
                         if let onNewTerminal {
                             HoverIconButton(systemImage: "terminal",
-                                            help: "Nouveau terminal dans ce worktree",
+                                            help: "New terminal in this worktree",
                                             action: onNewTerminal)
                         }
                         if let onOpenBrowser {
                             HoverIconButton(systemImage: "globe",
-                                            help: "Navigateur dédié dans cette pile",
+                                            help: "Dedicated browser in this stack",
                                             action: onOpenBrowser)
                         }
-                        HoverIconButton(systemImage: "xmark", help: "Fermer",
+                        HoverIconButton(systemImage: "xmark", help: "Close",
                                         action: onClose)
                     }
                     .padding(.horizontal, 5).padding(.vertical, 4)
@@ -1927,8 +1927,8 @@ extension View {
     }
 }
 
-/// Icône d'action des cartes : grise au repos, accent au survol — le pointeur
-/// dit ce qui est cliquable.
+/// Card action icon: gray at rest, accent on hover — the pointer
+/// tells what is clickable.
 struct HoverIconButton: View {
     let systemImage: String
     let help: String
@@ -1948,7 +1948,7 @@ struct HoverIconButton: View {
     }
 }
 
-// MARK: - Carte parent d'une pile (icônes au survol — terminal, navigateur)
+// MARK: - Stack parent card (icons on hover — terminal, browser)
 
 struct SidebarSessionCard: View {
     let item: AppModel.SessionItem
@@ -1971,17 +1971,17 @@ struct SidebarSessionCard: View {
                     .lineLimit(1)
                 Spacer()
                 if hovered {
-                    // Même cluster que les lignes de pile : espacement identique
-                    // partout, quel que soit le type d'onglet.
+                    // Same cluster as the stack rows: identical spacing
+                    // everywhere, whatever the tab type.
                     HStack(spacing: 2) {
                         HoverIconButton(systemImage: "terminal",
-                                        help: "Nouveau terminal dans ce worktree",
+                                        help: "New terminal in this worktree",
                                         action: onNewTerminal)
                         HoverIconButton(systemImage: "globe",
-                                        help: "Navigateur dédié dans cette pile",
+                                        help: "Dedicated browser in this stack",
                                         action: onOpenBrowser)
                         HoverIconButton(systemImage: "xmark",
-                                        help: "Fermer la session",
+                                        help: "Close session",
                                         action: onClose)
                     }
                 }
@@ -2009,10 +2009,10 @@ struct SidebarSessionCard: View {
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
         .contextMenu {
-            Button("Renommer…", action: onRename)
-            Button("Nouveau terminal", action: onNewTerminal)
-            Button("Navigateur dédié", action: onOpenBrowser)
-            Button("Archiver", action: onArchive)
+            Button("Rename…", action: onRename)
+            Button("New terminal", action: onNewTerminal)
+            Button("Dedicated browser", action: onOpenBrowser)
+            Button("Archive", action: onArchive)
         }
     }
 }

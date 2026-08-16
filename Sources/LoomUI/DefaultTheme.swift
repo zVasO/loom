@@ -2,42 +2,42 @@ import LoomCore
 import LoomTerminal
 import SwiftUI
 
-/// Tokens du thème par défaut — calqués sur la référence visuelle validée (Xirp) :
-/// fond quasi-noir, cartes plates cerclées, accent orange chaud, mono pour les
-/// chemins et branches. Le système de thèmes complet (Theme/ThemeResolver) traduit
-/// vers ces tokens ; aucune couleur en dur dans les vues.
+/// Default theme tokens — modeled on the validated visual reference (Xirp):
+/// near-black background, flat outlined cards, warm orange accent, mono for
+/// paths and branches. The full theme system (Theme/ThemeResolver) translates
+/// to these tokens; no hardcoded color in the views.
 public enum DefaultTheme {
 
-    // Fonds
+    // Backgrounds
     public static let background = Color(red: 0.051, green: 0.051, blue: 0.055)   // #0D0D0E
     public static let contentBackground = Color(red: 0.067, green: 0.067, blue: 0.075) // #111113
     public static let surface = Color(red: 0.090, green: 0.090, blue: 0.102)      // #17171A
     public static let surfaceRaised = Color(red: 0.118, green: 0.118, blue: 0.133)
     public static let cardBorder = Color(red: 0.149, green: 0.149, blue: 0.169)   // #26262B
 
-    // Accent (boutons pleins : texte sombre dessus, comme la référence)
+    // Accent (filled buttons: dark text on top, like the reference)
     public static let accent = Color(red: 0.910, green: 0.580, blue: 0.360)       // #E8945C
     public static let accentText = Color(red: 0.125, green: 0.071, blue: 0.016)
 
-    // Texte
+    // Text
     public static let primaryText = Color(red: 0.925, green: 0.925, blue: 0.933)
     public static let secondaryText = Color(red: 0.525, green: 0.525, blue: 0.557) // #86868E
     public static let mutedText = Color(red: 0.42, green: 0.42, blue: 0.45)
 
-    // Sémantique
-    public static let branch = Color(red: 0.36, green: 0.784, blue: 0.76)         // cyan mono
+    // Semantics
+    public static let branch = Color(red: 0.36, green: 0.784, blue: 0.76)         // mono cyan
     public static let danger = Color(red: 0.898, green: 0.392, blue: 0.424)
-    /// En-têtes de groupes de la sidebar — le vert de la référence.
+    /// Sidebar group headers — the reference's green.
     public static let groupHeader = Color(red: 0.298, green: 0.764, blue: 0.541)
 
-    /// Sémantique invariante (THM-08) : un thème ajuste la teinte, jamais le sens.
+    /// Invariant semantics (THM-08): a theme adjusts the hue, never the meaning.
     public static func badgeColor(for state: SessionState) -> Color {
         switch state {
-        case .working: Color(red: 0.298, green: 0.764, blue: 0.541)               // vert
-        case .needsInput: Color(red: 0.898, green: 0.706, blue: 0.333)            // ambre
-        // « inactif » (fermée mais pas détruite) partage le bleu du repos.
+        case .working: Color(red: 0.298, green: 0.764, blue: 0.541)               // green
+        case .needsInput: Color(red: 0.898, green: 0.706, blue: 0.333)            // amber
+        // "inactive" (closed but not destroyed) shares the resting blue.
         case .idle, .starting, .completed, .interrupted:
-            Color(red: 0.416, green: 0.635, blue: 0.910)                          // bleu
+            Color(red: 0.416, green: 0.635, blue: 0.910)                          // blue
         case .archived, .draft: secondaryText
         case .failed: danger
         }
@@ -45,20 +45,20 @@ public enum DefaultTheme {
 
     public static func label(for state: SessionState) -> String {
         switch state {
-        case .draft: "brouillon"
-        case .starting: "démarrage"
+        case .draft: "draft"
+        case .starting: "starting"
         case .working: "working"
-        case .needsInput: "attend une réponse"
-        // Vivante mais silencieuse ≠ fermée : « en veille » vs « inactif »
-        // (inactif = fermée mais pas détruite, reprise possible).
-        case .idle: "en veille"
-        case .completed, .interrupted: "inactif"
-        case .failed: "échoué"
-        case .archived: "archivé"
+        case .needsInput: "needs input"
+        // Alive but silent ≠ closed: "idle" vs "inactive"
+        // (inactive = closed but not destroyed, resumable).
+        case .idle: "idle"
+        case .completed, .interrupted: "inactive"
+        case .failed: "failed"
+        case .archived: "archived"
         }
     }
 
-    /// Palette ANSI 16 couleurs (espace *Terminal* du thème, THM-04).
+    /// 16-color ANSI palette (the theme's *Terminal* space, THM-04).
     public static func terminalColor(_ color: TerminalColor, isBackground: Bool) -> Color {
         switch color {
         case .default:

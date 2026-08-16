@@ -2,18 +2,18 @@ import LoomCore
 import Foundation
 import SwiftTerm
 
-/// Adapter de production du seam `TerminalEngine` (ADR-0001).
+/// Production adapter for the `TerminalEngine` seam (ADR-0001).
 ///
-/// Confinement STRICT (ADR-0007) : toutes les méthodes s'exécutent sur la queue
-/// sérielle de la session — le moteur SwiftTerm ne contient aucune primitive de
-/// synchronisation malgré ce que sa doc affirme (docs/research/swiftterm-pty.md §2).
-/// Le snapshot boucle sur `getLine(row:)` borné aux lignes visibles — jamais
-/// `getBufferAsData()`, qui inclut le scrollback (recherche §1.4).
+/// STRICT confinement (ADR-0007): every method runs on the session's serial
+/// queue — the SwiftTerm engine contains no synchronization primitives, despite
+/// what its docs claim (docs/research/swiftterm-pty.md §2).
+/// The snapshot loops over `getLine(row:)` bounded to the visible lines — never
+/// `getBufferAsData()`, which includes the scrollback (research §1.4).
 public final class SwiftTermEngine: TerminalEngine {
 
     private final class HeadlessDelegate: TerminalDelegate {
-        // Réponses du terminal vers le PTY (DA/DSR…). Branché par SessionRuntime
-        // quand la tranche « écho amont » arrivera ; d'ici là, collectées nulle part.
+        // Terminal responses back to the PTY (DA/DSR…). Wired up by SessionRuntime
+        // when the "upstream echo" slice lands; until then, collected nowhere.
         var onSend: ((ArraySlice<UInt8>) -> Void)?
         func send(source: Terminal, data: ArraySlice<UInt8>) { onSend?(data) }
     }
@@ -57,8 +57,8 @@ public final class SwiftTermEngine: TerminalEngine {
             for col in 0..<geometry.cols {
                 guard let charData = terminal.getCharData(col: col, row: row) else { break }
                 let character = charData.getCharacter()
-                // Les cellules jamais écrites sont des NUL : pour toute la couche valeur,
-                // une cellule vide est un espace (sinon les fins de ligne sont du contrôle).
+                // Never-written cells are NULs: throughout the value layer, an empty
+                // cell is a space (otherwise line endings become control characters).
                 cells.append(TerminalCell(character: character == "\0" ? " " : character,
                                           style: Self.cellStyle(from: charData.attribute)))
             }
@@ -72,7 +72,7 @@ public final class SwiftTermEngine: TerminalEngine {
     }
 
     public func historyTail(_ limit: Int) -> [TerminalLine] {
-        let scrollbackRows = terminal.getTopVisibleRow()   // yDisp = nb de lignes au-dessus
+        let scrollbackRows = terminal.getTopVisibleRow()   // yDisp = number of lines above
         guard scrollbackRows > 0 else { return [] }
         let start = max(0, scrollbackRows - limit)
         return (start..<scrollbackRows).map { row in

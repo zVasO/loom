@@ -1,10 +1,10 @@
 import Foundation
 
-/// UIX-06 : localise le binaire `claude` pour l'onboarding et le canary check
-/// (risque n°2 du cahier des charges). Pur : PATH et emplacements injectables.
+/// UIX-06: locates the `claude` binary for onboarding and the canary check
+/// (risk #2 in the spec). Pure: PATH and locations are injectable.
 public enum ClaudeLocator {
 
-    /// Emplacements usuels hors PATH GUI (les apps ne voient pas le PATH du shell).
+    /// Usual locations outside the GUI PATH (apps do not see the shell's PATH).
     public static let wellKnownLocations: [String] = [
         NSHomeDirectory() + "/.claude/local/claude",
         NSHomeDirectory() + "/.local/bin/claude",

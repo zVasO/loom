@@ -1,42 +1,43 @@
 import Testing
 import LoomAgents
 
-// Classification du `last_assistant_message` du hook Stop : est-ce que l'agent
-// termine son tour en attendant une réponse ? Alimente
-// StateEngine.AgentSignal.stop(endsWithQuestion:) — décision CONTEXT.md, validée
-// par docs/research/claude-code-hooks.md §4. Fixtures : messages réalistes de
-// fins de tour Claude Code, pas des chaînes fabriquées pour l'implémentation.
+// Classification of the Stop hook's `last_assistant_message`: does the agent end
+// its turn expecting a reply? Feeds StateEngine.AgentSignal.stop(endsWithQuestion:)
+// — CONTEXT.md decision, validated by docs/research/claude-code-hooks.md §4.
+// Fixtures: realistic Claude Code turn endings, not strings crafted for the
+// implementation. French fixtures deliberately exercise the French marker path.
 
-@Suite("Classification de fin de tour")
+@Suite("Turn-end classification")
 struct TurnEndClassifierTests {
 
-    @Test("un tour finissant par une question directe attend une réponse")
+    @Test("a turn ending with a direct question awaits a reply")
     func questionDirecte() {
         let message = """
-        J'ai identifié deux approches possibles pour le cache :
+        I identified two possible approaches for the cache:
 
-        1. Invalidation par TTL, simple mais approximative
-        2. Invalidation par événement, précise mais plus complexe
+        1. TTL invalidation, simple but approximate
+        2. Event-driven invalidation, precise but more complex
 
-        Laquelle préfères-tu ?
+        Which one do you prefer?
         """
         #expect(TurnEndClassifier.awaitsUserReply(message))
     }
 
-    @Test("un point d'interrogation en milieu de message ne fait pas une question")
+    @Test("a question mark mid-message does not make a question")
     func interrogationEnMilieuDeMessage() {
         let message = """
-        Le test « que se passe-t-il si le worktree est supprimé ? » échouait à cause
-        d'un chemin en dur. Je l'ai corrigé en résolvant le chemin depuis la fixture.
+        The test "what happens if the worktree is deleted?" was failing because of
+        a hardcoded path. I fixed it by resolving the path from the fixture.
 
-        Les 42 tests passent, le correctif est committé.
+        All 42 tests pass, the fix is committed.
         """
         #expect(!TurnEndClassifier.awaitsUserReply(message),
-                "le tour est fini : la carte doit passer à idle, pas réclamer une intervention")
+                "the turn is over: the card must go idle, not demand an intervention")
     }
 
-    @Test("une invitation à répondre sans « ? » attend quand même une réponse")
+    @Test("an invitation to reply without a trailing question mark still awaits a reply")
     func invitationSansPointDInterrogation() {
+        // Kept in French: exercises the French invitation markers ("dis-moi …").
         let fr = """
         Le correctif est prêt sur la branche, les tests passent.
 

@@ -1,8 +1,8 @@
 import LoomCore
 import Foundation
 
-/// Format de thème (THM-04) : JSON versionné, deux espaces OPTIONNELS — un thème
-/// partiel fusionne avec le parent (le sombre par défaut) à la résolution.
+/// Theme format (THM-04): versioned JSON, two OPTIONAL spaces — a partial
+/// theme merges with the parent (the default dark) at resolution time.
 public struct Theme: Codable, Sendable, Equatable {
 
     public enum Appearance: String, Codable, Sendable {
@@ -15,8 +15,8 @@ public struct Theme: Codable, Sendable, Equatable {
         public var accent: ThemeColor?
         public var primaryText: ThemeColor?
         public var secondaryText: ThemeColor?
-        /// Couleurs sémantiques des états — les thèmes ajustent la teinte, jamais le
-        /// sens (THM-08) : la clé est l'état, pas une couleur libre.
+        /// Semantic state colors — themes adjust the hue, never the
+        /// meaning (THM-08): the key is the state, not a free-form color.
         public var stateColors: [SessionState: ThemeColor]?
     }
 
@@ -25,7 +25,7 @@ public struct Theme: Codable, Sendable, Equatable {
         public var foreground: ThemeColor
         public var cursor: ThemeColor
         public var selection: ThemeColor
-        /// 16 couleurs : ANSI 0–7 + brights 8–15.
+        /// 16 colors: ANSI 0–7 + brights 8–15.
         public var ansi: [ThemeColor]
     }
 
@@ -36,7 +36,7 @@ public struct Theme: Codable, Sendable, Equatable {
     public var terminal: TerminalSpace?
 }
 
-/// Couleur hex `#RRGGBB` — valeur comparable, sérialisable, indépendante de SwiftUI.
+/// Hex `#RRGGBB` color — comparable, serializable value, independent of SwiftUI.
 public struct ThemeColor: Codable, Sendable, Equatable, Hashable {
     public let hex: String
 
@@ -63,12 +63,12 @@ public struct ThemeColor: Codable, Sendable, Equatable, Hashable {
     }
 }
 
-// MARK: - Résolution (THM-08 : un seul résolveur, aucune couleur en dur dans les vues)
+// MARK: - Resolution (THM-08: a single resolver, no hardcoded color in the views)
 
 public enum ThemeOverride: Sendable, Equatable {
-    /// THM-03 : le chemin rapide — juste la couleur signature du projet.
+    /// THM-03: the fast path — just the project's signature color.
     case accent(ThemeColor)
-    /// THM-02 : un thème entier pour le projet.
+    /// THM-02: a whole theme for the project.
     case theme(Theme)
 }
 
@@ -87,8 +87,8 @@ public struct ResolvedTheme: Sendable, Equatable {
 
 public enum ThemeResolver {
 
-    /// Cascade : thème de l'app → override projet ; chaque espace manquant est comblé
-    /// par le parent, en dernier ressort par le sombre par défaut. Jamais de trou.
+    /// Cascade: app theme → project override; every missing space is filled
+    /// by the parent, as a last resort by the default dark. Never a gap.
     public static func resolve(app: Theme, projectOverride: ThemeOverride?) -> ResolvedTheme {
         var effective = app
         var accentOverride: ThemeColor?
@@ -118,7 +118,7 @@ public enum ThemeResolver {
     }
 }
 
-// MARK: - Thèmes intégrés (THM-01 : ≥ 4 au lancement)
+// MARK: - Built-in themes (THM-01: ≥ 4 at launch)
 
 extension Theme {
 
@@ -134,7 +134,7 @@ extension Theme {
     }
 
     public static let builtinDark = Theme(
-        schemaVersion: 1, name: "Sombre", appearance: .dark,
+        schemaVersion: 1, name: "Dark", appearance: .dark,
         ui: UISpace(background: ThemeColor("#0B0B0F"), surface: ThemeColor("#17171C"),
                     accent: ThemeColor("#E8833A"), primaryText: ThemeColor("#EBEBF0"),
                     secondaryText: ThemeColor("#8C8C99"),
@@ -146,7 +146,7 @@ extension Theme {
                                 ansi: standardANSI))
 
     public static let builtinWarmDark = Theme(
-        schemaVersion: 1, name: "Sombre chaud", appearance: .dark,
+        schemaVersion: 1, name: "Warm Dark", appearance: .dark,
         ui: UISpace(background: ThemeColor("#141110"), surface: ThemeColor("#1F1A18"),
                     accent: ThemeColor("#E8A03A"), primaryText: ThemeColor("#F0EAE4"),
                     secondaryText: ThemeColor("#9C918A"),
@@ -158,7 +158,7 @@ extension Theme {
                                 ansi: standardANSI))
 
     public static let builtinLight = Theme(
-        schemaVersion: 1, name: "Clair", appearance: .light,
+        schemaVersion: 1, name: "Light", appearance: .light,
         ui: UISpace(background: ThemeColor("#F5F5F7"), surface: ThemeColor("#FFFFFF"),
                     accent: ThemeColor("#D96C1E"), primaryText: ThemeColor("#1C1C21"),
                     secondaryText: ThemeColor("#6E6E7A"),
@@ -170,7 +170,7 @@ extension Theme {
                                 ansi: standardANSI))
 
     public static let builtinHighContrast = Theme(
-        schemaVersion: 1, name: "Contraste élevé", appearance: .dark,
+        schemaVersion: 1, name: "High Contrast", appearance: .dark,
         ui: UISpace(background: ThemeColor("#000000"), surface: ThemeColor("#101010"),
                     accent: ThemeColor("#FFB000"), primaryText: ThemeColor("#FFFFFF"),
                     secondaryText: ThemeColor("#C8C8C8"),

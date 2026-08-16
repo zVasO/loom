@@ -2,49 +2,49 @@ import Testing
 import LoomGit
 import Foundation
 
-// Seam : l'interface publique de GitService, sur de VRAIS repos git en dossier
-// temporaire — c'est le comportement du binaire git de l'utilisateur qu'on
-// contractualise (ADR-0003), pas un mock.
+// Seam: GitService's public interface, on REAL git repos in a temporary
+// directory — it is the behavior of the user's git binary we contract
+// against (ADR-0003), not a mock.
 
-@Suite("GitService — worktrees et status", .serialized)
+@Suite("GitService — worktrees and status", .serialized)
 struct GitServiceTests {
 
     let service = GitService()
 
-    @Test("un worktree naît sur sa branche loom/<slug> (GIT-01, GIT-02)")
+    @Test("a worktree is born on its loom/<slug> branch (GIT-01, GIT-02)")
     func creationDeWorktree() async throws {
         let repo = try await makeFixtureRepo()
         let root = repo.deletingLastPathComponent().appendingPathComponent("worktrees")
 
-        let worktree = try await service.createWorktree(repo: repo, root: root, slug: "corrige-cache")
+        let worktree = try await service.createWorktree(repo: repo, root: root, slug: "fix-cache")
 
-        #expect(worktree.branch == "loom/corrige-cache")
+        #expect(worktree.branch == "loom/fix-cache")
         #expect(FileManager.default.fileExists(atPath: worktree.path.appendingPathComponent("README.md").path),
-                "le worktree est un checkout complet")
+                "the worktree is a full checkout")
         let head = try await git(["rev-parse", "--abbrev-ref", "HEAD"], in: worktree.path)
-        #expect(head == "loom/corrige-cache", "HEAD du worktree est sur la branche de session")
+        #expect(head == "loom/fix-cache", "the worktree's HEAD is on the session branch")
     }
 
-    @Test("collision de nom de branche : le suffixe départage (GIT-02)")
+    @Test("branch name collision: the suffix disambiguates (GIT-02)")
     func collisionDeBranche() async throws {
         let repo = try await makeFixtureRepo()
         let root = repo.deletingLastPathComponent().appendingPathComponent("worktrees")
 
-        let first = try await service.createWorktree(repo: repo, root: root, slug: "meme-tache")
-        let second = try await service.createWorktree(repo: repo, root: root, slug: "meme-tache")
+        let first = try await service.createWorktree(repo: repo, root: root, slug: "same-task")
+        let second = try await service.createWorktree(repo: repo, root: root, slug: "same-task")
 
-        #expect(first.branch == "loom/meme-tache")
-        #expect(second.branch == "loom/meme-tache-2", "jamais d'échec sur collision : on suffixe")
+        #expect(first.branch == "loom/same-task")
+        #expect(second.branch == "loom/same-task-2", "never fail on collision: we suffix")
         #expect(first.path != second.path)
     }
 
-    @Test("le status porcelain v2 se parse : modifié et non-suivi (GIT-03)")
+    @Test("porcelain v2 status parses: modified and untracked (GIT-03)")
     func statusPorcelain() async throws {
         let repo = try await makeFixtureRepo()
-        try "contenu modifié".write(to: repo.appendingPathComponent("README.md"),
-                                    atomically: true, encoding: .utf8)
-        try "nouveau".write(to: repo.appendingPathComponent("note.txt"),
-                            atomically: true, encoding: .utf8)
+        try "modified content".write(to: repo.appendingPathComponent("README.md"),
+                                     atomically: true, encoding: .utf8)
+        try "new".write(to: repo.appendingPathComponent("note.txt"),
+                        atomically: true, encoding: .utf8)
 
         let changes = try await service.status(in: repo)
 
@@ -52,43 +52,43 @@ struct GitServiceTests {
         #expect(changes.contains(FileChange(path: "note.txt", kind: .untracked)))
     }
 
-    @Test("la branche courante se détecte : la base du projet (PRJ-01)")
+    @Test("the current branch is detected: the project's base (PRJ-01)")
     func brancheCourante() async throws {
         let repo = try await makeFixtureRepo()
         let branch = try await service.currentBranch(in: repo)
         #expect(branch == "main")
     }
 
-    @Test("le diff unifié montre les changements, non-suivis compris (GIT-03)")
+    @Test("the unified diff shows the changes, untracked files included (GIT-03)")
     func diffUnifie() async throws {
         let repo = try await makeFixtureRepo()
-        try "contenu modifié".write(to: repo.appendingPathComponent("README.md"),
-                                    atomically: true, encoding: .utf8)
-        try "tout neuf".write(to: repo.appendingPathComponent("note.txt"),
+        try "modified content".write(to: repo.appendingPathComponent("README.md"),
+                                     atomically: true, encoding: .utf8)
+        try "brand new".write(to: repo.appendingPathComponent("note.txt"),
                               atomically: true, encoding: .utf8)
 
         let diff = try await service.diff(in: repo)
 
-        #expect(diff.contains("-# Fixture"), "l'ancienne ligne apparaît en suppression")
-        #expect(diff.contains("+contenu modifié"), "la nouvelle ligne apparaît en ajout")
-        #expect(diff.contains("+tout neuf"), "les fichiers non suivis font partie du diff (intent-to-add)")
+        #expect(diff.contains("-# Fixture"), "the old line shows up as a deletion")
+        #expect(diff.contains("+modified content"), "the new line shows up as an addition")
+        #expect(diff.contains("+brand new"), "untracked files are part of the diff (intent-to-add)")
     }
 
-    @Test("suppression sécurisée : refus si modifications non commit, force explicite (GIT-05)")
+    @Test("safe removal: refuses on uncommitted changes, explicit force (GIT-05)")
     func suppressionSecurisee() async throws {
         let repo = try await makeFixtureRepo()
         let root = repo.deletingLastPathComponent().appendingPathComponent("worktrees")
-        let worktree = try await service.createWorktree(repo: repo, root: root, slug: "a-supprimer")
-        try "travail en cours".write(to: worktree.path.appendingPathComponent("wip.txt"),
+        let worktree = try await service.createWorktree(repo: repo, root: root, slug: "to-delete")
+        try "work in progress".write(to: worktree.path.appendingPathComponent("wip.txt"),
                                      atomically: true, encoding: .utf8)
 
         await #expect(throws: GitError.self) {
             try await service.removeWorktree(worktree, repo: repo)
         }
-        #expect(FileManager.default.fileExists(atPath: worktree.path.path), "rien n'a été détruit")
+        #expect(FileManager.default.fileExists(atPath: worktree.path.path), "nothing was destroyed")
 
         try await service.removeWorktree(worktree, repo: repo, force: true)
-        #expect(!FileManager.default.fileExists(atPath: worktree.path.path), "force explicite : supprimé")
+        #expect(!FileManager.default.fileExists(atPath: worktree.path.path), "explicit force: removed")
     }
 
     // MARK: - Fixtures

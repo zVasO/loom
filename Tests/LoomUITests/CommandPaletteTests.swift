@@ -1,7 +1,8 @@
 import Testing
 import LoomUI
 
-// UIX-02 : le fuzzy matching de la palette — pur, déterministe, sans UI.
+// UIX-02: the palette's fuzzy matching — pure, deterministic, no UI.
+// Candidates stay in French on purpose: they exercise accent folding.
 
 @Suite("CommandPalette — fuzzy matching")
 struct CommandPaletteTests {
@@ -13,28 +14,28 @@ struct CommandPaletteTests {
         "Ouvrir le navigateur",
     ]
 
-    @Test("une sous-séquence matche, l'absence exclut")
+    @Test("a subsequence matches, its absence excludes")
     func sousSequence() {
         let results = CommandPalette.rank(query: "clbc", in: candidates)
-        #expect(results == ["Corriger le bug de cache"], "c-l-b-c traverse « Corriger le bug de cache »")
+        #expect(results == ["Corriger le bug de cache"], "c-l-b-c threads through \"Corriger le bug de cache\"")
         #expect(CommandPalette.rank(query: "xyz", in: candidates).isEmpty)
     }
 
-    @Test("accents et casse ignorés")
+    @Test("accents and case ignored")
     func accentsEtCasse() {
         let results = CommandPalette.rank(query: "deploy", in: candidates)
         #expect(results.first == "Déployer en préproduction")
     }
 
-    @Test("le préfixe de mot l'emporte sur la sous-séquence éparse")
+    @Test("word prefix wins over a sparse subsequence")
     func prefixeDeMotPrioritaire() {
         let results = CommandPalette.rank(query: "dep", in: candidates)
         #expect(results.count == 2)
         #expect(results.first == "Déployer en préproduction",
-                "début de chaîne > « dépendances » en milieu de phrase")
+                "start of string > \"dépendances\" mid-sentence")
     }
 
-    @Test("requête vide : tout, dans l'ordre d'origine")
+    @Test("empty query: everything, in original order")
     func requeteVide() {
         #expect(CommandPalette.rank(query: "", in: candidates) == candidates)
     }

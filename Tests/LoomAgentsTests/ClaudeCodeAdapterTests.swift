@@ -3,37 +3,37 @@ import LoomAgents
 import LoomCore
 import Foundation
 
-// Seam : l'interface publique de l'adapter. Les attendus viennent de la doc
-// officielle du CLI (docs/research/claude-code-hooks.md), pas du code.
+// Seam: the adapter's public interface. Expectations come from the official CLI
+// documentation (docs/research/claude-code-hooks.md), not from the code.
 
-@Suite("ClaudeCodeAdapter — traduction vers le CLI")
+@Suite("ClaudeCodeAdapter — translation to the CLI")
 struct ClaudeCodeAdapterTests {
 
-    @Test("le lancement impose l'UUID de session : la Reprise est déterministe")
+    @Test("launch imposes the session UUID: Resume is deterministic")
     func lancementImposeLUuid() {
         let id = SessionID()
         let adapter = ClaudeCodeAdapter()
-        let command = adapter.launchCommand(session: id, initialPrompt: "corrige le bug de cache")
+        let command = adapter.launchCommand(session: id, initialPrompt: "fix the cache bug")
 
         #expect(command.executable == "claude")
         #expect(command.arguments.contains("--session-id"))
         #expect(command.arguments.contains(id.rawValue.uuidString),
-                "l'ID est imposé au lancement — plus de fenêtre de crash avant SessionStart (recherche §5)")
-        #expect(command.arguments.last == "corrige le bug de cache", "le prompt initial part en argument")
+                "the ID is imposed at launch — no more crash window before SessionStart (research §5)")
+        #expect(command.arguments.last == "fix the cache bug", "the initial prompt is passed as an argument")
     }
 
-    @Test("les hooks sont injectés par --settings inline, jamais dans les settings globaux (STA-01)")
+    @Test("hooks are injected via inline --settings, never into global settings (STA-01)")
     func hooksInjectesParSettings() throws {
         let wiring = ClaudeCodeAdapter.HookWiring(
             helper: URL(fileURLWithPath: "/Library/Application Support/Loom/loom-hook"),
             socket: URL(fileURLWithPath: "/tmp/loom.sock"))
         let adapter = ClaudeCodeAdapter(hooks: wiring)
         let command = adapter.launchCommand(session: SessionID(), initialPrompt: nil,
-                                            hookToken: "jeton-secret-42")
+                                            hookToken: "secret-token-42")
 
         guard let flagIndex = command.arguments.firstIndex(of: "--settings"),
               command.arguments.indices.contains(flagIndex + 1) else {
-            Issue.record("--settings absent de la commande")
+            Issue.record("--settings missing from the command")
             return
         }
         let json = try #require(command.arguments[flagIndex + 1].data(using: .utf8))
@@ -41,16 +41,16 @@ struct ClaudeCodeAdapterTests {
         let hooks = try #require(settings["hooks"] as? [String: Any])
 
         for event in ["SessionStart", "UserPromptSubmit", "Stop", "Notification", "PermissionRequest", "SessionEnd"] {
-            let entries = try #require(hooks[event] as? [[String: Any]], "hook \(event) manquant")
+            let entries = try #require(hooks[event] as? [[String: Any]], "hook \(event) missing")
             let hookList = try #require(entries.first?["hooks"] as? [[String: Any]])
             let commandLine = try #require(hookList.first?["command"] as? String)
-            #expect(commandLine.contains("loom-hook"), "la commande de \(event) appelle le binaire helper")
-            #expect(commandLine.contains("jeton-secret-42"), "le token de session voyage avec \(event)")
-            #expect(commandLine.contains("/tmp/loom.sock"), "le helper de \(event) connaît le socket")
+            #expect(commandLine.contains("loom-hook"), "the \(event) command calls the helper binary")
+            #expect(commandLine.contains("secret-token-42"), "the session token travels with \(event)")
+            #expect(commandLine.contains("/tmp/loom.sock"), "the \(event) helper knows the socket")
         }
     }
 
-    @Test("la Reprise relance la session native par son UUID (UC-7)")
+    @Test("Resume relaunches the native session by its UUID (UC-7)")
     func repriseParUuid() {
         let id = SessionID()
         let command = ClaudeCodeAdapter().resumeCommand(session: id)
@@ -58,17 +58,17 @@ struct ClaudeCodeAdapterTests {
         #expect(command.arguments == ["--resume", id.rawValue.uuidString])
     }
 
-    @Test("la Reprise ré-injecte les hooks : la session reprise reste observée")
+    @Test("Resume re-injects the hooks: the resumed session stays observed")
     func repriseAvecHooks() {
         let adapter = ClaudeCodeAdapter(hooks: .init(
             helper: URL(fileURLWithPath: "/tmp/loom-hook"),
             socket: URL(fileURLWithPath: "/tmp/loom.sock")))
-        let command = adapter.resumeCommand(session: SessionID(), hookToken: "jeton-reprise")
+        let command = adapter.resumeCommand(session: SessionID(), hookToken: "resume-token")
         #expect(command.arguments.contains("--settings"),
-                "sans hooks ré-injectés, la session reprise serait aveugle pour la détection d'état")
+                "without re-injected hooks, the resumed session would be blind to state detection")
     }
 
-    @Test("les payloads de hooks deviennent les événements du réducteur (STA-01)")
+    @Test("hook payloads become reducer events (STA-01)")
     func payloadsDeviennentDesEvenements() throws {
         func payload(_ fields: [String: Any]) -> Data {
             var base: [String: Any] = ["session_id": "abc", "cwd": "/tmp"]
@@ -80,11 +80,11 @@ struct ClaudeCodeAdapterTests {
                 == .hook(.userPromptSubmit))
         #expect(ClaudeCodeAdapter.interpret(payload([
             "hook_event_name": "Stop",
-            "last_assistant_message": "Deux options s'offrent à nous. Laquelle préfères-tu ?",
-        ])) == .hook(.stop(awaitsReply: true)), "Stop + question = needs_input, via le classifieur")
+            "last_assistant_message": "We have two options here. Which one do you prefer?",
+        ])) == .hook(.stop(awaitsReply: true)), "Stop + question = needs_input, via the classifier")
         #expect(ClaudeCodeAdapter.interpret(payload([
             "hook_event_name": "Stop",
-            "last_assistant_message": "Correctif appliqué, tests verts.",
+            "last_assistant_message": "Fix applied, tests green.",
         ])) == .hook(.stop(awaitsReply: false)))
         #expect(ClaudeCodeAdapter.interpret(payload(["hook_event_name": "PermissionRequest"]))
                 == .hook(.permissionRequested))
@@ -93,8 +93,8 @@ struct ClaudeCodeAdapterTests {
         ])) == .hook(.permissionRequested))
         #expect(ClaudeCodeAdapter.interpret(payload([
             "hook_event_name": "Notification", "notification_type": "auth_success",
-        ])) == nil, "une notification sans valeur d'état est ignorée")
-        #expect(ClaudeCodeAdapter.interpret(Data("pas du json".utf8)) == nil,
-                "un payload corrompu ne produit jamais de transition")
+        ])) == nil, "a notification with no state value is ignored")
+        #expect(ClaudeCodeAdapter.interpret(Data("not json".utf8)) == nil,
+                "a corrupted payload never produces a transition")
     }
 }

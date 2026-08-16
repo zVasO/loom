@@ -1,12 +1,12 @@
 import Darwin
 import Foundation
 
-// loom-hook — le helper appelé par les hooks des agents (ADR-0005).
-// Lit le payload JSON du hook sur stdin, l'enveloppe {"token":…, "payload":…}
-// et l'écrit en une ligne sur le socket Unix de l'app. Plus robuste que
-// `nc -U` : pas de dépendance au PATH, code de sortie franc, jamais interactif.
+// loom-hook — the helper invoked by agent hooks (ADR-0005).
+// Reads the hook's JSON payload from stdin, wraps it as {"token":…, "payload":…}
+// and writes it as a single line to the app's Unix socket. More robust than
+// `nc -U`: no PATH dependency, unambiguous exit code, never interactive.
 //
-// Usage : loom-hook --socket <chemin> --token <jeton>
+// Usage: loom-hook --socket <path> --token <token>
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data("loom-hook: \(message)\n".utf8))
@@ -20,27 +20,27 @@ while let argument = arguments.next() {
     switch argument {
     case "--socket": socketPath = arguments.next()
     case "--token": token = arguments.next()
-    default: break   // arguments inconnus ignorés : les hooks peuvent évoluer
+    default: break   // unknown arguments ignored: hooks may evolve
     }
 }
-guard let socketPath, let token else { fail("--socket et --token sont requis") }
+guard let socketPath, let token else { fail("--socket and --token are required") }
 
 let payload = FileHandle.standardInput.readDataToEndOfFile()
 let payloadObject: Any = (try? JSONSerialization.jsonObject(with: payload)) ?? [:]
 let envelope: [String: Any] = ["token": token, "payload": payloadObject]
 guard var line = try? JSONSerialization.data(withJSONObject: envelope) else {
-    fail("payload insérialisable")
+    fail("payload cannot be serialized")
 }
 line.append(UInt8(ascii: "\n"))
 
 let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
-guard descriptor >= 0 else { fail("socket() : errno \(errno)") }
+guard descriptor >= 0 else { fail("socket(): errno \(errno)") }
 defer { close(descriptor) }
 
 var address = sockaddr_un()
 address.sun_family = sa_family_t(AF_UNIX)
 guard socketPath.utf8.count < MemoryLayout.size(ofValue: address.sun_path) else {
-    fail("chemin de socket trop long")
+    fail("socket path too long")
 }
 socketPath.withCString { source in
     withUnsafeMutableBytes(of: &address.sun_path) { buffer in
@@ -53,10 +53,10 @@ let connected = withUnsafePointer(to: &address) { pointer in
         connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
     }
 }
-guard connected == 0 else { fail("connect(\(socketPath)) : errno \(errno)") }
+guard connected == 0 else { fail("connect(\(socketPath)): errno \(errno)") }
 
 let written = line.withUnsafeBytes { buffer in
     write(descriptor, buffer.baseAddress, buffer.count)
 }
-guard written == line.count else { fail("écriture incomplète (\(written)/\(line.count))") }
+guard written == line.count else { fail("incomplete write (\(written)/\(line.count))") }
 exit(0)

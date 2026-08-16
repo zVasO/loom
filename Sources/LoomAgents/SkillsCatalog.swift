@@ -7,7 +7,7 @@ public struct SkillEntry: Equatable, Sendable {
     public let name: String
     public let description: String
     public let scope: Scope
-    /// Le SKILL.md sur disque — pour l'ouvrir dans l'app.
+    /// The SKILL.md on disk — for opening it in the app.
     public let path: URL?
 
     public init(name: String, description: String, scope: Scope, path: URL? = nil) {
@@ -18,17 +18,17 @@ public struct SkillEntry: Equatable, Sendable {
     }
 }
 
-/// SKL-01/02/03 : scan des dossiers de skills (`<dir>/*/SKILL.md`) aux deux portées.
-/// Le système de fichiers est la source de vérité — aucun cache, chaque scan relit.
-/// Frontmatter minimal (name/description) avec repli gracieux : un SKILL.md mal
-/// formé apparaît quand même, nom = dossier (SKL-02).
+/// SKL-01/02/03: scan of the skills directories (`<dir>/*/SKILL.md`) at both scopes.
+/// The filesystem is the source of truth — no cache, every scan re-reads.
+/// Minimal frontmatter (name/description) with graceful fallback: a malformed
+/// SKILL.md still shows up, name = folder (SKL-02).
 public enum SkillsCatalog {
 
     public static var defaultGlobalDirectory: URL {
         URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude/skills")
     }
 
-    /// Projet d'abord ; à nom égal, le projet masque le global (SKL-03).
+    /// Project first; on equal names, project shadows global (SKL-03).
     public static func scan(globalDirectory: URL?, projectDirectory: URL?) -> [SkillEntry] {
         let project = projectDirectory.map { entries(in: $0, scope: .project) } ?? []
         let global = globalDirectory.map { entries(in: $0, scope: .global) } ?? []
@@ -57,7 +57,7 @@ public enum SkillsCatalog {
             .sorted { $0.name < $1.name }
     }
 
-    /// YAML minimal : paires `clé: valeur` sur une ligne, entre les deux premiers `---`.
+    /// Minimal YAML: single-line `key: value` pairs, between the first two `---`.
     private static func frontmatter(of content: String) -> [String: String] {
         let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
         guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return [:] }

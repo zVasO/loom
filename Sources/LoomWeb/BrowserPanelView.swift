@@ -2,10 +2,10 @@ import LoomUI
 import SwiftUI
 import WebKit
 
-/// Panneau navigateur (WEB-01) : barre d'adresse, onglets, webview active.
-/// Seul le chrome est thémé par l'app — jamais le contenu web (THM-09).
+/// Browser panel (WEB-01): address bar, tabs, active webview.
+/// Only the chrome is themed by the app — never the web content (THM-09).
 public struct BrowserPanelView: View {
-    /// Possédé par l'appelant : les onglets survivent aux allers-retours de vue.
+    /// Owned by the caller: tabs survive the view coming and going.
     private let controller: BrowserController
     @State private var address = ""
     private let onVisit: ((String, String) -> Void)?
@@ -21,7 +21,7 @@ public struct BrowserPanelView: View {
                 Button { controller.activeWebView?.goBack() } label: { Image(systemName: "chevron.left") }
                 Button { controller.activeWebView?.goForward() } label: { Image(systemName: "chevron.right") }
                 Button { controller.activeWebView?.reload() } label: { Image(systemName: "arrow.clockwise") }
-                TextField("Adresse ou recherche…", text: $address)
+                TextField("Address or search…", text: $address)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit {
                         controller.navigateActive(to: address)
@@ -33,7 +33,7 @@ public struct BrowserPanelView: View {
                     Button {
                         NSWorkspace.shared.open(url)
                     } label: { Image(systemName: "safari") }
-                    .help("Ouvrir dans le navigateur système")
+                    .help("Open in system browser")
                 }
             }
             .padding(8)
@@ -57,7 +57,7 @@ public struct BrowserPanelView: View {
                 WebViewRepresentable(webView: webView)
             } else {
                 Spacer()
-                Text("⌘T ou + pour ouvrir un onglet")
+                Text("⌘T or + to open a tab")
                     .foregroundStyle(.secondary)
                 Spacer()
             }
@@ -69,8 +69,8 @@ public struct BrowserPanelView: View {
     }
 }
 
-/// Onglet horizontal du navigateur — même langage que la barre de pile
-/// (icône, titre, croix au survol ou sur l'actif).
+/// Horizontal browser tab — same language as the stack bar
+/// (icon, title, close cross on hover or on the active tab).
 struct BrowserTabButton: View {
     let title: String
     let isActive: Bool
@@ -83,7 +83,7 @@ struct BrowserTabButton: View {
             Image(systemName: "globe")
                 .font(.system(size: 9))
                 .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
-            Text(title.isEmpty ? "Nouvel onglet" : title)
+            Text(title.isEmpty ? "New tab" : title)
                 .font(.system(size: 11, weight: isActive ? .semibold : .regular))
                 .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
                                                      : DefaultTheme.secondaryText)
@@ -113,7 +113,7 @@ struct BrowserTabButton: View {
     }
 }
 
-/// La webview vit dans le contrôleur (LRU) ; la vue ne fait que l'héberger.
+/// The webview lives in the controller (LRU); the view merely hosts it.
 struct WebViewRepresentable: NSViewRepresentable {
     let webView: WKWebView
     func makeNSView(context: Context) -> WKWebView { webView }

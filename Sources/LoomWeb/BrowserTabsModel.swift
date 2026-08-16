@@ -1,9 +1,9 @@
 import Foundation
 
-/// Hygiène mémoire du navigateur (WEB-05) : au plus `maxLiveTabs` webviews vivantes,
-/// éviction LRU. Un onglet suspendu garde son URL — la continuité de connexion est
-/// garantie par le `WKWebsiteDataStore` partagé, pas par la webview. Logique pure,
-/// sans WebKit : la couche vue crée/détruit les webviews selon `liveTabIDs`.
+/// Browser memory hygiene (WEB-05): at most `maxLiveTabs` live webviews,
+/// LRU eviction. A suspended tab keeps its URL — login continuity is
+/// guaranteed by the shared `WKWebsiteDataStore`, not by the webview. Pure logic,
+/// no WebKit: the view layer creates/destroys webviews according to `liveTabIDs`.
 public struct BrowserTabsModel: Sendable, Equatable {
 
     public struct TabID: Hashable, Sendable {
@@ -19,7 +19,7 @@ public struct BrowserTabsModel: Sendable, Equatable {
     public let maxLiveTabs: Int
     public private(set) var tabs: [Tab] = []
     public private(set) var activeTab: TabID?
-    /// Du moins récemment utilisé au plus récent — les `maxLiveTabs` derniers vivent.
+    /// From least recently used to most recent — the last `maxLiveTabs` live.
     private var usageOrder: [TabID] = []
 
     public init(maxLiveTabs: Int = 4) {

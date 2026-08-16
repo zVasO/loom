@@ -1,10 +1,10 @@
 import LoomCore
 import Foundation
 
-/// La Reprise (UC-7) n'a de sens que si claude a persisté une conversation :
-/// le fichier natif `<uuid>.jsonl` sous `~/.claude/projects/<slug>/`. S'il n'existe
-/// pas (session lancée mais jamais utilisée), `--resume` échouerait — l'appelant
-/// relance à neuf sous le MÊME UUID dans le même worktree.
+/// Resume (UC-7) only makes sense if claude has persisted a conversation:
+/// the native `<uuid>.jsonl` file under `~/.claude/projects/<slug>/`. If it does not
+/// exist (session launched but never used), `--resume` would fail — the caller
+/// relaunches fresh under the SAME UUID in the same worktree.
 public enum ClaudeNativeSessions {
 
     public static var defaultProjectsDirectory: URL {

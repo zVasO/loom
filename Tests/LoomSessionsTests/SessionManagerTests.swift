@@ -6,8 +6,8 @@ import LoomTerminal
 import LoomTerminalTestSupport
 import Foundation
 
-// Seam convenu : l'interface publique de SessionManager — l'orchestrateur qui relie
-// SessionRuntime (process vivant) et StateEngine (vérité des états). UC-1/UC-2.
+// Agreed seam: SessionManager's public interface — the orchestrator linking
+// SessionRuntime (live process) and StateEngine (source of truth for states). UC-1/UC-2.
 
 @Suite("SessionManager — orchestration")
 struct SessionManagerTests {
@@ -22,7 +22,7 @@ struct SessionManagerTests {
                                    workingDirectory: URL(fileURLWithPath: "/tmp/worktree"))
     }
 
-    @Test("lancer une session : elle est listée, en starting, avec un runtime vivant (UC-1)")
+    @Test("launching a session: it is listed, in starting, with a live runtime (UC-1)")
     func lancerUneSession() async throws {
         let manager = makeManager()
         let id = try await manager.launch(spec())
@@ -30,7 +30,7 @@ struct SessionManagerTests {
         #expect(await manager.state(of: id) == .starting)
     }
 
-    @Test("l'exit du process remonte dans l'état : completed ou failed (STA-05)")
+    @Test("process exit surfaces in the state: completed or failed (STA-05)")
     func exitRemonteDansLEtat() async throws {
         let pty = ScriptedPTYHost()
         let manager = makeManager(pty: pty)
@@ -38,10 +38,10 @@ struct SessionManagerTests {
 
         pty.exit(code: 0)
         let completed = await pollUntil { await manager.state(of: id) == .completed }
-        #expect(completed, "le pump d'événements traduit l'exit en transition d'état")
+        #expect(completed, "the event pump translates the exit into a state transition")
     }
 
-    @Test("les hooks arrivent par le manager et priment (STA-01/STA-03)")
+    @Test("hooks arrive through the manager and take priority (STA-01/STA-03)")
     func hooksArriventParLeManager() async throws {
         let manager = makeManager()
         let id = try await manager.launch(spec())
@@ -53,7 +53,7 @@ struct SessionManagerTests {
         #expect(await manager.state(of: id) == .needsInput)
     }
 
-    @Test("arrêter une session via le manager (SES-06)")
+    @Test("stopping a session via the manager (SES-06)")
     func arreterUneSession() async throws {
         let pty = ScriptedPTYHost()
         pty.onSignal = { signal, host in
@@ -64,29 +64,29 @@ struct SessionManagerTests {
 
         await manager.stop(id)
         let failed = await pollUntil { await manager.state(of: id) == .failed }
-        #expect(failed, "exit 130 ≠ 0 → failed, décidé par le StateEngine, pas par le runtime")
+        #expect(failed, "exit 130 ≠ 0 → failed, decided by the StateEngine, not by the runtime")
     }
 
-    @Test("le circuit hooks complet : token par session, payload brut → état (STA-01)")
+    @Test("the full hooks circuit: per-session token, raw payload → state (STA-01)")
     func circuitHooksComplet() async throws {
         let manager = makeManager()
         let id = try await manager.launch(spec())
-        let token = try #require(await manager.hookToken(for: id), "chaque session naît avec son token")
+        let token = try #require(await manager.hookToken(for: id), "every session is born with its token")
         #expect(await manager.session(forToken: token) == id)
 
         let stop = try JSONSerialization.data(withJSONObject: [
             "hook_event_name": "Stop",
-            "last_assistant_message": "Deux pistes possibles — laquelle veux-tu ?",
+            "last_assistant_message": "Two possible approaches — which one do you want?",
         ])
         await manager.ingestHookPayload(stop, token: token)
-        #expect(await manager.state(of: id) == .needsInput, "payload brut → interpret → réducteur → badge")
+        #expect(await manager.state(of: id) == .needsInput, "raw payload → interpret → reducer → badge")
 
         let prompt = try JSONSerialization.data(withJSONObject: ["hook_event_name": "UserPromptSubmit"])
-        await manager.ingestHookPayload(prompt, token: "token-forgé")
-        #expect(await manager.state(of: id) == .needsInput, "un token forgé ne produit aucune transition")
+        await manager.ingestHookPayload(prompt, token: "forged-token")
+        #expect(await manager.state(of: id) == .needsInput, "a forged token produces no transition")
     }
 
-    @Test("la vérité des états atterrit en base : record, journal, issue (DAT-02, STA-06)")
+    @Test("the state truth lands in the database: record, journal, outcome (DAT-02, STA-06)")
     func etatsEnBase() async throws {
         let dbURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("loom-mgr-\(UUID().uuidString.prefix(8)).sqlite")
@@ -98,10 +98,10 @@ struct SessionManagerTests {
             store: store)
 
         let id = try await manager.launch(spec())
-        #expect(try store.session(id: id)?.state == .starting, "la session naît en base")
+        #expect(try store.session(id: id)?.state == .starting, "the session is born in the database")
 
         await manager.apply(.hook(.userPromptSubmit), to: id)
-        #expect(try store.session(id: id)?.state == .working, "chaque transition met la base à jour")
+        #expect(try store.session(id: id)?.state == .working, "every transition updates the database")
 
         pty.exit(code: 0)
         let recorded = await pollUntil {
@@ -113,11 +113,11 @@ struct SessionManagerTests {
         #expect(record.endedAt != nil)
 
         let journal = try store.transitions(session: id)
-        #expect(journal.map(\.to) == [.working, .completed], "le journal STA-06 raconte l'histoire")
+        #expect(journal.map(\.to) == [.working, .completed], "the STA-06 journal tells the story")
         #expect(journal.map(\.source) == [.hook, .process])
     }
 
-    @Test("agent sans hooks : les échantillons traversent l'interprète jusqu'au badge (STA-02)")
+    @Test("agent without hooks: samples travel through the interpreter to the badge (STA-02)")
     func canalHeuristiqueDeBoutEnBout() async throws {
         let pty = ScriptedPTYHost()
         let manager = SessionManager(
@@ -132,13 +132,13 @@ struct SessionManagerTests {
         spec.samplingInterval = .milliseconds(25)
         let id = try await manager.launch(spec)
 
-        pty.emit("Que voulez-vous faire ?\r\n❯ ")
+        pty.emit("What do you want to do?\r\n❯ ")
 
         let badged = await pollUntil { await manager.state(of: id) == .needsInput }
-        #expect(badged, "silence + motif d'invite, soutenus : la carte se badge sans aucun hook")
+        #expect(badged, "silence + prompt pattern, sustained: the card gets badged without any hook")
     }
 
-    @Test("l'UI observe les états par un flux : chaque transition réelle est poussée")
+    @Test("the UI observes states through a stream: every real transition is pushed")
     func fluxDEtatsPourLUI() async throws {
         let manager = makeManager()
         let updates = await manager.stateUpdates()
@@ -146,17 +146,17 @@ struct SessionManagerTests {
 
         await manager.apply(.hook(.userPromptSubmit), to: id)
         await manager.apply(.hook(.stop(awaitsReply: true)), to: id)
-        await manager.apply(.hook(.stop(awaitsReply: true)), to: id)   // sans effet : pas de doublon
+        await manager.apply(.hook(.stop(awaitsReply: true)), to: id)   // no effect: no duplicate
 
         var iterator = updates.makeAsyncIterator()
         let first = await iterator.next()
         let second = await iterator.next()
         #expect(first?.id == id)
         #expect(first?.state == .working)
-        #expect(second?.state == .needsInput, "seules les transitions réelles sont poussées")
+        #expect(second?.state == .needsInput, "only real transitions are pushed")
     }
 
-    @Test("UC-1 complet : le lancement crée le worktree et la session y travaille isolée")
+    @Test("full UC-1: launch creates the worktree and the session works there in isolation")
     func lancementSurWorktree() async throws {
         let repo = try await makeFixtureRepo()
         let dbURL = FileManager.default.temporaryDirectory
@@ -169,20 +169,20 @@ struct SessionManagerTests {
             store: store)
 
         var spec = spec()
-        spec.worktree = .create(repo: repo, slug: "corrige-le-cache")
+        spec.worktree = .create(repo: repo, slug: "fix-the-cache")
         let id = try await manager.launch(spec)
 
         let opened = try #require(pty.openedWorkingDirectory)
-        #expect(opened.lastPathComponent == "corrige-le-cache",
-                "l'agent démarre DANS le worktree, pas dans le repo")
+        #expect(opened.lastPathComponent == "fix-the-cache",
+                "the agent starts IN the worktree, not in the repo")
         #expect(FileManager.default.fileExists(atPath: opened.appendingPathComponent("README.md").path),
-                "le worktree est un checkout complet")
+                "the worktree is a full checkout")
         let record = try #require(try store.session(id: id))
-        #expect(record.branch == "loom/corrige-le-cache", "la branche de session est en base")
+        #expect(record.branch == "loom/fix-the-cache", "the session branch is in the database")
         #expect(record.worktreePath == opened.path)
     }
 
-    @Test("needs_input déclenche la notification, et elle seule (STA-04)")
+    @Test("needs_input triggers the notification, and it alone (STA-04)")
     func notificationSurNeedsInput() async throws {
         let spy = SpyNotifier()
         let manager = SessionManager(
@@ -192,27 +192,27 @@ struct SessionManagerTests {
         let id = try await manager.launch(spec())
 
         await manager.apply(.hook(.userPromptSubmit), to: id)
-        #expect(spy.all().isEmpty, "working ne notifie pas")
+        #expect(spy.all().isEmpty, "working does not notify")
 
         await manager.apply(.hook(.stop(awaitsReply: true)), to: id)
-        #expect(spy.all().map(\.session) == [id], "le badge needs_input part en notification")
+        #expect(spy.all().map(\.session) == [id], "the needs_input badge goes out as a notification")
 
         await manager.apply(.hook(.stop(awaitsReply: true)), to: id)
-        #expect(spy.all().count == 1, "pas de spam : une transition, une notification")
+        #expect(spy.all().count == 1, "no spam: one transition, one notification")
     }
 
-    @Test("l'identifiant imposé au CLI EST celui de la session — sinon la Reprise est morte")
+    @Test("the identifier imposed on the CLI IS the session's — otherwise Resume is dead")
     func identifiantUnique() async throws {
         let manager = makeManager()
-        let imposed = SessionID()   // celui que l'app met dans `claude --session-id`
+        let imposed = SessionID()   // the one the app puts in `claude --session-id`
         var spec = spec()
         spec.sessionID = imposed
         let id = try await manager.launch(spec)
         #expect(id == imposed,
-                "un seul UUID de bout en bout : commande, manager, base — c'est lui que --resume rejouera")
+                "a single UUID end to end: command, manager, database — the one --resume will replay")
     }
 
-    @Test("la Reprise relance la session interrompue sous le MÊME identifiant (UC-7)")
+    @Test("Resume relaunches the interrupted session under the SAME identifier (UC-7)")
     func repriseDeSessionInterrompue() async throws {
         let dbURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("loom-resume-\(UUID().uuidString.prefix(8)).sqlite")
@@ -224,7 +224,7 @@ struct SessionManagerTests {
             store: store)
 
         let id = SessionID()
-        let record = SessionRecord(id: id, title: "reprise-moi", agentID: "claude-code",
+        let record = SessionRecord(id: id, title: "resume-me", agentID: "claude-code",
                                    state: .interrupted, createdAt: Date())
         try store.insert(record)
 
@@ -233,12 +233,12 @@ struct SessionManagerTests {
         try await manager.resume(record, command: command,
                                  workingDirectory: URL(fileURLWithPath: "/tmp/worktree"))
 
-        #expect(await manager.sessions() == [id], "même identifiant : l'historique reste un fil continu")
+        #expect(await manager.sessions() == [id], "same identifier: the history stays one continuous thread")
         #expect(await manager.state(of: id) == .starting)
-        #expect(try store.session(id: id)?.state == .starting, "la base suit la reprise")
+        #expect(try store.session(id: id)?.state == .starting, "the database follows the resume")
     }
 
-    @Test("archiver via le manager : état + base (SES-07)")
+    @Test("archiving via the manager: state + database (SES-07)")
     func archiverUneSession() async throws {
         let dbURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("loom-arch-\(UUID().uuidString.prefix(8)).sqlite")

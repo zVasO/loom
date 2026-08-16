@@ -2,16 +2,16 @@ import LoomCore
 import LoomTerminal
 import Foundation
 
-/// Canal de repli STA-02 (agents sans hooks — Codex, Gemini) : traduit un
-/// échantillon d'activité en proposition d'état. Pur et sans mémoire — le lissage
-/// (hystérésis, fenêtre de priorité hook) appartient au StateEngine, pas à lui.
-/// Les motifs d'invite sont volontairement dans un tableau éditable : le cahier des
-/// charges prévoit leur mise à jour sans release (risque n°1, fichier de définitions).
+/// STA-02 fallback channel (hookless agents — Codex, Gemini): translates an
+/// activity sample into a state proposal. Pure and memoryless — the smoothing
+/// (hysteresis, hook priority window) belongs to the StateEngine, not to it.
+/// The prompt patterns deliberately live in an editable array: the spec calls
+/// for updating them without a release (risk #1, definitions file).
 public struct HeuristicInterpreter: Sendable {
 
     public var silenceThreshold: Duration
-    /// L'agent peut être muet à l'écran mais en pleine réflexion : au-delà de ce
-    /// seuil CPU (groupe de process), le silence ne vaut pas inactivité.
+    /// The agent can be silent on screen yet deep in thought: above this CPU
+    /// threshold (process group), silence does not count as inactivity.
     public var busyCPUFraction: Double
     public var promptPatterns: [String]
 
@@ -23,11 +23,11 @@ public struct HeuristicInterpreter: Sendable {
         self.promptPatterns = promptPatterns
     }
 
-    /// Fins de ligne typiques d'un shell ou d'un agent qui attend une saisie.
+    /// Line endings typical of a shell or an agent waiting for input.
     public static let defaultPromptPatterns = [
-        #"[$%>❯]\s*$"#,          // invites shell : $, %, >, ❯
+        #"[$%>❯]\s*$"#,          // shell prompts: $, %, >, ❯
         #"\(y/n\)\s*$"#,         // confirmations
-        #"\?\s*$"#,              // question affichée à l'écran
+        #"\?\s*$"#,              // question displayed on screen
     ]
 
     public func propose(_ sample: SessionRuntime.ActivitySample) -> StateEngine.Event? {

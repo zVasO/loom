@@ -4,11 +4,11 @@ import LoomTerminal
 import LoomTerminalTestSupport
 import Foundation
 
-// Intégration contre le vrai noyau : forkpty, DispatchIO, NOTE_EXIT. On passe par
-// SessionRuntime entier — la conclusion exigeant exit ET EOF, un adapter qui rate
-// l'un des deux fait échouer ces tests par construction.
+// Integration against the real kernel: forkpty, DispatchIO, NOTE_EXIT. We go
+// through the whole SessionRuntime — since conclusion requires exit AND EOF, an
+// adapter missing either one fails these tests by construction.
 
-@Suite("ForkPTYHost — process réels", .serialized)
+@Suite("ForkPTYHost — real processes", .serialized)
 struct ForkPTYHostTests {
 
     private func plan(_ script: String, extra: [String: String] = [:]) -> SessionLaunchPlan {
@@ -17,61 +17,61 @@ struct ForkPTYHostTests {
             workingDirectory: FileManager.default.temporaryDirectory)
     }
 
-    @Test("un vrai process de bout en bout : sortie parsée, transcript complet, exit 0")
+    @Test("a real process end to end: output parsed, transcript complete, exit 0")
     func processReelDeBoutEnBout() async throws {
         let transcript = MemoryTranscriptSink()
         let (runtime, events) = try SessionRuntime.launch(
-            plan("printf 'bonjour du vrai pty'"),
+            plan("printf 'hello from the real pty'"),
             using: SessionRuntime.Dependencies(ptyHost: ForkPTYHost(), transcript: transcript))
 
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else {
-            Issue.record("pas de .started")
+            Issue.record("no .started")
             return
         }
         guard case .terminated(let report) = await iterator.next() else {
-            Issue.record("pas de .terminated — exit ou EOF manquant à l'appel")
+            Issue.record("no .terminated — exit or EOF missing at the call")
             return
         }
         #expect(report.exitStatus.code == 0)
         #expect(transcript.isFinished)
-        #expect(transcript.text.contains("bonjour du vrai pty"))
+        #expect(transcript.text.contains("hello from the real pty"))
         let screen = await runtime.snapshot()
-        #expect(screen.lines[0].text.hasPrefix("bonjour du vrai pty"), "le moteur a parsé la vraie sortie")
+        #expect(screen.lines[0].text.hasPrefix("hello from the real pty"), "the engine parsed the real output")
     }
 
-    @Test("l'environnement construit atteint le process enfant (PATH compris)")
+    @Test("the constructed environment reaches the child process (PATH included)")
     func environnementAtteintLEnfant() async throws {
         let transcript = MemoryTranscriptSink()
         let (_, events) = try SessionRuntime.launch(
-            plan("printf \"%s|%s\" \"$LOOM_MARQUEUR\" \"${PATH:+path-present}\"",
-                 extra: ["LOOM_MARQUEUR": "vivant"]),
+            plan("printf \"%s|%s\" \"$LOOM_MARKER\" \"${PATH:+path-present}\"",
+                 extra: ["LOOM_MARKER": "alive"]),
             using: SessionRuntime.Dependencies(ptyHost: ForkPTYHost(), transcript: transcript))
 
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else { return }
         guard case .terminated = await iterator.next() else { return }
-        #expect(transcript.text.contains("vivant|path-present"),
-                "overlay de session ET PATH garantis dans l'enfant (recherche §7.3)")
+        #expect(transcript.text.contains("alive|path-present"),
+                "session overlay AND PATH guaranteed in the child (research §7.3)")
     }
 
-    @Test("stop gracieux sur un vrai process : SIGINT suffit à un agent poli")
+    @Test("graceful stop on a real process: SIGINT is enough for a polite agent")
     func stopGracieuxSurVraiProcess() async throws {
         let (runtime, events) = try SessionRuntime.launch(
             plan("sleep 30"),
             using: SessionRuntime.Dependencies(ptyHost: ForkPTYHost(), transcript: MemoryTranscriptSink()))
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else { return }
-        try await Task.sleep(for: .milliseconds(150))   // laisser sh lancer sleep
+        try await Task.sleep(for: .milliseconds(150))   // let sh start sleep
 
         let report = await runtime.stop(.graceful)
         #expect(report.exitStatus.code != 0 || report.exitStatus.signal != nil,
-                "le process est mort avant l'échéance des 30 s, tué par le SIGINT")
+                "the process died before the 30 s deadline, killed by the SIGINT")
     }
 }
 
 extension ForkPTYHostTests {
-    @Test("le resize atteint le vrai PTY : le process voit la nouvelle grille (TRM-02)")
+    @Test("resize reaches the real PTY: the process sees the new grid (TRM-02)")
     @MainActor
     func resizeAtteintLeVraiPty() async throws {
         let transcript = MemoryTranscriptSink()
@@ -85,6 +85,6 @@ extension ForkPTYHostTests {
 
         guard case .terminated = await iterator.next() else { return }
         #expect(transcript.text.contains("30 90"),
-                "stty doit voir 30 lignes × 90 colonnes après TIOCSWINSZ — vu : \(transcript.text)")
+                "stty must see 30 rows × 90 cols after TIOCSWINSZ — saw: \(transcript.text)")
     }
 }

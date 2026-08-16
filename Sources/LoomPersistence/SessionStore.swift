@@ -2,9 +2,9 @@ import LoomCore
 import Foundation
 import GRDB
 
-/// Persistance locale (ADR-0002 : GRDB pour les migrations contrôlées, FTS5 à venir,
-/// accès concurrents). Schéma extrait du §6.5 du cahier des charges ; migrations
-/// versionnées dès la v1 (DAT-02).
+/// Local persistence (ADR-0002: GRDB for controlled migrations, FTS5 to come,
+/// concurrent access). Schema extracted from spec §6.5; versioned migrations
+/// from v1 onward (DAT-02).
 public final class SessionStore: Sendable {
 
     private let database: DatabaseQueue
@@ -67,7 +67,7 @@ public final class SessionStore: Sendable {
         try migrator.migrate(database)
     }
 
-    // MARK: - Projets (PRJ-01/03/06)
+    // MARK: - Projects (PRJ-01/03/06)
 
     public func insertProject(_ record: ProjectRecord) throws {
         try database.write { db in try record.insert(db) }
@@ -80,7 +80,7 @@ public final class SessionStore: Sendable {
         }
     }
 
-    /// PRJ-06 : l'archivage n'écrit QUE dans la base — jamais dans le dossier source.
+    /// PRJ-06: archiving writes ONLY to the database — never to the source folder.
     public func archiveProject(_ id: ProjectID) throws {
         try database.write { db in
             try db.execute(sql: "UPDATE project SET archivedAt = ? WHERE id = ?",
@@ -88,9 +88,9 @@ public final class SessionStore: Sendable {
         }
     }
 
-    // MARK: - Recherche plein texte (SES-08)
+    // MARK: - Full-text search (SES-08)
 
-    /// Indexe (ou ré-indexe) une session : titre + transcript nettoyé.
+    /// Indexes (or re-indexes) a session: title + cleaned transcript.
     public func indexForSearch(session id: SessionID, title: String, transcript: String) throws {
         try database.write { db in
             try db.execute(sql: "DELETE FROM sessionFTS WHERE sessionID = ?",
@@ -100,8 +100,8 @@ public final class SessionStore: Sendable {
         }
     }
 
-    /// La requête utilisateur est mise entre guillemets FTS (préfixe autorisé) :
-    /// aucun caractère spécial de la syntaxe MATCH ne peut faire d'erreur.
+    /// The user query is wrapped in FTS quotes (prefix allowed):
+    /// no special character of the MATCH syntax can cause an error.
     public func searchSessions(matching query: String) throws -> [SessionID] {
         let sanitized = query.replacingOccurrences(of: "\"", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -115,7 +115,7 @@ public final class SessionStore: Sendable {
         }
     }
 
-    // MARK: - Historique navigateur (WEB-01)
+    // MARK: - Browser history (WEB-01)
 
     public func recordVisit(url: String, title: String, at date: Date) throws {
         try database.write { db in
@@ -129,8 +129,8 @@ public final class SessionStore: Sendable {
         public let title: String
     }
 
-    /// Suggestions de la barre d'adresse : préfixe respecté, dernière visite d'abord,
-    /// une entrée par URL.
+    /// Address bar suggestions: prefix respected, most recent visit first,
+    /// one entry per URL.
     public func historySuggestions(prefix: String, limit: Int = 8) throws -> [VisitSuggestion] {
         try database.read { db in
             let rows = try Row.fetchAll(db, sql: """
@@ -166,7 +166,7 @@ public final class SessionStore: Sendable {
         }
     }
 
-    /// SES-05 : renommage.
+    /// SES-05: renaming.
     public func rename(session id: SessionID, to title: String) throws {
         try database.write { db in
             try db.execute(sql: "UPDATE session SET title = ? WHERE id = ?",
@@ -174,8 +174,8 @@ public final class SessionStore: Sendable {
         }
     }
 
-    /// NFR-R / UC-7 : au relancement, toute session encore « vivante » en base est en
-    /// réalité morte avec l'app — elle devient candidate à la Reprise.
+    /// NFR-R / UC-7: on relaunch, any session still "live" in the database is in
+    /// fact dead along with the app — it becomes a candidate for Resume.
     @discardableResult
     public func markLiveSessionsInterrupted() throws -> Int {
         let live = [SessionState.starting, .working, .needsInput, .idle].map(\.rawValue)
@@ -187,7 +187,7 @@ public final class SessionStore: Sendable {
         }
     }
 
-    // MARK: - Journal des transitions (STA-06, côté stockage)
+    // MARK: - Transition journal (STA-06, storage side)
 
     public func recordTransition(session id: SessionID, from: SessionState, to: SessionState,
                                  source: TransitionSource, at instant: Date) throws {
@@ -208,7 +208,7 @@ public final class SessionStore: Sendable {
     }
 }
 
-// MARK: - Enregistrements
+// MARK: - Records
 
 public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "session"
@@ -263,7 +263,7 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
 
     public init(row: Row) throws {
         guard let uuid = UUID(uuidString: row["id"]) else {
-            throw DatabaseError(message: "id de session invalide")
+            throw DatabaseError(message: "invalid session id")
         }
         id = SessionID(uuid)
         title = row["title"]
@@ -310,7 +310,7 @@ public struct ProjectRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
 
     public init(row: Row) throws {
         guard let uuid = UUID(uuidString: row["id"]) else {
-            throw DatabaseError(message: "id de projet invalide")
+            throw DatabaseError(message: "invalid project id")
         }
         id = ProjectID(uuid)
         name = row["name"]

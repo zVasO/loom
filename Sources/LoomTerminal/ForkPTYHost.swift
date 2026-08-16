@@ -4,11 +4,11 @@ import Dispatch
 import Foundation
 import SwiftTerm
 
-/// Adapter de production du seam PTY : `forkpty` + `DispatchIO` + `NOTE_EXIT`.
-/// Chaque piège encodé ici est documenté par la recherche (swiftterm-pty.md §3) :
-/// handler d'exit posé AVANT `activate()`, fermeture du fd uniquement via le
-/// `cleanupHandler` du DispatchIO (jamais de close() direct — crash EV_VANISHED),
-/// l'EOF et l'exit émis comme deux événements distincts d'ordre non garanti.
+/// Production adapter for the PTY seam: `forkpty` + `DispatchIO` + `NOTE_EXIT`.
+/// Every pitfall encoded here is documented by the research (swiftterm-pty.md §3):
+/// exit handler installed BEFORE `activate()`, fd closed only through the DispatchIO
+/// `cleanupHandler` (never a direct close() — EV_VANISHED crash), EOF and exit
+/// emitted as two distinct events with no ordering guarantee.
 public struct ForkPTYHost: PTYHost {
 
     public init() {}
@@ -46,7 +46,7 @@ final class ForkPTYChannel: PTYChannel, @unchecked Sendable {
     private let queue: DispatchQueue
     private let io: DispatchIO
     private let exitSource: DispatchSourceProcess
-    /// Confiné à `queue` : après fermeture, plus aucun événement ne part vers le sink.
+    /// Confined to `queue`: after closing, no event ever reaches the sink again.
     private var isClosed = false
     private var sink: (@Sendable (PTYEvent) -> Void)?
 
@@ -56,7 +56,7 @@ final class ForkPTYChannel: PTYChannel, @unchecked Sendable {
         self.masterDescriptor = masterDescriptor
         self.queue = queue
         self.sink = sink
-        // Le fd n'est fermé QUE par le cleanupHandler (recherche §3.5).
+        // The fd is closed ONLY by the cleanupHandler (research §3.5).
         self.io = DispatchIO(type: .stream, fileDescriptor: masterDescriptor, queue: queue,
                              cleanupHandler: { _ in Darwin.close(masterDescriptor) })
         self.exitSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)
@@ -72,8 +72,8 @@ final class ForkPTYChannel: PTYChannel, @unchecked Sendable {
             }
         }
 
-        // Handler posé AVANT activate() : un enfant qui sort immédiatement est
-        // quand même moissonné (recherche §3.5).
+        // Handler installed BEFORE activate(): a child that exits immediately
+        // still gets reaped (research §3.5).
         exitSource.setEventHandler { [weak self] in
             guard let self, !self.isClosed else { return }
             var status: Int32 = 0
@@ -105,7 +105,7 @@ final class ForkPTYChannel: PTYChannel, @unchecked Sendable {
         case .terminate: SIGTERM
         case .kill: SIGKILL
         }
-        // forkpty a fait de l'enfant un chef de session : son pgid est son pid.
+        // forkpty made the child a session leader: its pgid is its pid.
         switch scope {
         case .process: kill(pid, number)
         case .group: kill(-pid, number)
@@ -126,8 +126,8 @@ final class ForkPTYChannel: PTYChannel, @unchecked Sendable {
     var processGroup: pid_t? { pid }
 
     func cpuFraction() -> Double {
-        // Alimentera l'heuristique STA-02 via proc_pid_rusage — tranche à venir
-        // avec l'échantillonneur ; 0 = « aucun signal CPU », jamais un faux signal.
+        // Will feed the STA-02 heuristic via proc_pid_rusage — upcoming slice along
+        // with the sampler; 0 = "no CPU signal", never a false signal.
         0
     }
 }

@@ -2,38 +2,38 @@ import LoomCore
 import Dispatch
 import Foundation
 
-// Seam du moteur terminal (ADR-0001, décision docs/design/session-runtime.md).
-// Deux adapters : SwiftTermEngine (prod) et LineEngine (test) ; libghostty en troisième (v2).
+// Terminal engine seam (ADR-0001, decision in docs/design/session-runtime.md).
+// Two adapters: SwiftTermEngine (prod) and LineEngine (test); libghostty as a third (v2).
 //
-// CONTRAT DE CONFINEMENT (ADR-0007) : toutes les méthodes et propriétés sont appelées
-// sur la queue sérielle de la session, sans exception. Le protocole est volontairement
-// non-Sendable : le type dit le confinement.
+// CONFINEMENT CONTRACT (ADR-0007): every method and property is called on the
+// session's serial queue, no exceptions. The protocol is deliberately non-Sendable:
+// the type states the confinement.
 
-// Le seam de fabrique est la closure `SessionRuntime.Dependencies.makeEngine` — un seul
-// mécanisme (ADR-0008). Le canal de retour vers le PTY (réponses DA/DSR) et le titre
-// arriveront avec l'adapter SwiftTerm, dictés par ses besoins réels, pas avant.
+// The factory seam is the `SessionRuntime.Dependencies.makeEngine` closure — a single
+// mechanism (ADR-0008). The return channel to the PTY (DA/DSR responses) and the title
+// will arrive with the SwiftTerm adapter, dictated by its actual needs, not before.
 public protocol TerminalEngine: AnyObject {
     func feed(_ bytes: ArraySlice<UInt8>)
     func resize(to geometry: TerminalGeometry)
-    /// Écran visible uniquement — jamais le scrollback. Incrémente `revision`.
+    /// Visible screen only — never the scrollback. Increments `revision`.
     func snapshot() -> TerminalScreen
-    /// Lignes modifiées depuis le dernier appel, et remise à zéro du marqueur.
+    /// Rows modified since the last call, resetting the marker.
     func takeDirtyRows() -> IndexSet
-    /// Réduit l'empreinte d'un terminal détaché (NFR-M) sans toucher au transcript.
+    /// Shrinks a detached terminal's footprint (NFR-M) without touching the transcript.
     func setScrollback(_ lines: Int)
-    /// Les `limit` dernières lignes SORTIES de l'écran (queue du scrollback),
-    /// de la plus ancienne à la plus récente — pour le défilement de la vue.
+    /// The last `limit` lines that have SCROLLED OFF the screen (scrollback tail),
+    /// oldest to newest — for view scrolling.
     func historyTail(_ limit: Int) -> [TerminalLine]
 }
 
-// MARK: - Écran
+// MARK: - Screen
 
-/// Valeur immuable traversant la frontière queue de session → MainActor.
+/// Immutable value crossing the session queue → MainActor boundary.
 public struct TerminalScreen: Sendable, Equatable {
     public let geometry: TerminalGeometry
     public let lines: [TerminalLine]
     public let cursor: CursorPosition
-    /// Monotone par terminal ; égal ⇒ rien à redessiner.
+    /// Monotonic per terminal; equal ⇒ nothing to redraw.
     public let revision: UInt64
 
     public init(geometry: TerminalGeometry, lines: [TerminalLine], cursor: CursorPosition,
@@ -44,8 +44,8 @@ public struct TerminalScreen: Sendable, Equatable {
         self.revision = revision
     }
 
-    /// `TerminalSurface.screen` n'est jamais optionnel ni vide : avant le premier
-    /// attachement, la vue peint cet écran vierge à la bonne géométrie.
+    /// `TerminalSurface.screen` is never optional nor empty: before the first
+    /// attachment, the view paints this blank screen at the right geometry.
     public static func blank(_ geometry: TerminalGeometry) -> TerminalScreen {
         TerminalScreen(geometry: geometry,
                        lines: Array(repeating: TerminalLine(cells: []), count: geometry.rows),
@@ -81,8 +81,8 @@ public struct CellStyle: Sendable, Equatable {
     }
 }
 
-/// Les couleurs restent symboliques jusqu'au rendu : c'est le thème résolu (THM-04)
-/// qui traduit `ansi(n)` en couleur concrète, jamais le moteur.
+/// Colors stay symbolic until rendering: the resolved theme (THM-04) translates
+/// `ansi(n)` into a concrete color, never the engine.
 public enum TerminalColor: Sendable, Equatable {
     case `default`
     case ansi(UInt8)

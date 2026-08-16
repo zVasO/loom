@@ -3,10 +3,10 @@ import LoomCore
 import LoomPersistence
 import Foundation
 
-// Seam : l'interface publique de SessionStore, sur une vraie base SQLite en
-// dossier temporaire — migrations comprises (DAT-02 : versionnées dès la v1).
+// Seam: SessionStore's public interface, on a real SQLite database in a
+// temporary directory — migrations included (DAT-02: versioned from v1).
 
-@Suite("SessionStore — persistance GRDB")
+@Suite("SessionStore — GRDB persistence")
 struct SessionStoreTests {
 
     private func makeStore() throws -> SessionStore {
@@ -15,12 +15,12 @@ struct SessionStoreTests {
         return try SessionStore(path: url.path)
     }
 
-    @Test("une session persiste et se relit intacte (aller-retour complet)")
+    @Test("a session persists and reads back intact (full round-trip)")
     func allerRetourSession() throws {
         let store = try makeStore()
         let id = SessionID()
-        let record = SessionRecord(id: id, title: "Corriger le cache", agentID: "claude-code",
-                                   state: .working, branch: "loom/corrige-cache",
+        let record = SessionRecord(id: id, title: "Fix the cache", agentID: "claude-code",
+                                   state: .working, branch: "loom/fix-cache",
                                    worktreePath: "/tmp/wt", createdAt: Date(timeIntervalSince1970: 1000))
         try store.insert(record)
 
@@ -29,7 +29,7 @@ struct SessionStoreTests {
         #expect(try store.allSessions().count == 1)
     }
 
-    @Test("le journal des transitions garde l'histoire, source comprise (STA-06)")
+    @Test("the transition journal keeps the history, source included (STA-06)")
     func journalDesTransitions() throws {
         let store = try makeStore()
         let id = SessionID()
@@ -45,27 +45,27 @@ struct SessionStoreTests {
         #expect(journal.count == 2)
         #expect(journal[0].to == .working)
         #expect(journal[1].to == .needsInput)
-        #expect(journal[1].source == .hook, "la source de chaque transition est journalisée")
+        #expect(journal[1].source == .hook, "the source of each transition is journaled")
     }
 
-    @Test("au relancement, les sessions vivantes deviennent interrupted (NFR-R, UC-7)")
+    @Test("on relaunch, live sessions become interrupted (NFR-R, UC-7)")
     func marquageInterruptedAuRelancement() throws {
         let store = try makeStore()
         let working = SessionID()
         let done = SessionID()
-        try store.insert(SessionRecord(id: working, title: "vivante", agentID: "claude-code",
+        try store.insert(SessionRecord(id: working, title: "live", agentID: "claude-code",
                                        state: .working, createdAt: Date()))
-        try store.insert(SessionRecord(id: done, title: "finie", agentID: "claude-code",
+        try store.insert(SessionRecord(id: done, title: "finished", agentID: "claude-code",
                                        state: .completed, createdAt: Date()))
 
         let marked = try store.markLiveSessionsInterrupted()
 
-        #expect(marked == 1, "seules les sessions vivantes sont marquées")
-        #expect(try store.session(id: working)?.state == .interrupted, "candidate à la Reprise")
-        #expect(try store.session(id: done)?.state == .completed, "les états terminaux ne bougent pas")
+        #expect(marked == 1, "only live sessions are marked")
+        #expect(try store.session(id: working)?.state == .interrupted, "Resume candidate")
+        #expect(try store.session(id: done)?.state == .completed, "terminal states do not move")
     }
 
-    @Test("l'historique navigateur : visites enregistrées, suggestions par préfixe (WEB-01)")
+    @Test("browser history: visits recorded, suggestions by prefix (WEB-01)")
     func historiqueNavigateur() throws {
         let store = try makeStore()
         try store.recordVisit(url: "https://github.com/vaso/loom/pulls", title: "Pull requests",
@@ -78,37 +78,37 @@ struct SessionStoreTests {
         let suggestions = try store.historySuggestions(prefix: "https://github.com")
         #expect(suggestions.map(\.url) == ["https://github.com/vaso/loom",
                                            "https://github.com/vaso/loom/pulls"],
-                "préfixe respecté, plus récent d'abord")
-        #expect(try store.historySuggestions(prefix: "https://exemple.fr").isEmpty)
+                "prefix honored, most recent first")
+        #expect(try store.historySuggestions(prefix: "https://example.org").isEmpty)
     }
 
-    @Test("recherche plein texte : titres ET transcripts, via FTS5 (SES-08)")
+    @Test("full-text search: titles AND transcripts, via FTS5 (SES-08)")
     func recherchePleinTexte() throws {
         let store = try makeStore()
         let cache = SessionID()
         let deploy = SessionID()
-        try store.insert(SessionRecord(id: cache, title: "Corriger le bug de cache",
+        try store.insert(SessionRecord(id: cache, title: "Fix the cache bug",
                                        agentID: "claude-code", state: .completed, createdAt: Date()))
-        try store.insert(SessionRecord(id: deploy, title: "Déployer en préproduction",
+        try store.insert(SessionRecord(id: deploy, title: "Deploy to staging",
                                        agentID: "claude-code", state: .completed, createdAt: Date()))
-        try store.indexForSearch(session: cache, title: "Corriger le bug de cache",
-                                 transcript: "l'invalidation par TTL était approximative")
-        try store.indexForSearch(session: deploy, title: "Déployer en préproduction",
-                                 transcript: "kubectl apply réussi, pods verts")
+        try store.indexForSearch(session: cache, title: "Fix the cache bug",
+                                 transcript: "TTL invalidation was too approximate")
+        try store.indexForSearch(session: deploy, title: "Deploy to staging",
+                                 transcript: "kubectl apply succeeded, pods green")
 
-        #expect(try store.searchSessions(matching: "cache") == [cache], "match sur le titre")
-        #expect(try store.searchSessions(matching: "kubectl") == [deploy], "match sur le transcript")
+        #expect(try store.searchSessions(matching: "cache") == [cache], "match on the title")
+        #expect(try store.searchSessions(matching: "kubectl") == [deploy], "match on the transcript")
         #expect(try store.searchSessions(matching: "invalidation") == [cache])
-        #expect(try store.searchSessions(matching: "introuvable-xyz").isEmpty)
-        #expect(try store.searchSessions(matching: "\"guillemets\" spéciaux*").isEmpty,
-                "une requête avec caractères spéciaux FTS ne fait jamais d'erreur")
+        #expect(try store.searchSessions(matching: "notfound-xyz").isEmpty)
+        #expect(try store.searchSessions(matching: "\"quoted\" special*").isEmpty,
+                "a query with special FTS characters never errors")
     }
 
-    @Test("projets : insertion, rattachement des sessions, archivage sans toucher au dossier (PRJ-01/03/06)")
+    @Test("projects: insert, session attachment, archive without touching the folder (PRJ-01/03/06)")
     func projets() throws {
         let store = try makeStore()
         let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("loom-projet-\(UUID().uuidString.prefix(8))")
+            .appendingPathComponent("loom-project-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
         let projectID = ProjectID()
@@ -121,25 +121,25 @@ struct SessionStoreTests {
         try store.insert(SessionRecord(id: session, title: "t", agentID: "claude-code",
                                        state: .working, projectID: projectID, createdAt: Date()))
         #expect(try store.session(id: session)?.projectID == projectID,
-                "la session connaît son projet (regroupement PRJ-03)")
+                "the session knows its project (PRJ-03 grouping)")
 
         try store.archiveProject(projectID)
-        #expect(try store.activeProjects().isEmpty, "archivé : le projet sort des listes")
+        #expect(try store.activeProjects().isEmpty, "archived: the project leaves the lists")
         #expect(FileManager.default.fileExists(atPath: folder.path),
-                "PRJ-06 : l'app ne détruit JAMAIS le dossier source de l'utilisateur")
+                "PRJ-06: the app NEVER destroys the user's source folder")
     }
 
-    @Test("renommer une session persiste (SES-05)")
+    @Test("renaming a session persists (SES-05)")
     func renommage() throws {
         let store = try makeStore()
         let id = SessionID()
         try store.insert(SessionRecord(id: id, title: "dbdd-a3f2", agentID: "claude-code",
                                        state: .working, createdAt: Date()))
-        try store.rename(session: id, to: "Corrige le cache Redis")
-        #expect(try store.session(id: id)?.title == "Corrige le cache Redis")
+        try store.rename(session: id, to: "Fix the Redis cache")
+        #expect(try store.session(id: id)?.title == "Fix the Redis cache")
     }
 
-    @Test("l'état persisté suit les mises à jour")
+    @Test("persisted state follows updates")
     func miseAJourDEtat() throws {
         let store = try makeStore()
         let id = SessionID()

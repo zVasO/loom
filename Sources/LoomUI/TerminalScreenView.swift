@@ -2,16 +2,16 @@ import AppKit
 import LoomTerminal
 import SwiftUI
 
-/// Métriques de la grille terminal : la vue et le PTY doivent parler de la MÊME
-/// géométrie (TRM-02) — c'est ici qu'un point devient une cellule.
+/// Terminal grid metrics: the view and the PTY must speak the SAME
+/// geometry (TRM-02) — this is where a point becomes a cell.
 public enum TerminalMetrics {
     public static let fontSize: CGFloat = 12.5
     static let nsFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
 
-    /// Mesure sur une SONDE de 100 caractères via TextKit : l'avance d'un glyphe
-    /// mono est fractionnaire (≈7,52 pt à 12,5) — la mesurer sur un seul caractère
-    /// arrondit, et l'erreur ×100 colonnes faisait annoncer au PTY plus de colonnes
-    /// que la vue n'en affiche : texte rogné à droite.
+    /// Measured on a 100-character PROBE via TextKit: a mono glyph's advance
+    /// is fractional (≈7.52 pt at 12.5) — measuring it on a single character
+    /// rounds, and the error ×100 columns had the PTY announcing more columns
+    /// than the view displays: text clipped on the right.
     public static let cellSize: CGSize = {
         let probe = NSAttributedString(string: String(repeating: "0", count: 100),
                                        attributes: [.font: nsFont])
@@ -20,7 +20,7 @@ public enum TerminalMetrics {
                       height: ceil(measured.height) + 1)
     }()
 
-    /// Combien de cellules tiennent dans `size` (padding de la vue déduit).
+    /// How many cells fit in `size` (view padding deducted).
     public static func grid(fitting size: CGSize, insets: CGFloat = 16) -> (cols: Int, rows: Int) {
         let cell = cellSize
         guard cell.width > 0, cell.height > 0 else { return (80, 24) }
@@ -29,14 +29,14 @@ public enum TerminalMetrics {
     }
 }
 
-/// Rendu d'un `TerminalScreen` — la vue tire des valeurs, jamais le moteur
-/// (ADR-0007/0008). La grille correspond exactement à la géométrie du PTY :
-/// aucun défilement, aucun repli — l'agent dessine pour la taille réelle.
+/// Renders a `TerminalScreen` — the view pulls values, never the engine
+/// (ADR-0007/0008). The grid matches the PTY geometry exactly:
+/// no scrolling, no wrapping — the agent draws for the real size.
 public struct TerminalScreenView: View {
     public let screen: TerminalScreen
     public let history: [TerminalLine]
-    /// Collé en bas pendant le stream ; remonter dans l'historique décroche,
-    /// revenir en bas raccroche (suivi de la géométrie de défilement).
+    /// Pinned to the bottom during the stream; scrolling up into history unpins,
+    /// coming back down re-pins (tracks the scroll geometry).
     @State private var pinnedToBottom = true
 
     public init(screen: TerminalScreen, history: [TerminalLine] = []) {
@@ -56,7 +56,7 @@ public struct TerminalScreenView: View {
                         row(line, height: cell.height,
                             cursorCol: index == screen.cursor.row ? screen.cursor.col : nil)
                     }
-                    Color.clear.frame(height: 0).id("bas")   // marqueur d’ancrage : hauteur nulle, sinon il rogne le haut
+                    Color.clear.frame(height: 0).id("bas")   // anchor marker: zero height, otherwise it clips the top
                 }
                 .padding(8)
             }
@@ -71,12 +71,12 @@ public struct TerminalScreenView: View {
         .background(DefaultTheme.contentBackground)
     }
 
-    /// `cursorCol` : le curseur du terminal, dessiné par NOUS (l'agent ne peint
-    /// que ses cellules) — sans lui, on taperait en aveugle dans son champ.
+    /// `cursorCol`: the terminal cursor, drawn by US (the agent only paints
+    /// its cells) — without it, one would type blind into its field.
     private func row(_ line: TerminalLine, height: CGFloat, cursorCol: Int? = nil) -> some View {
         Text(attributed(line))
             .font(.system(size: TerminalMetrics.fontSize, design: .monospaced))
-            .textSelection(.enabled)   // sélection à la souris + ⌘C
+            .textSelection(.enabled)   // mouse selection + ⌘C
             .frame(height: height, alignment: .leading)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
@@ -108,8 +108,8 @@ public struct TerminalScreenView: View {
 
 
 private extension View {
-    /// macOS 15+ : suit la position réelle de défilement pour décider de l'ancrage
-    /// bas ; en deçà, on reste toujours collé (repli honnête).
+    /// macOS 15+: tracks the actual scroll position to decide on bottom
+    /// anchoring; below that, always stay pinned (honest fallback).
     @ViewBuilder
     func scrollGeometryPinning(_ pinned: Binding<Bool>) -> some View {
         if #available(macOS 15.0, *) {

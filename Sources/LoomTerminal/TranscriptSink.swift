@@ -1,15 +1,15 @@
 import LoomCore
 import Foundation
 
-// Seam du transcript (local-substitutable). Adapters : FileTranscriptSink (prod, batch
-// 250 ms, rotation 10 Mo, flux brut + version dé-ANSI-isée pour FTS5 — DAT-01) et
-// MemoryTranscriptSink (test, avec mode défaillant pour vérifier la dégradation en notice).
+// Transcript seam (locally substitutable). Adapters: FileTranscriptSink (prod, 250 ms
+// batching, 10 MB rotation, raw stream + de-ANSI-fied version for FTS5 — DAT-01) and
+// MemoryTranscriptSink (test, with a failing mode to verify degradation into a notice).
 
 public protocol TranscriptSink: Sendable {
-    /// Appelé sur la queue de session, AVANT le parsing (un crash du moteur ne perd
-    /// aucun octet déjà lu — NFR-R). Doit copier et rendre la main immédiatement.
-    /// Ne lève jamais : une panne de transcript dégrade en notice, elle ne tue pas la session.
+    /// Called on the session queue, BEFORE parsing (an engine crash loses no byte
+    /// already read — NFR-R). Must copy and return immediately.
+    /// Never throws: a transcript failure degrades into a notice, it does not kill the session.
     func append(_ bytes: ArraySlice<UInt8>, terminal: TerminalID)
-    /// Barrière : flush et fermeture. Après retour, les fichiers sont complets sur disque.
+    /// Barrier: flush and close. After returning, the files are complete on disk.
     func finish(terminal: TerminalID) async
 }

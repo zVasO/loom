@@ -1,21 +1,21 @@
 import Foundation
 
-/// Identité d'une Session Loom (distincte de la session native de l'agent — CONTEXT.md).
-/// L'UUID est imposé à l'agent quand son CLI le permet (`claude --session-id`), ce qui rend
-/// la Reprise déterministe (docs/research/claude-code-hooks.md §5).
+/// Identity of a Loom Session (distinct from the agent's native session — CONTEXT.md).
+/// The UUID is imposed on the agent when its CLI allows it (`claude --session-id`), which makes
+/// Resume deterministic (docs/research/claude-code-hooks.md §5).
 public struct SessionID: Hashable, Sendable, Codable {
     public let rawValue: UUID
     public init(_ rawValue: UUID = UUID()) { self.rawValue = rawValue }
 }
 
-/// Identité d'un Projet (dossier local auquel se rattachent des sessions — CONTEXT.md).
+/// Identity of a Project (a local folder that sessions attach to — CONTEXT.md).
 public struct ProjectID: Hashable, Sendable, Codable {
     public let rawValue: UUID
     public init(_ rawValue: UUID = UUID()) { self.rawValue = rawValue }
 }
 
-/// Identité d'un terminal au sein d'une Session. `.primary` héberge l'agent
-/// (Terminal principal) ; les autres sont des Terminaux secondaires (SES-04).
+/// Identity of a terminal within a Session. `.primary` hosts the agent
+/// (primary terminal); the others are secondary terminals (SES-04).
 public struct TerminalID: Hashable, Sendable, Codable {
     public static let primary = TerminalID(rawValue: 0)
     public let rawValue: Int
@@ -29,15 +29,15 @@ public struct TerminalGeometry: Sendable, Equatable, Codable {
         self.cols = cols
         self.rows = rows
     }
-    /// Dimensionne le PTY avant qu'une vue existe, pour que l'agent n'écrive
-    /// jamais sur un écran 80×24 qu'il faudrait reflow ensuite.
+    /// Sizes the PTY before any view exists, so the agent never writes
+    /// to an 80×24 screen that would have to be reflowed later.
     public static let `default` = TerminalGeometry(cols: 120, rows: 32)
 }
 
-/// Ce qu'il faut exécuter — produit par un `AgentAdapter` (§6.2 du cahier des charges).
-/// `environment` est un OVERLAY, pas un environnement complet : le runtime construit
-/// toujours une base (`TERM`, `LANG`, `HOME`, et un `PATH` explicite — SwiftTerm
-/// omet `PATH` de son environnement par défaut) puis fusionne cet overlay par-dessus.
+/// What to execute — produced by an `AgentAdapter` (spec §6.2).
+/// `environment` is an OVERLAY, not a complete environment: the runtime always
+/// builds a base (`TERM`, `LANG`, `HOME`, and an explicit `PATH` — SwiftTerm
+/// omits `PATH` from its default environment) then merges this overlay on top.
 public struct Command: Sendable, Equatable {
     public var executable: String
     public var arguments: [String]

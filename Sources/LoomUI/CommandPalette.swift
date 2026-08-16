@@ -1,8 +1,8 @@
 import Foundation
 
-/// Le cœur de la palette ⌘K (UIX-02) : fuzzy matching pur.
-/// Sous-séquence obligatoire ; le score favorise les débuts de mots et les
-/// caractères consécutifs. Accents et casse ignorés.
+/// The heart of the ⌘K palette (UIX-02): pure fuzzy matching.
+/// Subsequence required; the score favors word starts and
+/// consecutive characters. Diacritics and case ignored.
 public enum CommandPalette {
 
     public static func rank(query: String, in candidates: [String]) -> [String] {
@@ -14,7 +14,7 @@ public enum CommandPalette {
             .map(\.0)
     }
 
-    /// `nil` si `query` n'est pas une sous-séquence de `candidate`.
+    /// `nil` if `query` is not a subsequence of `candidate`.
     static func score(_ query: [Character], in candidate: String) -> Int? {
         let normalized = normalize(candidate)
         var score = 0
@@ -23,8 +23,8 @@ public enum CommandPalette {
         for (index, character) in normalized.enumerated() {
             guard queryIndex < query.count, character == query[queryIndex] else { continue }
             score += 1
-            if index == 0 || normalized[index - 1] == " " { score += 3 }   // début de mot
-            if index == previousMatched + 1 { score += 2 }                  // consécutif
+            if index == 0 || normalized[index - 1] == " " { score += 3 }   // word start
+            if index == previousMatched + 1 { score += 2 }                  // consecutive
             previousMatched = index
             queryIndex += 1
         }

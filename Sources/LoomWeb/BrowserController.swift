@@ -2,12 +2,12 @@ import Foundation
 import Observation
 import WebKit
 
-/// Pilote le navigateur intégré : le modèle LRU décide qui vit, ce contrôleur
-/// crée/détruit les `WKWebView` en conséquence.
-/// - WEB-02 : `WKWebsiteDataStore.default()` — persistant, partagé par toute l'app,
-///   les cookies survivent aux relances.
-/// - WEB-04 : user-agent Safari pour ne pas casser les OAuth.
-/// - WEB-07 : aucune injection de script, aucune interception de contenu.
+/// Drives the built-in browser: the LRU model decides who lives, this controller
+/// creates/destroys the `WKWebView`s accordingly.
+/// - WEB-02: `WKWebsiteDataStore.default()` — persistent, shared across the whole app,
+///   cookies survive relaunches.
+/// - WEB-04: Safari user-agent so OAuth flows do not break.
+/// - WEB-07: no script injection, no content interception.
 @MainActor
 @Observable
 public final class BrowserController: NSObject {
@@ -55,10 +55,10 @@ public final class BrowserController: NSObject {
         webViews[active]?.load(URLRequest(url: url))
     }
 
-    /// WEB-06 — adresse OU recherche : « github.com/pulls » → https://… ; une URL
-    /// complète passe telle quelle ; des mots (« claude code hooks ») partent en
-    /// recherche Google. Une entrée est une adresse si elle n'a pas d'espace ET
-    /// ressemble à un hôte (un point, ou localhost).
+    /// WEB-06 — address OR search: "github.com/pulls" → https://…; a full URL
+    /// passes through as is; words ("claude code hooks") go to a Google
+    /// search. An input is an address if it has no space AND
+    /// looks like a host (a dot, or localhost).
     nonisolated public static func normalize(_ input: String) -> URL? {
         let trimmed = input.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
@@ -71,8 +71,8 @@ public final class BrowserController: NSObject {
         return search.url
     }
 
-    /// Fait coïncider les webviews vivantes avec la décision LRU du modèle :
-    /// suspendu = la webview est détruite, l'URL reste dans le modèle (WEB-05).
+    /// Reconciles the live webviews with the model's LRU decision:
+    /// suspended = the webview is destroyed, the URL stays in the model (WEB-05).
     private func reconcileWebViews() {
         let live = model.liveTabIDs
         for id in webViews.keys where !live.contains(id) {
@@ -89,7 +89,7 @@ public final class BrowserController: NSObject {
             webView.navigationDelegate = self
             webViews[id] = webView
             if let url = model.tab(id)?.url {
-                webView.load(URLRequest(url: url))   // réactivation : rechargement (WEB-05)
+                webView.load(URLRequest(url: url))   // reactivation: reload (WEB-05)
             }
         }
     }

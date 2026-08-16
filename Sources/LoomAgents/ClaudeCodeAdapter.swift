@@ -1,12 +1,12 @@
 import LoomCore
 import Foundation
 
-/// Traduit le monde Loom vers le CLI Claude Code (§6.2 du cahier des charges).
-/// Faits vérifiés en source primaire : docs/research/claude-code-hooks.md.
+/// Translates the Loom world to the Claude Code CLI (spec §6.2).
+/// Facts verified against the primary source: docs/research/claude-code-hooks.md.
 public struct ClaudeCodeAdapter: Sendable {
 
-    /// Câblage des hooks vers l'app : binaire helper (ADR-0005) et socket Unix.
-    /// Le token, lui, est PAR SESSION — il se passe à `launchCommand`.
+    /// Wiring of the hooks to the app: helper binary (ADR-0005) and Unix socket.
+    /// The token, on the other hand, is PER SESSION — it is passed to `launchCommand`.
     public struct HookWiring: Sendable {
         public var helper: URL
         public var socket: URL
@@ -16,8 +16,8 @@ public struct ClaudeCodeAdapter: Sendable {
         }
     }
 
-    /// Événements écoutés — le sous-ensemble qui porte la détection d'état (STA-01),
-    /// vérifié contre la doc officielle (docs/research/claude-code-hooks.md §1).
+    /// Events we listen to — the subset that carries state detection (STA-01),
+    /// verified against the official docs (docs/research/claude-code-hooks.md §1).
     static let hookedEvents = ["SessionStart", "UserPromptSubmit", "Stop",
                                "Notification", "PermissionRequest", "SessionEnd"]
 
@@ -29,10 +29,10 @@ public struct ClaudeCodeAdapter: Sendable {
         self.hooks = hooks
     }
 
-    /// L'UUID de session est IMPOSÉ au CLI (`--session-id`) : la Reprise devient
-    /// déterministe, sans dépendre de l'arrivée du hook SessionStart (recherche §5).
-    /// Les hooks partent en `--settings` inline : portée session, fusionnés avec les
-    /// hooks personnels de l'utilisateur, rien d'écrit sur son disque (STA-01).
+    /// The session UUID is IMPOSED on the CLI (`--session-id`): Resume becomes
+    /// deterministic, without depending on the SessionStart hook arriving (research §5).
+    /// The hooks go out as inline `--settings`: session-scoped, merged with the
+    /// user's personal hooks, nothing written to their disk (STA-01).
     public func launchCommand(session: SessionID, initialPrompt: String?,
                               hookToken: String? = nil) -> Command {
         var arguments = ["--session-id", session.rawValue.uuidString]
@@ -46,9 +46,9 @@ public struct ClaudeCodeAdapter: Sendable {
         return Command(executable: executable, arguments: arguments)
     }
 
-    /// Traduit un payload de hook (JSON stdin du helper) en événement du réducteur.
-    /// `nil` = rien à dire à la machine à états (notification sans valeur d'état,
-    /// payload corrompu — jamais de transition sur du bruit).
+    /// Translates a hook payload (JSON stdin of the helper) into a reducer event.
+    /// `nil` = nothing to tell the state machine (notification with no state value,
+    /// corrupted payload — never a transition on noise).
     public static func interpret(_ payload: Data) -> StateEngine.Event? {
         guard let object = try? JSONSerialization.jsonObject(with: payload),
               let fields = object as? [String: Any],
@@ -75,7 +75,7 @@ public struct ClaudeCodeAdapter: Sendable {
         }
     }
 
-    /// UC-7 : l'UUID ayant été imposé au lancement, la Reprise est un simple `--resume`.
+    /// UC-7: since the UUID was imposed at launch, Resume is a simple `--resume`.
     public func resumeCommand(session: SessionID, hookToken: String? = nil) -> Command {
         var arguments = ["--resume", session.rawValue.uuidString]
         if let hooks, let hookToken,

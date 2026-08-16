@@ -4,9 +4,9 @@ import SwiftUI
 @main
 struct LoomApp: App {
     init() {
-        // Lancé hors bundle .app (`swift run`), le process est traité en arrière-plan :
-        // pas d'icône Dock, fenêtre jamais au premier plan. On force l'activation —
-        // sans effet indésirable une fois empaqueté par le wizard de release.
+        // Launched outside an .app bundle (`swift run`), the process is treated as background:
+        // no Dock icon, window never in the foreground. We force activation — with no
+        // undesirable effect once packaged by the release wizard.
         NSApplication.shared.setActivationPolicy(.regular)
         DispatchQueue.main.async {
             NSApplication.shared.activate(ignoringOtherApps: true)
@@ -20,18 +20,18 @@ struct LoomApp: App {
                 .frame(minWidth: 980, minHeight: 620)
                 .preferredColorScheme(.dark)
         }
-        // La navbar custom occupe le haut de la fenêtre, comme la référence :
-        // barre de titre masquée, les feux tricolores flottent dessus.
+        // The custom navbar occupies the top of the window, like the reference:
+        // title bar hidden, the traffic lights float on top of it.
         .windowStyle(.hiddenTitleBar)
         .commands {
-            // Le menu Édition standard (copier/coller…) reste intact : on ne
-            // remplace que Fichier > Nouveau.
+            // The standard Edit menu (copy/paste…) stays intact: we only
+            // replace File > New.
             CommandGroup(replacing: .newItem) {
-                Button("Nouvelle session claude") {
+                Button("New claude session") {
                     NotificationCenter.default.post(name: .loomNewSession, object: nil)
                 }
                 .keyboardShortcut("n", modifiers: .command)
-                Button("Nouvel onglet dans la pile") {
+                Button("New tab in the stack") {
                     NotificationCenter.default.post(name: .loomNewTab, object: nil)
                 }
                 .keyboardShortcut("t", modifiers: .command)
@@ -41,8 +41,8 @@ struct LoomApp: App {
 }
 
 extension Notification.Name {
-    /// ⌘N — une session claude dans le projet courant.
+    /// ⌘N — a claude session in the current project.
     static let loomNewSession = Notification.Name("loom.newSession")
-    /// ⌘T — contextuel : onglet web dans le navigateur, terminal dans une session.
+    /// ⌘T — contextual: web tab in the browser, terminal in a session.
     static let loomNewTab = Notification.Name("loom.newTab")
 }

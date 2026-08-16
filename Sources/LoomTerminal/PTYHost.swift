@@ -2,16 +2,16 @@ import LoomCore
 import Dispatch
 import Foundation
 
-// Seam de la source d'octets (décision docs/design/session-runtime.md, forme du candidat B).
-// Adapters : ForkPTYHost (prod v1), ScriptedPTYHost (test), TmuxPTYHost (v2, ADR-0006).
+// Byte-source seam (decision in docs/design/session-runtime.md, shape of candidate B).
+// Adapters: ForkPTYHost (prod v1), ScriptedPTYHost (test), TmuxPTYHost (v2, ADR-0006).
 //
-// Le contrat est délibérément SANS descripteur de fichier : un backend tmux n'en a pas
-// à offrir. `PTYEvent` rend l'ordre EOF/exit explicite et donc testable — les deux
-// événements arrivent dans un ordre non garanti, et seul `terminated` conclut.
+// The contract deliberately exposes NO file descriptor: a tmux backend has none to
+// offer. `PTYEvent` makes the EOF/exit ordering explicit and therefore testable — the
+// two events arrive in no guaranteed order, and only `terminated` concludes.
 
 public protocol PTYHost: Sendable {
-    /// Ouvre un canal. `sink` n'est appelé QUE sur `queue`, et plus jamais après `close()`.
-    /// L'environnement transmis est complet (le runtime a déjà construit la base + PATH).
+    /// Opens a channel. `sink` is called ONLY on `queue`, and never again after `close()`.
+    /// The environment passed in is complete (the runtime has already built the base + PATH).
     func open(command: Command,
               workingDirectory: URL,
               environment: [String: String],
@@ -21,30 +21,30 @@ public protocol PTYHost: Sendable {
 }
 
 public enum PTYEvent: Sendable {
-    /// Slice valide uniquement pendant l'appel du sink — copier pour conserver.
+    /// Slice valid only for the duration of the sink call — copy to retain.
     case bytes([UInt8])
-    /// Informatif : ne termine JAMAIS une session (recherche SwiftTerm §7.4).
+    /// Informational: NEVER terminates a session (SwiftTerm research §7.4).
     case endOfFile
-    /// Seule vérité sur la fin du process et son code de sortie.
+    /// Sole source of truth for process termination and its exit code.
     case terminated(ExitStatus)
 }
 
 public protocol PTYChannel: AnyObject, Sendable {
     func write(_ bytes: ArraySlice<UInt8>)
-    /// TIOCSWINSZ (forkpty) / refresh-client (tmux). Le moteur est redimensionné à part.
+    /// TIOCSWINSZ (forkpty) / refresh-client (tmux). The engine is resized separately.
     func resize(to geometry: TerminalGeometry)
-    /// SES-06 distingue la cible : SIGINT gracieux à l'agent seul (`.process`),
-    /// l'escalade SIGTERM/SIGKILL au groupe entier (`.group`) pour atteindre les
-    /// descendants (TRM-02) — sans quoi un SIGINT frapperait aussi les builds/tests
-    /// que l'agent a lancés.
+    /// SES-06 distinguishes the target: graceful SIGINT to the agent alone (`.process`),
+    /// SIGTERM/SIGKILL escalation to the whole group (`.group`) to reach descendants
+    /// (TRM-02) — otherwise a SIGINT would also hit the builds/tests the agent
+    /// has launched.
     func signal(_ signal: PTYSignal, scope: PTYSignalScope)
-    /// Idempotent ; ne délivre plus rien après retour, et LIBÈRE la référence au sink
-    /// (c'est ce qui rompt le cycle de rétention sink → runtime à la conclusion).
+    /// Idempotent; delivers nothing after returning, and RELEASES the sink reference
+    /// (which is what breaks the sink → runtime retain cycle at conclusion).
     func close()
     var capabilities: PTYCapabilities { get }
-    /// `nil` pour un backend sans process group joignable (tmux).
+    /// `nil` for a backend with no reachable process group (tmux).
     var processGroup: pid_t? { get }
-    /// Fraction CPU 0…1 du groupe (proc_pid_rusage) — matière de l'heuristique STA-02.
+    /// CPU fraction 0…1 for the group (proc_pid_rusage) — input to the STA-02 heuristic.
     func cpuFraction() -> Double
 }
 
@@ -55,22 +55,22 @@ public enum PTYSignal: Sendable {
 }
 
 public enum PTYSignalScope: Sendable {
-    /// Le process de l'agent seul (kill(pid, …)).
+    /// The agent process alone (kill(pid, …)).
     case process
-    /// Le groupe de process entier (kill(-pgid, …)).
+    /// The whole process group (kill(-pgid, …)).
     case group
 }
 
 public struct PTYCapabilities: OptionSet, Sendable {
     public let rawValue: Int
     public init(rawValue: Int) { self.rawValue = rawValue }
-    public static let signals = PTYCapabilities(rawValue: 1 << 0)      // process group joignable
-    public static let survivesHost = PTYCapabilities(rawValue: 1 << 1) // vraie persistance (tmux, v2)
-    public static let cpuSampling = PTYCapabilities(rawValue: 1 << 2)  // proc_pid_rusage possible
+    public static let signals = PTYCapabilities(rawValue: 1 << 0)      // reachable process group
+    public static let survivesHost = PTYCapabilities(rawValue: 1 << 1) // true persistence (tmux, v2)
+    public static let cpuSampling = PTYCapabilities(rawValue: 1 << 2)  // proc_pid_rusage available
 }
 
 public struct ExitStatus: Sendable, Equatable {
-    /// `nil` si le process a été tué par un signal.
+    /// `nil` if the process was killed by a signal.
     public let code: Int32?
     public let signal: Int32?
     public init(code: Int32?, signal: Int32? = nil) {
@@ -79,7 +79,7 @@ public struct ExitStatus: Sendable, Equatable {
     }
 }
 
-/// L'escalade d'arrêt est une donnée, pas du code : testable sous horloge injectée (SES-06).
+/// The shutdown escalation is data, not code: testable under an injected clock (SES-06).
 public struct ShutdownLadder: Sendable, Equatable {
     public struct Step: Sendable, Equatable {
         public let signal: PTYSignal
@@ -94,16 +94,16 @@ public struct ShutdownLadder: Sendable, Equatable {
     public var steps: [Step]
     public init(steps: [Step]) { self.steps = steps }
 
-    /// SES-06 : SIGINT gracieux à l'agent, puis SIGTERM au groupe après 5 s, puis SIGKILL.
+    /// SES-06: graceful SIGINT to the agent, then SIGTERM to the group after 5 s, then SIGKILL.
     public static let graceful = ShutdownLadder(steps: [
         Step(signal: .interrupt, scope: .process, grace: .seconds(5)),
         Step(signal: .terminate, scope: .group, grace: .seconds(5)),
         Step(signal: .kill, scope: .group, grace: .seconds(1)),
     ])
 
-    /// Fermeture d'onglet : le DOUBLE SIGINT du « Ctrl+C Ctrl+C » utilisateur —
-    /// claude ignore le premier (« press ctrl-c again ») et sort proprement au
-    /// second ; SIGTERM/SIGKILL ne servent que de filet.
+    /// Tab close: the DOUBLE SIGINT of the user's "Ctrl+C Ctrl+C" — claude ignores
+    /// the first one ("press ctrl-c again") and exits cleanly on the second;
+    /// SIGTERM/SIGKILL serve only as a safety net.
     public static let close = ShutdownLadder(steps: [
         Step(signal: .interrupt, scope: .process, grace: .milliseconds(350)),
         Step(signal: .interrupt, scope: .process, grace: .seconds(2)),

@@ -5,36 +5,36 @@ import LoomPersistence
 import LoomTerminal
 import Foundation
 
-/// Notifications système (STA-04) : seam à deux adapters — UserNotifications en
-/// prod (couche app), espion en test.
+/// System notifications (STA-04): a seam with two adapters — UserNotifications in
+/// prod (app layer), a spy in tests.
 public protocol SessionNotifier: Sendable {
     func sessionNeedsInput(_ session: SessionID, title: String)
 }
 
-/// L'acteur central (§6.2 du cahier des charges, placé ici par ADR-0009) : crée les
-/// sessions, route leurs événements vers la machine à états, porte la vérité des
-/// états pour la couche vue. Le runtime mesure ; le StateEngine décide ; le manager relie.
+/// The central actor (spec §6.2, placed here by ADR-0009): creates the
+/// sessions, routes their events to the state machine, and holds the truth of the
+/// states for the view layer. The runtime measures; the StateEngine decides; the manager connects.
 public actor SessionManager {
 
     public struct SessionSpec: Sendable {
         public var command: Command
         public var workingDirectory: URL
         public var geometry: TerminalGeometry
-        /// `nil` = pas de canal heuristique (sessions pilotées par hooks).
+        /// `nil` = no heuristic channel (hook-driven sessions).
         public var samplingInterval: Duration?
-        /// Token IPC déjà embarqué dans la commande (hooks --settings) ; `nil` = le
-        /// manager en génère un.
+        /// IPC token already embedded in the command (hooks --settings); `nil` = the
+        /// manager generates one.
         public var hookToken: String?
-        /// GIT-01 : `.create` fabrique le worktree AVANT le fork et la session y
-        /// travaille isolée sur sa branche `loom/<slug>`.
+        /// GIT-01: `.create` builds the worktree BEFORE the fork and the session
+        /// works there isolated on its `loom/<slug>` branch.
         public var worktree: WorktreeStrategy = .none
-        /// PRJ-03 : projet de rattachement, persisté avec la session.
+        /// PRJ-03: the project this session belongs to, persisted with the session.
         public var projectID: ProjectID?
-        /// L'UUID imposé au CLI (`claude --session-id`) : le MÊME de bout en bout —
-        /// commande, manager, base — sans quoi `--resume` rejoue un identifiant que
-        /// l'agent n'a jamais connu. `nil` = le manager en génère un.
+        /// The UUID imposed on the CLI (`claude --session-id`): the SAME end to end —
+        /// command, manager, database — otherwise `--resume` replays an identifier the
+        /// agent never knew. `nil` = the manager generates one.
         public var sessionID: SessionID?
-        /// Titre affiché ; `nil` = « Session ».
+        /// Displayed title; `nil` = "Session".
         public var title: String?
         public init(command: Command, workingDirectory: URL,
                     geometry: TerminalGeometry = .default,
@@ -49,13 +49,13 @@ public actor SessionManager {
     }
 
     private let runtimeDependencies: SessionRuntime.Dependencies
-    /// `nil` en tests unitaires purs ; la base ne fait jamais échouer une session
-    /// vivante — les erreurs d'écriture sont silencieusement absorbées (NFR-R).
+    /// `nil` in pure unit tests; the database never fails a live session —
+    /// write errors are silently absorbed (NFR-R).
     private let store: SessionStore?
     private var runtimes: [SessionID: SessionRuntime] = [:]
     private var states: [SessionID: StateEngine.State] = [:]
     private var pumps: [SessionID: Task<Void, Never>] = [:]
-    /// Token IPC par session (ADR-0005) : émis à la naissance, vérifié à chaque payload.
+    /// Per-session IPC token (ADR-0005): issued at birth, verified on every payload.
     private var tokens: [String: SessionID] = [:]
     private var tokensBySession: [SessionID: String] = [:]
     private var stateContinuation: AsyncStream<StateUpdate>.Continuation?
@@ -66,8 +66,8 @@ public actor SessionManager {
         public let state: SessionState
     }
 
-    /// Flux des transitions réelles pour la couche vue. Mono-consommateur,
-    /// tamponné : l'UI peut s'abonner avant ou après les premières transitions.
+    /// Stream of real transitions for the view layer. Single-consumer,
+    /// buffered: the UI can subscribe before or after the first transitions.
     public func stateUpdates() -> AsyncStream<StateUpdate> {
         let (stream, continuation) = AsyncStream.makeStream(of: StateUpdate.self,
                                                             bufferingPolicy: .bufferingNewest(256))
@@ -81,11 +81,11 @@ public actor SessionManager {
     private let notifier: (any SessionNotifier)?
 
     public enum WorktreeStrategy: Sendable {
-        /// La session travaille directement dans le dossier fourni.
+        /// The session works directly in the provided directory.
         case none
-        /// Worktree dédié : `<repo>-worktrees/<slug>` sur `loom/<slug>` (GIT-01,
-        /// racine sibling par défaut — décision du premier avis sur le cahier des
-        /// charges : jamais de worktrees imbriqués sous les yeux des agents).
+        /// Dedicated worktree: `<repo>-worktrees/<slug>` on `loom/<slug>` (GIT-01,
+        /// sibling root by default — decision from the first review of the spec:
+        /// never nested worktrees in the agents' sight).
         case create(repo: URL, slug: String)
     }
 
@@ -102,8 +102,8 @@ public actor SessionManager {
         self.notifier = notifier
     }
 
-    /// UC-1 : worktree (si demandé) → runtime → pump d'événements ; la session naît
-    /// en `starting`.
+    /// UC-1: worktree (if requested) → runtime → event pump; the session is born
+    /// in `starting`.
     public func launch(_ spec: SessionSpec) async throws -> SessionID {
         let id = spec.sessionID ?? SessionID()
         var workingDirectory = spec.workingDirectory
@@ -140,9 +140,9 @@ public actor SessionManager {
         return id
     }
 
-    /// UC-7 : relance une session interrompue sous le MÊME identifiant — l'historique
-    /// reste un fil continu. La commande (`claude --resume <uuid>` + hooks) est
-    /// construite par l'appelant, qui possède le câblage.
+    /// UC-7: relaunches an interrupted session under the SAME identifier — the history
+    /// remains one continuous thread. The command (`claude --resume <uuid>` + hooks) is
+    /// built by the caller, who owns the wiring.
     public func resume(_ record: SessionRecord, command: Command, workingDirectory: URL,
                        geometry: TerminalGeometry = .default,
                        samplingInterval: Duration? = nil, hookToken: String? = nil) async throws {
@@ -163,10 +163,10 @@ public actor SessionManager {
                 await self?.handle(event, for: id)
             }
         }
-        apply(.user(.resume), to: id)   // interrupted → starting, journalisé, base et UI à jour
+        apply(.user(.resume), to: id)   // interrupted → starting, logged, database and UI up to date
     }
 
-    /// SES-07 : archive — y compris une session de l'historique, absente de la mémoire.
+    /// SES-07: archive — including a session from history, absent from memory.
     public func archive(_ id: SessionID) {
         if states[id] == nil {
             let record = (try? store?.session(id: id)) ?? nil
@@ -176,8 +176,8 @@ public actor SessionManager {
         apply(.user(.archive), to: id)
     }
 
-    /// Point d'entrée des hooks (serveur IPC) et des heuristiques : toute transition
-    /// passe par le réducteur — le manager n'écrit jamais un état à la main.
+    /// Entry point for hooks (IPC server) and heuristics: every transition
+    /// goes through the reducer — the manager never writes a state by hand.
     public func apply(_ event: StateEngine.Event, to id: SessionID) {
         guard let current = states[id] else { return }
         let next = StateEngine.reduce(current, event, at: clock.now, tuning: tuning)
@@ -188,7 +188,7 @@ public actor SessionManager {
             let record = (try? store?.session(id: id)) ?? nil
             notifier?.sessionNeedsInput(id, title: record?.title ?? "Session")
         }
-        // La transition est réelle : journal STA-06 + état courant en base.
+        // The transition is real: STA-06 journal + current state in the database.
         try? store?.recordTransition(session: id, from: current.session, to: next.session,
                                      source: Self.source(of: event), at: Date())
         if case .process(.exited(let code)) = event {
@@ -207,25 +207,25 @@ public actor SessionManager {
         }
     }
 
-    // MARK: - Circuit hooks (branché sur HookSocketServer)
+    // MARK: - Hook circuit (wired to HookSocketServer)
 
     public func hookToken(for id: SessionID) -> String? {
         tokensBySession[id]
     }
 
-    /// Le `validate` du serveur IPC : token → session, `nil` pour tout token inconnu.
+    /// The IPC server's `validate`: token → session, `nil` for any unknown token.
     public func session(forToken token: String) -> SessionID? {
         tokens[token]
     }
 
-    /// Le `handler` du serveur IPC : payload brut → interprétation par l'adapter →
-    /// réducteur. Un token forgé ou un payload sans valeur d'état ne produit rien.
+    /// The IPC server's `handler`: raw payload → interpretation by the adapter →
+    /// reducer. A forged token or a payload with no state value produces nothing.
     public func ingestHookPayload(_ payload: Data, token: String) {
         guard let id = tokens[token] else { return }
         ingest(payload, for: id)
     }
 
-    /// Variante quand la session est déjà authentifiée (le serveur a validé le token).
+    /// Variant for when the session is already authenticated (the server validated the token).
     public func ingest(_ payload: Data, for id: SessionID) {
         guard states[id] != nil, let event = ClaudeCodeAdapter.interpret(payload) else { return }
         apply(event, to: id)
@@ -243,8 +243,8 @@ public actor SessionManager {
         runtimes[id]
     }
 
-    /// SES-06 : arrêt escaladé délégué au runtime ; l'état final viendra de l'exit
-    /// via le pump, jamais d'une écriture directe.
+    /// SES-06: escalated shutdown delegated to the runtime; the final state will come
+    /// from the exit via the pump, never from a direct write.
     public func stop(_ id: SessionID, ladder: ShutdownLadder = .graceful) async {
         guard let runtime = runtimes[id] else { return }
         await runtime.stop(ladder)
@@ -253,7 +253,7 @@ public actor SessionManager {
     private func handle(_ event: SessionRuntime.Event, for id: SessionID) {
         switch event {
         case .started:
-            break   // la session reste `starting` jusqu'au premier signal de l'agent
+            break   // the session stays `starting` until the agent's first signal
         case .activity(let sample):
             if let proposal = interpreter.propose(sample) {
                 apply(proposal, to: id)

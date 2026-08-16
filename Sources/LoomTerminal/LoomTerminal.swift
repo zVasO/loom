@@ -1,1 +1,1 @@
-// Package LoomTerminal — voir §6.1 du cahier des charges. Interfaces à définir via codebase-design.
+// Package LoomTerminal — see §6.1 of the requirements spec. Interfaces to be defined via codebase-design.

@@ -1,51 +1,51 @@
 import Testing
 import LoomCore
 
-// Tests au seam convenu : l'interface publique de StateEngine, rien d'autre.
-// Les valeurs attendues viennent du cahier des charges (STA-01→05) et du verdict
-// du prototype (docs/research/state-engine-prototype.md), pas du code.
+// Tests at the agreed seam: StateEngine's public interface, nothing else.
+// Expected values come from the spec (STA-01→05) and the prototype's verdict
+// (docs/research/state-engine-prototype.md), not from the code.
 
-@Suite("StateEngine — fusion hooks / heuristiques")
+@Suite("StateEngine — hooks / heuristics fusion")
 struct StateEngineTests {
     let t0 = ContinuousClock().now
 
-    @Test("un prompt soumis (hook) passe la session en working")
+    @Test("a submitted prompt (hook) moves the session to working")
     func promptSoumisPasseEnWorking() {
         var s = StateEngine.State(session: .starting)
         s = StateEngine.reduce(s, .hook(.userPromptSubmit), at: t0)
         #expect(s.session == .working)
     }
 
-    @Test("une heuristique n'écrase pas un état posé par un hook dans les 10 s (STA-03)")
+    @Test("a heuristic does not overwrite a hook-set state within 10 s (STA-03)")
     func heuristiqueRejeteeDansLaFenetreHook() {
         var s = StateEngine.State(session: .starting)
         s = StateEngine.reduce(s, .hook(.userPromptSubmit), at: t0)
         s = StateEngine.reduce(s, .heuristic(.idle), at: t0.advanced(by: .seconds(4)))
-        #expect(s.session == .working, "l'agent réfléchit en silence : le silence PTY ne doit pas conclure idle")
+        #expect(s.session == .working, "the agent is thinking silently: PTY silence must not conclude idle")
     }
 
-    @Test("hors fenêtre hook, une heuristique maintenue au moins 2 s s'applique (STA-02)")
+    @Test("outside the hook window, a heuristic sustained at least 2 s applies (STA-02)")
     func heuristiqueAppliqueeApresHysterese() {
         var s = StateEngine.State(session: .starting)
         s = StateEngine.reduce(s, .hook(.userPromptSubmit), at: t0)
         s = StateEngine.reduce(s, .heuristic(.idle), at: t0.advanced(by: .seconds(11)))
-        #expect(s.session == .working, "première détection = proposition, pas encore une transition")
+        #expect(s.session == .working, "first detection = a proposal, not yet a transition")
         s = StateEngine.reduce(s, .heuristic(.idle), at: t0.advanced(by: .milliseconds(13_500)))
-        #expect(s.session == .idle, "silence maintenu 2,5 s hors fenêtre hook : la session est idle")
+        #expect(s.session == .idle, "silence sustained 2.5 s outside the hook window: the session is idle")
     }
 
-    @Test("une proposition périmée ne compte pas comme observation soutenue (STA-02)")
+    @Test("a stale proposal does not count as a sustained observation (STA-02)")
     func propositionPerimeeNeSAppliquePas() {
         var s = StateEngine.State(session: .working)
         s = StateEngine.reduce(s, .heuristic(.idle), at: t0)
         s = StateEngine.reduce(s, .heuristic(.idle), at: t0.advanced(by: .seconds(100)))
         #expect(s.session == .working,
-                "100 s sans aucune observation : la proposition initiale est périmée, pas confirmée")
+                "100 s without any observation: the initial proposal is stale, not confirmed")
         s = StateEngine.reduce(s, .heuristic(.idle), at: t0.advanced(by: .milliseconds(102_500)))
-        #expect(s.session == .idle, "la proposition repartie à t+100 s, soutenue 2,5 s, s'applique")
+        #expect(s.session == .idle, "the proposal restarted at t+100 s, sustained 2.5 s, applies")
     }
 
-    @Test("l'exit du process conclut : code 0 → completed, code ≠ 0 → failed (STA-05)")
+    @Test("process exit concludes: code 0 → completed, code ≠ 0 → failed (STA-05)")
     func exitDuProcessConclut() {
         var ok = StateEngine.State(session: .working)
         ok = StateEngine.reduce(ok, .process(.exited(code: 0)), at: t0)
@@ -56,53 +56,53 @@ struct StateEngineTests {
         #expect(ko.session == .failed)
     }
 
-    @Test("un état terminal absorbe les signaux tardifs")
+    @Test("a terminal state absorbs late signals")
     func etatTerminalAbsorbant() {
         var s = StateEngine.State(session: .completed)
         s = StateEngine.reduce(s, .hook(.userPromptSubmit), at: t0)
-        #expect(s.session == .completed, "un hook en retard ne ressuscite pas une session terminée")
+        #expect(s.session == .completed, "a late hook does not resurrect a finished session")
     }
 
-    @Test("Stop classe la fin de tour : question → needs_input, sinon → idle")
+    @Test("Stop classifies the turn end: question → needs_input, otherwise → idle")
     func stopClasseLaFinDeTour() {
         var q = StateEngine.State(session: .working)
         q = StateEngine.reduce(q, .hook(.stop(awaitsReply: true)), at: t0)
-        #expect(q.session == .needsInput, "« … lequel préférez-vous ? » doit badger la carte")
+        #expect(q.session == .needsInput, "\"… which one do you prefer?\" must badge the card")
 
         var done = StateEngine.State(session: .working)
         done = StateEngine.reduce(done, .hook(.stop(awaitsReply: false)), at: t0)
         #expect(done.session == .idle)
     }
 
-    @Test("une demande de permission badge immédiatement, sans délai (STA-04)")
+    @Test("a permission request badges immediately, no delay (STA-04)")
     func permissionBadgeImmediatement() {
         var s = StateEngine.State(session: .working)
         s = StateEngine.reduce(s, .hook(.permissionRequested), at: t0)
         #expect(s.session == .needsInput)
     }
 
-    @Test("archiver une session terminée : la seule action qui traverse un état terminal (SES-07)")
+    @Test("archiving a finished session: the only action that crosses a terminal state (SES-07)")
     func archivageDepuisTerminal() {
         var s = StateEngine.State(session: .completed)
         s = StateEngine.reduce(s, .user(.archive), at: t0)
-        #expect(s.session == .archived, "le cas nominal de l'archivage EST la session terminée")
+        #expect(s.session == .archived, "the nominal archive case IS the finished session")
 
         var live = StateEngine.State(session: .idle)
         live = StateEngine.reduce(live, .user(.archive), at: t0)
-        #expect(live.session == .archived, "une session vivante peut aussi être archivée")
+        #expect(live.session == .archived, "a live session can be archived too")
     }
 
-    @Test("l'arrêt de l'app interrompt, et seule une session interrompue se reprend (UC-7)")
+    @Test("app shutdown interrupts, and only an interrupted session can resume (UC-7)")
     func interruptionPuisReprise() {
         var s = StateEngine.State(session: .working)
         s = StateEngine.reduce(s, .process(.interrupted), at: t0)
-        #expect(s.session == .interrupted, "kill de l'app : le PTY est mort, la session est candidate à la Reprise")
+        #expect(s.session == .interrupted, "app killed: the PTY is dead, the session is a Resume candidate")
 
         s = StateEngine.reduce(s, .user(.resume), at: t0.advanced(by: .seconds(30)))
-        #expect(s.session == .starting, "Reprise = relance via --resume, la session redémarre")
+        #expect(s.session == .starting, "Resume = relaunch via --resume, the session restarts")
 
         var idle = StateEngine.State(session: .idle)
         idle = StateEngine.reduce(idle, .user(.resume), at: t0)
-        #expect(idle.session == .idle, "une session vivante ne se « reprend » pas")
+        #expect(idle.session == .idle, "a live session does not \"resume\"")
     }
 }

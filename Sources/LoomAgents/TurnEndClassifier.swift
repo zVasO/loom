@@ -1,8 +1,8 @@
 import Foundation
 
-/// Classifie le `last_assistant_message` du hook `Stop` : l'agent attend-il une réponse ?
-/// (question directe, choix à faire, invitation à décider — pas seulement un « ? » final.)
-/// Le réducteur d'état reçoit le fait (`stop(awaitsReply:)`), jamais le texte.
+/// Classifies the `last_assistant_message` of the `Stop` hook: is the agent awaiting a reply?
+/// (direct question, choice to make, invitation to decide — not just a trailing "?".)
+/// The state reducer receives the fact (`stop(awaitsReply:)`), never the text.
 public enum TurnEndClassifier {
     public static func awaitsUserReply(_ message: String) -> Bool {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -16,9 +16,9 @@ public enum TurnEndClassifier {
         return invitationMarkers.contains { lowered.contains($0) }
     }
 
-    /// Formules par lesquelles l'agent rend la main en attendant une décision.
-    /// Liste volontairement courte, à enrichir depuis le corpus de vraies sessions
-    /// (fixtures §10 du cahier des charges), jamais depuis l'imagination.
+    /// Phrasings by which the agent hands back control while awaiting a decision.
+    /// Deliberately short list, to be grown from the corpus of real sessions
+    /// (fixtures, spec §10), never from imagination.
     private static let invitationMarkers: [String] = [
         "dis-moi", "dites-moi", "fais-moi savoir", "indique-moi",
         "let me know", "tell me which", "tell me if", "your call",

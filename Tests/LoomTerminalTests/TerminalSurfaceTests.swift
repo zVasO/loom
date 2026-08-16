@@ -4,11 +4,11 @@ import LoomTerminal
 import LoomTerminalTestSupport
 import Foundation
 
-// La projection MainActor du terminal pour SwiftUI (design C retenu, ADR-0008) :
-// screen jamais vide, cycle de vie attach/detach structuré, aucune frame quand détaché.
+// The MainActor projection of the terminal for SwiftUI (design C chosen, ADR-0008):
+// screen never empty, structured attach/detach lifecycle, no frame while detached.
 
 @MainActor
-@Suite("TerminalSurface — projection @Observable")
+@Suite("TerminalSurface — @Observable projection")
 struct TerminalSurfaceTests {
 
     private func makeRuntime(pty: ScriptedPTYHost = ScriptedPTYHost()) throws -> SessionRuntime {
@@ -20,18 +20,18 @@ struct TerminalSurfaceTests {
         ).runtime
     }
 
-    @Test("surface() est idempotente et son écran n'est jamais vide")
+    @Test("surface() is idempotent and its screen is never empty")
     func surfaceIdempotenteEtEcranJamaisVide() throws {
         let runtime = try makeRuntime()
         let surface = runtime.surface()
-        #expect(runtime.surface() === surface, "même TerminalID → même instance, partageable entre vues")
+        #expect(runtime.surface() === surface, "same TerminalID → same instance, shareable across views")
         #expect(surface.screen.geometry == TerminalGeometry(cols: 40, rows: 6),
-                "avant tout attachement : écran vierge à la bonne géométrie — pas d'état de chargement")
+                "before any attachment: blank screen at the right geometry — no loading state")
         #expect(surface.screen.lines.count == 6)
         #expect(surface.isAttached == false)
     }
 
-    @Test("attachée, la surface reçoit les frames : l'écran suit la sortie de l'agent")
+    @Test("attached, the surface receives frames: the screen follows the agent's output")
     func surfaceAttacheeRecoitLesFrames() async throws {
         let pty = ScriptedPTYHost()
         let runtime = try makeRuntime(pty: pty)
@@ -39,52 +39,52 @@ struct TerminalSurfaceTests {
         surface.attach()
         #expect(surface.isAttached)
 
-        pty.emit("Analyse en cours…")
-        let arrived = await pollUntil { surface.screen.lines[0].text.hasPrefix("Analyse en cours…") }
-        #expect(arrived, "l'écran de la surface doit reproduire la sortie parsée")
+        pty.emit("Analyzing…")
+        let arrived = await pollUntil { surface.screen.lines[0].text.hasPrefix("Analyzing…") }
+        #expect(arrived, "the surface's screen must reproduce the parsed output")
     }
 
-    @Test("détachée, la surface gèle sur le dernier écran connu — aucune frame produite")
+    @Test("detached, the surface freezes on the last known screen — no frame produced")
     func surfaceDetacheeNeRecoitPlusRien() async throws {
         let pty = ScriptedPTYHost()
         let runtime = try makeRuntime(pty: pty)
         let surface = runtime.surface()
         surface.attach()
-        pty.emit("premier")
-        _ = await pollUntil { surface.screen.lines[0].text.hasPrefix("premier") }
+        pty.emit("first")
+        _ = await pollUntil { surface.screen.lines[0].text.hasPrefix("first") }
 
         surface.detach()
         pty.emit(" second")
         try await Task.sleep(for: .milliseconds(80))
-        #expect(surface.screen.lines[0].text.hasPrefix("premier"),
-                "après détachement : dernier écran connu, pas de mise à jour (TRM-03)")
+        #expect(surface.screen.lines[0].text.hasPrefix("first"),
+                "after detaching: last known screen, no update (TRM-03)")
         #expect(!surface.screen.lines[0].text.contains("second"))
     }
 
-    @Test("send() tape dans le PTY sans exiger de vue attachée (SES-05, message rapide)")
+    @Test("send() types into the PTY without requiring an attached view (SES-05, quick message)")
     func sendEcritDansLePty() async throws {
         let pty = ScriptedPTYHost()
         let runtime = try makeRuntime(pty: pty)
         runtime.surface().send("continue\r")
         let written = await pollUntil { String(decoding: pty.writtenBytes, as: UTF8.self) == "continue\r" }
-        #expect(written, "la frappe atteint le PTY via la queue de session")
+        #expect(written, "the keystroke reaches the PTY via the session queue")
     }
 
-    @Test("attached() suit l'annulation structurée : l'annulation de la tâche détache")
+    @Test("attached() follows structured cancellation: cancelling the task detaches")
     func attachedSuitLAnnulationStructuree() async throws {
         let runtime = try makeRuntime()
         let surface = runtime.surface()
 
         let lifecycle = Task { await surface.attached() }
         let attached = await pollUntil { surface.isAttached }
-        #expect(attached, "entrer dans attached() attache")
+        #expect(attached, "entering attached() attaches")
 
         lifecycle.cancel()
         let detached = await pollUntil { !surface.isAttached }
-        #expect(detached, "annuler la tâche (.task de SwiftUI) détache — impossible d'oublier")
+        #expect(detached, "cancelling the task (SwiftUI's .task) detaches — impossible to forget")
     }
 
-    /// Attente active bornée (2 s) — le chemin queue → MainActor est asynchrone par nature.
+    /// Bounded active wait (2 s) — the queue → MainActor path is asynchronous by nature.
     private func pollUntil(_ condition: @MainActor () -> Bool) async -> Bool {
         for _ in 0..<200 {
             if condition() { return true }

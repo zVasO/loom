@@ -3,8 +3,8 @@ import LoomTerminal
 import Dispatch
 import Foundation
 
-// Adapters de test au seam PTY (docs/design/session-runtime.md §Tests) :
-// aucun process réel, l'ordre des événements est piloté par le test.
+// Test adapters for the PTY seam (docs/design/session-runtime.md §Tests):
+// no real process; event ordering is driven by the test.
 
 public final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
     public init() {}
@@ -54,12 +54,12 @@ public final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
         return ScriptedChannel(host: self)
     }
 
-    /// Réaction scriptée aux signaux (« l'agent sort sur SIGINT », « ignore tout sauf SIGKILL »…).
+    /// Scripted reaction to signals ("the agent exits on SIGINT", "ignores all but SIGKILL"…).
     public var onSignal: (@Sendable (PTYSignal, ScriptedPTYHost) -> Void)?
 
-    // Pilotage par le test : chaque événement part sur la queue de session, comme en prod.
-    // `exit` livre terminated puis EOF (l'ordre courant) ; pour l'ordre adverse, composer
-    // avec les primitives brutes deliverTerminated/emit/emitEOF.
+    // Test-driven delivery: each event goes out on the session queue, as in prod.
+    // `exit` delivers terminated then EOF (the common order); for the adversarial order,
+    // compose with the raw primitives deliverTerminated/emit/emitEOF.
     public func emit(_ text: String) { deliver(.bytes(Array(text.utf8))) }
     public func emitEOF() { deliver(.endOfFile) }
     public func exit(code: Int32) {
@@ -109,8 +109,8 @@ private final class ScriptedChannel: PTYChannel, @unchecked Sendable {
     func cpuFraction() -> Double { 0 }
 }
 
-/// Moteur de test : buffer de lignes en clair, pas d'ANSI hors CR/LF. Rend les
-/// assertions d'écran lisibles sans dépendre du parseur d'un tiers.
+/// Test engine: plain-text line buffer, no ANSI beyond CR/LF. Keeps screen
+/// assertions readable without depending on a third party's parser.
 public final class LineEngine: TerminalEngine {
     private let geometry: TerminalGeometry
     private var text = ""
@@ -146,7 +146,7 @@ public final class MemoryTranscriptSink: TranscriptSink, @unchecked Sendable {
     private let lock = NSLock()
     private var bytes: [UInt8] = []
     public private(set) var isFinished = false
-    /// Vrai si un append est arrivé APRÈS finish() — violation de la barrière de drainage.
+    /// True if an append arrived AFTER finish() — a drainage-barrier violation.
     public private(set) var appendedAfterFinish = false
 
     public var text: String {

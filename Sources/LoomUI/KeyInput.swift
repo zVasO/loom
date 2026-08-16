@@ -1,20 +1,20 @@
 import AppKit
 import SwiftUI
 
-/// SES-05bis : la saisie se fait DANS le champ de l'agent, pas dans une barre à
-/// nous — chaque frappe est traduite en octets terminal et envoyée au PTY.
-/// Traduction pure, séparée de la vue : c'est elle qui porte les tests.
+/// SES-05bis: typing happens IN the agent's field, not in a bar of our
+/// own — every keystroke is translated into terminal bytes and sent to the PTY.
+/// Pure translation, separate from the view: it is what carries the tests.
 public enum KeyTranslator {
 
-    /// Touches spéciales identifiées par code virtuel matériel (indépendant de la
-    /// disposition clavier). `nil` = touche ordinaire, à composer par la vue.
+    /// Special keys identified by hardware virtual key code (independent of the
+    /// keyboard layout). `nil` = ordinary key, to be composed by the view.
     public static func special(keyCode: UInt16, option: Bool) -> String? {
         switch keyCode {
-        case 36, 76: return option ? "\u{1b}\r" : "\r"   // Entrée (+ pavé numérique)
+        case 36, 76: return option ? "\u{1b}\r" : "\r"   // Return (+ numeric keypad)
         case 48: return "\t"
-        case 51: return "\u{7f}"                          // effacement arrière → DEL
+        case 51: return "\u{7f}"                          // backspace → DEL
         case 53: return "\u{1b}"
-        case 117: return "\u{1b}[3~"                      // suppression avant
+        case 117: return "\u{1b}[3~"                      // forward delete
         case 115: return "\u{1b}[H"
         case 119: return "\u{1b}[F"
         case 116: return "\u{1b}[5~"
@@ -27,21 +27,21 @@ public enum KeyTranslator {
         }
     }
 
-    /// Traduction complète d'une frappe : touche spéciale d'abord, sinon le texte
-    /// produit par la disposition réelle (AZERTY, accents…). `nil` = rien à envoyer.
+    /// Full translation of a keystroke: special key first, otherwise the text
+    /// produced by the actual layout (AZERTY, accents…). `nil` = nothing to send.
     public static func bytes(keyCode: UInt16, characters: String, option: Bool) -> String? {
         if let special = special(keyCode: keyCode, option: option) { return special }
         return characters.isEmpty ? nil : characters
     }
 }
 
-/// Zone invisible sous le terminal : premier répondant, elle pousse chaque frappe
-/// vers le PTY — la saisie vit dans le champ de l'agent. Les touches ordinaires
-/// passent par `interpretKeyEvents` pour composer les touches mortes (ê, î…),
-/// les raccourcis ⌘ restent au système, ⌘V colle dans le champ de l'agent.
+/// Invisible zone under the terminal: as first responder it pushes every keystroke
+/// to the PTY — typing lives in the agent's field. Ordinary keys
+/// go through `interpretKeyEvents` to compose dead keys (ê, î…),
+/// ⌘ shortcuts stay with the system, ⌘V pastes into the agent's field.
 public struct KeyCaptureView: NSViewRepresentable {
-    /// Incrémenté par la vue hôte quand l'utilisateur clique le terminal :
-    /// signal explicite de reprise du focus, même si un TextField l'avait.
+    /// Incremented by the host view when the user clicks the terminal:
+    /// explicit signal to reclaim focus, even if a TextField had it.
     let focusTick: Int
     let onText: (String) -> Void
 
@@ -61,8 +61,8 @@ public struct KeyCaptureView: NSViewRepresentable {
         guard let window = view.window else { return }
         let clicked = view.lastFocusTick != focusTick
         view.lastFocusTick = focusTick
-        // Reprise du focus : sur clic explicite, ou si plus rien n'est focalisé —
-        // jamais en le volant à un champ de texte actif (renommage, palette…).
+        // Reclaiming focus: on an explicit click, or if nothing is focused anymore —
+        // never by stealing it from an active text field (renaming, palette…).
         if clicked || window.firstResponder === window {
             DispatchQueue.main.async { [weak view] in
                 view.map { $0.window?.makeFirstResponder($0) }
@@ -95,12 +95,12 @@ public struct KeyCaptureView: NSViewRepresentable {
                 onText?(special)
                 return
             }
-            // Ctrl+lettre : le caractère de contrôle est déjà dans characters (⌃C → ETX).
+            // Ctrl+letter: the control character is already in characters (⌃C → ETX).
             if event.modifierFlags.contains(.control) {
                 if let text = event.characters, !text.isEmpty { onText?(text) }
                 return
             }
-            // Composition système (touches mortes, IME) → insertText.
+            // System composition (dead keys, IME) → insertText.
             interpretKeyEvents([event])
         }
 
@@ -113,12 +113,12 @@ public struct KeyCaptureView: NSViewRepresentable {
         }
 
         public override func doCommand(by selector: Selector) {
-            // Les sélecteurs d'édition sont déjà couverts par les touches spéciales ;
-            // on absorbe le reste sans faire sonner le bip système.
+            // The editing selectors are already covered by the special keys;
+            // we absorb the rest without triggering the system beep.
         }
 
         public override func performKeyEquivalent(with event: NSEvent) -> Bool {
-            // ⌘V : collage direct dans le champ de l'agent.
+            // ⌘V: paste directly into the agent's field.
             if event.modifierFlags.contains(.command),
                event.charactersIgnoringModifiers == "v",
                let text = NSPasteboard.general.string(forType: .string) {

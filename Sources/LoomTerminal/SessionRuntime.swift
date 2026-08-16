@@ -2,17 +2,17 @@ import LoomCore
 import Dispatch
 import Foundation
 
-/// Tout ce qui est vivant dans une session : le process de l'agent sur son PTY,
-/// le tee vers le Transcript, et (tranches à venir) le moteur terminal, l'échantillonnage
-/// et les surfaces de vue. Décision d'interface : docs/design/session-runtime.md, ADR-0008.
+/// Everything alive in a session: the agent process on its PTY, the tee to the
+/// Transcript, and (upcoming slices) the terminal engine, sampling, and the view
+/// surfaces. Interface decision: docs/design/session-runtime.md, ADR-0008.
 public final class SessionRuntime: @unchecked Sendable {
 
-    /// Seams internes avec défauts — aucun appelant de production ne les nomme.
+    /// Internal seams with defaults — no production caller ever names them.
     public struct Dependencies: Sendable {
         public var ptyHost: any PTYHost
         public var transcript: any TranscriptSink
-        /// Défaut de production : SwiftTermEngine, scrollback TRM-05 (10 000 lignes —
-        /// jamais les 500 par défaut de SwiftTerm, pensés mono-session).
+        /// Production default: SwiftTermEngine with the TRM-05 scrollback (10,000 lines —
+        /// never SwiftTerm's 500-line default, which assumes a single session).
         public var makeEngine: @Sendable (TerminalGeometry, DispatchQueue) -> any TerminalEngine
         public init(ptyHost: any PTYHost,
                     transcript: any TranscriptSink,
@@ -26,21 +26,21 @@ public final class SessionRuntime: @unchecked Sendable {
 
     public enum Event: Sendable {
         case started
-        /// Matière première du canal heuristique STA-02 — émis à la cadence de
-        /// `SessionLaunchPlan.samplingInterval` (jamais si `nil`). Le runtime mesure,
-        /// il n'interprète pas.
+        /// Raw material for the STA-02 heuristic channel — emitted at the
+        /// `SessionLaunchPlan.samplingInterval` cadence (never when `nil`). The runtime
+        /// measures; it does not interpret.
         case activity(ActivitySample)
-        /// Toujours le dernier événement ; le flux se termine juste après. Quand un
-        /// appelant le reçoit, le transcript est complet et fermé (barrière de drainage).
+        /// Always the last event; the stream finishes right after. By the time a caller
+        /// receives it, the transcript is complete and closed (drainage barrier).
         case terminated(TerminationReport)
     }
 
     public struct ActivitySample: Sendable {
         public let at: ContinuousClock.Instant
         public let bytesSinceLastSample: Int
-        /// Depuis le dernier octet reçu du PTY.
+        /// Since the last byte received from the PTY.
         public let silence: Duration
-        /// Dernières lignes non vides de l'écran visible, texte seul.
+        /// Last non-empty lines of the visible screen, plain text only.
         public let visibleTail: [String]
         public let cpuFraction: Double
         public init(at: ContinuousClock.Instant, bytesSinceLastSample: Int, silence: Duration,
@@ -59,32 +59,32 @@ public final class SessionRuntime: @unchecked Sendable {
 
     private let queue: DispatchQueue
     private var channel: (any PTYChannel)!
-    /// Confiné à `queue`, sans exception (ADR-0007). Créé et nourri sur la queue de session.
+    /// Confined to `queue`, no exceptions (ADR-0007). Created and fed on the session queue.
     private var engine: (any TerminalEngine)?
-    // Barrière de drainage (course EOF/exit, recherche §7.4) : la session ne conclut
-    // qu'après avoir vu l'exit ET l'EOF — les octets en vol entre les deux sont donc
-    // toujours dans le transcript avant sa fermeture. Confinés à `queue`.
+    // Drainage barrier (EOF/exit race, research §7.4): the session only concludes
+    // after seeing BOTH the exit AND the EOF — so bytes in flight between the two are
+    // always in the transcript before it closes. Confined to `queue`.
     private var sawEOF = false
     private var exitStatus: ExitStatus?
-    // Échantillonnage heuristique (confinés à `queue`).
+    // Heuristic sampling (confined to `queue`).
     private var samplingTimer: DispatchSourceTimer?
     private var bytesSinceLastSample = 0
     private var lastByteAt: ContinuousClock.Instant?
     private let geometry: TerminalGeometry
-    /// Géométrie de lancement, lisible par la fabrique de surfaces (MainActor).
+    /// Launch geometry, readable by the surface factory (MainActor).
     var launchGeometry: TerminalGeometry { geometry }
-    /// Projections partagées, confinées au MainActor (une par TerminalID).
+    /// Shared projections, MainActor-confined (one per TerminalID).
     @MainActor var surfaces: [TerminalID: TerminalSurface] = [:]
-    /// Terminaux avec au moins une surface attachée — lu sur la queue à chaque lot
-    /// d'octets, protégé par le verrou (pas de rendu pour les sessions non visibles).
+    /// Terminals with at least one attached surface — read on the queue for every byte
+    /// batch, protected by the lock (no rendering for sessions that are not visible).
     private var attachedTerminals: Set<TerminalID> = []
-    /// Coalescence : au plus une frame en vol (confiné à la queue de session).
+    /// Coalescing: at most one frame in flight (confined to the session queue).
     private var frameScheduled = false
     private let lock = NSLock()
 
-    /// TRM-02 : resize synchronisé vue → moteur → PTY (TIOCSWINSZ). Une seule
-    /// opération pour l'appelant, deux en interne ; le process reçoit SIGWINCH
-    /// et repeint. Dernière valeur gagnante, frame repoussée aussitôt.
+    /// TRM-02: synchronized resize, view → engine → PTY (TIOCSWINSZ). One operation
+    /// for the caller, two internally; the process receives SIGWINCH and repaints.
+    /// Last value wins, and a frame is pushed right away.
     func resize(to geometry: TerminalGeometry) {
         queue.async {
             self.engine?.resize(to: geometry)
@@ -93,15 +93,15 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
-    /// Écriture vers le PTY du terminal (frappe, message rapide SES-05).
-    /// Non bloquant : un saut sur la queue de session puis le canal.
+    /// Write to the terminal's PTY (keystrokes, quick message SES-05).
+    /// Non-blocking: one hop onto the session queue, then the channel.
     func write(_ text: String, to terminal: TerminalID) {
         let bytes = Array(text.utf8)
         queue.async { self.channel.write(bytes[...]) }
     }
 
-    /// Appelé depuis le MainActor par les surfaces ; l'attachement peint immédiatement
-    /// l'écran courant (chemin du réattachement < 100 ms, TRM-03).
+    /// Called from the MainActor by the surfaces; attaching immediately paints the
+    /// current screen (reattachment path < 100 ms, TRM-03).
     func setAttachment(_ terminal: TerminalID, attached: Bool) {
         lock.withLock {
             if attached { attachedTerminals.insert(terminal) } else { attachedTerminals.remove(terminal) }
@@ -111,7 +111,7 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
-    /// Sur la queue de session : programme au plus une livraison de frame.
+    /// On the session queue: schedules at most one frame delivery.
     private func scheduleFrame() {
         let anyoneWatching = lock.withLock { !attachedTerminals.isEmpty }
         guard anyoneWatching, !frameScheduled else { return }
@@ -122,7 +122,7 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
-    /// Sur la queue de session : copie l'écran et le livre aux surfaces attachées.
+    /// On the session queue: copies the screen and delivers it to the attached surfaces.
     private func deliverFrame() {
         let watching = lock.withLock { attachedTerminals }
         guard !watching.isEmpty, let engine else { return }
@@ -135,8 +135,8 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
-    /// Sur la queue de session : mesure et émet un échantillon (STA-02). Le runtime
-    /// ne décide d'aucun état — l'interprétation appartient à la couche session.
+    /// On the session queue: measures and emits a sample (STA-02). The runtime
+    /// decides no state — interpretation belongs to the session layer.
     private func emitSample(_ continuation: AsyncStream<Event>.Continuation) {
         let now = ContinuousClock().now
         let tail = (engine?.snapshot().lines ?? [])
@@ -153,8 +153,8 @@ public final class SessionRuntime: @unchecked Sendable {
         bytesSinceLastSample = 0
     }
 
-    /// Appelé sur la queue de session. Conclut quand exit ET EOF sont là : ferme le
-    /// canal, fixe le transcript, émet `.terminated`, termine le flux.
+    /// Called on the session queue. Concludes once BOTH exit AND EOF are in: closes
+    /// the channel, seals the transcript, emits `.terminated`, finishes the stream.
     private func concludeIfDrained(transcript: any TranscriptSink,
                                    continuation: AsyncStream<Event>.Continuation) {
         guard sawEOF, let status = exitStatus else { return }
@@ -179,8 +179,8 @@ public final class SessionRuntime: @unchecked Sendable {
         self.geometry = geometry
     }
 
-    /// Écran visible courant du terminal principal, tous les octets déjà reçus étant parsés.
-    /// Coût : un saut sur la queue de session + une copie O(cols × rows).
+    /// Current visible screen of the primary terminal, with every byte received so far parsed.
+    /// Cost: one hop onto the session queue + one O(cols × rows) copy.
     public func snapshot() async -> TerminalScreen {
         await withCheckedContinuation { continuation in
             queue.async {
@@ -189,9 +189,9 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
-    /// Arrêt escaladé (SES-06). Idempotent, ne jette jamais, valide après une sortie
-    /// naturelle et en concurrence : un seul appelant déroule l'échelle, tous
-    /// reçoivent le même rapport.
+    /// Escalated shutdown (SES-06). Idempotent, never throws, valid after a natural
+    /// exit and under concurrency: a single caller walks the ladder, everyone
+    /// receives the same report.
     @discardableResult
     public func stop(_ ladder: ShutdownLadder = .graceful) async -> TerminationReport {
         let leadsEscalation: Bool = lock.withLock {
@@ -206,8 +206,8 @@ public final class SessionRuntime: @unchecked Sendable {
             channel.signal(step.signal, scope: step.scope)
             if let done = await awaitTermination(upTo: step.grace) { return done }
         }
-        // Après le dernier échelon (normalement SIGKILL), la sortie est inéluctable ;
-        // cette attente ignore l'annulation — `stop` ne rend jamais un état inventé.
+        // After the last rung (normally SIGKILL), exit is inevitable; this wait
+        // ignores cancellation — `stop` never returns a made-up state.
         return await awaitTerminationUncancellable()
     }
 
@@ -229,8 +229,8 @@ public final class SessionRuntime: @unchecked Sendable {
         for waiter in sureWaiters { waiter.resume(returning: newReport) }
     }
 
-    /// Attend la terminaison en ignorant l'annulation : la sortie est certaine
-    /// (SIGKILL déjà envoyé, ou un autre appelant déroule l'échelle).
+    /// Waits for termination, ignoring cancellation: exit is certain (SIGKILL
+    /// already sent, or another caller is walking the ladder).
     private func awaitTerminationUncancellable() async -> TerminationReport {
         await withCheckedContinuation { (continuation: CheckedContinuation<TerminationReport, Never>) in
             lock.lock()
@@ -244,8 +244,8 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
-    /// Attend la terminaison au plus `grace` (nil = sans limite). Annulable proprement :
-    /// le délai de grâce et l'exit réel courent l'un contre l'autre sans fuite de continuation.
+    /// Waits for termination for at most `grace` (nil = unbounded). Cleanly cancellable:
+    /// the grace period and the real exit race each other without leaking a continuation.
     private func awaitTermination(upTo grace: Duration?) async -> TerminationReport? {
         await withTaskGroup(of: TerminationReport?.self) { group in
             group.addTask { await self.awaitTerminationCancellable() }
@@ -287,16 +287,16 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
-    /// Le flux d'événements est rendu ici et une seule fois : mono-consommateur structurel.
+    /// The event stream is handed out here and only once: structurally single-consumer.
     public static func launch(_ plan: SessionLaunchPlan,
                               using dependencies: Dependencies) throws -> (runtime: SessionRuntime, events: AsyncStream<Event>) {
         let queue = DispatchQueue(label: "app.loom.session")
         let (stream, continuation) = AsyncStream.makeStream(of: Event.self)
         let runtime = SessionRuntime(queue: queue, geometry: plan.geometry)
 
-        // Soumis avant `open` : sur la queue sérielle, `.started` précède donc
-        // structurellement tout événement que le sink pourra délivrer — même un
-        // exit immédiat (exec échoué) ne peut pas le devancer.
+        // Submitted before `open`: on the serial queue, `.started` therefore
+        // structurally precedes any event the sink could deliver — even an
+        // immediate exit (failed exec) cannot get ahead of it.
         queue.async {
             runtime.engine = dependencies.makeEngine(plan.geometry, queue)
             continuation.yield(.started)
@@ -320,15 +320,15 @@ public final class SessionRuntime: @unchecked Sendable {
             geometry: plan.geometry,
             deliveringOn: queue
         ) { event in
-            // Capture FORTE délibérée : la session vit tant que son process vit, même si
-            // l'appelant lâche sa poignée — le transcript ne dépend d'aucune référence
-            // de la couche vue (NFR-R). Le cycle runtime → channel → sink → runtime se
-            // rompt à la conclusion, quand `close()` libère le sink (contrat PTYChannel).
-            // Sur la queue sérielle de session : l'ordre PTY est l'ordre du transcript.
+            // Deliberate STRONG capture: the session lives as long as its process, even
+            // if the caller drops its handle — the transcript depends on no reference
+            // from the view layer (NFR-R). The runtime → channel → sink → runtime cycle
+            // breaks at conclusion, when `close()` releases the sink (PTYChannel contract).
+            // On the serial session queue: PTY order is transcript order.
             switch event {
             case .bytes(let bytes):
-                // Le transcript reçoit AVANT le parsing : un crash du moteur ne perd
-                // aucun octet déjà lu (NFR-R).
+                // The transcript receives bytes BEFORE parsing: an engine crash loses
+                // no byte already read (NFR-R).
                 dependencies.transcript.append(bytes[...], terminal: .primary)
                 runtime.engine?.feed(bytes[...])
                 runtime.bytesSinceLastSample += bytes.count
@@ -348,11 +348,11 @@ public final class SessionRuntime: @unchecked Sendable {
 }
 
 extension SessionRuntime {
-    /// Environnement COMPLET du process enfant : base héritée de l'app + réglages
-    /// terminal + `PATH` toujours présent (SwiftTerm l'omet de son environnement par
-    /// défaut — recherche §7.3), puis l'overlay de la session qui gagne toute collision.
-    /// La résolution du PATH depuis le shell de login (GIT-06) viendra avec
-    /// l'EnvironmentResolver ; en attendant, l'héritage de l'app + repli système.
+    /// COMPLETE child-process environment: base inherited from the app + terminal
+    /// settings + `PATH` always present (SwiftTerm omits it from its default
+    /// environment — research §7.3), then the session overlay, which wins every
+    /// collision. PATH resolution from the login shell (GIT-06) will come with the
+    /// EnvironmentResolver; until then, app inheritance + system fallback.
     static func childEnvironment(overlay: [String: String]) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         environment["TERM"] = "xterm-256color"
@@ -369,8 +369,8 @@ public struct SessionLaunchPlan: Sendable {
     public var command: Command
     public var workingDirectory: URL
     public var geometry: TerminalGeometry
-    /// Cadence du canal heuristique (STA-02). `nil` = pas d'échantillonnage —
-    /// les sessions pilotées par hooks n'en ont pas besoin.
+    /// Cadence of the heuristic channel (STA-02). `nil` = no sampling —
+    /// hook-driven sessions don't need it.
     public var samplingInterval: Duration?
     public init(command: Command, workingDirectory: URL, geometry: TerminalGeometry = .default,
                 samplingInterval: Duration? = nil) {
