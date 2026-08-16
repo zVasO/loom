@@ -130,11 +130,11 @@ public final class AppModel {
     public private(set) var allRecords: [SessionRecord] = []
 
     private func reloadPersistedSessions() {
-        let all = ((try? store?.allSessions()) ?? []) ?? []
+        let all = ((try? store?.allSessions()) ?? nil) ?? []
         allRecords = all
         interruptedSessions = all.filter { $0.state == .interrupted }
         historySessions = all.filter { [.completed, .failed, .archived].contains($0.state) }
-        projects = ((try? store?.activeProjects()) ?? []) ?? []
+        projects = ((try? store?.activeProjects()) ?? nil) ?? []
         if selectedProject == nil { selectedProject = projects.first?.id }
     }
 
@@ -241,6 +241,9 @@ public final class AppModel {
                 samplingInterval: .milliseconds(500),
                 hookToken: token)
             spec.projectID = project?.id
+            // Un seul UUID de bout en bout : celui de `--session-id` — la Reprise en dépend.
+            spec.sessionID = sessionID
+            spec.title = initialPrompt ?? "Session"
             // GIT-01 : un repo Git → un worktree isolé par session, jamais le dossier nu.
             if FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
                 spec.worktree = .create(repo: directory, slug: Self.slug(from: initialPrompt ?? ""))

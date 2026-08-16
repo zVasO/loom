@@ -201,6 +201,17 @@ struct SessionManagerTests {
         #expect(spy.all().count == 1, "pas de spam : une transition, une notification")
     }
 
+    @Test("l'identifiant imposé au CLI EST celui de la session — sinon la Reprise est morte")
+    func identifiantUnique() async throws {
+        let manager = makeManager()
+        let imposed = SessionID()   // celui que l'app met dans `claude --session-id`
+        var spec = spec()
+        spec.sessionID = imposed
+        let id = try await manager.launch(spec)
+        #expect(id == imposed,
+                "un seul UUID de bout en bout : commande, manager, base — c'est lui que --resume rejouera")
+    }
+
     @Test("la Reprise relance la session interrompue sous le MÊME identifiant (UC-7)")
     func repriseDeSessionInterrompue() async throws {
         let dbURL = FileManager.default.temporaryDirectory

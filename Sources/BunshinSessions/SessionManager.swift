@@ -30,6 +30,12 @@ public actor SessionManager {
         public var worktree: WorktreeStrategy = .none
         /// PRJ-03 : projet de rattachement, persisté avec la session.
         public var projectID: ProjectID?
+        /// L'UUID imposé au CLI (`claude --session-id`) : le MÊME de bout en bout —
+        /// commande, manager, base — sans quoi `--resume` rejoue un identifiant que
+        /// l'agent n'a jamais connu. `nil` = le manager en génère un.
+        public var sessionID: SessionID?
+        /// Titre affiché ; `nil` = « Session ».
+        public var title: String?
         public init(command: Command, workingDirectory: URL,
                     geometry: TerminalGeometry = .default,
                     samplingInterval: Duration? = nil,
@@ -99,7 +105,7 @@ public actor SessionManager {
     /// UC-1 : worktree (si demandé) → runtime → pump d'événements ; la session naît
     /// en `starting`.
     public func launch(_ spec: SessionSpec) async throws -> SessionID {
-        let id = SessionID()
+        let id = spec.sessionID ?? SessionID()
         var workingDirectory = spec.workingDirectory
         var worktree: Worktree?
         if case .create(let repo, let slug) = spec.worktree {
@@ -120,7 +126,7 @@ public actor SessionManager {
         let token = spec.hookToken ?? UUID().uuidString
         tokens[token] = id
         tokensBySession[id] = token
-        try? store?.insert(SessionRecord(id: id, title: spec.command.executable,
+        try? store?.insert(SessionRecord(id: id, title: spec.title ?? "Session",
                                          agentID: "claude-code", state: .starting,
                                          branch: worktree?.branch,
                                          worktreePath: worktree?.path.path,
