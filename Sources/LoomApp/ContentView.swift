@@ -1136,24 +1136,21 @@ struct SessionsView: View {
                 }
             }
         }
-        // ⌘T duplique le TYPE d'onglet courant, toujours dans la barre
-        // horizontale : sur un terminal → un Term de plus ; sur un navigateur
-        // → un Web de plus dans la même pile.
+        // ⌘T n'existe qu'en contexte terminal ou navigateur, et crée
+        // FORCÉMENT un onglet du même type, dans la barre horizontale.
         .onReceive(NotificationCenter.default.publisher(for: .loomNewTab)) { _ in
-            switch selected {
-            case .webPane(let paneID):
-                let parent = model.browserPane(paneID)?.parentID
-                selected = .webPane(model.openBrowserPane(for: parent))
-            case .session:
-                if let parent = currentStackParent {
+            guard let context = stripContext else { return }
+            switch context.kind {
+            case .web:
+                selected = .webPane(model.openBrowserPane(for: context.parent?.id))
+            case .terminal:
+                if let parent = context.parent {
                     Task {
                         if let id = await model.launchShell(for: parent) {
                             selected = .session(id)
                         }
                     }
                 }
-            case nil:
-                break
             }
         }
         // Le process de la session affichée est mort (⌃C⌃C, exit) : le tab se
@@ -1167,115 +1164,93 @@ struct SessionsView: View {
         }
     }
 
-    /// La pile de l'élément affiché : son parent claude, qu'on soit sur lui,
-    /// sur un de ses terminaux ou sur un de ses navigateurs.
-    private var currentStackParent: AppModel.SessionItem? {
-        func dormantItem(_ record: SessionRecord) -> AppModel.SessionItem {
-            AppModel.SessionItem(id: record.id, title: record.title, state: record.state,
-                                 projectID: record.projectID, branch: record.branch,
-                                 parentID: nil, isShell: false, isDormant: true)
-        }
-        func parentItem(_ id: SessionID) -> AppModel.SessionItem? {
-            model.sessions.first { $0.id == id }
-                ?? model.dormantSessions.first { $0.id == id }.map(dormantItem)
-        }
+    /// Le contexte de la barre horizontale : elle n'existe QUE si l'onglet
+    /// ouvert est un terminal ou un navigateur — jamais sur la session claude.
+    enum StripKind { case terminal, web }
+
+    private func stackParentItem(_ id: SessionID) -> AppModel.SessionItem? {
+        model.sessions.first { $0.id == id }
+            ?? model.dormantSessions.first { $0.id == id }.map { record in
+                AppModel.SessionItem(id: record.id, title: record.title, state: record.state,
+                                     projectID: record.projectID, branch: record.branch,
+                                     parentID: nil, isShell: false, isDormant: true)
+            }
+    }
+
+    private var stripContext: (parent: AppModel.SessionItem?, kind: StripKind)? {
         switch selected {
         case .session(let id):
-            guard let item = parentItem(id) else { return nil }
-            if item.isShell, let parentID = item.parentID { return parentItem(parentID) }
-            return item
+            guard let item = model.sessions.first(where: { $0.id == id }), item.isShell,
+                  let parentID = item.parentID else { return nil }
+            return (stackParentItem(parentID), .terminal)
         case .webPane(let paneID):
-            guard let parentID = model.browserPane(paneID)?.parentID else { return nil }
-            return parentItem(parentID)
+            guard let pane = model.browserPane(paneID) else { return nil }
+            return (pane.parentID.flatMap(stackParentItem), .web)
         case nil:
             return nil
         }
     }
 
-    /// La barre d'onglets horizontale de la référence : les membres de la pile
-    /// (claude, terminaux, navigateurs), croix comprise, « + » = ⌘T.
+    /// Barre d'onglets horizontale mono-type (référence Terminal) : sur un
+    /// terminal, les terminaux de la pile ; sur un navigateur, ses navigateurs.
+    /// Le « + » et ⌘T créent toujours un onglet DU MÊME type.
     @ViewBuilder
     private var stackTabStrip: some View {
-        if let parent = currentStackParent {
-            let shells = model.sessions.filter { $0.parentID == parent.id && $0.isShell }
-            let dormants = model.dormantShells.filter { $0.parentID == parent.id }
-            let panes = model.browserPanes.filter { $0.parentID == parent.id }
+        if let context = stripContext {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 3) {
-                    StackTab(icon: "sparkle", title: parent.title,
-                             isActive: selected == .session(parent.id),
-                             isDormant: parent.isDormant,
-                             onSelect: {
-                                 if parent.isDormant {
-                                     Task {
-                                         await model.resumeDormant(parent.id)
-                                         selected = .session(parent.id)
-                                     }
-                                 } else {
-                                     selected = .session(parent.id)
-                                 }
-                             },
-                             onClose: {
-                                 Task {
-                                     if parent.isDormant { await model.archiveSession(parent.id) }
-                                     else { await model.stopSession(parent.id) }
-                                 }
-                             })
-                    ForEach(shells) { shell in
-                        StackTab(icon: "terminal", title: shell.title,
-                                 isActive: selected == .session(shell.id),
-                                 onSelect: { selected = .session(shell.id) },
-                                 onClose: { Task { await model.stopSession(shell.id) } })
+                    switch context.kind {
+                    case .terminal:
+                        if let parent = context.parent {
+                            let shells = model.sessions.filter { $0.parentID == parent.id && $0.isShell }
+                            let dormants = model.dormantShells.filter { $0.parentID == parent.id }
+                            ForEach(shells) { shell in
+                                StackTab(icon: "terminal", title: shell.title,
+                                         isActive: selected == .session(shell.id),
+                                         onSelect: { selected = .session(shell.id) },
+                                         onClose: { Task { await model.stopSession(shell.id) } })
+                            }
+                            ForEach(dormants) { dormant in
+                                StackTab(icon: "terminal", title: dormant.title,
+                                         isActive: false, isDormant: true,
+                                         onSelect: {
+                                             Task {
+                                                 if let id = await model.reopenDormantShell(dormant) {
+                                                     selected = .session(id)
+                                                 }
+                                             }
+                                         },
+                                         onClose: { model.forgetDormantShell(dormant) })
+                            }
+                        }
+                    case .web:
+                        let panes = model.browserPanes.filter { $0.parentID == context.parent?.id }
+                        ForEach(panes) { pane in
+                            StackTab(icon: "globe", title: pane.title,
+                                     isActive: selected == .webPane(pane.id),
+                                     onSelect: { selected = .webPane(pane.id) },
+                                     onClose: {
+                                         if selected == .webPane(pane.id) { selected = nil }
+                                         model.closeBrowserPane(pane.id)
+                                     })
+                        }
                     }
-                    ForEach(dormants) { dormant in
-                        StackTab(icon: "terminal", title: dormant.title,
-                                 isActive: false, isDormant: true,
-                                 onSelect: {
-                                     Task {
-                                         if let id = await model.reopenDormantShell(dormant) {
-                                             selected = .session(id)
-                                         }
-                                     }
-                                 },
-                                 onClose: { model.forgetDormantShell(dormant) })
-                    }
-                    ForEach(panes) { pane in
-                        StackTab(icon: "globe", title: pane.title,
-                                 isActive: selected == .webPane(pane.id),
-                                 onSelect: { selected = .webPane(pane.id) },
-                                 onClose: {
-                                     if selected == .webPane(pane.id) { selected = nil }
-                                     model.closeBrowserPane(pane.id)
-                                 })
-                    }
-                    // Le « + » propose les deux natures d'onglet — toujours
-                    // dans la barre horizontale de cette pile.
-                    Menu {
-                        Button {
-                            Task {
-                                if let id = await model.launchShell(for: parent) {
-                                    selected = .session(id)
+                    HoverIconButton(systemImage: "plus",
+                                    help: context.kind == .terminal
+                                        ? "Nouveau terminal (⌘T)" : "Nouveau navigateur (⌘T)") {
+                        switch context.kind {
+                        case .terminal:
+                            if let parent = context.parent {
+                                Task {
+                                    if let id = await model.launchShell(for: parent) {
+                                        selected = .session(id)
+                                    }
                                 }
                             }
-                        } label: {
-                            Label("Nouveau terminal", systemImage: "terminal")
+                        case .web:
+                            selected = .webPane(model.openBrowserPane(for: context.parent?.id))
                         }
-                        Button {
-                            selected = .webPane(model.openBrowserPane(for: parent.id))
-                        } label: {
-                            Label("Nouveau navigateur", systemImage: "globe")
-                        }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 10))
-                            .foregroundStyle(DefaultTheme.secondaryText)
-                            .frame(width: 20, height: 20)
-                            .contentShape(Rectangle())
                     }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .help("Nouvel onglet dans cette pile (⌘T : même type que l'actif)")
                     .padding(.leading, 3)
                 }
                 .padding(.horizontal, 8).padding(.vertical, 5)
