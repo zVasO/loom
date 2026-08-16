@@ -280,6 +280,11 @@ public final class AppModel {
         await resumeSession(record)
     }
 
+    public func forgetDormantShell(_ dormant: DormantShell) {
+        dormantShells.removeAll { $0.id == dormant.id }
+        saveStackChildren()
+    }
+
     public func reopenDormantShell(_ dormant: DormantShell) async -> SessionID? {
         guard let parent = stackParent(dormant.parentID) else { return nil }
         dormantShells.removeAll { $0.id == dormant.id }
@@ -399,6 +404,79 @@ public final class AppModel {
             .map { URL(fileURLWithPath: $0).appendingPathComponent(".claude/skills") }
         return SkillsCatalog.scan(globalDirectory: SkillsCatalog.defaultGlobalDirectory,
                                   projectDirectory: projectDirectory)
+    }
+
+    /// SKL-01 au niveau projet : skills du projet (racine/.claude/skills) devant
+    /// les globaux — même règle d'ombrage que pour les sessions.
+    public func skills(forProject id: ProjectID) -> [SkillEntry] {
+        let projectDirectory = project(id).map {
+            URL(fileURLWithPath: $0.path).appendingPathComponent(".claude/skills")
+        }
+        return SkillsCatalog.scan(globalDirectory: SkillsCatalog.defaultGlobalDirectory,
+                                  projectDirectory: projectDirectory)
+    }
+
+    public struct ProjectGitData: Sendable {
+        public var branch: String
+        public var changes: [FileChange]
+    }
+
+    /// Git du dossier RACINE du projet (les worktrees des sessions ont leur
+    /// panneau dédié dans la vue session).
+    public func projectGit(_ id: ProjectID) async -> ProjectGitData? {
+        guard let path = project(id)?.path else { return nil }
+        let root = URL(fileURLWithPath: path)
+        let git = GitService()
+        guard let branch = try? await git.currentBranch(in: root) else { return nil }
+        let changes = (try? await git.status(in: root)) ?? []
+        return ProjectGitData(branch: branch, changes: changes)
+    }
+
+    public struct FileEntry: Identifiable, Equatable, Sendable {
+        public var id: String { path }
+        public var name: String
+        public var path: String       // relatif à la racine du projet
+        public var isDirectory: Bool
+    }
+
+    /// Listing lecture seule d'un dossier du projet — dossiers d'abord, cachés
+    /// exclus (sauf .claude, utile pour retrouver skills et règles).
+    public func listFiles(in id: ProjectID, at relativePath: String) -> [FileEntry] {
+        guard let rootPath = project(id)?.path else { return [] }
+        let directory = URL(fileURLWithPath: rootPath).appendingPathComponent(relativePath)
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        return contents
+            .filter { !$0.lastPathComponent.hasPrefix(".") || $0.lastPathComponent == ".claude" }
+            .map { url in
+                FileEntry(name: url.lastPathComponent,
+                          path: relativePath.isEmpty ? url.lastPathComponent
+                                                     : relativePath + "/" + url.lastPathComponent,
+                          isDirectory: (try? url.resourceValues(forKeys: [.isDirectoryKey]))?
+                              .isDirectory ?? false)
+            }
+            .sorted { ($0.isDirectory ? 0 : 1, $0.name.lowercased())
+                      < ($1.isDirectory ? 0 : 1, $1.name.lowercased()) }
+    }
+
+    public struct RuleFile: Identifiable, Equatable, Sendable {
+        public var id: String { name }
+        public var name: String
+        public var content: String
+    }
+
+    /// Les règles que les agents liront dans ce projet : fichiers d'instructions
+    /// connus, présents à la racine (ou .claude/).
+    public func ruleFiles(for id: ProjectID) -> [RuleFile] {
+        guard let rootPath = project(id)?.path else { return [] }
+        let root = URL(fileURLWithPath: rootPath)
+        let candidates = ["CLAUDE.md", "AGENTS.md", "CONTEXT.md", ".claude/CLAUDE.md",
+                          ".cursorrules", ".github/copilot-instructions.md"]
+        return candidates.compactMap { name in
+            let url = root.appendingPathComponent(name)
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            return RuleFile(name: name, content: content)
+        }
     }
 
     // MARK: - Compteurs des cartes projet (référence : « 2 active · 4 sessions »)

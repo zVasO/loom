@@ -223,6 +223,14 @@ struct ProjectsView: View {
     @State private var goal = ""
     @FocusState private var goalFocused: Bool
     @State private var draggedProject: ProjectID?
+    @State private var projectTab: ProjectTab = .overview
+    @State private var filesPath = ""
+    @State private var gitData: AppModel.ProjectGitData?
+
+    enum ProjectTab: String, CaseIterable {
+        case overview = "Overview", git = "Git", files = "Files"
+        case skills = "Skills", rules = "Rules"
+    }
 
     private var current: ProjectRecord? {
         model.projects.first { $0.id == model.selectedProject } ?? model.projects.first
@@ -291,9 +299,17 @@ struct ProjectsView: View {
             if let project = current {
                 VStack(alignment: .leading, spacing: 26) {
                     header(project)
-                    goalField(project)
-                    activeSection(project)
-                    recentSection(project)
+                    tabBar
+                    switch projectTab {
+                    case .overview:
+                        goalField(project)
+                        activeSection(project)
+                        recentSection(project)
+                    case .git: gitTab(project)
+                    case .files: filesTab(project)
+                    case .skills: skillsTab(project)
+                    case .rules: rulesTab(project)
+                    }
                 }
                 .frame(maxWidth: 860, alignment: .leading)
                 .padding(.horizontal, 36).padding(.top, 36).padding(.bottom, 44)
@@ -301,6 +317,193 @@ struct ProjectsView: View {
             }
         }
         .background(DefaultTheme.background)
+        // Changer de projet remet la navigation des tabs à zéro.
+        .onChange(of: current?.id) {
+            projectTab = .overview
+            filesPath = ""
+            gitData = nil
+        }
+        .task(id: "\(current?.id.rawValue.uuidString ?? "")-\(projectTab.rawValue)") {
+            if projectTab == .git, let project = current {
+                gitData = await model.projectGit(project.id)
+            }
+        }
+    }
+
+    /// La rangée d'onglets de la référence : soulignement accent sur l'actif.
+    private var tabBar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 22) {
+                ForEach(ProjectTab.allCases, id: \.self) { tabItem in
+                    ProjectTabButton(title: tabItem.rawValue,
+                                     isActive: projectTab == tabItem) {
+                        projectTab = tabItem
+                    }
+                }
+            }
+            Divider().overlay(DefaultTheme.cardBorder)
+        }
+    }
+
+    // MARK: Tab Git — le dossier racine du projet
+
+    @ViewBuilder
+    private func gitTab(_ project: ProjectRecord) -> some View {
+        if let git = gitData {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 8) {
+                    MonoTag(git.branch, systemImage: "arrow.triangle.branch")
+                    Text("· racine du projet (les worktrees vivent dans leurs sessions)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                }
+                if git.changes.isEmpty {
+                    Text("Aucune modification en attente")
+                        .font(.system(size: 12))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(git.changes.enumerated()), id: \.offset) { _, change in
+                            HStack(spacing: 8) {
+                                Text(String(describing: change.kind).prefix(1).uppercased())
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(DefaultTheme.accent)
+                                    .frame(width: 14)
+                                Text(change.path)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(DefaultTheme.primaryText)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+        } else {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Lecture du dépôt…")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
+        }
+    }
+
+    // MARK: Tab Files — navigation lecture seule
+
+    private func filesTab(_ project: ProjectRecord) -> some View {
+        let entries = model.listFiles(in: project.id, at: filesPath)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                HoverIconButton(systemImage: "house", help: "Racine du projet") { filesPath = "" }
+                Text("/" + filesPath)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .lineLimit(1)
+                Spacer()
+                GhostButton("Finder", systemImage: "arrow.up.forward.square") {
+                    let url = URL(fileURLWithPath: project.path).appendingPathComponent(filesPath)
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            VStack(spacing: 1) {
+                if !filesPath.isEmpty {
+                    fileRow(name: "..", isDirectory: true) {
+                        filesPath = filesPath.contains("/")
+                            ? String(filesPath[..<filesPath.lastIndex(of: "/")!]) : ""
+                    }
+                }
+                ForEach(entries) { entry in
+                    fileRow(name: entry.name, isDirectory: entry.isDirectory) {
+                        if entry.isDirectory {
+                            filesPath = entry.path
+                        } else {
+                            NSWorkspace.shared.open(
+                                URL(fileURLWithPath: project.path).appendingPathComponent(entry.path))
+                        }
+                    }
+                }
+            }
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    private func fileRow(name: String, isDirectory: Bool, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: isDirectory ? "folder.fill" : "doc")
+                .font(.system(size: 11))
+                .foregroundStyle(isDirectory ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .frame(width: 16)
+            Text(name)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(DefaultTheme.primaryText)
+            Spacer()
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .hoverSurface(0.6)
+        .onTapGesture(perform: action)
+    }
+
+    // MARK: Tab Skills — ce que les agents peuvent invoquer ici
+
+    private func skillsTab(_ project: ProjectRecord) -> some View {
+        let skills = model.skills(forProject: project.id)
+        return VStack(alignment: .leading, spacing: 6) {
+            if skills.isEmpty {
+                Text("Aucun skill — ajoute des dossiers dans .claude/skills (projet) ou ~/.claude/skills (global).")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
+            ForEach(skills, id: \.name) { skill in
+                HStack(spacing: 8) {
+                    Text("/" + skill.name)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.accent)
+                    Text(skill.description)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(skill.scope == .project ? "projet" : "global")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(skill.scope == .project ? DefaultTheme.accent
+                                                                 : DefaultTheme.mutedText)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(DefaultTheme.surfaceRaised, in: Capsule())
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    // MARK: Tab Rules — les instructions que liront les agents
+
+    private func rulesTab(_ project: ProjectRecord) -> some View {
+        let rules = model.ruleFiles(for: project.id)
+        return VStack(alignment: .leading, spacing: 12) {
+            if rules.isEmpty {
+                Text("Aucun fichier de règles (CLAUDE.md, AGENTS.md, CONTEXT.md…) à la racine.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
+            ForEach(rules) { rule in
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(rule.name, systemImage: "doc.text")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                    Text(rule.content.prefix(2000))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+        }
     }
 
     private func header(_ project: ProjectRecord) -> some View {
@@ -452,6 +655,33 @@ struct ProjectsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             Task { await model.addProject(at: url) }
         }
+    }
+}
+
+/// Onglet du détail projet : soulignement accent sur l'actif, texte éclairci
+/// au survol (référence Xirp).
+struct ProjectTabButton: View {
+    let title: String
+    let isActive: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 7) {
+                Text(title)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
+                                                         : DefaultTheme.secondaryText)
+                Rectangle()
+                    .fill(isActive ? DefaultTheme.accent : .clear)
+                    .frame(height: 2)
+            }
+            .fixedSize()
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
     }
 }
 
@@ -682,7 +912,7 @@ struct SessionsView: View {
                 let globalPanes = model.browserPanes.filter { $0.parentID == nil }
                 if !globalPanes.isEmpty {
                     group("NAVIGATEUR", projectID: nil) {
-                        ForEach(globalPanes) { pane in paneRow(pane, parentTitle: nil).stackChrome(
+                        ForEach(globalPanes) { pane in paneRow(pane).stackChrome(
                             isSelected: selected == .webPane(pane.id)) }
                     }
                 }
@@ -779,11 +1009,20 @@ struct SessionsView: View {
                     renameText = item.title
                     renameTarget = item.id
                 },
-                onArchive: { Task { await model.archiveSession(item.id) } })
+                onArchive: { Task { await model.archiveSession(item.id) } },
+                onClose: {
+                    Task {
+                        if item.isDormant {
+                            await model.archiveSession(item.id)   // inactive : la croix détruit
+                        } else {
+                            await model.stopSession(item.id)      // vivante : stop → le tab se ferme seul
+                        }
+                    }
+                })
                 .stackChrome(isSelected: selected == .session(item.id))
             ForEach(shells) { shell in
                 Divider().overlay(DefaultTheme.cardBorder)
-                shellRow(shell, parentTitle: item.title)
+                shellRow(shell, parent: item)
                     .stackChrome(isSelected: selected == .session(shell.id))
             }
             ForEach(dormantShells) { dormant in
@@ -793,7 +1032,7 @@ struct SessionsView: View {
             }
             ForEach(panes) { pane in
                 Divider().overlay(DefaultTheme.cardBorder)
-                paneRow(pane, parentTitle: item.title)
+                paneRow(pane, parent: item)
                     .stackChrome(isSelected: selected == .webPane(pane.id))
             }
         }
@@ -803,7 +1042,7 @@ struct SessionsView: View {
     }
 
     /// SES-04 : le terminal secondaire dans la pile (« >_ Term n · parent »).
-    private func shellRow(_ shell: AppModel.SessionItem, parentTitle: String) -> some View {
+    private func shellRow(_ shell: AppModel.SessionItem, parent: AppModel.SessionItem) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "terminal")
                 .font(.system(size: 11))
@@ -812,7 +1051,7 @@ struct SessionsView: View {
                 Text(shell.title)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(DefaultTheme.primaryText)
-                Label(parentTitle, systemImage: "link")
+                Label(parent.title, systemImage: "link")
                     .font(.system(size: 10))
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
@@ -824,6 +1063,10 @@ struct SessionsView: View {
         .padding(10)
         .contentShape(Rectangle())
         .hoverSurface(0.6)
+        .stackQuickActions(
+            onNewTerminal: { Task { await model.launchShell(for: parent) } },
+            onOpenBrowser: { selected = .webPane(model.openBrowserPane(for: parent.id)) },
+            onClose: { Task { await model.stopSession(shell.id) } })
         .onTapGesture { selected = .session(shell.id) }
         .contextMenu {
             Button("Arrêter") { Task { await model.stopSession(shell.id) } }
@@ -852,6 +1095,7 @@ struct SessionsView: View {
         .padding(10)
         .contentShape(Rectangle())
         .hoverSurface(0.6)
+        .stackQuickActions(onClose: { model.forgetDormantShell(dormant) })
         .onTapGesture {
             Task {
                 if let id = await model.reopenDormantShell(dormant) {
@@ -862,7 +1106,14 @@ struct SessionsView: View {
     }
 
     /// WEB-03 : le navigateur dédié dans la pile (« 🌐 Web n · parent »).
-    private func paneRow(_ pane: AppModel.BrowserPane, parentTitle: String?) -> some View {
+    private func paneRow(_ pane: AppModel.BrowserPane,
+                         parent: AppModel.SessionItem? = nil) -> some View {
+        let parentTitle = parent?.title
+        return paneRowBody(pane, parentTitle: parentTitle, parent: parent)
+    }
+
+    private func paneRowBody(_ pane: AppModel.BrowserPane, parentTitle: String?,
+                             parent: AppModel.SessionItem?) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "globe")
                 .font(.system(size: 11))
@@ -888,6 +1139,13 @@ struct SessionsView: View {
         .padding(10)
         .contentShape(Rectangle())
         .hoverSurface(0.6)
+        .stackQuickActions(
+            onNewTerminal: parent.map { p in { Task { await model.launchShell(for: p) } } },
+            onOpenBrowser: { selected = .webPane(model.openBrowserPane(for: parent?.id)) },
+            onClose: {
+                if selected == .webPane(pane.id) { selected = nil }
+                model.closeBrowserPane(pane.id)
+            })
         .onTapGesture { selected = .webPane(pane.id) }
         .contextMenu {
             Button("Fermer") {
@@ -1184,6 +1442,53 @@ struct SessionDetailView: View {
     }
 }
 
+/// Actions rapides d'une ligne de pile, révélées au survol : petit bloc à
+/// droite (terminal, navigateur, croix) — disponibles sur TOUS les onglets.
+struct StackQuickActionsModifier: ViewModifier {
+    var onNewTerminal: (() -> Void)?
+    var onOpenBrowser: (() -> Void)?
+    let onClose: () -> Void
+    @State private var hovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .topTrailing) {
+                if hovered {
+                    HStack(spacing: 2) {
+                        if let onNewTerminal {
+                            HoverIconButton(systemImage: "terminal",
+                                            help: "Nouveau terminal dans ce worktree",
+                                            action: onNewTerminal)
+                        }
+                        if let onOpenBrowser {
+                            HoverIconButton(systemImage: "globe",
+                                            help: "Navigateur dédié dans cette pile",
+                                            action: onOpenBrowser)
+                        }
+                        HoverIconButton(systemImage: "xmark", help: "Fermer",
+                                        action: onClose)
+                    }
+                    .padding(.horizontal, 5).padding(.vertical, 4)
+                    .background(DefaultTheme.surfaceRaised,
+                                in: RoundedRectangle(cornerRadius: 6))
+                    .padding(6)
+                }
+            }
+            .onHover { hovered = $0 }
+            .animation(.hover, value: hovered)
+    }
+}
+
+extension View {
+    func stackQuickActions(onNewTerminal: (() -> Void)? = nil,
+                           onOpenBrowser: (() -> Void)? = nil,
+                           onClose: @escaping () -> Void) -> some View {
+        modifier(StackQuickActionsModifier(onNewTerminal: onNewTerminal,
+                                           onOpenBrowser: onOpenBrowser,
+                                           onClose: onClose))
+    }
+}
+
 /// Icône d'action des cartes : grise au repos, accent au survol — le pointeur
 /// dit ce qui est cliquable.
 struct HoverIconButton: View {
@@ -1216,6 +1521,7 @@ struct SidebarSessionCard: View {
     let onOpenBrowser: () -> Void
     let onRename: () -> Void
     let onArchive: () -> Void
+    let onClose: () -> Void
     @State private var hovered = false
 
     var body: some View {
@@ -1233,6 +1539,9 @@ struct SidebarSessionCard: View {
                     HoverIconButton(systemImage: "globe",
                                     help: "Navigateur dédié dans cette pile",
                                     action: onOpenBrowser)
+                    HoverIconButton(systemImage: "xmark",
+                                    help: "Fermer la session",
+                                    action: onClose)
                 }
             }
             if let branch = item.branch {

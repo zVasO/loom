@@ -51,3 +51,39 @@ struct BrowserTabsModelTests {
         #expect(model.activeTab != a)
     }
 }
+
+/// WEB-06 : la barre d'adresse accepte des MOTS — un moteur de recherche
+/// (Google) prend le relais quand l'entrée n'est pas une adresse.
+@Suite("Adresse ou recherche")
+struct AdresseOuRechercheTests {
+
+    @Test("une URL complète passe telle quelle")
+    func urlComplete() {
+        #expect(BrowserController.normalize("https://github.com/pulls")?.absoluteString
+                == "https://github.com/pulls")
+    }
+
+    @Test("un domaine nu devient https")
+    func domaineNu() {
+        #expect(BrowserController.normalize("github.com/pulls")?.absoluteString
+                == "https://github.com/pulls")
+    }
+
+    @Test("des mots deviennent une recherche Google")
+    func motsVersRecherche() {
+        #expect(BrowserController.normalize("claude code hooks")?.absoluteString
+                == "https://www.google.com/search?q=claude%20code%20hooks")
+    }
+
+    @Test("un mot seul sans point est aussi une recherche")
+    func motSeul() {
+        #expect(BrowserController.normalize("swiftterm")?.absoluteString
+                == "https://www.google.com/search?q=swiftterm")
+    }
+
+    @Test("localhost reste une adresse")
+    func localhost() {
+        #expect(BrowserController.normalize("localhost:5173")?.absoluteString
+                == "https://localhost:5173")
+    }
+}

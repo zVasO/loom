@@ -55,12 +55,20 @@ public final class BrowserController: NSObject {
         webViews[active]?.load(URLRequest(url: url))
     }
 
-    /// « github.com/pulls » → https://github.com/pulls ; une URL complète passe telle quelle.
-    static func normalize(_ input: String) -> URL? {
+    /// WEB-06 — adresse OU recherche : « github.com/pulls » → https://… ; une URL
+    /// complète passe telle quelle ; des mots (« claude code hooks ») partent en
+    /// recherche Google. Une entrée est une adresse si elle n'a pas d'espace ET
+    /// ressemble à un hôte (un point, ou localhost).
+    nonisolated public static func normalize(_ input: String) -> URL? {
         let trimmed = input.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
         if trimmed.contains("://") { return URL(string: trimmed) }
-        return URL(string: "https://" + trimmed)
+        let looksLikeHost = !trimmed.contains(" ")
+            && (trimmed.contains(".") || trimmed.hasPrefix("localhost"))
+        if looksLikeHost { return URL(string: "https://" + trimmed) }
+        var search = URLComponents(string: "https://www.google.com/search")!
+        search.queryItems = [URLQueryItem(name: "q", value: trimmed)]
+        return search.url
     }
 
     /// Fait coïncider les webviews vivantes avec la décision LRU du modèle :
