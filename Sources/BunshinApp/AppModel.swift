@@ -34,9 +34,13 @@ public final class AppModel {
         public let id: SessionID
         public var title: String
         public var state: SessionState
+        public var projectID: ProjectID?
     }
 
     public private(set) var sessions: [SessionItem] = []
+    /// PRJ-03 : la sidebar regroupe par projet.
+    public private(set) var projects: [ProjectRecord] = []
+    public var selectedProject: ProjectID?
     /// UC-7 : proposées à la Reprise au relancement.
     public private(set) var interruptedSessions: [SessionRecord] = []
     /// SES-07 : terminées/échouées/archivées, consultables.
@@ -115,6 +119,24 @@ public final class AppModel {
         let all = (try? store?.allSessions()) ?? []
         interruptedSessions = (all ?? []).filter { $0.state == .interrupted }
         historySessions = (all ?? []).filter { [.completed, .failed, .archived].contains($0.state) }
+        projects = ((try? store?.activeProjects()) ?? []) ?? []
+        if selectedProject == nil { selectedProject = projects.first?.id }
+    }
+
+    /// PRJ-01 : ajoute un projet en pointant un dossier ; s'il est un repo Git, la
+    /// branche courante est détectée. L'app ne modifie jamais le dossier.
+    public func addProject(at url: URL) async {
+        let isGit = FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
+        let branch = isGit ? try? await GitService().currentBranch(in: url) : nil
+        let record = ProjectRecord(id: ProjectID(), name: url.lastPathComponent,
+                                   path: url.path, defaultBranch: branch, createdAt: Date())
+        try? store?.insertProject(record)
+        reloadPersistedSessions()
+        selectedProject = record.id
+    }
+
+    public func project(_ id: ProjectID?) -> ProjectRecord? {
+        projects.first { $0.id == id }
     }
 
     /// UC-7 : la Reprise — même identifiant, hooks ré-injectés, worktree d'origine.
@@ -168,8 +190,13 @@ public final class AppModel {
 
     // MARK: - Actions (UC-1, SES-06)
 
-    public func launchSession(prompt: String, in directory: URL) async {
+    /// UC-1 : lance dans le projet sélectionné (worktree si repo Git), ou dans le
+    /// home pour une session générale (PRJ-05).
+    public func launchSession(prompt: String) async {
         guard let manager else { return }
+        let project = project(selectedProject)
+        let directory = project.map { URL(fileURLWithPath: $0.path) }
+            ?? FileManager.default.homeDirectoryForCurrentUser
         do {
             let sessionID = SessionID()
             let token = UUID().uuidString
@@ -179,6 +206,7 @@ public final class AppModel {
                 workingDirectory: directory,
                 samplingInterval: .milliseconds(500),
                 hookToken: token)
+            spec.projectID = project?.id
             // GIT-01 : un repo Git → un worktree isolé par session, jamais le dossier nu.
             if FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
                 spec.worktree = .create(repo: directory, slug: Self.slug(from: prompt))
@@ -186,7 +214,7 @@ public final class AppModel {
             let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
             sessions.insert(SessionItem(id: id, title: prompt.isEmpty ? "Session" : prompt,
-                                        state: .starting), at: 0)
+                                        state: .starting, projectID: project?.id), at: 0)
         } catch {
             startupError = String(describing: error)
         }

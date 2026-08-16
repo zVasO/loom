@@ -52,6 +52,13 @@ struct GitServiceTests {
         #expect(changes.contains(FileChange(path: "note.txt", kind: .untracked)))
     }
 
+    @Test("la branche courante se détecte : la base du projet (PRJ-01)")
+    func brancheCourante() async throws {
+        let repo = try await makeFixtureRepo()
+        let branch = try await service.currentBranch(in: repo)
+        #expect(branch == "main")
+    }
+
     @Test("le diff unifié montre les changements, non-suivis compris (GIT-03)")
     func diffUnifie() async throws {
         let repo = try await makeFixtureRepo()

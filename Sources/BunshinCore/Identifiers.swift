@@ -8,6 +8,12 @@ public struct SessionID: Hashable, Sendable, Codable {
     public init(_ rawValue: UUID = UUID()) { self.rawValue = rawValue }
 }
 
+/// Identité d'un Projet (dossier local auquel se rattachent des sessions — CONTEXT.md).
+public struct ProjectID: Hashable, Sendable, Codable {
+    public let rawValue: UUID
+    public init(_ rawValue: UUID = UUID()) { self.rawValue = rawValue }
+}
+
 /// Identité d'un terminal au sein d'une Session. `.primary` héberge l'agent
 /// (Terminal principal) ; les autres sont des Terminaux secondaires (SES-04).
 public struct TerminalID: Hashable, Sendable, Codable {

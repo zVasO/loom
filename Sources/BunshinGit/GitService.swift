@@ -68,6 +68,11 @@ public struct GitService: Sendable {
         }
     }
 
+    /// PRJ-01 : la branche courante du repo au moment de l'ajout du projet.
+    public func currentBranch(in repo: URL) async throws -> String {
+        try await run(["rev-parse", "--abbrev-ref", "HEAD"], in: repo)
+    }
+
     /// GIT-03 : diff unifié en lecture seule — les fichiers non suivis y figurent
     /// aussi (via `--no-index` contre /dev/null, sans jamais toucher l'index).
     public func diff(in worktree: URL) async throws -> String {

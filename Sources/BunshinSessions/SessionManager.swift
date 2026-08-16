@@ -28,6 +28,8 @@ public actor SessionManager {
         /// GIT-01 : `.create` fabrique le worktree AVANT le fork et la session y
         /// travaille isolée sur sa branche `bunshin/<slug>`.
         public var worktree: WorktreeStrategy = .none
+        /// PRJ-03 : projet de rattachement, persisté avec la session.
+        public var projectID: ProjectID?
         public init(command: Command, workingDirectory: URL,
                     geometry: TerminalGeometry = .default,
                     samplingInterval: Duration? = nil,
@@ -122,6 +124,7 @@ public actor SessionManager {
                                          agentID: "claude-code", state: .starting,
                                          branch: worktree?.branch,
                                          worktreePath: worktree?.path.path,
+                                         projectID: spec.projectID,
                                          createdAt: Date()))
         pumps[id] = Task { [weak self] in
             for await event in events {

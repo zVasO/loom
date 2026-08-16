@@ -104,6 +104,31 @@ struct SessionStoreTests {
                 "une requête avec caractères spéciaux FTS ne fait jamais d'erreur")
     }
 
+    @Test("projets : insertion, rattachement des sessions, archivage sans toucher au dossier (PRJ-01/03/06)")
+    func projets() throws {
+        let store = try makeStore()
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bunshin-projet-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let projectID = ProjectID()
+        try store.insertProject(ProjectRecord(id: projectID, name: "bunshin",
+                                              path: folder.path, defaultBranch: "main",
+                                              createdAt: Date()))
+        #expect(try store.activeProjects().map(\.id) == [projectID])
+
+        let session = SessionID()
+        try store.insert(SessionRecord(id: session, title: "t", agentID: "claude-code",
+                                       state: .working, projectID: projectID, createdAt: Date()))
+        #expect(try store.session(id: session)?.projectID == projectID,
+                "la session connaît son projet (regroupement PRJ-03)")
+
+        try store.archiveProject(projectID)
+        #expect(try store.activeProjects().isEmpty, "archivé : le projet sort des listes")
+        #expect(FileManager.default.fileExists(atPath: folder.path),
+                "PRJ-06 : l'app ne détruit JAMAIS le dossier source de l'utilisateur")
+    }
+
     @Test("l'état persisté suit les mises à jour")
     func miseAJourDEtat() throws {
         let store = try makeStore()

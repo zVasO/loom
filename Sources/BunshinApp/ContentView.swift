@@ -17,14 +17,21 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selected) {
-                Section("Actives") {
-                    ForEach(model.sessions) { item in
-                        SessionCardView(title: item.title, state: item.state, preview: "")
-                            .tag(item.id)
-                            .listRowBackground(Color.clear)
-                            .contextMenu {
-                                Button("Archiver") { Task { await model.archiveSession(item.id) } }
-                            }
+                // PRJ-03 : cartes groupées par projet.
+                ForEach(model.projects, id: \.id) { project in
+                    let items = model.sessions.filter { $0.projectID == project.id }
+                    if !items.isEmpty {
+                        Section(project.name) {
+                            ForEach(items) { item in activeCard(item) }
+                        }
+                    }
+                }
+                let orphans = model.sessions.filter { item in
+                    model.project(item.projectID) == nil
+                }
+                if !orphans.isEmpty {
+                    Section("Sans projet") {
+                        ForEach(orphans) { item in activeCard(item) }
                     }
                 }
                 if !model.interruptedSessions.isEmpty {
@@ -130,18 +137,34 @@ struct ContentView: View {
         paletteQuery = ""
     }
 
-    /// UC-1 : un objectif, un dossier, une session.
+    private func activeCard(_ item: AppModel.SessionItem) -> some View {
+        SessionCardView(title: item.title, state: item.state, preview: "")
+            .tag(item.id)
+            .listRowBackground(Color.clear)
+            .contextMenu {
+                Button("Archiver") { Task { await model.archiveSession(item.id) } }
+            }
+    }
+
+    /// UC-1 : un objectif, un projet, une session.
     private var quickStart: some View {
         VStack(spacing: 6) {
             TextField("Décris la tâche…", text: $prompt)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { launch() }
             HStack {
-                Button("Dossier…") { pickDirectory() }
-                Text(directory.lastPathComponent)
-                    .font(.caption)
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                    .lineLimit(1)
+                Picker("", selection: $model.selectedProject) {
+                    Text("Sans projet").tag(ProjectID?.none)
+                    ForEach(model.projects, id: \.id) { project in
+                        Text(project.name).tag(ProjectID?.some(project.id))
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 180)
+                Button {
+                    addProject()
+                } label: { Image(systemName: "folder.badge.plus") }
+                .help("Ajouter un projet (PRJ-01)")
                 Spacer()
                 Button("Lancer") { launch() }
                     .buttonStyle(.borderedProminent)
@@ -157,15 +180,15 @@ struct ContentView: View {
         guard !prompt.isEmpty else { return }
         let task = prompt
         prompt = ""
-        Task { await model.launchSession(prompt: task, in: directory) }
+        Task { await model.launchSession(prompt: task) }
     }
 
-    private func pickDirectory() {
+    private func addProject() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         if panel.runModal() == .OK, let url = panel.url {
-            directory = url
+            Task { await model.addProject(at: url) }
         }
     }
 }

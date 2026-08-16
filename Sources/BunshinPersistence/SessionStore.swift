@@ -51,7 +51,41 @@ public final class SessionStore: Sendable {
                 )
                 """)
         }
+        migrator.registerMigration("v4-projects") { db in
+            try db.create(table: "project") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("path", .text).notNull()
+                t.column("defaultBranch", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.column("archivedAt", .datetime)
+            }
+            try db.alter(table: "session") { t in
+                t.add(column: "projectID", .text).indexed()
+            }
+        }
         try migrator.migrate(database)
+    }
+
+    // MARK: - Projets (PRJ-01/03/06)
+
+    public func insertProject(_ record: ProjectRecord) throws {
+        try database.write { db in try record.insert(db) }
+    }
+
+    public func activeProjects() throws -> [ProjectRecord] {
+        try database.read { db in
+            try ProjectRecord.filter(Column("archivedAt") == nil)
+                .order(Column("createdAt")).fetchAll(db)
+        }
+    }
+
+    /// PRJ-06 : l'archivage n'écrit QUE dans la base — jamais dans le dossier source.
+    public func archiveProject(_ id: ProjectID) throws {
+        try database.write { db in
+            try db.execute(sql: "UPDATE project SET archivedAt = ? WHERE id = ?",
+                           arguments: [Date(), id.rawValue.uuidString])
+        }
     }
 
     // MARK: - Recherche plein texte (SES-08)
@@ -179,12 +213,14 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
     public var worktreePath: String?
     public var initialPrompt: String?
     public var exitCode: Int32?
+    public var projectID: ProjectID?
     public var createdAt: Date
     public var endedAt: Date?
 
     public init(id: SessionID, title: String, agentID: String, state: SessionState,
                 branch: String? = nil, worktreePath: String? = nil, initialPrompt: String? = nil,
-                exitCode: Int32? = nil, createdAt: Date, endedAt: Date? = nil) {
+                exitCode: Int32? = nil, projectID: ProjectID? = nil,
+                createdAt: Date, endedAt: Date? = nil) {
         self.id = id
         self.title = title
         self.agentID = agentID
@@ -193,12 +229,14 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
         self.worktreePath = worktreePath
         self.initialPrompt = initialPrompt
         self.exitCode = exitCode
+        self.projectID = projectID
         self.createdAt = createdAt
         self.endedAt = endedAt
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, agentID, state, branch, worktreePath, initialPrompt, exitCode, createdAt, endedAt
+        case id, title, agentID, state, branch, worktreePath, initialPrompt, exitCode, projectID,
+             createdAt, endedAt
     }
 
     public func encode(to container: inout PersistenceContainer) throws {
@@ -210,6 +248,7 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
         container["worktreePath"] = worktreePath
         container["initialPrompt"] = initialPrompt
         container["exitCode"] = exitCode
+        container["projectID"] = projectID?.rawValue.uuidString
         container["createdAt"] = createdAt
         container["endedAt"] = endedAt
     }
@@ -226,8 +265,51 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
         worktreePath = row["worktreePath"]
         initialPrompt = row["initialPrompt"]
         exitCode = row["exitCode"]
+        projectID = (row["projectID"] as String?).flatMap(UUID.init(uuidString:)).map(ProjectID.init)
         createdAt = row["createdAt"]
         endedAt = row["endedAt"]
+    }
+}
+
+public struct ProjectRecord: Codable, Equatable, Sendable, FetchableRecord, PersistableRecord {
+    public static let databaseTableName = "project"
+
+    public var id: ProjectID
+    public var name: String
+    public var path: String
+    public var defaultBranch: String?
+    public var createdAt: Date
+    public var archivedAt: Date?
+
+    public init(id: ProjectID, name: String, path: String, defaultBranch: String?,
+                createdAt: Date, archivedAt: Date? = nil) {
+        self.id = id
+        self.name = name
+        self.path = path
+        self.defaultBranch = defaultBranch
+        self.createdAt = createdAt
+        self.archivedAt = archivedAt
+    }
+
+    public func encode(to container: inout PersistenceContainer) throws {
+        container["id"] = id.rawValue.uuidString
+        container["name"] = name
+        container["path"] = path
+        container["defaultBranch"] = defaultBranch
+        container["createdAt"] = createdAt
+        container["archivedAt"] = archivedAt
+    }
+
+    public init(row: Row) throws {
+        guard let uuid = UUID(uuidString: row["id"]) else {
+            throw DatabaseError(message: "id de projet invalide")
+        }
+        id = ProjectID(uuid)
+        name = row["name"]
+        path = row["path"]
+        defaultBranch = row["defaultBranch"]
+        createdAt = row["createdAt"]
+        archivedAt = row["archivedAt"]
     }
 }
 
