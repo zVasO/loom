@@ -85,6 +85,47 @@ struct HookSocketServerTests {
         #expect(delivered, "le découpage se fait sur les fins de ligne, pas sur les paquets")
     }
 
+    @Test("le binaire bunshin-hook relaie un payload stdin jusqu'au serveur (ADR-0005)")
+    func binaireHelperDeBoutEnBout() async throws {
+        let url = socketURL()
+        let id = SessionID()
+        let received = Received()
+        let server = HookSocketServer(
+            socketPath: url,
+            validate: { token in token == "jeton-helper" ? id : nil },
+            handler: { session, payload in received.append((session, payload)) })
+        try server.start()
+        defer { server.stop() }
+
+        let helper = productsDirectory.appendingPathComponent("bunshin-hook")
+        let process = Process()
+        process.executableURL = helper
+        process.arguments = ["--socket", url.path, "--token", "jeton-helper"]
+        let stdin = Pipe()
+        process.standardInput = stdin
+        try process.run()
+        stdin.fileHandleForWriting.write(Data(#"{"hook_event_name":"Stop","last_assistant_message":"fini."}"#.utf8))
+        try stdin.fileHandleForWriting.close()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0, "le helper sort en 0 quand le relais réussit")
+
+        let delivered = await pollUntil { received.all().count == 1 }
+        #expect(delivered)
+        let (_, payload) = try #require(received.all().first)
+        let json = try #require(try JSONSerialization.jsonObject(with: payload) as? [String: Any])
+        #expect(json["hook_event_name"] as? String == "Stop", "le payload traverse intact")
+    }
+
+    /// `.build/debug` est le symlink stable de SPM vers les produits — résolu depuis
+    /// #filePath, indépendant du runner de tests.
+    private var productsDirectory: URL {
+        URL(fileURLWithPath: #filePath)                     // …/Tests/BunshinIPCTests/…
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()                    // racine du repo
+            .appendingPathComponent(".build/debug")
+    }
+
     // MARK: - Outillage
 
     private final class Received: @unchecked Sendable {

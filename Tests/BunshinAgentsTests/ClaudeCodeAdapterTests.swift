@@ -26,10 +26,10 @@ struct ClaudeCodeAdapterTests {
     func hooksInjectesParSettings() throws {
         let wiring = ClaudeCodeAdapter.HookWiring(
             helper: URL(fileURLWithPath: "/Library/Application Support/Bunshin/bunshin-hook"),
-            socket: URL(fileURLWithPath: "/tmp/bunshin.sock"),
-            token: "jeton-secret-42")
+            socket: URL(fileURLWithPath: "/tmp/bunshin.sock"))
         let adapter = ClaudeCodeAdapter(hooks: wiring)
-        let command = adapter.launchCommand(session: SessionID(), initialPrompt: nil)
+        let command = adapter.launchCommand(session: SessionID(), initialPrompt: nil,
+                                            hookToken: "jeton-secret-42")
 
         guard let flagIndex = command.arguments.firstIndex(of: "--settings"),
               command.arguments.indices.contains(flagIndex + 1) else {

@@ -26,9 +26,25 @@ public final class AppModel {
     private(set) var manager: SessionManager?
     private var hookServer: HookSocketServer?
     private let supportDirectory: URL
-    private let adapter = ClaudeCodeAdapter()
     private var socketURL: URL { supportDirectory.appendingPathComponent("bunshin.sock") }
-    private var helperURL: URL { supportDirectory.appendingPathComponent("bunshin-hook") }
+
+    /// L'adapter parle au CLI avec le câblage hooks complet (ADR-0005).
+    private var adapter: ClaudeCodeAdapter {
+        ClaudeCodeAdapter(hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
+                                       socket: socketURL))
+    }
+
+    /// En développement, `bunshin-hook` est un produit frère de l'app ; empaqueté,
+    /// il vivra dans le bundle puis sera copié dans Application Support.
+    static func helperBinaryURL(fallback supportDirectory: URL) -> URL {
+        let sibling = Bundle.main.executableURL?
+            .deletingLastPathComponent()
+            .appendingPathComponent("bunshin-hook")
+        if let sibling, FileManager.default.isExecutableFile(atPath: sibling.path) {
+            return sibling
+        }
+        return supportDirectory.appendingPathComponent("bunshin-hook")
+    }
 
     public init(supportDirectory: URL? = nil) {
         self.supportDirectory = supportDirectory
@@ -98,13 +114,14 @@ public final class AppModel {
         guard let manager else { return }
         do {
             let sessionID = SessionID()
+            let token = UUID().uuidString
             let id = try await manager.launch(SessionManager.SessionSpec(
-                command: adapter.launchCommand(session: sessionID, initialPrompt: prompt),
+                command: adapter.launchCommand(session: sessionID, initialPrompt: prompt,
+                                               hookToken: token),
                 workingDirectory: directory,
-                samplingInterval: .milliseconds(500)))
-            if let token = await manager.hookToken(for: id) {
-                tokenRegistry.register(token: token, session: id)
-            }
+                samplingInterval: .milliseconds(500),
+                hookToken: token))
+            tokenRegistry.register(token: token, session: id)
             sessions.insert(SessionItem(id: id, title: prompt.isEmpty ? "Session" : prompt,
                                         state: .starting), at: 0)
         } catch {

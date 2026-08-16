@@ -5,16 +5,14 @@ import Foundation
 /// Faits vérifiés en source primaire : docs/research/claude-code-hooks.md.
 public struct ClaudeCodeAdapter: Sendable {
 
-    /// Câblage des hooks vers l'app : binaire helper (ADR-0005), socket Unix, token
-    /// par session. Le payload JSON du hook arrive sur le stdin du helper.
+    /// Câblage des hooks vers l'app : binaire helper (ADR-0005) et socket Unix.
+    /// Le token, lui, est PAR SESSION — il se passe à `launchCommand`.
     public struct HookWiring: Sendable {
         public var helper: URL
         public var socket: URL
-        public var token: String
-        public init(helper: URL, socket: URL, token: String) {
+        public init(helper: URL, socket: URL) {
             self.helper = helper
             self.socket = socket
-            self.token = token
         }
     }
 
@@ -35,9 +33,11 @@ public struct ClaudeCodeAdapter: Sendable {
     /// déterministe, sans dépendre de l'arrivée du hook SessionStart (recherche §5).
     /// Les hooks partent en `--settings` inline : portée session, fusionnés avec les
     /// hooks personnels de l'utilisateur, rien d'écrit sur son disque (STA-01).
-    public func launchCommand(session: SessionID, initialPrompt: String?) -> Command {
+    public func launchCommand(session: SessionID, initialPrompt: String?,
+                              hookToken: String? = nil) -> Command {
         var arguments = ["--session-id", session.rawValue.uuidString]
-        if let hooks, let settings = Self.hookSettingsJSON(wiring: hooks) {
+        if let hooks, let hookToken,
+           let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken) {
             arguments.append(contentsOf: ["--settings", settings])
         }
         if let initialPrompt {
@@ -80,9 +80,9 @@ public struct ClaudeCodeAdapter: Sendable {
         Command(executable: executable, arguments: ["--resume", session.rawValue.uuidString])
     }
 
-    private static func hookSettingsJSON(wiring: HookWiring) -> String? {
+    private static func hookSettingsJSON(wiring: HookWiring, token: String) -> String? {
         let helperInvocation = [
-            wiring.helper.path, "--socket", wiring.socket.path, "--token", wiring.token,
+            wiring.helper.path, "--socket", wiring.socket.path, "--token", token,
         ].map { $0.contains(" ") ? "'\($0)'" : $0 }.joined(separator: " ")
 
         let entry: [[String: Any]] = [[

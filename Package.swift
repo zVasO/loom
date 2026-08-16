@@ -8,6 +8,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "BunshinApp", targets: ["BunshinApp"]),
+        .executable(name: "bunshin-hook", targets: ["bunshin-hook"]),
         .library(name: "BunshinCore", targets: ["BunshinCore"]),
     ],
     dependencies: [
@@ -25,6 +26,8 @@ let package = Package(
         .target(name: "BunshinWeb", dependencies: ["BunshinCore"]),
         .target(name: "BunshinPersistence", dependencies: ["BunshinCore", "BunshinTerminal", .product(name: "GRDB", package: "GRDB.swift")]),
         .target(name: "BunshinIPC", dependencies: ["BunshinCore"]),
+        // Le helper appelé par les hooks des agents (ADR-0005) : stdin → socket, sans dépendance.
+        .executableTarget(name: "bunshin-hook"),
         .target(name: "BunshinSessions", dependencies: ["BunshinCore", "BunshinTerminal", "BunshinAgents", "BunshinPersistence"]),
         // Adapters de test du seam PTY, partagés par les cibles de test (jamais exposé en produit).
         .target(name: "BunshinTerminalTestSupport", dependencies: ["BunshinCore", "BunshinTerminal"]),

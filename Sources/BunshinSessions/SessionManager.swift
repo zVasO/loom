@@ -15,13 +15,18 @@ public actor SessionManager {
         public var geometry: TerminalGeometry
         /// `nil` = pas de canal heuristique (sessions pilotées par hooks).
         public var samplingInterval: Duration?
+        /// Token IPC déjà embarqué dans la commande (hooks --settings) ; `nil` = le
+        /// manager en génère un.
+        public var hookToken: String?
         public init(command: Command, workingDirectory: URL,
                     geometry: TerminalGeometry = .default,
-                    samplingInterval: Duration? = nil) {
+                    samplingInterval: Duration? = nil,
+                    hookToken: String? = nil) {
             self.command = command
             self.workingDirectory = workingDirectory
             self.geometry = geometry
             self.samplingInterval = samplingInterval
+            self.hookToken = hookToken
         }
     }
 
@@ -75,7 +80,7 @@ public actor SessionManager {
             using: runtimeDependencies)
         runtimes[id] = runtime
         states[id] = StateEngine.State(session: .starting)
-        let token = UUID().uuidString
+        let token = spec.hookToken ?? UUID().uuidString
         tokens[token] = id
         tokensBySession[id] = token
         try? store?.insert(SessionRecord(id: id, title: spec.command.executable,
