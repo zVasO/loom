@@ -187,7 +187,34 @@ public final class AppModel {
             [.completed, .failed, .archived].contains($0.state) && ClaudeNativeSessions.exists($0.id)
         }
         projects = ((try? store?.activeProjects()) ?? nil) ?? []
+        applySavedProjectOrder()
         if selectedProject == nil { selectedProject = projects.first?.id }
+    }
+
+    /// Fiche d'une session pour le panneau d'infos (chevron du fil d'Ariane).
+    public func sessionInfo(_ id: SessionID) -> SessionRecord? {
+        (try? store?.session(id: id)) ?? nil
+    }
+
+    /// L'ordre de la sidebar appartient à l'utilisateur (glisser-déposer) : simple
+    /// préférence d'affichage, persistée hors base — les inconnus vont à la fin.
+    public func reorderProjects(dragged: ProjectID, before target: ProjectID) {
+        guard let from = projects.firstIndex(where: { $0.id == dragged }),
+              let to = projects.firstIndex(where: { $0.id == target }), from != to else { return }
+        projects.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        UserDefaults.standard.set(projects.map(\.id.rawValue.uuidString),
+                                  forKey: "loom.projects.order")
+    }
+
+    private func applySavedProjectOrder() {
+        guard let order = UserDefaults.standard.stringArray(forKey: "loom.projects.order")
+        else { return }
+        let rank = Dictionary(order.enumerated().map { ($1, $0) }) { first, _ in first }
+        projects = projects.enumerated().sorted { lhs, rhs in
+            let l = rank[lhs.element.id.rawValue.uuidString] ?? Int.max
+            let r = rank[rhs.element.id.rawValue.uuidString] ?? Int.max
+            return l == r ? lhs.offset < rhs.offset : l < r
+        }.map(\.element)
     }
 
     /// SES-04 : un shell libre dans le worktree de la session parente — la carte
