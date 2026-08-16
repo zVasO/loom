@@ -1,5 +1,6 @@
 import BunshinAgents
 import BunshinCore
+import BunshinGit
 import BunshinIPC
 import BunshinPersistence
 import BunshinSessions
@@ -209,6 +210,22 @@ public final class AppModel {
 
     public func stopSession(_ id: SessionID) async {
         await manager?.stop(id)
+    }
+
+    public struct GitPanelData {
+        public let changes: [FileChange]
+        public let diff: String
+    }
+
+    /// GIT-03 : status + diff du worktree de la session, en lecture seule.
+    public func gitPanel(for id: SessionID) async -> GitPanelData? {
+        let record = (try? store?.session(id: id)) ?? nil
+        guard let path = record?.worktreePath else { return nil }
+        let worktree = URL(fileURLWithPath: path)
+        let git = GitService()
+        let changes = (try? await git.status(in: worktree)) ?? []
+        let diff = (try? await git.diff(in: worktree)) ?? ""
+        return GitPanelData(changes: changes, diff: diff)
     }
 
     public func surface(for id: SessionID) async -> TerminalSurface? {

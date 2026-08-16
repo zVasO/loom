@@ -52,6 +52,21 @@ struct GitServiceTests {
         #expect(changes.contains(FileChange(path: "note.txt", kind: .untracked)))
     }
 
+    @Test("le diff unifié montre les changements, non-suivis compris (GIT-03)")
+    func diffUnifie() async throws {
+        let repo = try await makeFixtureRepo()
+        try "contenu modifié".write(to: repo.appendingPathComponent("README.md"),
+                                    atomically: true, encoding: .utf8)
+        try "tout neuf".write(to: repo.appendingPathComponent("note.txt"),
+                              atomically: true, encoding: .utf8)
+
+        let diff = try await service.diff(in: repo)
+
+        #expect(diff.contains("-# Fixture"), "l'ancienne ligne apparaît en suppression")
+        #expect(diff.contains("+contenu modifié"), "la nouvelle ligne apparaît en ajout")
+        #expect(diff.contains("+tout neuf"), "les fichiers non suivis font partie du diff (intent-to-add)")
+    }
+
     @Test("suppression sécurisée : refus si modifications non commit, force explicite (GIT-05)")
     func suppressionSecurisee() async throws {
         let repo = try await makeFixtureRepo()

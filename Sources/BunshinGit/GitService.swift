@@ -68,6 +68,21 @@ public struct GitService: Sendable {
         }
     }
 
+    /// GIT-03 : diff unifié en lecture seule — les fichiers non suivis y figurent
+    /// aussi (via `--no-index` contre /dev/null, sans jamais toucher l'index).
+    public func diff(in worktree: URL) async throws -> String {
+        var output = try await run(["diff", "HEAD"], in: worktree)
+        let untracked = try await status(in: worktree).filter { $0.kind == .untracked }
+        for change in untracked {
+            // `--no-index` sort en 1 quand il y a des différences : c'est le cas nominal.
+            if let piece = try? await run(["diff", "--no-index", "--", "/dev/null", change.path],
+                                          in: worktree, successCodes: [0, 1]), !piece.isEmpty {
+                output += (output.isEmpty ? "" : "\n") + piece
+            }
+        }
+        return output
+    }
+
     /// GIT-05 : suppression refusée si le worktree porte des modifications non
     /// commitées ; `force: true` est le SEUL chemin destructif, toujours explicite.
     public func removeWorktree(_ worktree: Worktree, repo: URL, force: Bool = false) async throws {
@@ -85,7 +100,8 @@ public struct GitService: Sendable {
     // MARK: - Exécution
 
     @discardableResult
-    private func run(_ arguments: [String], in directory: URL) async throws -> String {
+    private func run(_ arguments: [String], in directory: URL,
+                     successCodes: Set<Int32> = [0]) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: gitPath)
         process.arguments = arguments
@@ -102,7 +118,7 @@ public struct GitService: Sendable {
             process.terminationHandler = { finished in
                 let output = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
                 let errors = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                if finished.terminationStatus == 0 {
+                if successCodes.contains(finished.terminationStatus) {
                     continuation.resume(returning: output.trimmingCharacters(in: .whitespacesAndNewlines))
                 } else {
                     continuation.resume(throwing: GitError.commandFailed(

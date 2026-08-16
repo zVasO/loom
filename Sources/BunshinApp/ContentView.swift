@@ -1,4 +1,5 @@
 import BunshinCore
+import BunshinGit
 import BunshinTerminal
 import BunshinUI
 import BunshinWeb
@@ -128,12 +129,17 @@ struct SessionDetailView: View {
     let sessionID: SessionID
     @State private var surface: TerminalSurface?
     @State private var input = ""
+    @State private var gitShown = false
+    @State private var gitData: AppModel.GitPanelData?
 
     var body: some View {
         Group {
             if let surface {
                 VStack(spacing: 0) {
-                    TerminalScreenView(screen: surface.screen)
+                    HSplitView {
+                        TerminalScreenView(screen: surface.screen)
+                        if gitShown { gitPanel }
+                    }
                     HStack {
                         TextField("Répondre à l'agent…", text: $input)
                             .textFieldStyle(.roundedBorder)
@@ -141,6 +147,10 @@ struct SessionDetailView: View {
                                 surface.send(input + "\r")
                                 input = ""
                             }
+                        Button(gitShown ? "Masquer Git" : "Git") {
+                            gitShown.toggle()
+                            if gitShown { Task { gitData = await model.gitPanel(for: sessionID) } }
+                        }
                         Button("Stop", role: .destructive) {
                             Task { await model.stopSession(sessionID) }
                         }
@@ -154,5 +164,52 @@ struct SessionDetailView: View {
         }
         .task { surface = await model.surface(for: sessionID) }
         .background(DefaultTheme.background)
+    }
+
+    /// GIT-03 : panneau latéral lecture seule — fichiers modifiés + diff unifié.
+    private var gitPanel: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Modifications").font(.headline)
+                Spacer()
+                Button {
+                    Task { gitData = await model.gitPanel(for: sessionID) }
+                } label: { Image(systemName: "arrow.clockwise") }
+            }
+            if let gitData {
+                if gitData.changes.isEmpty {
+                    Text("Worktree propre").foregroundStyle(DefaultTheme.secondaryText)
+                } else {
+                    ForEach(gitData.changes, id: \.path) { change in
+                        Label(change.path, systemImage: symbol(for: change.kind))
+                            .font(.system(.caption, design: .monospaced))
+                            .lineLimit(1)
+                    }
+                    ScrollView {
+                        Text(gitData.diff)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                }
+            } else {
+                Text("Pas de worktree pour cette session")
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .frame(minWidth: 280, maxWidth: 420)
+        .background(DefaultTheme.surface)
+    }
+
+    private func symbol(for kind: FileChange.Kind) -> String {
+        switch kind {
+        case .modified: "pencil"
+        case .added: "plus"
+        case .deleted: "minus"
+        case .renamed: "arrow.right"
+        case .untracked: "questionmark"
+        }
     }
 }
