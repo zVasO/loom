@@ -287,8 +287,8 @@ public final class AppModel {
             try await manager.resume(record, command: command, workingDirectory: directory,
                                      samplingInterval: .milliseconds(500), hookToken: token)
             tokenRegistry.register(token: token, session: record.id)
-            sessions.insert(SessionItem(id: record.id, title: record.title, state: .starting,
-                                        projectID: record.projectID, branch: record.branch), at: 0)
+            sessions.append(SessionItem(id: record.id, title: record.title, state: .starting,
+                                        projectID: record.projectID, branch: record.branch))
             interruptedSessions.removeAll { $0.id == record.id }
         } catch {
             startupError = String(describing: error)
@@ -360,9 +360,9 @@ public final class AppModel {
             let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
             let record = (try? store?.session(id: id)) ?? nil
-            sessions.insert(SessionItem(id: id, title: record?.title ?? "Session",
+            sessions.append(SessionItem(id: id, title: record?.title ?? "Session",
                                         state: .starting, projectID: project?.id,
-                                        branch: record?.branch), at: 0)
+                                        branch: record?.branch))
             reloadPersistedSessions()
             return id
         } catch {
