@@ -329,6 +329,8 @@ struct SessionsView: View {
     let onNewSession: (ProjectID) -> Void
     @State private var renameTarget: SessionID?
     @State private var renameText = ""
+    /// Groupes repliés (affichage seulement — les sessions continuent de tourner).
+    @State private var collapsedGroups: Set<String> = []
 
     var body: some View {
         HStack(spacing: 0) {
@@ -369,28 +371,32 @@ struct SessionsView: View {
             VStack(alignment: .leading, spacing: 14) {
                 let globalPanes = model.browserPanes.filter { $0.parentID == nil }
                 if !globalPanes.isEmpty {
-                    groupHeader("NAVIGATEUR", projectID: nil)
-                    ForEach(globalPanes) { pane in paneRow(pane, parentTitle: nil).stackChrome(
-                        isSelected: selected == .webPane(pane.id)) }
+                    group("NAVIGATEUR", projectID: nil) {
+                        ForEach(globalPanes) { pane in paneRow(pane, parentTitle: nil).stackChrome(
+                            isSelected: selected == .webPane(pane.id)) }
+                    }
                 }
                 ForEach(model.projects, id: \.id) { project in
                     let items = model.sessions.filter { $0.projectID == project.id }
                     let interrupted = model.interruptedSessions.filter { $0.projectID == project.id }
                     if !items.isEmpty || !interrupted.isEmpty {
-                        groupHeader(project.name.uppercased(), projectID: project.id)
-                        projectStacks(items: items)
-                        ForEach(interrupted, id: \.id) { record in interruptedCard(record) }
+                        group(project.name.uppercased(), projectID: project.id) {
+                            projectStacks(items: items)
+                            ForEach(interrupted, id: \.id) { record in interruptedCard(record) }
+                        }
                     }
                 }
                 let orphans = model.sessions.filter { model.project($0.projectID) == nil }
                 if !orphans.isEmpty {
-                    groupHeader("SANS PROJET", projectID: nil)
-                    projectStacks(items: orphans)
+                    group("SANS PROJET", projectID: nil) {
+                        projectStacks(items: orphans)
+                    }
                 }
                 if !model.historySessions.isEmpty {
-                    groupHeader("HISTORIQUE", projectID: nil)
-                    ForEach(model.historySessions.prefix(12), id: \.id) { record in
-                        historyCard(record)
+                    group("HISTORIQUE", projectID: nil) {
+                        ForEach(model.historySessions.prefix(12), id: \.id) { record in
+                            historyCard(record)
+                        }
                     }
                 }
             }
@@ -522,28 +528,48 @@ struct SessionsView: View {
         }
     }
 
-    private func groupHeader(_ title: String, projectID: ProjectID?) -> some View {
-        HStack {
-            Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(DefaultTheme.groupHeader)
-            Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
-                .foregroundStyle(DefaultTheme.groupHeader)
-            Spacer()
-            if let projectID {
+    /// Un groupe repliable : chevron + titre cliquables (affichage seulement,
+    /// les sessions continuent de tourner) ; écart resserré entre les piles.
+    @ViewBuilder
+    private func group(_ title: String, projectID: ProjectID?,
+                       @ViewBuilder content: () -> some View) -> some View {
+        let collapsed = collapsedGroups.contains(title)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
                 Button {
-                    onNewSession(projectID)
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        if collapsed { collapsedGroups.remove(title) } else { collapsedGroups.insert(title) }
+                    }
                 } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(DefaultTheme.secondaryText)
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                            .rotationEffect(.degrees(collapsed ? -90 : 0))
+                        Text(title)
+                            .font(.system(size: 10, weight: .semibold))
+                            .kerning(0.8)
+                    }
+                    .foregroundStyle(DefaultTheme.groupHeader)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                Spacer()
+                if let projectID {
+                    Button {
+                        onNewSession(projectID)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 2)
+            if !collapsed {
+                content()
             }
         }
-        .padding(.horizontal, 2)
     }
 
     private func interruptedCard(_ record: SessionRecord) -> some View {
