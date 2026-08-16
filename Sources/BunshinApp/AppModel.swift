@@ -67,11 +67,14 @@ public final class AppModel {
     public private(set) var preferredGrid: TerminalGeometry = {
         let cols = UserDefaults.standard.integer(forKey: "bunshin.terminal.cols")
         let rows = UserDefaults.standard.integer(forKey: "bunshin.terminal.rows")
-        return cols >= 20 && rows >= 4 ? TerminalGeometry(cols: cols, rows: rows) : .default
+        return cols >= 40 && rows >= 10 ? TerminalGeometry(cols: cols, rows: rows) : .default
     }()
 
     public func noteTerminalGrid(cols: Int, rows: Int) {
-        guard cols >= 20, rows >= 4 else { return }
+        // Seule une grille plausible pour une vraie fenêtre est mémorisée : une
+        // mesure transitoire (layout en cours) ne doit jamais empoisonner la
+        // géométrie de lancement des sessions suivantes.
+        guard cols >= 40, rows >= 10 else { return }
         preferredGrid = TerminalGeometry(cols: cols, rows: rows)
         UserDefaults.standard.set(cols, forKey: "bunshin.terminal.cols")
         UserDefaults.standard.set(rows, forKey: "bunshin.terminal.rows")

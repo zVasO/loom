@@ -49,6 +49,24 @@ struct ContentView: View {
         .background(DefaultTheme.background)
         .preferredColorScheme(.dark)
         .onAppear { model.start() }
+        .task {
+            // Reproduction autonome (diagnostic) : BUNSHIN_AUTOTEST=1 simule le
+            // clic « + » deux secondes après le lancement — même chemin de code.
+            guard ProcessInfo.processInfo.environment["BUNSHIN_AUTOTEST"] == "1" else { return }
+            try? await Task.sleep(for: .seconds(1))
+            NSApp.windows.first?.setFrame(NSRect(x: 40, y: 40, width: 1500, height: 950),
+                                          display: true)
+            try? await Task.sleep(for: .seconds(1))
+            createSession(in: model.projects.first?.id)
+            try? await Task.sleep(for: .seconds(10))
+            if case .session(let id) = selected, let s = await model.surface(for: id) {
+                let text = s.screen.lines
+                    .map { String($0.cells.map(\.character)) }
+                    .joined(separator: "\n")
+                try? text.write(toFile: "/tmp/bunshin-screen-dump.txt",
+                                atomically: true, encoding: .utf8)
+            }
+        }
         .sheet(isPresented: $paletteShown) { palette }
         .alert("Démarrage incomplet", isPresented: .constant(model.startupError != nil)) {
             Button("OK") { model.clearError() }
@@ -668,9 +686,14 @@ struct SessionDetailView: View {
                             // s'annule à chaque changement de taille — debounce gratuit
                             // pendant le redimensionnement de la fenêtre.
                             .task(id: proxy.size) {
-                                // Première mesure : immédiate, pour que le SIGWINCH
-                                // parte AVANT la bannière de l'agent. Les suivantes
-                                // sont debouncées (annulation du task).
+                                // GeometryReader publie un placeholder (100×100) avant
+                                // le vrai layout : ne JAMAIS l'appliquer — l'agent
+                                // recevrait un SIGWINCH 20×5 en plein démarrage et
+                                // peindrait son interface pour cinq lignes.
+                                guard proxy.size.width >= 300, proxy.size.height >= 200 else { return }
+                                // Première mesure réelle : immédiate, pour corriger la
+                                // grille de lancement avant la bannière de l'agent.
+                                // Les suivantes sont debouncées (annulation du task).
                                 if firstResizeDone {
                                     try? await Task.sleep(for: .milliseconds(80))
                                     guard !Task.isCancelled else { return }
