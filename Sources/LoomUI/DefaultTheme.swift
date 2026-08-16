@@ -35,9 +35,11 @@ public enum DefaultTheme {
         switch state {
         case .working: Color(red: 0.298, green: 0.764, blue: 0.541)               // vert
         case .needsInput: Color(red: 0.898, green: 0.706, blue: 0.333)            // ambre
-        case .idle, .starting: Color(red: 0.416, green: 0.635, blue: 0.910)       // bleu
-        case .completed, .archived, .draft: secondaryText
-        case .failed, .interrupted: danger
+        // « inactif » (fermée mais pas détruite) partage le bleu du repos.
+        case .idle, .starting, .completed, .interrupted:
+            Color(red: 0.416, green: 0.635, blue: 0.910)                          // bleu
+        case .archived, .draft: secondaryText
+        case .failed: danger
         }
     }
 
@@ -47,10 +49,11 @@ public enum DefaultTheme {
         case .starting: "démarrage"
         case .working: "working"
         case .needsInput: "attend une réponse"
-        case .idle: "inactif"
-        case .completed: "terminé"
+        // Vivante mais silencieuse ≠ fermée : « en veille » vs « inactif »
+        // (inactif = fermée mais pas détruite, reprise possible).
+        case .idle: "en veille"
+        case .completed, .interrupted: "inactif"
         case .failed: "échoué"
-        case .interrupted: "interrompu"
         case .archived: "archivé"
         }
     }

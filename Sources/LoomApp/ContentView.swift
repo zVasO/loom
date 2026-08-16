@@ -678,26 +678,17 @@ struct SessionsView: View {
                     }
                 }
                 ForEach(model.projects, id: \.id) { project in
-                    let items = model.sessions.filter { $0.projectID == project.id }
-                    let interrupted = model.interruptedSessions.filter { $0.projectID == project.id }
-                    if !items.isEmpty || !interrupted.isEmpty {
+                    let items = stackItems(for: project.id)
+                    if !items.isEmpty {
                         group(project.name.uppercased(), projectID: project.id) {
                             projectStacks(items: items)
-                            ForEach(interrupted, id: \.id) { record in interruptedCard(record) }
                         }
                     }
                 }
-                let orphans = model.sessions.filter { model.project($0.projectID) == nil }
+                let orphans = stackItems(for: nil)
                 if !orphans.isEmpty {
                     group("SANS PROJET", projectID: nil) {
                         projectStacks(items: orphans)
-                    }
-                }
-                if !model.historySessions.isEmpty {
-                    group("HISTORIQUE", projectID: nil) {
-                        ForEach(model.historySessions.prefix(12), id: \.id) { record in
-                            historyCard(record)
-                        }
                     }
                 }
             }
@@ -717,6 +708,24 @@ struct SessionsView: View {
         }
     }
 
+    /// Vivantes + inactives (fermées mais pas détruites) : la pile complète du
+    /// projet, nom et tabs mémorisés — seules les sessions claude sans aucune
+    /// conversation sont écartées (filtre en amont, dans le modèle).
+    private func stackItems(for projectID: ProjectID?) -> [AppModel.SessionItem] {
+        let live = model.sessions.filter {
+            projectID != nil ? $0.projectID == projectID : model.project($0.projectID) == nil
+        }
+        let dormant = model.dormantSessions
+            .filter { projectID != nil ? $0.projectID == projectID
+                                       : model.project($0.projectID) == nil }
+            .map { record in
+                AppModel.SessionItem(id: record.id, title: record.title, state: record.state,
+                                     projectID: record.projectID, branch: record.branch,
+                                     parentID: nil, isShell: false, isDormant: true)
+            }
+        return live + dormant
+    }
+
     /// La pile de la référence : la session et ses enfants (terminaux, webs) forment
     /// UN bloc joint ; chaque pile est séparée de la suivante.
     @ViewBuilder
@@ -724,19 +733,30 @@ struct SessionsView: View {
         ForEach(items.filter { !$0.isShell }) { item in
             sessionStack(item,
                          shells: items.filter { $0.parentID == item.id },
+                         dormantShells: model.dormantShells.filter { $0.parentID == item.id },
                          panes: model.browserPanes.filter { $0.parentID == item.id })
         }
     }
 
     private func sessionStack(_ item: AppModel.SessionItem,
                               shells: [AppModel.SessionItem],
+                              dormantShells: [AppModel.DormantShell],
                               panes: [AppModel.BrowserPane]) -> some View {
         VStack(spacing: 0) {
             SidebarSessionCard(
                 item: item,
-                childCount: shells.count + panes.count,
+                childCount: shells.count + dormantShells.count + panes.count,
                 isSelected: selected == .session(item.id),
-                onSelect: { selected = .session(item.id) },
+                onSelect: {
+                    if item.isDormant {
+                        Task {
+                            await model.resumeDormant(item.id)
+                            selected = .session(item.id)
+                        }
+                    } else {
+                        selected = .session(item.id)
+                    }
+                },
                 onNewTerminal: {
                     Task {
                         if let id = await model.launchShell(for: item) { selected = .session(id) }
@@ -756,6 +776,11 @@ struct SessionsView: View {
                 Divider().overlay(DefaultTheme.cardBorder)
                 shellRow(shell, parentTitle: item.title)
                     .stackChrome(isSelected: selected == .session(shell.id))
+            }
+            ForEach(dormantShells) { dormant in
+                Divider().overlay(DefaultTheme.cardBorder)
+                dormantShellRow(dormant, parentTitle: item.title)
+                    .stackChrome(isSelected: false)
             }
             ForEach(panes) { pane in
                 Divider().overlay(DefaultTheme.cardBorder)
@@ -782,7 +807,8 @@ struct SessionsView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
-                StatusLabel(shell.state)
+                // Pas de badge d'état sur les terminaux : working/attend une
+                // réponse ne parlent que des sessions claude.
             }
             Spacer()
         }
@@ -792,6 +818,37 @@ struct SessionsView: View {
         .onTapGesture { selected = .session(shell.id) }
         .contextMenu {
             Button("Arrêter") { Task { await model.stopSession(shell.id) } }
+        }
+    }
+
+    /// Un terminal mémorisé dont le process est mort avec l'app : la ligne
+    /// reste dans la pile, le clic relance un shell du même nom au même endroit.
+    private func dormantShellRow(_ dormant: AppModel.DormantShell,
+                                 parentTitle: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "terminal")
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.mutedText)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(dormant.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                Label(parentTitle, systemImage: "link")
+                    .font(.system(size: 10))
+                    .foregroundStyle(DefaultTheme.mutedText)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .contentShape(Rectangle())
+        .hoverSurface(0.6)
+        .onTapGesture {
+            Task {
+                if let id = await model.reopenDormantShell(dormant) {
+                    selected = .session(id)
+                }
+            }
         }
     }
 
@@ -872,40 +929,6 @@ struct SessionsView: View {
         }
     }
 
-    private func interruptedCard(_ record: SessionRecord) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(record.title)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(DefaultTheme.primaryText)
-                .lineLimit(1)
-            StatusLabel(.interrupted)
-            Button("Reprendre") {
-                Task { await model.resumeSession(record) }
-            }
-            .font(.system(size: 11))
-            .buttonStyle(.bordered)
-            .tint(DefaultTheme.accent)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
-    }
-
-    private func historyCard(_ record: SessionRecord) -> some View {
-        HStack(spacing: 8) {
-            Circle().fill(DefaultTheme.badgeColor(for: record.state)).frame(width: 5, height: 5)
-            Text(record.title)
-                .font(.system(size: 11))
-                .foregroundStyle(DefaultTheme.secondaryText)
-                .lineLimit(1)
-            Spacer()
-        }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .contextMenu {
-            Button("Archiver") { Task { await model.archiveSession(record.id) } }
-        }
-    }
 }
 
 /// La sélection d'un élément de pile : liseré accent inséré, fond teinté — comme

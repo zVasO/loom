@@ -40,6 +40,8 @@ public final class AppModel {
         /// SES-04 : un terminal secondaire (shell libre) rattaché à une session agent.
         public var parentID: SessionID?
         public var isShell: Bool = false
+        /// Fermée mais pas détruite (« inactif ») : cliquer reprend la session.
+        public var isDormant: Bool = false
     }
 
     public private(set) var sessions: [SessionItem] = []
@@ -166,6 +168,7 @@ public final class AppModel {
 
             Task { await self.observeStates(of: manager) }
             reloadPersistedSessions()
+            restoreStackChildren()
         } catch {
             startupError = String(describing: error)
         }
@@ -220,30 +223,116 @@ public final class AppModel {
     /// SES-04 : un shell libre dans le worktree de la session parente — la carte
     /// apparaît indentée sous elle (« Term n »). Les shells meurent avec l'app et
     /// ne sont jamais proposés à la Reprise (aucune conversation native).
-    public func launchShell(for parent: SessionItem) async -> SessionID? {
+    @discardableResult
+    public func launchShell(for parent: SessionItem, title: String? = nil) async -> SessionID? {
         guard let manager else { return nil }
         let record = (try? store?.session(id: parent.id)) ?? nil
         let directory = record?.worktreePath.map(URL.init(fileURLWithPath:))
             ?? project(parent.projectID).map { URL(fileURLWithPath: $0.path) }
             ?? FileManager.default.homeDirectoryForCurrentUser
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let count = sessions.filter { $0.parentID == parent.id }.count + 1
+        let count = sessions.filter { $0.parentID == parent.id }.count
+            + dormantShells.filter { $0.parentID == parent.id }.count + 1
+        let name = title ?? "Term \(count)"
         var spec = SessionManager.SessionSpec(
             command: Command(executable: shell, arguments: ["-l"]),
             workingDirectory: directory,
             geometry: preferredGrid,
             samplingInterval: .seconds(1))
-        spec.title = "Term \(count)"
+        spec.title = name
         spec.projectID = parent.projectID
         do {
             let id = try await manager.launch(spec)
-            sessions.append(SessionItem(id: id, title: "Term \(count)", state: .starting,
+            sessions.append(SessionItem(id: id, title: name, state: .starting,
                                         projectID: parent.projectID, branch: parent.branch,
                                         parentID: parent.id, isShell: true))
+            saveStackChildren()
             return id
         } catch {
             startupError = String(describing: error)
             return nil
+        }
+    }
+
+    // MARK: - Mémoire de la pile (le nom, les tabs Term/Web survivent au relancement)
+
+    /// Un terminal de pile dont le PTY est mort avec l'app : la LIGNE survit —
+    /// cliquer relance un shell du même nom dans le même worktree.
+    public struct DormantShell: Identifiable, Codable, Equatable {
+        public var id = UUID()
+        public var title: String
+        public var parentID: SessionID
+    }
+
+    public private(set) var dormantShells: [DormantShell] = []
+
+    /// Sessions claude fermées mais pas détruites (« inactif ») : elles restent
+    /// dans leur pile avec leurs tabs — seules celles sans conversation (jamais
+    /// un message) disparaissent, via le filtre ClaudeNativeSessions.exists.
+    public var dormantSessions: [SessionRecord] {
+        (interruptedSessions + historySessions).filter { record in
+            record.state != .archived && !sessions.contains { $0.id == record.id }
+        }
+    }
+
+    public func resumeDormant(_ id: SessionID) async {
+        guard let record = allRecords.first(where: { $0.id == id }) else { return }
+        await resumeSession(record)
+    }
+
+    public func reopenDormantShell(_ dormant: DormantShell) async -> SessionID? {
+        guard let parent = stackParent(dormant.parentID) else { return nil }
+        dormantShells.removeAll { $0.id == dormant.id }
+        return await launchShell(for: parent, title: dormant.title)
+    }
+
+    private func stackParent(_ id: SessionID) -> SessionItem? {
+        if let live = sessions.first(where: { $0.id == id }) { return live }
+        return allRecords.first { $0.id == id }.map {
+            SessionItem(id: $0.id, title: $0.title, state: $0.state,
+                        projectID: $0.projectID, branch: $0.branch)
+        }
+    }
+
+    private struct PersistedPane: Codable {
+        var title: String
+        var parentID: SessionID?
+        var urls: [String]
+    }
+
+    private struct PersistedChildren: Codable {
+        var shells: [DormantShell]
+        var panes: [PersistedPane]
+    }
+
+    /// Photographie les enfants de pile à chaque mutation : au prochain
+    /// lancement, les shells vivants d'aujourd'hui seront les dormants de demain.
+    func saveStackChildren() {
+        let shells = sessions.filter(\.isShell).compactMap { item in
+            item.parentID.map { DormantShell(title: item.title, parentID: $0) }
+        }
+        let panes = browserPanes.map { pane in
+            PersistedPane(title: pane.title, parentID: pane.parentID,
+                          urls: pane.controller.tabs.map(\.url.absoluteString))
+        }
+        let payload = PersistedChildren(shells: shells + dormantShells, panes: panes)
+        if let data = try? JSONEncoder().encode(payload) {
+            UserDefaults.standard.set(data, forKey: "loom.stack.children")
+        }
+    }
+
+    func restoreStackChildren() {
+        guard let data = UserDefaults.standard.data(forKey: "loom.stack.children"),
+              let payload = try? JSONDecoder().decode(PersistedChildren.self, from: data)
+        else { return }
+        // Un dormant n'a de sens que si son parent existe encore quelque part.
+        dormantShells = payload.shells.filter { shell in
+            allRecords.contains { $0.id == shell.parentID }
+        }
+        for record in payload.panes {
+            let pane = BrowserPane(title: record.title, parentID: record.parentID)
+            for url in record.urls { pane.controller.openTab(urlString: url) }
+            browserPanes.append(pane)
         }
     }
 
@@ -271,11 +360,13 @@ public final class AppModel {
         let count = browserPanes.filter { $0.parentID == parent }.count + 1
         let pane = BrowserPane(title: "Web \(count)", parentID: parent)
         browserPanes.append(pane)
+        saveStackChildren()
         return pane.id
     }
 
     public func closeBrowserPane(_ id: UUID) {
         browserPanes.removeAll { $0.id == id }
+        saveStackChildren()
     }
 
     public func browserPane(_ id: UUID) -> BrowserPane? {
@@ -455,6 +546,7 @@ public final class AppModel {
 
     /// Historique de la barre d'adresse (WEB-01) — best-effort, jamais bloquant.
     public func recordVisit(url: String, title: String) {
+        saveStackChildren()   // les tabs des panes font partie de la pile mémorisée
         try? store?.recordVisit(url: url, title: title, at: Date())
     }
 
