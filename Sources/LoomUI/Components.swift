@@ -2,13 +2,58 @@ import LoomCore
 import SwiftUI
 
 // Le vocabulaire visuel de la référence : pilules d'onglets, tags mono,
-// points de statut, boutons pleins à l'accent.
+// points de statut, boutons pleins à l'accent. Tout ce qui est cliquable
+// répond au survol — même recette partout : fond qui se lève, texte qui
+// s'éclaire, 120 ms easeOut.
+
+public extension Animation {
+    /// La transition de survol commune à tous les contrôles.
+    static var hover: Animation { .easeOut(duration: 0.12) }
+}
+
+/// Éclaircit le contrôle au survol — pour les boutons pleins faits main
+/// (le « + » de la barre, ⌘K…) qui ne passent pas par un composant.
+public struct HoverBrightnessModifier: ViewModifier {
+    let amount: Double
+    @State private var hovered = false
+
+    public func body(content: Content) -> some View {
+        content
+            .brightness(hovered ? amount : 0)
+            .onHover { hovered = $0 }
+            .animation(.hover, value: hovered)
+    }
+}
+
+/// Lève la surface au survol — pour les lignes cliquables (piles, listes).
+public struct HoverSurfaceModifier: ViewModifier {
+    let opacity: Double
+    @State private var hovered = false
+
+    public func body(content: Content) -> some View {
+        content
+            .background(hovered ? DefaultTheme.surfaceRaised.opacity(opacity) : .clear)
+            .onHover { hovered = $0 }
+            .animation(.hover, value: hovered)
+    }
+}
+
+public extension View {
+    func hoverBrightness(_ amount: Double = 0.06) -> some View {
+        modifier(HoverBrightnessModifier(amount: amount))
+    }
+
+    func hoverSurface(_ opacity: Double = 1) -> some View {
+        modifier(HoverSurfaceModifier(opacity: opacity))
+    }
+}
 
 /// Onglet de la barre de navigation (Projects / Sessions).
 public struct NavTab: View {
     let title: String
     let isActive: Bool
     let action: () -> Void
+    @State private var hovered = false
 
     public init(_ title: String, isActive: Bool, action: @escaping () -> Void) {
         self.title = title
@@ -20,15 +65,19 @@ public struct NavTab: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                .foregroundStyle(isActive ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
+                .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
+                                                     : DefaultTheme.secondaryText)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background(isActive ? DefaultTheme.surfaceRaised : .clear,
+                .background(isActive ? DefaultTheme.surfaceRaised
+                            : hovered ? DefaultTheme.surfaceRaised.opacity(0.6) : .clear,
                             in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8)
                     .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
     }
 }
 
@@ -44,6 +93,8 @@ public struct AccentButton: View {
         self.action = action
     }
 
+    @State private var hovered = false
+
     public var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
@@ -54,8 +105,11 @@ public struct AccentButton: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 9))
+            .brightness(hovered ? 0.06 : 0)
         }
         .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
     }
 }
 
@@ -74,18 +128,27 @@ public struct GhostButton: View {
         self.action = action
     }
 
+    @State private var hovered = false
+
     public var body: some View {
         Button(role: role, action: action) {
             HStack(spacing: 6) {
                 if let systemImage { Image(systemName: systemImage).font(.system(size: 12)) }
                 if let title { Text(title).font(.system(size: 13)) }
             }
-            .foregroundStyle(role == .destructive ? DefaultTheme.danger : DefaultTheme.secondaryText)
+            .foregroundStyle(role == .destructive ? DefaultTheme.danger
+                             : hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
+            .background(hovered ? (role == .destructive ? DefaultTheme.danger.opacity(0.12)
+                                                        : DefaultTheme.surfaceRaised)
+                                : .clear,
+                        in: RoundedRectangle(cornerRadius: 7))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
     }
 }
 

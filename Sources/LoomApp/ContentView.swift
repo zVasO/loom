@@ -117,6 +117,7 @@ struct ContentView: View {
                     .foregroundStyle(DefaultTheme.accentText)
                     .frame(width: 26, height: 26)
                     .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 7))
+                    .hoverBrightness()
             }
             .buttonStyle(.plain)
 
@@ -138,6 +139,7 @@ struct ContentView: View {
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .padding(.horizontal, 8).padding(.vertical, 5)
                     .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                    .hoverBrightness(0.1)
             }
             .buttonStyle(.plain)
             .keyboardShortcut("k", modifiers: .command)
@@ -336,12 +338,14 @@ struct ProjectRow: View {
             }
         }
         .padding(16)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .background(hovered ? DefaultTheme.surfaceRaised : DefaultTheme.surface,
+                    in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12)
             .stroke(hovered ? DefaultTheme.accent.opacity(0.5) : DefaultTheme.cardBorder, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture { onOpen() }
         .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
         .contextMenu {
             Button("Ouvrir dans le Finder") {
                 NSWorkspace.shared.open(URL(fileURLWithPath: project.path))
@@ -523,6 +527,7 @@ struct SessionsView: View {
         }
         .padding(10)
         .contentShape(Rectangle())
+        .hoverSurface(0.6)
         .onTapGesture { selected = .session(shell.id) }
         .contextMenu {
             Button("Arrêter") { Task { await model.stopSession(shell.id) } }
@@ -555,6 +560,7 @@ struct SessionsView: View {
         }
         .padding(10)
         .contentShape(Rectangle())
+        .hoverSurface(0.6)
         .onTapGesture { selected = .webPane(pane.id) }
         .contextMenu {
             Button("Fermer") {
@@ -587,18 +593,15 @@ struct SessionsView: View {
                     }
                     .foregroundStyle(DefaultTheme.groupHeader)
                     .contentShape(Rectangle())
+                    .hoverBrightness(0.2)
                 }
                 .buttonStyle(.plain)
                 Spacer()
                 if let projectID {
-                    Button {
+                    HoverIconButton(systemImage: "plus",
+                                    help: "Nouvelle session dans ce projet") {
                         onNewSession(projectID)
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(DefaultTheme.secondaryText)
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 2)
@@ -878,9 +881,11 @@ struct SidebarSessionCard: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
         .contextMenu {
             Button("Renommer…", action: onRename)
             Button("Nouveau terminal", action: onNewTerminal)
