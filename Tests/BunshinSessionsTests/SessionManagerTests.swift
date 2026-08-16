@@ -1,5 +1,6 @@
 import Testing
 import BunshinCore
+import BunshinPersistence
 import BunshinSessions
 import BunshinTerminal
 import BunshinTerminalTestSupport
@@ -83,6 +84,37 @@ struct SessionManagerTests {
         let prompt = try JSONSerialization.data(withJSONObject: ["hook_event_name": "UserPromptSubmit"])
         await manager.ingestHookPayload(prompt, token: "token-forgé")
         #expect(await manager.state(of: id) == .needsInput, "un token forgé ne produit aucune transition")
+    }
+
+    @Test("la vérité des états atterrit en base : record, journal, issue (DAT-02, STA-06)")
+    func etatsEnBase() async throws {
+        let dbURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bunshin-mgr-\(UUID().uuidString.prefix(8)).sqlite")
+        let store = try SessionStore(path: dbURL.path)
+        let pty = ScriptedPTYHost()
+        let manager = SessionManager(
+            runtimeDependencies: SessionRuntime.Dependencies(ptyHost: pty,
+                                                             transcript: MemoryTranscriptSink()),
+            store: store)
+
+        let id = try await manager.launch(spec())
+        #expect(try store.session(id: id)?.state == .starting, "la session naît en base")
+
+        await manager.apply(.hook(.userPromptSubmit), to: id)
+        #expect(try store.session(id: id)?.state == .working, "chaque transition met la base à jour")
+
+        pty.exit(code: 0)
+        let recorded = await pollUntil {
+            (try? store.session(id: id))??.state == .completed
+        }
+        #expect(recorded)
+        let record = try #require(try store.session(id: id))
+        #expect(record.exitCode == 0)
+        #expect(record.endedAt != nil)
+
+        let journal = try store.transitions(session: id)
+        #expect(journal.map(\.to) == [.working, .completed], "le journal STA-06 raconte l'histoire")
+        #expect(journal.map(\.source) == [.hook, .process])
     }
 
     private func pollUntil(_ condition: () async -> Bool) async -> Bool {

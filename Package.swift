@@ -23,9 +23,9 @@ let package = Package(
         .target(name: "BunshinAgents", dependencies: ["BunshinCore"]),
         .target(name: "BunshinGit", dependencies: ["BunshinCore"]),
         .target(name: "BunshinWeb", dependencies: ["BunshinCore"]),
-        .target(name: "BunshinPersistence", dependencies: ["BunshinCore", .product(name: "GRDB", package: "GRDB.swift")]),
+        .target(name: "BunshinPersistence", dependencies: ["BunshinCore", "BunshinTerminal", .product(name: "GRDB", package: "GRDB.swift")]),
         .target(name: "BunshinIPC", dependencies: ["BunshinCore"]),
-        .target(name: "BunshinSessions", dependencies: ["BunshinCore", "BunshinTerminal", "BunshinAgents"]),
+        .target(name: "BunshinSessions", dependencies: ["BunshinCore", "BunshinTerminal", "BunshinAgents", "BunshinPersistence"]),
         // Adapters de test du seam PTY, partagés par les cibles de test (jamais exposé en produit).
         .target(name: "BunshinTerminalTestSupport", dependencies: ["BunshinCore", "BunshinTerminal"]),
         .target(name: "BunshinUI", dependencies: ["BunshinCore"]),
