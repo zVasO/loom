@@ -1,5 +1,6 @@
 import Testing
 import BunshinAgents
+import BunshinCore
 import Foundation
 
 // UIX-06 : le diagnostic guidé « Claude Code est-il installé ? » — recherche dans
@@ -41,5 +42,38 @@ struct ClaudeLocatorTests {
         try FileManager.default.createDirectory(at: dir.appendingPathComponent("claude"),
                                                 withIntermediateDirectories: true)
         #expect(ClaudeLocator.locate(searchPath: dir.path, extraLocations: []) == nil)
+    }
+}
+
+@Suite("ClaudeNativeSessions — la Reprise sait si claude a quelque chose à reprendre")
+struct ClaudeNativeSessionsTests {
+
+    @Test("une session native existe si son .jsonl est dans un projet claude")
+    func detectionDeSessionNative() throws {
+        let projects = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bunshin-native-\(UUID().uuidString.prefix(8))")
+        let project = projects.appendingPathComponent("-Users-x-repo-worktree")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let id = SessionID()
+        FileManager.default.createFile(
+            atPath: project.appendingPathComponent("\(id.rawValue.uuidString).jsonl").path,
+            contents: Data("{}".utf8))
+
+        #expect(ClaudeNativeSessions.exists(id, projectsDirectory: projects))
+        #expect(!ClaudeNativeSessions.exists(SessionID(), projectsDirectory: projects),
+                "un UUID jamais persisté → rien à reprendre → il faut relancer à neuf")
+    }
+
+    @Test("la casse de l'UUID ne compte pas")
+    func casseIgnoree() throws {
+        let projects = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bunshin-native-\(UUID().uuidString.prefix(8))")
+        let project = projects.appendingPathComponent("-p")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let id = SessionID()
+        FileManager.default.createFile(
+            atPath: project.appendingPathComponent("\(id.rawValue.uuidString.lowercased()).jsonl").path,
+            contents: Data("{}".utf8))
+        #expect(ClaudeNativeSessions.exists(id, projectsDirectory: projects))
     }
 }

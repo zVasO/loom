@@ -169,17 +169,23 @@ public final class AppModel {
     }
 
     /// UC-7 : la Reprise — même identifiant, hooks ré-injectés, worktree d'origine.
+    /// Si claude n'a jamais persisté la conversation (session lancée mais jamais
+    /// utilisée), `--resume` n'aurait rien à reprendre : on relance À NEUF sous le
+    /// même UUID dans le même worktree — « Reprendre » ne peut plus échouer.
     public func resumeSession(_ record: SessionRecord) async {
         guard let manager else { return }
         let token = UUID().uuidString
-        let command = adapter.resumeCommand(session: record.id, hookToken: token)
+        let command = ClaudeNativeSessions.exists(record.id)
+            ? adapter.resumeCommand(session: record.id, hookToken: token)
+            : adapter.launchCommand(session: record.id, initialPrompt: nil, hookToken: token)
         let directory = record.worktreePath.map(URL.init(fileURLWithPath:))
             ?? FileManager.default.homeDirectoryForCurrentUser
         do {
             try await manager.resume(record, command: command, workingDirectory: directory,
                                      samplingInterval: .milliseconds(500), hookToken: token)
             tokenRegistry.register(token: token, session: record.id)
-            sessions.insert(SessionItem(id: record.id, title: record.title, state: .starting), at: 0)
+            sessions.insert(SessionItem(id: record.id, title: record.title, state: .starting,
+                                        projectID: record.projectID, branch: record.branch), at: 0)
             interruptedSessions.removeAll { $0.id == record.id }
         } catch {
             startupError = String(describing: error)
