@@ -17,8 +17,11 @@ struct BunshinApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .frame(minWidth: 800, minHeight: 500)
+                .frame(minWidth: 980, minHeight: 620)
                 .preferredColorScheme(.dark)
         }
+        // La navbar custom occupe le haut de la fenêtre, comme la référence :
+        // barre de titre masquée, les feux tricolores flottent dessus.
+        .windowStyle(.hiddenTitleBar)
     }
 }

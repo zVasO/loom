@@ -35,6 +35,7 @@ public final class AppModel {
         public var title: String
         public var state: SessionState
         public var projectID: ProjectID?
+        public var branch: String?
     }
 
     public private(set) var sessions: [SessionItem] = []
@@ -46,6 +47,10 @@ public final class AppModel {
     /// SES-07 : terminées/échouées/archivées, consultables.
     public private(set) var historySessions: [SessionRecord] = []
     public private(set) var startupError: String?
+
+    public func clearError() {
+        startupError = nil
+    }
 
     private(set) var manager: SessionManager?
     private var hookServer: HookSocketServer?
@@ -121,12 +126,30 @@ public final class AppModel {
         }
     }
 
+    /// Tous les enregistrements connus — compteurs et dates des cartes projet.
+    public private(set) var allRecords: [SessionRecord] = []
+
     private func reloadPersistedSessions() {
-        let all = (try? store?.allSessions()) ?? []
-        interruptedSessions = (all ?? []).filter { $0.state == .interrupted }
-        historySessions = (all ?? []).filter { [.completed, .failed, .archived].contains($0.state) }
+        let all = ((try? store?.allSessions()) ?? []) ?? []
+        allRecords = all
+        interruptedSessions = all.filter { $0.state == .interrupted }
+        historySessions = all.filter { [.completed, .failed, .archived].contains($0.state) }
         projects = ((try? store?.activeProjects()) ?? []) ?? []
         if selectedProject == nil { selectedProject = projects.first?.id }
+    }
+
+    // MARK: - Compteurs des cartes projet (référence : « 2 active · 4 sessions »)
+
+    public func activeCount(for projectID: ProjectID) -> Int {
+        sessions.filter { $0.projectID == projectID && [.working, .needsInput, .starting, .idle].contains($0.state) }.count
+    }
+
+    public func sessionCount(for projectID: ProjectID) -> Int {
+        allRecords.filter { $0.projectID == projectID }.count
+    }
+
+    public func lastActivity(for projectID: ProjectID) -> Date? {
+        allRecords.filter { $0.projectID == projectID }.map(\.createdAt).max()
     }
 
     /// PRJ-01 : ajoute un projet en pointant un dossier ; s'il est un repo Git, la
@@ -219,8 +242,11 @@ public final class AppModel {
             }
             let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
+            let record = (try? store?.session(id: id)) ?? nil
             sessions.insert(SessionItem(id: id, title: prompt.isEmpty ? "Session" : prompt,
-                                        state: .starting, projectID: project?.id), at: 0)
+                                        state: .starting, projectID: project?.id,
+                                        branch: record?.branch), at: 0)
+            reloadPersistedSessions()
         } catch {
             startupError = String(describing: error)
         }

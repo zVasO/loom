@@ -2,25 +2,40 @@ import BunshinCore
 import BunshinTerminal
 import SwiftUI
 
-/// Thème sombre par défaut du §7 — le système de thèmes complet (THM-01→09,
-/// cascade projet, import iTerm/Ghostty) viendra le remplacer ; d'ici là, une
-/// seule source de couleurs, aucune couleur en dur dans les vues.
+/// Tokens du thème par défaut — calqués sur la référence visuelle validée (Xirp) :
+/// fond quasi-noir, cartes plates cerclées, accent orange chaud, mono pour les
+/// chemins et branches. Le système de thèmes complet (Theme/ThemeResolver) traduit
+/// vers ces tokens ; aucune couleur en dur dans les vues.
 public enum DefaultTheme {
 
-    public static let background = Color(red: 0.043, green: 0.043, blue: 0.059)   // ≈ #0B0B0F
-    public static let surface = Color(red: 0.09, green: 0.09, blue: 0.11)
-    public static let accent = Color.orange
-    public static let primaryText = Color.white.opacity(0.92)
-    public static let secondaryText = Color.white.opacity(0.55)
+    // Fonds
+    public static let background = Color(red: 0.051, green: 0.051, blue: 0.055)   // #0D0D0E
+    public static let contentBackground = Color(red: 0.067, green: 0.067, blue: 0.075) // #111113
+    public static let surface = Color(red: 0.090, green: 0.090, blue: 0.102)      // #17171A
+    public static let surfaceRaised = Color(red: 0.118, green: 0.118, blue: 0.133)
+    public static let cardBorder = Color(red: 0.149, green: 0.149, blue: 0.169)   // #26262B
+
+    // Accent (boutons pleins : texte sombre dessus, comme la référence)
+    public static let accent = Color(red: 0.910, green: 0.580, blue: 0.360)       // #E8945C
+    public static let accentText = Color(red: 0.125, green: 0.071, blue: 0.016)
+
+    // Texte
+    public static let primaryText = Color(red: 0.925, green: 0.925, blue: 0.933)
+    public static let secondaryText = Color(red: 0.525, green: 0.525, blue: 0.557) // #86868E
+    public static let mutedText = Color(red: 0.42, green: 0.42, blue: 0.45)
+
+    // Sémantique
+    public static let branch = Color(red: 0.36, green: 0.784, blue: 0.76)         // cyan mono
+    public static let danger = Color(red: 0.898, green: 0.392, blue: 0.424)
 
     /// Sémantique invariante (THM-08) : un thème ajuste la teinte, jamais le sens.
     public static func badgeColor(for state: SessionState) -> Color {
         switch state {
-        case .working: .green
-        case .needsInput: Color(red: 0.95, green: 0.7, blue: 0.2)   // ambre
-        case .idle, .starting: .blue
-        case .completed, .archived, .draft: .gray
-        case .failed, .interrupted: .red
+        case .working: Color(red: 0.298, green: 0.764, blue: 0.541)               // vert
+        case .needsInput: Color(red: 0.898, green: 0.706, blue: 0.333)            // ambre
+        case .idle, .starting: Color(red: 0.416, green: 0.635, blue: 0.910)       // bleu
+        case .completed, .archived, .draft: secondaryText
+        case .failed, .interrupted: danger
         }
     }
 
@@ -28,7 +43,7 @@ public enum DefaultTheme {
         switch state {
         case .draft: "brouillon"
         case .starting: "démarrage"
-        case .working: "travaille"
+        case .working: "working"
         case .needsInput: "attend une réponse"
         case .idle: "inactif"
         case .completed: "terminé"
