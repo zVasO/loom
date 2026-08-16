@@ -4,12 +4,13 @@ import WebKit
 /// Panneau navigateur (WEB-01) : barre d'adresse, onglets, webview active.
 /// Seul le chrome est thémé par l'app — jamais le contenu web (THM-09).
 public struct BrowserPanelView: View {
-    @State private var controller: BrowserController
+    /// Possédé par l'appelant : les onglets survivent aux allers-retours de vue.
+    private let controller: BrowserController
     @State private var address = ""
     private let onVisit: ((String, String) -> Void)?
 
-    public init(onVisit: ((String, String) -> Void)? = nil) {
-        _controller = State(initialValue: BrowserController())
+    public init(controller: BrowserController, onVisit: ((String, String) -> Void)? = nil) {
+        self.controller = controller
         self.onVisit = onVisit
     }
 

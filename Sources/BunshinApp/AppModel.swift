@@ -36,6 +36,9 @@ public final class AppModel {
         public var state: SessionState
         public var projectID: ProjectID?
         public var branch: String?
+        /// SES-04 : un terminal secondaire (shell libre) rattaché à une session agent.
+        public var parentID: SessionID?
+        public var isShell: Bool = false
     }
 
     public private(set) var sessions: [SessionItem] = []
@@ -143,6 +146,35 @@ public final class AppModel {
         }
         projects = ((try? store?.activeProjects()) ?? nil) ?? []
         if selectedProject == nil { selectedProject = projects.first?.id }
+    }
+
+    /// SES-04 : un shell libre dans le worktree de la session parente — la carte
+    /// apparaît indentée sous elle (« Term n »). Les shells meurent avec l'app et
+    /// ne sont jamais proposés à la Reprise (aucune conversation native).
+    public func launchShell(for parent: SessionItem) async -> SessionID? {
+        guard let manager else { return nil }
+        let record = (try? store?.session(id: parent.id)) ?? nil
+        let directory = record?.worktreePath.map(URL.init(fileURLWithPath:))
+            ?? project(parent.projectID).map { URL(fileURLWithPath: $0.path) }
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let count = sessions.filter { $0.parentID == parent.id }.count + 1
+        var spec = SessionManager.SessionSpec(
+            command: Command(executable: shell, arguments: ["-l"]),
+            workingDirectory: directory,
+            samplingInterval: .seconds(1))
+        spec.title = "Term \(count)"
+        spec.projectID = parent.projectID
+        do {
+            let id = try await manager.launch(spec)
+            sessions.append(SessionItem(id: id, title: "Term \(count)", state: .starting,
+                                        projectID: parent.projectID, branch: parent.branch,
+                                        parentID: parent.id, isShell: true))
+            return id
+        } catch {
+            startupError = String(describing: error)
+            return nil
+        }
     }
 
     /// SES-05 : renommage — la carte, le fil d'Ariane et la base suivent.

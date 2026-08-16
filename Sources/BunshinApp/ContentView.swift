@@ -14,11 +14,18 @@ enum MainTab {
     case projects, sessions
 }
 
+/// Le détail de la vue Sessions : une session… ou le navigateur, en onglet
+/// comme les autres (WEB-03).
+enum DetailSelection: Hashable {
+    case session(SessionID)
+    case browser
+}
+
 struct ContentView: View {
     @State private var model = AppModel()
     @State private var tab: MainTab = .projects
-    @State private var selected: SessionID?
-    @State private var browserShown = false
+    @State private var selected: DetailSelection?
+    @State private var browserController = BrowserController()
     @State private var paletteShown = false
     @State private var paletteQuery = ""
 
@@ -34,6 +41,8 @@ struct ContentView: View {
                 createSession(in: project)
             })
             case .sessions: SessionsView(model: model, selected: $selected,
+                                         browserController: browserController,
+                                         onVisit: { url, title in model.recordVisit(url: url, title: title) },
                                          onNewSession: { project in
                                              createSession(in: project)
                                          })
@@ -42,10 +51,6 @@ struct ContentView: View {
         .background(DefaultTheme.background)
         .preferredColorScheme(.dark)
         .onAppear { model.start() }
-        .sheet(isPresented: $browserShown) {
-            BrowserPanelView(onVisit: { url, title in model.recordVisit(url: url, title: title) })
-                .frame(minWidth: 960, minHeight: 640)
-        }
         .sheet(isPresented: $paletteShown) { palette }
         .alert("Démarrage incomplet", isPresented: .constant(model.startupError != nil)) {
             Button("OK") { model.clearError() }
@@ -85,7 +90,10 @@ struct ContentView: View {
 
             Spacer()
 
-            GhostButton(systemImage: "globe") { browserShown = true }
+            GhostButton(systemImage: "globe") {
+                tab = .sessions
+                selected = .browser
+            }
             Button {
                 paletteShown = true
             } label: {
@@ -144,7 +152,7 @@ struct ContentView: View {
     private func createSession(in projectID: ProjectID?) {
         Task {
             if let id = await model.launchSession(in: projectID) {
-                selected = id
+                selected = .session(id)
                 tab = .sessions
             }
         }
@@ -152,7 +160,7 @@ struct ContentView: View {
 
     private func openFromPalette(_ title: String) {
         if let match = allSessionTitles.first(where: { $0.title == title }) {
-            selected = match.id
+            selected = .session(match.id)
             tab = .sessions
         }
         paletteShown = false
@@ -314,7 +322,9 @@ struct ProjectRow: View {
 
 struct SessionsView: View {
     let model: AppModel
-    @Binding var selected: SessionID?
+    @Binding var selected: DetailSelection?
+    let browserController: BrowserController
+    let onVisit: (String, String) -> Void
     let onNewSession: (ProjectID) -> Void
     @State private var renameTarget: SessionID?
     @State private var renameText = ""
@@ -323,9 +333,12 @@ struct SessionsView: View {
         HStack(spacing: 0) {
             sidebar
             Divider().overlay(DefaultTheme.cardBorder)
-            if let selected {
-                SessionDetailView(model: model, sessionID: selected)
-                    .id(selected)
+            if case .session(let sessionID) = selected {
+                SessionDetailView(model: model, sessionID: sessionID)
+                    .id(sessionID)
+            } else if selected == .browser {
+                BrowserPanelView(controller: browserController, onVisit: onVisit)
+                    .background(DefaultTheme.contentBackground)
             } else {
                 VStack(spacing: 8) {
                     Text("Aucune session ouverte")
@@ -343,6 +356,7 @@ struct SessionsView: View {
     private var sidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                browserCard
                 ForEach(model.projects, id: \.id) { project in
                     let items = model.sessions.filter { $0.projectID == project.id }
                     let interrupted = model.interruptedSessions.filter { $0.projectID == project.id }
@@ -382,8 +396,67 @@ struct SessionsView: View {
     private func projectGroup(_ project: ProjectRecord, items: [AppModel.SessionItem],
                               interrupted: [SessionRecord]) -> some View {
         groupHeader(project.name.uppercased(), projectID: project.id)
-        ForEach(items) { item in sessionCard(item) }
+        ForEach(items.filter { !$0.isShell }) { item in
+            sessionCard(item)
+            ForEach(items.filter { $0.parentID == item.id }) { shell in
+                shellCard(shell, parent: item)
+            }
+        }
         ForEach(interrupted, id: \.id) { record in interruptedCard(record) }
+    }
+
+    /// Le navigateur vit en onglet, comme une session (WEB-03).
+    private var browserCard: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "globe")
+                .font(.system(size: 12))
+                .foregroundStyle(DefaultTheme.accent)
+            Text("Navigateur")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(DefaultTheme.primaryText)
+            Spacer()
+            if !browserController.tabs.isEmpty {
+                Text("\(browserController.tabs.count)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
+        }
+        .padding(10)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9)
+            .stroke(selected == .browser ? DefaultTheme.accent : DefaultTheme.cardBorder, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { selected = .browser }
+    }
+
+    /// SES-04 : le terminal secondaire, indenté sous sa session parente.
+    private func shellCard(_ shell: AppModel.SessionItem, parent: AppModel.SessionItem) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "terminal")
+                .font(.system(size: 10))
+                .foregroundStyle(DefaultTheme.secondaryText)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(shell.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                Text(parent.title)
+                    .font(.system(size: 9))
+                    .foregroundStyle(DefaultTheme.mutedText)
+            }
+            Spacer()
+            StatusLabel(shell.state)
+        }
+        .padding(8)
+        .padding(.leading, 14)
+        .background(DefaultTheme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8)
+            .stroke(selected == .session(shell.id) ? DefaultTheme.accent : DefaultTheme.cardBorder,
+                    lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { selected = .session(shell.id) }
+        .contextMenu {
+            Button("Arrêter") { Task { await model.stopSession(shell.id) } }
+        }
     }
 
     private func groupHeader(_ title: String, projectID: ProjectID?) -> some View {
@@ -411,31 +484,21 @@ struct SessionsView: View {
     }
 
     private func sessionCard(_ item: AppModel.SessionItem) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(item.title)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(DefaultTheme.primaryText)
-                .lineLimit(1)
-            if let branch = item.branch {
-                MonoTag(branch, systemImage: "arrow.triangle.branch",
-                        color: DefaultTheme.secondaryText)
-            }
-            StatusLabel(item.state)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9)
-            .stroke(selected == item.id ? DefaultTheme.accent : DefaultTheme.cardBorder, lineWidth: 1))
-        .contentShape(Rectangle())
-        .onTapGesture { selected = item.id }
-        .contextMenu {
-            Button("Renommer…") {
+        SidebarSessionCard(
+            item: item,
+            isSelected: selected == .session(item.id),
+            onSelect: { selected = .session(item.id) },
+            onNewTerminal: {
+                Task {
+                    if let id = await model.launchShell(for: item) { selected = .session(id) }
+                }
+            },
+            onOpenBrowser: { selected = .browser },
+            onRename: {
                 renameText = item.title
                 renameTarget = item.id
-            }
-            Button("Archiver") { Task { await model.archiveSession(item.id) } }
-        }
+            },
+            onArchive: { Task { await model.archiveSession(item.id) } })
     }
 
     private func interruptedCard(_ record: SessionRecord) -> some View {
@@ -671,6 +734,65 @@ struct SessionDetailView: View {
         case .deleted: "minus"
         case .renamed: "arrow.right"
         case .untracked: "questionmark"
+        }
+    }
+}
+
+// MARK: - Carte de session (référence : icônes au survol — terminal, navigateur)
+
+struct SidebarSessionCard: View {
+    let item: AppModel.SessionItem
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onNewTerminal: () -> Void
+    let onOpenBrowser: () -> Void
+    let onRename: () -> Void
+    let onArchive: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(item.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .lineLimit(1)
+                Spacer()
+                if hovered {
+                    Button(action: onNewTerminal) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 10))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Nouveau terminal dans ce worktree")
+                    Button(action: onOpenBrowser) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 10))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Ouvrir le navigateur")
+                }
+            }
+            if let branch = item.branch {
+                MonoTag(branch, systemImage: "arrow.triangle.branch",
+                        color: DefaultTheme.secondaryText)
+            }
+            StatusLabel(item.state)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9)
+            .stroke(isSelected ? DefaultTheme.accent : DefaultTheme.cardBorder, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .onHover { hovered = $0 }
+        .contextMenu {
+            Button("Renommer…", action: onRename)
+            Button("Nouveau terminal", action: onNewTerminal)
+            Button("Archiver", action: onArchive)
         }
     }
 }
