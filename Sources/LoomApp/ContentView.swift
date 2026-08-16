@@ -1136,11 +1136,14 @@ struct SessionsView: View {
                 }
             }
         }
-        // ⌘T : un onglet DANS le contexte affiché — web si navigateur, terminal sinon.
+        // ⌘T duplique le TYPE d'onglet courant, toujours dans la barre
+        // horizontale : sur un terminal → un Term de plus ; sur un navigateur
+        // → un Web de plus dans la même pile.
         .onReceive(NotificationCenter.default.publisher(for: .loomNewTab)) { _ in
             switch selected {
             case .webPane(let paneID):
-                model.browserPane(paneID)?.controller.openTab(urlString: "google.com")
+                let parent = model.browserPane(paneID)?.parentID
+                selected = .webPane(model.openBrowserPane(for: parent))
             case .session:
                 if let parent = currentStackParent {
                     Task {
@@ -1245,14 +1248,34 @@ struct SessionsView: View {
                                      model.closeBrowserPane(pane.id)
                                  })
                     }
-                    HoverIconButton(systemImage: "plus",
-                                    help: "Nouveau terminal dans cette pile (⌘T)") {
-                        Task {
-                            if let id = await model.launchShell(for: parent) {
-                                selected = .session(id)
+                    // Le « + » propose les deux natures d'onglet — toujours
+                    // dans la barre horizontale de cette pile.
+                    Menu {
+                        Button {
+                            Task {
+                                if let id = await model.launchShell(for: parent) {
+                                    selected = .session(id)
+                                }
                             }
+                        } label: {
+                            Label("Nouveau terminal", systemImage: "terminal")
                         }
+                        Button {
+                            selected = .webPane(model.openBrowserPane(for: parent.id))
+                        } label: {
+                            Label("Nouveau navigateur", systemImage: "globe")
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
                     }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Nouvel onglet dans cette pile (⌘T : même type que l'actif)")
                     .padding(.leading, 3)
                 }
                 .padding(.horizontal, 8).padding(.vertical, 5)
