@@ -1386,20 +1386,17 @@ struct SessionsView: View {
                     }
                 })
                 .stackChrome(isSelected: selected == .session(item.id))
-            ForEach(shells) { shell in
+            // Les onglets individuels vivent dans la barre HORIZONTALE : la
+            // pile verticale ne montre qu'une ligne de groupe par type.
+            if !shells.isEmpty || !dormantShells.isEmpty {
                 Divider().overlay(DefaultTheme.cardBorder)
-                shellRow(shell, parent: item)
-                    .stackChrome(isSelected: selected == .session(shell.id))
+                terminalGroupRow(parent: item, shells: shells, dormants: dormantShells)
+                    .stackChrome(isSelected: shells.contains { selected == .session($0.id) })
             }
-            ForEach(dormantShells) { dormant in
+            if !panes.isEmpty {
                 Divider().overlay(DefaultTheme.cardBorder)
-                dormantShellRow(dormant, parent: item)
-                    .stackChrome(isSelected: false)
-            }
-            ForEach(panes) { pane in
-                Divider().overlay(DefaultTheme.cardBorder)
-                paneRow(pane, parent: item)
-                    .stackChrome(isSelected: selected == .webPane(pane.id))
+                webGroupRow(parent: item, panes: panes)
+                    .stackChrome(isSelected: panes.contains { selected == .webPane($0.id) })
             }
         }
         .background(DefaultTheme.surface)
@@ -1407,22 +1404,34 @@ struct SessionsView: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
-    /// SES-04 : le terminal secondaire dans la pile (« >_ Term n · parent »).
-    private func shellRow(_ shell: AppModel.SessionItem, parent: AppModel.SessionItem) -> some View {
-        HStack(spacing: 8) {
+    /// SES-04 : LE groupe de terminaux de la pile — une seule ligne, le détail
+    /// des onglets vit dans la barre horizontale.
+    private func terminalGroupRow(parent: AppModel.SessionItem,
+                                  shells: [AppModel.SessionItem],
+                                  dormants: [AppModel.DormantShell]) -> some View {
+        let count = shells.count + dormants.count
+        return HStack(spacing: 8) {
             Image(systemName: "terminal")
                 .font(.system(size: 11))
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(shells.isEmpty ? DefaultTheme.mutedText : DefaultTheme.accent)
             VStack(alignment: .leading, spacing: 2) {
-                Text(shell.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(DefaultTheme.primaryText)
+                HStack(spacing: 6) {
+                    Text(count > 1 ? "Terminaux" : (shells.first?.title ?? dormants.first?.title ?? "Terminal"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(shells.isEmpty ? DefaultTheme.secondaryText
+                                                        : DefaultTheme.primaryText)
+                    if count > 1 {
+                        Text("\(count)")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(DefaultTheme.surfaceRaised, in: Capsule())
+                    }
+                }
                 Label(parent.title, systemImage: "link")
                     .font(.system(size: 10))
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
-                // Pas de badge d'état sur les terminaux : working/attend une
-                // réponse ne parlent que des sessions claude.
             }
             Spacer()
         }
@@ -1432,32 +1441,46 @@ struct SessionsView: View {
         .stackQuickActions(
             onNewTerminal: { Task { await model.launchShell(for: parent) } },
             onOpenBrowser: { selected = .webPane(model.openBrowserPane(for: parent.id)) },
-            onClose: { Task { await model.stopSession(shell.id) } })
-        .onTapGesture { selected = .session(shell.id) }
-        .contextMenu {
-            Button("Arrêter") { Task { await model.stopSession(shell.id) } }
+            onClose: {
+                Task {
+                    for shell in shells { await model.stopSession(shell.id) }
+                    for dormant in dormants { model.forgetDormantShell(dormant) }
+                }
+            })
+        .onTapGesture {
+            if let first = shells.first {
+                selected = .session(first.id)
+            } else if let dormant = dormants.first {
+                Task {
+                    if let id = await model.reopenDormantShell(dormant) {
+                        selected = .session(id)
+                    }
+                }
+            }
         }
     }
 
-    /// Un terminal mémorisé dont le process est mort avec l'app : la ligne
-    /// reste dans la pile, le clic relance un shell du même nom au même endroit.
-    private func dormantShellRow(_ dormant: AppModel.DormantShell,
-                                 parent: AppModel.SessionItem) -> some View {
-        let parentTitle = parent.title
-        return dormantShellRowBody(dormant, parentTitle: parentTitle, parent: parent)
-    }
-
-    private func dormantShellRowBody(_ dormant: AppModel.DormantShell, parentTitle: String,
-                                     parent: AppModel.SessionItem) -> some View {
+    /// WEB-03 : LE groupe de navigateurs de la pile — même principe.
+    private func webGroupRow(parent: AppModel.SessionItem,
+                             panes: [AppModel.BrowserPane]) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "terminal")
+            Image(systemName: "globe")
                 .font(.system(size: 11))
-                .foregroundStyle(DefaultTheme.mutedText)
+                .foregroundStyle(DefaultTheme.accent)
             VStack(alignment: .leading, spacing: 2) {
-                Text(dormant.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Label(parentTitle, systemImage: "link")
+                HStack(spacing: 6) {
+                    Text(panes.count > 1 ? "Web" : (panes.first?.title ?? "Web"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                    if panes.count > 1 {
+                        Text("\(panes.count)")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(DefaultTheme.surfaceRaised, in: Capsule())
+                    }
+                }
+                Label(parent.title, systemImage: "link")
                     .font(.system(size: 10))
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
@@ -1470,13 +1493,14 @@ struct SessionsView: View {
         .stackQuickActions(
             onNewTerminal: { Task { await model.launchShell(for: parent) } },
             onOpenBrowser: { selected = .webPane(model.openBrowserPane(for: parent.id)) },
-            onClose: { model.forgetDormantShell(dormant) })
-        .onTapGesture {
-            Task {
-                if let id = await model.reopenDormantShell(dormant) {
-                    selected = .session(id)
+            onClose: {
+                for pane in panes {
+                    if selected == .webPane(pane.id) { selected = nil }
+                    model.closeBrowserPane(pane.id)
                 }
-            }
+            })
+        .onTapGesture {
+            if let first = panes.first { selected = .webPane(first.id) }
         }
     }
 
