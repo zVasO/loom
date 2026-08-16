@@ -1,3 +1,4 @@
+import BunshinAgents
 import BunshinCore
 import BunshinTerminal
 import Foundation
@@ -23,6 +24,9 @@ public actor SessionManager {
     private var runtimes: [SessionID: SessionRuntime] = [:]
     private var states: [SessionID: StateEngine.State] = [:]
     private var pumps: [SessionID: Task<Void, Never>] = [:]
+    /// Token IPC par session (ADR-0005) : émis à la naissance, vérifié à chaque payload.
+    private var tokens: [String: SessionID] = [:]
+    private var tokensBySession: [SessionID: String] = [:]
     private let clock = ContinuousClock()
 
     public init(runtimeDependencies: SessionRuntime.Dependencies) {
@@ -39,6 +43,9 @@ public actor SessionManager {
             using: runtimeDependencies)
         runtimes[id] = runtime
         states[id] = StateEngine.State(session: .starting)
+        let token = UUID().uuidString
+        tokens[token] = id
+        tokensBySession[id] = token
         pumps[id] = Task { [weak self] in
             for await event in events {
                 await self?.handle(event, for: id)
@@ -52,6 +59,25 @@ public actor SessionManager {
     public func apply(_ event: StateEngine.Event, to id: SessionID) {
         guard let current = states[id] else { return }
         states[id] = StateEngine.reduce(current, event, at: clock.now)
+    }
+
+    // MARK: - Circuit hooks (branché sur HookSocketServer)
+
+    public func hookToken(for id: SessionID) -> String? {
+        tokensBySession[id]
+    }
+
+    /// Le `validate` du serveur IPC : token → session, `nil` pour tout token inconnu.
+    public func session(forToken token: String) -> SessionID? {
+        tokens[token]
+    }
+
+    /// Le `handler` du serveur IPC : payload brut → interprétation par l'adapter →
+    /// réducteur. Un token forgé ou un payload sans valeur d'état ne produit rien.
+    public func ingestHookPayload(_ payload: Data, token: String) {
+        guard let id = tokens[token],
+              let event = ClaudeCodeAdapter.interpret(payload) else { return }
+        apply(event, to: id)
     }
 
     public func state(of id: SessionID) -> SessionState? {

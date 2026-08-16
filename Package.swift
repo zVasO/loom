@@ -39,5 +39,6 @@ let package = Package(
         .testTarget(name: "BunshinAgentsTests", dependencies: ["BunshinAgents"]),
         .testTarget(name: "BunshinTerminalTests", dependencies: ["BunshinTerminal", "BunshinTerminalTestSupport"]),
         .testTarget(name: "BunshinSessionsTests", dependencies: ["BunshinSessions", "BunshinTerminalTestSupport"]),
+        .testTarget(name: "BunshinIPCTests", dependencies: ["BunshinIPC"]),
     ]
 )

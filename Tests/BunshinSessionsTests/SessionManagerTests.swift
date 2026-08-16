@@ -66,6 +66,25 @@ struct SessionManagerTests {
         #expect(failed, "exit 130 ≠ 0 → failed, décidé par le StateEngine, pas par le runtime")
     }
 
+    @Test("le circuit hooks complet : token par session, payload brut → état (STA-01)")
+    func circuitHooksComplet() async throws {
+        let manager = makeManager()
+        let id = try await manager.launch(spec())
+        let token = try #require(await manager.hookToken(for: id), "chaque session naît avec son token")
+        #expect(await manager.session(forToken: token) == id)
+
+        let stop = try JSONSerialization.data(withJSONObject: [
+            "hook_event_name": "Stop",
+            "last_assistant_message": "Deux pistes possibles — laquelle veux-tu ?",
+        ])
+        await manager.ingestHookPayload(stop, token: token)
+        #expect(await manager.state(of: id) == .needsInput, "payload brut → interpret → réducteur → badge")
+
+        let prompt = try JSONSerialization.data(withJSONObject: ["hook_event_name": "UserPromptSubmit"])
+        await manager.ingestHookPayload(prompt, token: "token-forgé")
+        #expect(await manager.state(of: id) == .needsInput, "un token forgé ne produit aucune transition")
+    }
+
     private func pollUntil(_ condition: () async -> Bool) async -> Bool {
         for _ in 0..<200 {
             if await condition() { return true }
