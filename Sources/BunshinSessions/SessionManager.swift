@@ -13,11 +13,15 @@ public actor SessionManager {
         public var command: Command
         public var workingDirectory: URL
         public var geometry: TerminalGeometry
+        /// `nil` = pas de canal heuristique (sessions pilotées par hooks).
+        public var samplingInterval: Duration?
         public init(command: Command, workingDirectory: URL,
-                    geometry: TerminalGeometry = .default) {
+                    geometry: TerminalGeometry = .default,
+                    samplingInterval: Duration? = nil) {
             self.command = command
             self.workingDirectory = workingDirectory
             self.geometry = geometry
+            self.samplingInterval = samplingInterval
         }
     }
 
@@ -33,9 +37,16 @@ public actor SessionManager {
     private var tokensBySession: [SessionID: String] = [:]
     private let clock = ContinuousClock()
 
-    public init(runtimeDependencies: SessionRuntime.Dependencies, store: SessionStore? = nil) {
+    private let tuning: StateEngine.Tuning
+    private let interpreter: HeuristicInterpreter
+
+    public init(runtimeDependencies: SessionRuntime.Dependencies, store: SessionStore? = nil,
+                tuning: StateEngine.Tuning = .standard,
+                interpreter: HeuristicInterpreter = HeuristicInterpreter()) {
         self.runtimeDependencies = runtimeDependencies
         self.store = store
+        self.tuning = tuning
+        self.interpreter = interpreter
     }
 
     /// UC-1 : crée le runtime, arme le pump d'événements, la session naît en `starting`.
@@ -44,7 +55,8 @@ public actor SessionManager {
         let (runtime, events) = try SessionRuntime.launch(
             SessionLaunchPlan(command: spec.command,
                               workingDirectory: spec.workingDirectory,
-                              geometry: spec.geometry),
+                              geometry: spec.geometry,
+                              samplingInterval: spec.samplingInterval),
             using: runtimeDependencies)
         runtimes[id] = runtime
         states[id] = StateEngine.State(session: .starting)
@@ -66,7 +78,7 @@ public actor SessionManager {
     /// passe par le réducteur — le manager n'écrit jamais un état à la main.
     public func apply(_ event: StateEngine.Event, to id: SessionID) {
         guard let current = states[id] else { return }
-        let next = StateEngine.reduce(current, event, at: clock.now)
+        let next = StateEngine.reduce(current, event, at: clock.now, tuning: tuning)
         states[id] = next
         guard next.session != current.session else { return }
         // La transition est réelle : journal STA-06 + état courant en base.
@@ -130,6 +142,10 @@ public actor SessionManager {
         switch event {
         case .started:
             break   // la session reste `starting` jusqu'au premier signal de l'agent
+        case .activity(let sample):
+            if let proposal = interpreter.propose(sample) {
+                apply(proposal, to: id)
+            }
         case .terminated(let report):
             apply(.process(.exited(code: report.exitStatus.code)), to: id)
             pumps[id] = nil

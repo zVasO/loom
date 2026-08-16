@@ -56,7 +56,10 @@ public final class SwiftTermEngine: TerminalEngine {
             cells.reserveCapacity(geometry.cols)
             for col in 0..<geometry.cols {
                 guard let charData = terminal.getCharData(col: col, row: row) else { break }
-                cells.append(TerminalCell(character: charData.getCharacter(),
+                let character = charData.getCharacter()
+                // Les cellules jamais écrites sont des NUL : pour toute la couche valeur,
+                // une cellule vide est un espace (sinon les fins de ligne sont du contrôle).
+                cells.append(TerminalCell(character: character == "\0" ? " " : character,
                                           style: Self.cellStyle(from: charData.attribute)))
             }
             lines.append(TerminalLine(cells: cells))

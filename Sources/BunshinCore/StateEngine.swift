@@ -2,14 +2,25 @@
 /// porté depuis le prototype validé (docs/research/state-engine-prototype.md).
 public enum StateEngine {
 
-    /// Un état posé par un hook n'est jamais écrasé par une heuristique dans les 10 s (STA-03).
-    public static let hookPriorityWindow: Duration = .seconds(10)
-    /// Une proposition heuristique doit être maintenue au moins 2 s avant de s'appliquer (STA-02).
-    public static let heuristicHysteresis: Duration = .seconds(2)
-    /// Au-delà de cet écart entre deux observations d'une même proposition, elle est
-    /// périmée et repart de zéro : l'hystérésis mesure une observation SOUTENUE,
-    /// pas l'âge d'un candidat oublié.
-    public static let heuristicStaleness: Duration = .seconds(4)
+    /// Constantes du lissage, injectables (tests en millisecondes, réglages par
+    /// agent à terme). Les valeurs standard sont celles du cahier des charges.
+    public struct Tuning: Sendable {
+        /// Un état posé par un hook n'est jamais écrasé par une heuristique dans cette fenêtre (STA-03).
+        public var hookPriorityWindow: Duration
+        /// Une proposition heuristique doit être maintenue au moins ce temps avant de s'appliquer (STA-02).
+        public var heuristicHysteresis: Duration
+        /// Au-delà de cet écart entre deux observations d'une même proposition, elle est
+        /// périmée et repart de zéro : l'hystérésis mesure une observation SOUTENUE.
+        public var heuristicStaleness: Duration
+        public init(hookPriorityWindow: Duration = .seconds(10),
+                    heuristicHysteresis: Duration = .seconds(2),
+                    heuristicStaleness: Duration = .seconds(4)) {
+            self.hookPriorityWindow = hookPriorityWindow
+            self.heuristicHysteresis = heuristicHysteresis
+            self.heuristicStaleness = heuristicStaleness
+        }
+        public static let standard = Tuning()
+    }
 
     public struct State: Sendable, Equatable {
         public var session: SessionState
@@ -69,7 +80,8 @@ public enum StateEngine {
     /// archivage — crée une nouvelle trajectoire).
     private static let terminalStates: Set<SessionState> = [.completed, .failed, .archived]
 
-    public static func reduce(_ state: State, _ event: Event, at instant: ContinuousClock.Instant) -> State {
+    public static func reduce(_ state: State, _ event: Event, at instant: ContinuousClock.Instant,
+                              tuning: Tuning = .standard) -> State {
         guard !terminalStates.contains(state.session) else { return state }
         var next = state
         switch event {
@@ -89,12 +101,12 @@ public enum StateEngine {
                 next.candidate = nil
             }
         case .heuristic(let guess):
-            if let lastHookAt = state.lastHookAt, instant - lastHookAt < hookPriorityWindow {
+            if let lastHookAt = state.lastHookAt, instant - lastHookAt < tuning.hookPriorityWindow {
                 break
             }
             if let candidate = state.candidate, candidate.guess == guess,
-               instant - candidate.lastObserved <= heuristicStaleness {
-                if instant - candidate.since >= heuristicHysteresis {
+               instant - candidate.lastObserved <= tuning.heuristicStaleness {
+                if instant - candidate.since >= tuning.heuristicHysteresis {
                     next.session = sessionState(for: guess)
                     next.candidate = nil
                 } else {

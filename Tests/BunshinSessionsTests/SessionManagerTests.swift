@@ -117,6 +117,27 @@ struct SessionManagerTests {
         #expect(journal.map(\.source) == [.hook, .process])
     }
 
+    @Test("agent sans hooks : les échantillons traversent l'interprète jusqu'au badge (STA-02)")
+    func canalHeuristiqueDeBoutEnBout() async throws {
+        let pty = ScriptedPTYHost()
+        let manager = SessionManager(
+            runtimeDependencies: SessionRuntime.Dependencies(ptyHost: pty,
+                                                             transcript: MemoryTranscriptSink()),
+            tuning: StateEngine.Tuning(hookPriorityWindow: .milliseconds(50),
+                                       heuristicHysteresis: .milliseconds(40),
+                                       heuristicStaleness: .milliseconds(500)),
+            interpreter: HeuristicInterpreter(silenceThreshold: .milliseconds(30)))
+
+        var spec = spec()
+        spec.samplingInterval = .milliseconds(25)
+        let id = try await manager.launch(spec)
+
+        pty.emit("Que voulez-vous faire ?\r\n❯ ")
+
+        let badged = await pollUntil { await manager.state(of: id) == .needsInput }
+        #expect(badged, "silence + motif d'invite, soutenus : la carte se badge sans aucun hook")
+    }
+
     private func pollUntil(_ condition: () async -> Bool) async -> Bool {
         for _ in 0..<200 {
             if await condition() { return true }

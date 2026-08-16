@@ -144,6 +144,37 @@ struct SessionRuntimeTests {
         #expect(screen.lines[0].cells[0].style.foreground == .ansi(2))
     }
 
+    @Test("le runtime échantillonne : octets, silence, queue d'écran (STA-02)")
+    func echantillonnageHeuristique() async throws {
+        let pty = ScriptedPTYHost()
+        var plan = SessionLaunchPlan(command: Command(executable: "/fake/codex"),
+                                     workingDirectory: URL(fileURLWithPath: "/tmp/worktree"))
+        plan.samplingInterval = .milliseconds(30)
+        let (_, events) = try SessionRuntime.launch(
+            plan,
+            using: SessionRuntime.Dependencies(ptyHost: pty,
+                                               transcript: MemoryTranscriptSink(),
+                                               makeEngine: { geometry, _ in LineEngine(geometry: geometry) }))
+
+        pty.emit("invite $ ")
+
+        var sawActivity = false
+        var sawQuietTail = false
+        for await event in events {
+            if case .activity(let sample) = event {
+                sawActivity = true
+                if sample.bytesSinceLastSample == 0,
+                   sample.silence >= .milliseconds(30),
+                   sample.visibleTail.last?.hasPrefix("invite $") == true {
+                    sawQuietTail = true
+                    break
+                }
+            }
+        }
+        #expect(sawActivity, "des échantillons arrivent sur le flux d'événements")
+        #expect(sawQuietTail, "après le calme : zéro octet, silence mesuré, motif d'invite visible")
+    }
+
     @Test("des octets tardifs après l'exit sont drainés avant la conclusion (course EOF/exit)")
     func drainageAvantConclusion() async throws {
         let pty = ScriptedPTYHost()

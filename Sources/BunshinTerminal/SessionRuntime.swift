@@ -26,9 +26,31 @@ public final class SessionRuntime: @unchecked Sendable {
 
     public enum Event: Sendable {
         case started
+        /// Matière première du canal heuristique STA-02 — émis à la cadence de
+        /// `SessionLaunchPlan.samplingInterval` (jamais si `nil`). Le runtime mesure,
+        /// il n'interprète pas.
+        case activity(ActivitySample)
         /// Toujours le dernier événement ; le flux se termine juste après. Quand un
         /// appelant le reçoit, le transcript est complet et fermé (barrière de drainage).
         case terminated(TerminationReport)
+    }
+
+    public struct ActivitySample: Sendable {
+        public let at: ContinuousClock.Instant
+        public let bytesSinceLastSample: Int
+        /// Depuis le dernier octet reçu du PTY.
+        public let silence: Duration
+        /// Dernières lignes non vides de l'écran visible, texte seul.
+        public let visibleTail: [String]
+        public let cpuFraction: Double
+        public init(at: ContinuousClock.Instant, bytesSinceLastSample: Int, silence: Duration,
+                    visibleTail: [String], cpuFraction: Double) {
+            self.at = at
+            self.bytesSinceLastSample = bytesSinceLastSample
+            self.silence = silence
+            self.visibleTail = visibleTail
+            self.cpuFraction = cpuFraction
+        }
     }
 
     public struct TerminationReport: Sendable {
@@ -44,6 +66,10 @@ public final class SessionRuntime: @unchecked Sendable {
     // toujours dans le transcript avant sa fermeture. Confinés à `queue`.
     private var sawEOF = false
     private var exitStatus: ExitStatus?
+    // Échantillonnage heuristique (confinés à `queue`).
+    private var samplingTimer: DispatchSourceTimer?
+    private var bytesSinceLastSample = 0
+    private var lastByteAt: ContinuousClock.Instant?
     private let geometry: TerminalGeometry
     /// Géométrie de lancement, lisible par la fabrique de surfaces (MainActor).
     var launchGeometry: TerminalGeometry { geometry }
@@ -97,11 +123,31 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
+    /// Sur la queue de session : mesure et émet un échantillon (STA-02). Le runtime
+    /// ne décide d'aucun état — l'interprétation appartient à la couche session.
+    private func emitSample(_ continuation: AsyncStream<Event>.Continuation) {
+        let now = ContinuousClock().now
+        let tail = (engine?.snapshot().lines ?? [])
+            .map(\.text)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .suffix(12)
+        continuation.yield(.activity(ActivitySample(
+            at: now,
+            bytesSinceLastSample: bytesSinceLastSample,
+            silence: lastByteAt.map { now - $0 } ?? .zero,
+            visibleTail: Array(tail),
+            cpuFraction: channel.cpuFraction())))
+        bytesSinceLastSample = 0
+    }
+
     /// Appelé sur la queue de session. Conclut quand exit ET EOF sont là : ferme le
     /// canal, fixe le transcript, émet `.terminated`, termine le flux.
     private func concludeIfDrained(transcript: any TranscriptSink,
                                    continuation: AsyncStream<Event>.Continuation) {
         guard sawEOF, let status = exitStatus else { return }
+        samplingTimer?.cancel()
+        samplingTimer = nil
         channel.close()
         Task {
             await transcript.finish(terminal: .primary)
@@ -242,6 +288,17 @@ public final class SessionRuntime: @unchecked Sendable {
         queue.async {
             runtime.engine = dependencies.makeEngine(plan.geometry, queue)
             continuation.yield(.started)
+            if let interval = plan.samplingInterval {
+                let seconds = Double(interval.components.seconds)
+                    + Double(interval.components.attoseconds) / 1e18
+                let timer = DispatchSource.makeTimerSource(queue: queue)
+                timer.schedule(deadline: .now() + seconds, repeating: seconds)
+                timer.setEventHandler { [weak runtime] in
+                    runtime?.emitSample(continuation)
+                }
+                timer.activate()
+                runtime.samplingTimer = timer
+            }
         }
 
         runtime.channel = try dependencies.ptyHost.open(
@@ -262,6 +319,8 @@ public final class SessionRuntime: @unchecked Sendable {
                 // aucun octet déjà lu (NFR-R).
                 dependencies.transcript.append(bytes[...], terminal: .primary)
                 runtime.engine?.feed(bytes[...])
+                runtime.bytesSinceLastSample += bytes.count
+                runtime.lastByteAt = ContinuousClock().now
                 runtime.scheduleFrame()
             case .endOfFile:
                 runtime.sawEOF = true
@@ -298,9 +357,14 @@ public struct SessionLaunchPlan: Sendable {
     public var command: Command
     public var workingDirectory: URL
     public var geometry: TerminalGeometry
-    public init(command: Command, workingDirectory: URL, geometry: TerminalGeometry = .default) {
+    /// Cadence du canal heuristique (STA-02). `nil` = pas d'échantillonnage —
+    /// les sessions pilotées par hooks n'en ont pas besoin.
+    public var samplingInterval: Duration?
+    public init(command: Command, workingDirectory: URL, geometry: TerminalGeometry = .default,
+                samplingInterval: Duration? = nil) {
         self.command = command
         self.workingDirectory = workingDirectory
         self.geometry = geometry
+        self.samplingInterval = samplingInterval
     }
 }
