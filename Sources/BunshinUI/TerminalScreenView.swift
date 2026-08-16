@@ -49,7 +49,7 @@ public struct TerminalScreenView: View {
                     ForEach(Array(screen.lines.enumerated()), id: \.offset) { _, line in
                         row(line, height: cell.height)
                     }
-                    Color.clear.frame(height: 1).id("bas")
+                    Color.clear.frame(height: 0).id("bas")   // marqueur d’ancrage : hauteur nulle, sinon il rogne le haut
                 }
                 .padding(8)
             }
