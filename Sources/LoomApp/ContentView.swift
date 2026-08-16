@@ -653,6 +653,15 @@ struct SessionsView: View {
                 placeholder
             }
         }
+        // Le process de la session affichée est mort (⌃C⌃C, exit) : le tab se
+        // ferme tout seul — la carte « inactif » reste dans la pile si la
+        // session a une conversation.
+        .onChange(of: model.sessions) { _, live in
+            if case .session(let id) = selected,
+               !live.contains(where: { $0.id == id }) {
+                selected = nil
+            }
+        }
     }
 
     private var placeholder: some View {

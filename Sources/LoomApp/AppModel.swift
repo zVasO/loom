@@ -481,7 +481,15 @@ public final class AppModel {
     private func observeStates(of manager: SessionManager) async {
         let updates = await manager.stateUpdates()
         for await update in updates {
-            if let index = sessions.firstIndex(where: { $0.id == update.id }) {
+            guard let index = sessions.firstIndex(where: { $0.id == update.id }) else { continue }
+            // Le process est mort (⌃C⌃C, exit, crash) : la carte vivante se ferme
+            // d'elle-même — la session réapparaît « inactif » dans sa pile si elle
+            // a une conversation, disparaît sinon (filtre du rechargement).
+            if [.completed, .failed, .interrupted].contains(update.state) {
+                sessions.remove(at: index)
+                saveStackChildren()
+                reloadPersistedSessions()
+            } else {
                 sessions[index].state = update.state
             }
         }
