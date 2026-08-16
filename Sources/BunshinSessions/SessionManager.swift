@@ -35,7 +35,22 @@ public actor SessionManager {
     /// Token IPC par session (ADR-0005) : émis à la naissance, vérifié à chaque payload.
     private var tokens: [String: SessionID] = [:]
     private var tokensBySession: [SessionID: String] = [:]
+    private var stateContinuation: AsyncStream<StateUpdate>.Continuation?
     private let clock = ContinuousClock()
+
+    public struct StateUpdate: Sendable, Equatable {
+        public let id: SessionID
+        public let state: SessionState
+    }
+
+    /// Flux des transitions réelles pour la couche vue. Mono-consommateur,
+    /// tamponné : l'UI peut s'abonner avant ou après les premières transitions.
+    public func stateUpdates() -> AsyncStream<StateUpdate> {
+        let (stream, continuation) = AsyncStream.makeStream(of: StateUpdate.self,
+                                                            bufferingPolicy: .bufferingNewest(256))
+        stateContinuation = continuation
+        return stream
+    }
 
     private let tuning: StateEngine.Tuning
     private let interpreter: HeuristicInterpreter
@@ -81,6 +96,7 @@ public actor SessionManager {
         let next = StateEngine.reduce(current, event, at: clock.now, tuning: tuning)
         states[id] = next
         guard next.session != current.session else { return }
+        stateContinuation?.yield(StateUpdate(id: id, state: next.session))
         // La transition est réelle : journal STA-06 + état courant en base.
         try? store?.recordTransition(session: id, from: current.session, to: next.session,
                                      source: Self.source(of: event), at: Date())
@@ -114,8 +130,13 @@ public actor SessionManager {
     /// Le `handler` du serveur IPC : payload brut → interprétation par l'adapter →
     /// réducteur. Un token forgé ou un payload sans valeur d'état ne produit rien.
     public func ingestHookPayload(_ payload: Data, token: String) {
-        guard let id = tokens[token],
-              let event = ClaudeCodeAdapter.interpret(payload) else { return }
+        guard let id = tokens[token] else { return }
+        ingest(payload, for: id)
+    }
+
+    /// Variante quand la session est déjà authentifiée (le serveur a validé le token).
+    public func ingest(_ payload: Data, for id: SessionID) {
+        guard states[id] != nil, let event = ClaudeCodeAdapter.interpret(payload) else { return }
         apply(event, to: id)
     }
 

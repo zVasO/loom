@@ -4,8 +4,9 @@ import SwiftUI
 struct BunshinApp: App {
     var body: some Scene {
         WindowGroup {
-            Text("Bunshin")
-                .frame(minWidth: 400, minHeight: 300)
+            ContentView()
+                .frame(minWidth: 800, minHeight: 500)
+                .preferredColorScheme(.dark)
         }
     }
 }

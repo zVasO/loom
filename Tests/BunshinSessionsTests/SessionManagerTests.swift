@@ -138,6 +138,24 @@ struct SessionManagerTests {
         #expect(badged, "silence + motif d'invite, soutenus : la carte se badge sans aucun hook")
     }
 
+    @Test("l'UI observe les états par un flux : chaque transition réelle est poussée")
+    func fluxDEtatsPourLUI() async throws {
+        let manager = makeManager()
+        let updates = await manager.stateUpdates()
+        let id = try await manager.launch(spec())
+
+        await manager.apply(.hook(.userPromptSubmit), to: id)
+        await manager.apply(.hook(.stop(awaitsReply: true)), to: id)
+        await manager.apply(.hook(.stop(awaitsReply: true)), to: id)   // sans effet : pas de doublon
+
+        var iterator = updates.makeAsyncIterator()
+        let first = await iterator.next()
+        let second = await iterator.next()
+        #expect(first?.id == id)
+        #expect(first?.state == .working)
+        #expect(second?.state == .needsInput, "seules les transitions réelles sont poussées")
+    }
+
     private func pollUntil(_ condition: () async -> Bool) async -> Bool {
         for _ in 0..<200 {
             if await condition() { return true }

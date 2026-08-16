@@ -28,7 +28,7 @@ let package = Package(
         .target(name: "BunshinSessions", dependencies: ["BunshinCore", "BunshinTerminal", "BunshinAgents", "BunshinPersistence"]),
         // Adapters de test du seam PTY, partagés par les cibles de test (jamais exposé en produit).
         .target(name: "BunshinTerminalTestSupport", dependencies: ["BunshinCore", "BunshinTerminal"]),
-        .target(name: "BunshinUI", dependencies: ["BunshinCore"]),
+        .target(name: "BunshinUI", dependencies: ["BunshinCore", "BunshinTerminal"]),
         .executableTarget(
             name: "BunshinApp",
             dependencies: [
