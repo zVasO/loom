@@ -69,3 +69,22 @@ struct ForkPTYHostTests {
                 "le process est mort avant l'échéance des 30 s, tué par le SIGINT")
     }
 }
+
+extension ForkPTYHostTests {
+    @Test("le resize atteint le vrai PTY : le process voit la nouvelle grille (TRM-02)")
+    @MainActor
+    func resizeAtteintLeVraiPty() async throws {
+        let transcript = MemoryTranscriptSink()
+        let (runtime, events) = try SessionRuntime.launch(
+            plan("sleep 0.5; stty size"),
+            using: SessionRuntime.Dependencies(ptyHost: ForkPTYHost(), transcript: transcript))
+        var iterator = events.makeAsyncIterator()
+        guard case .started = await iterator.next() else { return }
+
+        runtime.surface().resize(cols: 90, rows: 30)
+
+        guard case .terminated = await iterator.next() else { return }
+        #expect(transcript.text.contains("30 90"),
+                "stty doit voir 30 lignes × 90 colonnes après TIOCSWINSZ — vu : \(transcript.text)")
+    }
+}
