@@ -31,6 +31,14 @@ public final class HookSocketServer: @unchecked Sendable {
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw IPCError.socketCreationFailed(errno: errno) }
 
+        // Ne JAMAIS voler le socket d'une instance vivante : l'unlink ci-dessous
+        // laisserait son serveur orphelin et tous ses hooks en errno 61. Un
+        // fichier mort (personne ne répond), lui, est une épave à remplacer.
+        if FileManager.default.fileExists(atPath: socketPath.path),
+           Self.isServerAlive(at: socketPath.path) {
+            close(descriptor)
+            throw IPCError.anotherInstanceRunning(socketPath.path)
+        }
         unlink(socketPath.path)
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
@@ -131,4 +139,29 @@ public enum IPCError: Error, Sendable {
     case socketPathTooLong(String)
     case bindFailed(errno: Int32)
     case listenFailed(errno: Int32)
+    /// Un serveur répond déjà sur ce chemin : une autre instance de l'app tourne.
+    case anotherInstanceRunning(String)
+}
+
+extension HookSocketServer {
+    /// Sonde de vie : `connect` réussit ⇔ un serveur écoute derrière le fichier.
+    static func isServerAlive(at path: String) -> Bool {
+        let probe = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard probe >= 0 else { return false }
+        defer { close(probe) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        guard path.utf8.count < MemoryLayout.size(ofValue: address.sun_path) else { return false }
+        path.withCString { source in
+            withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+                buffer.baseAddress!.assumingMemoryBound(to: CChar.self)
+                    .update(from: source, count: strlen(source) + 1)
+            }
+        }
+        return withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(probe, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0
+            }
+        }
+    }
 }

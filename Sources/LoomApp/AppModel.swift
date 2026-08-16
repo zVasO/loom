@@ -637,7 +637,9 @@ public final class AppModel {
     }
 
     public func stopSession(_ id: SessionID) async {
-        await manager?.stop(id)
+        // Fermer un onglet = le double Ctrl+C de l'utilisateur : claude sort
+        // proprement en ~½ s au lieu d'attendre l'escalade SIGTERM à 5 s.
+        await manager?.stop(id, ladder: .close)
     }
 
     public struct GitPanelData {

@@ -100,5 +100,15 @@ public struct ShutdownLadder: Sendable, Equatable {
         Step(signal: .terminate, scope: .group, grace: .seconds(5)),
         Step(signal: .kill, scope: .group, grace: .seconds(1)),
     ])
+
+    /// Fermeture d'onglet : le DOUBLE SIGINT du « Ctrl+C Ctrl+C » utilisateur —
+    /// claude ignore le premier (« press ctrl-c again ») et sort proprement au
+    /// second ; SIGTERM/SIGKILL ne servent que de filet.
+    public static let close = ShutdownLadder(steps: [
+        Step(signal: .interrupt, scope: .process, grace: .milliseconds(350)),
+        Step(signal: .interrupt, scope: .process, grace: .seconds(2)),
+        Step(signal: .terminate, scope: .group, grace: .seconds(3)),
+        Step(signal: .kill, scope: .group, grace: .seconds(1)),
+    ])
     public static let immediate = ShutdownLadder(steps: [Step(signal: .kill, scope: .group, grace: .seconds(1))])
 }

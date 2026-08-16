@@ -224,6 +224,11 @@ struct ProjectsView: View {
     @FocusState private var goalFocused: Bool
     @State private var draggedProject: ProjectID?
     @State private var projectTab: ProjectTab = .overview
+    @State private var skillFilter: SkillFilter = .all
+
+    enum SkillFilter: String, CaseIterable {
+        case all = "Tous", global = "Global", project = "Projet"
+    }
     @State private var filesPath = ""
     @State private var gitData: AppModel.ProjectGitData?
 
@@ -446,61 +451,67 @@ struct ProjectsView: View {
         .onTapGesture(perform: action)
     }
 
-    // MARK: Tab Skills — ce que les agents peuvent invoquer ici
+    // MARK: Tab Skills — ce que les agents peuvent invoquer ici (cartes, réf. Xirp)
 
     private func skillsTab(_ project: ProjectRecord) -> some View {
         let skills = model.skills(forProject: project.id)
-        return VStack(alignment: .leading, spacing: 6) {
-            if skills.isEmpty {
+        let globals = skills.filter { $0.scope == .global }
+        let projets = skills.filter { $0.scope == .project }
+        let filtered = switch skillFilter {
+        case .all: skills
+        case .global: globals
+        case .project: projets
+        }
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 6) {
+                filterPill("Tous (\(skills.count))", isActive: skillFilter == .all) { skillFilter = .all }
+                filterPill("Global (\(globals.count))", isActive: skillFilter == .global) { skillFilter = .global }
+                filterPill("Projet (\(projets.count))", isActive: skillFilter == .project) { skillFilter = .project }
+            }
+            if filtered.isEmpty {
                 Text("Aucun skill — ajoute des dossiers dans .claude/skills (projet) ou ~/.claude/skills (global).")
                     .font(.system(size: 12))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
-            ForEach(skills, id: \.name) { skill in
-                HStack(spacing: 8) {
-                    Text("/" + skill.name)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(DefaultTheme.accent)
-                    Text(skill.description)
-                        .font(.system(size: 11))
-                        .foregroundStyle(DefaultTheme.secondaryText)
-                        .lineLimit(1)
-                    Spacer()
-                    Text(skill.scope == .project ? "projet" : "global")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(skill.scope == .project ? DefaultTheme.accent
-                                                                 : DefaultTheme.mutedText)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(DefaultTheme.surfaceRaised, in: Capsule())
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)],
+                      alignment: .leading, spacing: 12) {
+                ForEach(filtered, id: \.name) { skill in
+                    SkillCard(skill: skill)
                 }
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
             }
         }
     }
 
-    // MARK: Tab Rules — les instructions que liront les agents
+    private func filterPill(_ title: String, isActive: Bool,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .foregroundStyle(isActive ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
+                .padding(.horizontal, 11).padding(.vertical, 5)
+                .background(isActive ? DefaultTheme.surfaceRaised : .clear, in: Capsule())
+                .overlay(Capsule().stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Tab Rules — les instructions que liront les agents (cartes)
 
     private func rulesTab(_ project: ProjectRecord) -> some View {
         let rules = model.ruleFiles(for: project.id)
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 16) {
             if rules.isEmpty {
                 Text("Aucun fichier de règles (CLAUDE.md, AGENTS.md, CONTEXT.md…) à la racine.")
                     .font(.system(size: 12))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
-            ForEach(rules) { rule in
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(rule.name, systemImage: "doc.text")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                    Text(rule.content.prefix(2000))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(DefaultTheme.secondaryText)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)],
+                      alignment: .leading, spacing: 12) {
+                ForEach(rules) { rule in
+                    RuleCard(rule: rule) {
+                        NSWorkspace.shared.open(
+                            URL(fileURLWithPath: project.path).appendingPathComponent(rule.name))
+                    }
                 }
             }
         }
@@ -655,6 +666,94 @@ struct ProjectsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             Task { await model.addProject(at: url) }
         }
+    }
+}
+
+/// Carte skill de la référence : étincelle dans un carré teinté, nom, deux
+/// lignes de description, chip de portée.
+struct SkillCard: View {
+    let skill: SkillEntry
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 13))
+                .foregroundStyle(Color(red: 0.62, green: 0.55, blue: 0.95))
+                .frame(width: 30, height: 30)
+                .background(Color(red: 0.62, green: 0.55, blue: 0.95).opacity(0.14),
+                            in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(skill.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                Text(skill.description)
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                scopeChip
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
+        .background(hovered ? DefaultTheme.surfaceRaised : DefaultTheme.surface,
+                    in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
+    }
+
+    private var scopeChip: some View {
+        let isProject = skill.scope == .project
+        let color = isProject ? DefaultTheme.accent
+                              : Color(red: 0.416, green: 0.635, blue: 0.910)
+        return Label(isProject ? "projet" : "global",
+                     systemImage: isProject ? "folder" : "globe")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(color.opacity(0.14), in: Capsule())
+    }
+}
+
+/// Carte règle : document dans un carré teinté, nom, aperçu — clic pour ouvrir.
+struct RuleCard: View {
+    let rule: AppModel.RuleFile
+    let onOpen: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 13))
+                .foregroundStyle(DefaultTheme.accent)
+                .frame(width: 30, height: 30)
+                .background(DefaultTheme.accent.opacity(0.12),
+                            in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(rule.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                Text(rule.content.prefix(300))
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
+        .background(hovered ? DefaultTheme.surfaceRaised : DefaultTheme.surface,
+                    in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(hovered ? DefaultTheme.accent.opacity(0.5) : DefaultTheme.cardBorder,
+                    lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onOpen)
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
     }
 }
 
@@ -1027,7 +1126,7 @@ struct SessionsView: View {
             }
             ForEach(dormantShells) { dormant in
                 Divider().overlay(DefaultTheme.cardBorder)
-                dormantShellRow(dormant, parentTitle: item.title)
+                dormantShellRow(dormant, parent: item)
                     .stackChrome(isSelected: false)
             }
             ForEach(panes) { pane in
@@ -1076,7 +1175,13 @@ struct SessionsView: View {
     /// Un terminal mémorisé dont le process est mort avec l'app : la ligne
     /// reste dans la pile, le clic relance un shell du même nom au même endroit.
     private func dormantShellRow(_ dormant: AppModel.DormantShell,
-                                 parentTitle: String) -> some View {
+                                 parent: AppModel.SessionItem) -> some View {
+        let parentTitle = parent.title
+        return dormantShellRowBody(dormant, parentTitle: parentTitle, parent: parent)
+    }
+
+    private func dormantShellRowBody(_ dormant: AppModel.DormantShell, parentTitle: String,
+                                     parent: AppModel.SessionItem) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "terminal")
                 .font(.system(size: 11))
@@ -1095,7 +1200,10 @@ struct SessionsView: View {
         .padding(10)
         .contentShape(Rectangle())
         .hoverSurface(0.6)
-        .stackQuickActions(onClose: { model.forgetDormantShell(dormant) })
+        .stackQuickActions(
+            onNewTerminal: { Task { await model.launchShell(for: parent) } },
+            onOpenBrowser: { selected = .webPane(model.openBrowserPane(for: parent.id)) },
+            onClose: { model.forgetDormantShell(dormant) })
         .onTapGesture {
             Task {
                 if let id = await model.reopenDormantShell(dormant) {
@@ -1533,15 +1641,19 @@ struct SidebarSessionCard: View {
                     .lineLimit(1)
                 Spacer()
                 if hovered {
-                    HoverIconButton(systemImage: "terminal",
-                                    help: "Nouveau terminal dans ce worktree",
-                                    action: onNewTerminal)
-                    HoverIconButton(systemImage: "globe",
-                                    help: "Navigateur dédié dans cette pile",
-                                    action: onOpenBrowser)
-                    HoverIconButton(systemImage: "xmark",
-                                    help: "Fermer la session",
-                                    action: onClose)
+                    // Même cluster que les lignes de pile : espacement identique
+                    // partout, quel que soit le type d'onglet.
+                    HStack(spacing: 2) {
+                        HoverIconButton(systemImage: "terminal",
+                                        help: "Nouveau terminal dans ce worktree",
+                                        action: onNewTerminal)
+                        HoverIconButton(systemImage: "globe",
+                                        help: "Navigateur dédié dans cette pile",
+                                        action: onOpenBrowser)
+                        HoverIconButton(systemImage: "xmark",
+                                        help: "Fermer la session",
+                                        action: onClose)
+                    }
                 }
             }
             if let branch = item.branch {

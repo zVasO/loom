@@ -166,3 +166,38 @@ struct HookSocketServerTests {
         return condition()
     }
 }
+
+@Suite("Cohabitation de sockets")
+struct CohabitationSocketsTests {
+
+    /// Deux instances de l'app ne doivent JAMAIS partager un chemin : la seconde
+    /// refuse de voler le socket de la première (sinon : unlink silencieux,
+    /// serveur orphelin, et tous les hooks en errno 61).
+    @Test("un second serveur sur le même chemin échoue tant que le premier vit")
+    func secondServeurRefuse() throws {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loom-test-\(UUID().uuidString.prefix(8)).sock")
+        let first = HookSocketServer(socketPath: path,
+                                     validate: { _ in nil }, handler: { _, _ in })
+        try first.start()
+        defer { first.stop() }
+        let second = HookSocketServer(socketPath: path,
+                                      validate: { _ in nil }, handler: { _, _ in })
+        #expect(throws: (any Error).self) { try second.start() }
+    }
+
+    @Test("un fichier socket périmé (instance morte) est remplacé sans erreur")
+    func socketPerimeRemplace() throws {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loom-test-\(UUID().uuidString.prefix(8)).sock")
+        let dead = HookSocketServer(socketPath: path,
+                                    validate: { _ in nil }, handler: { _, _ in })
+        try dead.start()
+        dead.stop()   // stop() peut laisser ou non le fichier : le suivant doit s'en sortir
+        FileManager.default.createFile(atPath: path.path, contents: nil)   // épave garantie
+        let next = HookSocketServer(socketPath: path,
+                                    validate: { _ in nil }, handler: { _, _ in })
+        try next.start()
+        next.stop()
+    }
+}
