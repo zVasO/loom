@@ -1111,6 +1111,13 @@ struct SessionsView: View {
     @State private var renameText = ""
     /// Groupes repliés (affichage seulement — les sessions continuent de tourner).
     @State private var collapsedGroups: Set<String> = []
+    /// Fermeture demandée mais pas encore confirmée : chaque croix passe ici.
+    @State private var pendingClose: PendingClose?
+
+    struct PendingClose {
+        var message: String
+        var action: () -> Void
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -1135,6 +1142,17 @@ struct SessionsView: View {
                     placeholder
                 }
             }
+        }
+        .alert("Fermer cet onglet ?",
+               isPresented: Binding(get: { pendingClose != nil },
+                                    set: { if !$0 { pendingClose = nil } })) {
+            Button("Fermer", role: .destructive) {
+                pendingClose?.action()
+                pendingClose = nil
+            }
+            Button("Annuler", role: .cancel) { pendingClose = nil }
+        } message: {
+            Text(pendingClose?.message ?? "")
         }
         // ⌘T n'existe qu'en contexte terminal ou navigateur, et crée
         // FORCÉMENT un onglet du même type, dans la barre horizontale.
@@ -1208,7 +1226,12 @@ struct SessionsView: View {
                                 StackTab(icon: "terminal", title: shell.title,
                                          isActive: selected == .session(shell.id),
                                          onSelect: { selected = .session(shell.id) },
-                                         onClose: { Task { await model.stopSession(shell.id) } })
+                                         onClose: {
+                                             pendingClose = PendingClose(
+                                                 message: "« \(shell.title) » sera arrêté.") {
+                                                 Task { await model.stopSession(shell.id) }
+                                             }
+                                         })
                             }
                             ForEach(dormants) { dormant in
                                 StackTab(icon: "terminal", title: dormant.title,
@@ -1220,7 +1243,12 @@ struct SessionsView: View {
                                                  }
                                              }
                                          },
-                                         onClose: { model.forgetDormantShell(dormant) })
+                                         onClose: {
+                                             pendingClose = PendingClose(
+                                                 message: "« \(dormant.title) » sera retiré de la pile mémorisée.") {
+                                                 model.forgetDormantShell(dormant)
+                                             }
+                                         })
                             }
                         }
                     case .web:
@@ -1230,8 +1258,11 @@ struct SessionsView: View {
                                      isActive: selected == .webPane(pane.id),
                                      onSelect: { selected = .webPane(pane.id) },
                                      onClose: {
-                                         if selected == .webPane(pane.id) { selected = nil }
-                                         model.closeBrowserPane(pane.id)
+                                         pendingClose = PendingClose(
+                                             message: "« \(pane.title) » sera fermé — ses onglets seront perdus.") {
+                                             if selected == .webPane(pane.id) { selected = nil }
+                                             model.closeBrowserPane(pane.id)
+                                         }
                                      })
                         }
                     }
@@ -1377,13 +1408,13 @@ struct SessionsView: View {
                 },
                 onArchive: { Task { await model.archiveSession(item.id) } },
                 onClose: {
-                    Task {
-                        if item.isDormant {
-                            await model.archiveSession(item.id)   // inactive : la croix détruit
-                        } else {
-                            await model.stopSession(item.id)      // vivante : stop → le tab se ferme seul
+                    pendingClose = item.isDormant
+                        ? PendingClose(message: "« \(item.title) » est inactive : elle sera détruite (archivée), définitivement.") {
+                            Task { await model.archiveSession(item.id) }
                         }
-                    }
+                        : PendingClose(message: "claude sera arrêté proprement — « \(item.title) » restera reprenable en « inactif ».") {
+                            Task { await model.stopSession(item.id) }
+                        }
                 })
                 .stackChrome(isSelected: selected == .session(item.id))
             // Les onglets individuels vivent dans la barre HORIZONTALE : la
@@ -1442,9 +1473,13 @@ struct SessionsView: View {
             onNewTerminal: { Task { await model.launchShell(for: parent) } },
             onOpenBrowser: { selected = .webPane(model.openBrowserPane(for: parent.id)) },
             onClose: {
-                Task {
-                    for shell in shells { await model.stopSession(shell.id) }
-                    for dormant in dormants { model.forgetDormantShell(dormant) }
+                pendingClose = PendingClose(
+                    message: count > 1 ? "Les \(count) terminaux de la pile seront fermés."
+                                       : "Le terminal de la pile sera fermé.") {
+                    Task {
+                        for shell in shells { await model.stopSession(shell.id) }
+                        for dormant in dormants { model.forgetDormantShell(dormant) }
+                    }
                 }
             })
         .onTapGesture {
@@ -1494,9 +1529,13 @@ struct SessionsView: View {
             onNewTerminal: { Task { await model.launchShell(for: parent) } },
             onOpenBrowser: { selected = .webPane(model.openBrowserPane(for: parent.id)) },
             onClose: {
-                for pane in panes {
-                    if selected == .webPane(pane.id) { selected = nil }
-                    model.closeBrowserPane(pane.id)
+                pendingClose = PendingClose(
+                    message: panes.count > 1 ? "Les \(panes.count) navigateurs de la pile seront fermés — onglets perdus."
+                                             : "Le navigateur de la pile sera fermé — onglets perdus.") {
+                    for pane in panes {
+                        if selected == .webPane(pane.id) { selected = nil }
+                        model.closeBrowserPane(pane.id)
+                    }
                 }
             })
         .onTapGesture {
