@@ -11,6 +11,8 @@ struct ContentView: View {
     @State private var prompt = ""
     @State private var directory = FileManager.default.homeDirectoryForCurrentUser
     @State private var browserShown = false
+    @State private var paletteShown = false
+    @State private var paletteQuery = ""
 
     var body: some View {
         NavigationSplitView {
@@ -66,11 +68,18 @@ struct ContentView: View {
         .background(DefaultTheme.background)
         .toolbar {
             Button {
+                paletteShown.toggle()
+            } label: {
+                Label("Palette", systemImage: "command")
+            }
+            .keyboardShortcut("k", modifiers: .command)   // UIX-02
+            Button {
                 browserShown.toggle()
             } label: {
                 Label("Navigateur", systemImage: "globe")
             }
         }
+        .sheet(isPresented: $paletteShown) { palette }
         .sheet(isPresented: $browserShown) {
             BrowserPanelView(onVisit: { url, title in model.recordVisit(url: url, title: title) })
                 .frame(minWidth: 900, minHeight: 600)
@@ -81,6 +90,44 @@ struct ContentView: View {
         } message: {
             Text(model.startupError ?? "")
         }
+    }
+
+    /// UIX-02 : la palette ⌘K — fuzzy sur toutes les sessions, Entrée ouvre la première.
+    private var palette: some View {
+        VStack(spacing: 0) {
+            TextField("Aller à une session…", text: $paletteQuery)
+                .textFieldStyle(.roundedBorder)
+                .font(.title3)
+                .padding(12)
+                .onSubmit {
+                    if let first = paletteMatches.first { openFromPalette(first) }
+                }
+            List(paletteMatches, id: \.self) { title in
+                Text(title)
+                    .contentShape(Rectangle())
+                    .onTapGesture { openFromPalette(title) }
+            }
+            .frame(minHeight: 240)
+        }
+        .frame(minWidth: 480)
+    }
+
+    private var allSessionTitles: [(title: String, id: SessionID)] {
+        model.sessions.map { ($0.title, $0.id) }
+            + model.interruptedSessions.map { ($0.title, $0.id) }
+            + model.historySessions.map { ($0.title, $0.id) }
+    }
+
+    private var paletteMatches: [String] {
+        CommandPalette.rank(query: paletteQuery, in: allSessionTitles.map(\.title))
+    }
+
+    private func openFromPalette(_ title: String) {
+        if let match = allSessionTitles.first(where: { $0.title == title }) {
+            selected = match.id
+        }
+        paletteShown = false
+        paletteQuery = ""
     }
 
     /// UC-1 : un objectif, un dossier, une session.

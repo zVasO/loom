@@ -43,7 +43,42 @@ public final class SessionStore: Sendable {
                 t.column("visitedAt", .datetime).notNull()
             }
         }
+        migrator.registerMigration("v3-fts") { db in
+            try db.execute(sql: """
+                CREATE VIRTUAL TABLE sessionFTS USING fts5(
+                    sessionID UNINDEXED, title, transcript,
+                    tokenize='unicode61 remove_diacritics 2'
+                )
+                """)
+        }
         try migrator.migrate(database)
+    }
+
+    // MARK: - Recherche plein texte (SES-08)
+
+    /// Indexe (ou ré-indexe) une session : titre + transcript nettoyé.
+    public func indexForSearch(session id: SessionID, title: String, transcript: String) throws {
+        try database.write { db in
+            try db.execute(sql: "DELETE FROM sessionFTS WHERE sessionID = ?",
+                           arguments: [id.rawValue.uuidString])
+            try db.execute(sql: "INSERT INTO sessionFTS (sessionID, title, transcript) VALUES (?, ?, ?)",
+                           arguments: [id.rawValue.uuidString, title, transcript])
+        }
+    }
+
+    /// La requête utilisateur est mise entre guillemets FTS (préfixe autorisé) :
+    /// aucun caractère spécial de la syntaxe MATCH ne peut faire d'erreur.
+    public func searchSessions(matching query: String) throws -> [SessionID] {
+        let sanitized = query.replacingOccurrences(of: "\"", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitized.isEmpty else { return [] }
+        let match = "\"\(sanitized)\"*"
+        return try database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT sessionID FROM sessionFTS WHERE sessionFTS MATCH ? ORDER BY rank
+                """, arguments: [match])
+            return rows.compactMap { UUID(uuidString: $0["sessionID"]).map(SessionID.init) }
+        }
     }
 
     // MARK: - Historique navigateur (WEB-01)

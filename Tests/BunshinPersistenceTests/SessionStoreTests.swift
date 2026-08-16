@@ -82,6 +82,28 @@ struct SessionStoreTests {
         #expect(try store.historySuggestions(prefix: "https://exemple.fr").isEmpty)
     }
 
+    @Test("recherche plein texte : titres ET transcripts, via FTS5 (SES-08)")
+    func recherchePleinTexte() throws {
+        let store = try makeStore()
+        let cache = SessionID()
+        let deploy = SessionID()
+        try store.insert(SessionRecord(id: cache, title: "Corriger le bug de cache",
+                                       agentID: "claude-code", state: .completed, createdAt: Date()))
+        try store.insert(SessionRecord(id: deploy, title: "Déployer en préproduction",
+                                       agentID: "claude-code", state: .completed, createdAt: Date()))
+        try store.indexForSearch(session: cache, title: "Corriger le bug de cache",
+                                 transcript: "l'invalidation par TTL était approximative")
+        try store.indexForSearch(session: deploy, title: "Déployer en préproduction",
+                                 transcript: "kubectl apply réussi, pods verts")
+
+        #expect(try store.searchSessions(matching: "cache") == [cache], "match sur le titre")
+        #expect(try store.searchSessions(matching: "kubectl") == [deploy], "match sur le transcript")
+        #expect(try store.searchSessions(matching: "invalidation") == [cache])
+        #expect(try store.searchSessions(matching: "introuvable-xyz").isEmpty)
+        #expect(try store.searchSessions(matching: "\"guillemets\" spéciaux*").isEmpty,
+                "une requête avec caractères spéciaux FTS ne fait jamais d'erreur")
+    }
+
     @Test("l'état persisté suit les mises à jour")
     func miseAJourDEtat() throws {
         let store = try makeStore()
