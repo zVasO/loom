@@ -52,8 +52,9 @@ public struct TerminalScreenView: View {
                     ForEach(Array(history.enumerated()), id: \.offset) { _, line in
                         row(line, height: cell.height)
                     }
-                    ForEach(Array(screen.lines.enumerated()), id: \.offset) { _, line in
-                        row(line, height: cell.height)
+                    ForEach(Array(screen.lines.enumerated()), id: \.offset) { index, line in
+                        row(line, height: cell.height,
+                            cursorCol: index == screen.cursor.row ? screen.cursor.col : nil)
                     }
                     Color.clear.frame(height: 0).id("bas")   // marqueur d’ancrage : hauteur nulle, sinon il rogne le haut
                 }
@@ -70,12 +71,22 @@ public struct TerminalScreenView: View {
         .background(DefaultTheme.contentBackground)
     }
 
-    private func row(_ line: TerminalLine, height: CGFloat) -> some View {
+    /// `cursorCol` : le curseur du terminal, dessiné par NOUS (l'agent ne peint
+    /// que ses cellules) — sans lui, on taperait en aveugle dans son champ.
+    private func row(_ line: TerminalLine, height: CGFloat, cursorCol: Int? = nil) -> some View {
         Text(attributed(line))
             .font(.system(size: TerminalMetrics.fontSize, design: .monospaced))
             .frame(height: height, alignment: .leading)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
+            .overlay(alignment: .topLeading) {
+                if let col = cursorCol {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(DefaultTheme.accent.opacity(0.55))
+                        .frame(width: TerminalMetrics.cellSize.width, height: height - 2)
+                        .offset(x: CGFloat(col) * TerminalMetrics.cellSize.width, y: 1)
+                }
+            }
     }
 
     private func attributed(_ line: TerminalLine) -> AttributedString {

@@ -58,7 +58,21 @@ struct ContentView: View {
                                           display: true)
             try? await Task.sleep(for: .seconds(1))
             createSession(in: model.projects.first?.id)
-            try? await Task.sleep(for: .seconds(10))
+            // La frappe passe par le VRAI chemin (fenêtre → premier répondant →
+            // PTY) : le dump doit montrer « salut » dans le champ de l'agent.
+            try? await Task.sleep(for: .seconds(8))
+            if let win = NSApp.windows.first {
+                let touches: [(String, UInt16)] = [("s", 1), ("a", 0), ("l", 37), ("u", 32), ("t", 17)]
+                for (char, code) in touches {
+                    let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                                 timestamp: ProcessInfo.processInfo.systemUptime,
+                                                 windowNumber: win.windowNumber, context: nil,
+                                                 characters: char, charactersIgnoringModifiers: char,
+                                                 isARepeat: false, keyCode: code)
+                    if let event { win.sendEvent(event) }
+                }
+            }
+            try? await Task.sleep(for: .seconds(3))
             if case .session(let id) = selected, let s = await model.surface(for: id) {
                 let text = s.screen.lines
                     .map { String($0.cells.map(\.character)) }
@@ -656,23 +670,11 @@ struct SessionDetailView: View {
     let model: AppModel
     let sessionID: SessionID
     @State private var surface: TerminalSurface?
-    @State private var input = ""
     @State private var gitShown = false
     @State private var gitData: AppModel.GitPanelData?
-    @State private var skills: [SkillEntry] = []
     @State private var firstResizeDone = false
-
-    /// Le helper est actif tant qu'on tape le nom du skill (« /dep… ») ;
-    /// dès un espace, on est dans les arguments — Entrée envoie.
-    private var skillHelperActive: Bool {
-        input.hasPrefix("/") && !input.contains(" ")
-    }
-
-    private var skillSuggestions: [SkillEntry] {
-        let query = String(input.dropFirst())
-        let ranked = CommandPalette.rank(query: query, in: skills.map(\.name))
-        return ranked.prefix(8).compactMap { name in skills.first { $0.name == name } }
-    }
+    /// Incrémenté à chaque clic sur le terminal : la capture clavier reprend le focus.
+    @State private var focusTick = 0
 
     private var item: AppModel.SessionItem? {
         model.sessions.first { $0.id == sessionID }
@@ -707,24 +709,18 @@ struct SessionDetailView: View {
                                 surface.resize(cols: grid.cols, rows: grid.rows)
                                 model.noteTerminalGrid(cols: grid.cols, rows: grid.rows)
                             }
+                            // SES-05bis : la frappe va au champ de saisie de
+                            // l'agent — pas de barre à nous. La capture vit SOUS
+                            // le feed (le clavier suit le premier répondant, pas
+                            // la géométrie) ; cliquer le terminal reprend le focus.
+                            .background(KeyCaptureView(focusTick: focusTick) { surface.send($0) })
+                            .contentShape(Rectangle())
+                            .onTapGesture { focusTick += 1 }
                     }
                     .background(DefaultTheme.contentBackground)
                     if gitShown { gitPanel }
                 }
-                // Le helper / FLOTTE au-dessus du feed : il ne participe pas au
-                // layout — la grille du PTY ne bouge pas d'un pixel quand il
-                // apparaît, le feed de la session reste immobile.
-                .overlay(alignment: .bottomLeading) {
-                    if skillHelperActive && !skillSuggestions.isEmpty {
-                        skillHelper
-                            .frame(maxWidth: 560)
-                            .shadow(color: .black.opacity(0.5), radius: 18, y: 6)
-                            .padding(.horizontal, 10)
-                            .padding(.bottom, 6)
-                    }
-                }
-                inputBar(surface)
-                    .task { await surface.attached() }
+                .task { await surface.attached() }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -761,65 +757,6 @@ struct SessionDetailView: View {
         .padding(.horizontal, 14)
         .frame(height: 42)
         .background(DefaultTheme.background)
-    }
-
-    private func inputBar(_ surface: TerminalSurface) -> some View {
-        VStack(spacing: 6) {
-            TextField("Répondre à l'agent…  (/ pour les skills)", text: $input)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundStyle(DefaultTheme.primaryText)
-                .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
-                .onChange(of: input) { _, newValue in
-                    if newValue.hasPrefix("/") && skills.isEmpty {
-                        skills = model.skills(for: sessionID)
-                    }
-                }
-                .onSubmit {
-                    if skillHelperActive, let first = skillSuggestions.first {
-                        input = "/" + first.name + " "
-                    } else {
-                        surface.send(input + "\r")
-                        input = ""
-                    }
-                }
-        }
-        .padding(10)
-        .background(DefaultTheme.background)
-    }
-
-    /// SKL-01 : les skills visibles par l'agent dans ce worktree, projet devant.
-    private var skillHelper: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(skillSuggestions, id: \.name) { skill in
-                Button {
-                    input = "/" + skill.name + " "
-                } label: {
-                    HStack(spacing: 8) {
-                        Text("/" + skill.name)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(DefaultTheme.accent)
-                        Text(skill.description)
-                            .font(.system(size: 11))
-                            .foregroundStyle(DefaultTheme.secondaryText)
-                            .lineLimit(1)
-                        Spacer()
-                        Text(skill.scope == .project ? "projet" : "global")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(skill.scope == .project ? DefaultTheme.accent : DefaultTheme.mutedText)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(DefaultTheme.surfaceRaised, in: Capsule())
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
     private var gitPanel: some View {
