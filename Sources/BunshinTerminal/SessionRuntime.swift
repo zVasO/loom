@@ -82,6 +82,17 @@ public final class SessionRuntime: @unchecked Sendable {
     private var frameScheduled = false
     private let lock = NSLock()
 
+    /// TRM-02 : resize synchronisé vue → moteur → PTY (TIOCSWINSZ). Une seule
+    /// opération pour l'appelant, deux en interne ; le process reçoit SIGWINCH
+    /// et repeint. Dernière valeur gagnante, frame repoussée aussitôt.
+    func resize(to geometry: TerminalGeometry) {
+        queue.async {
+            self.engine?.resize(to: geometry)
+            self.channel.resize(to: geometry)
+            self.scheduleFrame()
+        }
+    }
+
     /// Écriture vers le PTY du terminal (frappe, message rapide SES-05).
     /// Non bloquant : un saut sur la queue de session puis le canal.
     func write(_ text: String, to terminal: TerminalID) {

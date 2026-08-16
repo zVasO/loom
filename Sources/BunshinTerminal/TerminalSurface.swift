@@ -66,6 +66,18 @@ public final class TerminalSurface {
         runtime?.write(text, to: terminal)
     }
 
+    /// TRM-02 : la vue annonce sa grille ; moteur et PTY suivent (SIGWINCH côté agent).
+    /// Coalescé côté appel : seule une vraie nouvelle géométrie traverse.
+    public func resize(cols: Int, rows: Int) {
+        guard cols >= 20, rows >= 4 else { return }
+        let geometry = TerminalGeometry(cols: cols, rows: rows)
+        guard geometry != lastRequestedGeometry else { return }
+        lastRequestedGeometry = geometry
+        runtime?.resize(to: geometry)
+    }
+
+    private var lastRequestedGeometry: TerminalGeometry?
+
     func receive(_ screen: TerminalScreen) {
         guard isAttached else { return }
         self.screen = screen

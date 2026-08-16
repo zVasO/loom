@@ -477,8 +477,19 @@ struct SessionDetailView: View {
             Divider().overlay(DefaultTheme.cardBorder)
             if let surface {
                 HSplitView {
-                    TerminalScreenView(screen: surface.screen)
-                        .background(DefaultTheme.contentBackground)
+                    GeometryReader { proxy in
+                        TerminalScreenView(screen: surface.screen)
+                            // TRM-02 : la vue annonce sa grille au PTY ; le task(id:)
+                            // s'annule à chaque changement de taille — debounce gratuit
+                            // pendant le redimensionnement de la fenêtre.
+                            .task(id: proxy.size) {
+                                try? await Task.sleep(for: .milliseconds(80))
+                                guard !Task.isCancelled else { return }
+                                let grid = TerminalMetrics.grid(fitting: proxy.size)
+                                surface.resize(cols: grid.cols, rows: grid.rows)
+                            }
+                    }
+                    .background(DefaultTheme.contentBackground)
                     if gitShown { gitPanel }
                 }
                 inputBar(surface)
