@@ -166,6 +166,14 @@ public final class SessionStore: Sendable {
         }
     }
 
+    /// SES-05 : renommage.
+    public func rename(session id: SessionID, to title: String) throws {
+        try database.write { db in
+            try db.execute(sql: "UPDATE session SET title = ? WHERE id = ?",
+                           arguments: [title, id.rawValue.uuidString])
+        }
+    }
+
     /// NFR-R / UC-7 : au relancement, toute session encore « vivante » en base est en
     /// réalité morte avec l'app — elle devient candidate à la Reprise.
     @discardableResult

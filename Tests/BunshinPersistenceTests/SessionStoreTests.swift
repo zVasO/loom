@@ -129,6 +129,16 @@ struct SessionStoreTests {
                 "PRJ-06 : l'app ne détruit JAMAIS le dossier source de l'utilisateur")
     }
 
+    @Test("renommer une session persiste (SES-05)")
+    func renommage() throws {
+        let store = try makeStore()
+        let id = SessionID()
+        try store.insert(SessionRecord(id: id, title: "dbdd-a3f2", agentID: "claude-code",
+                                       state: .working, createdAt: Date()))
+        try store.rename(session: id, to: "Corrige le cache Redis")
+        #expect(try store.session(id: id)?.title == "Corrige le cache Redis")
+    }
+
     @Test("l'état persisté suit les mises à jour")
     func miseAJourDEtat() throws {
         let store = try makeStore()

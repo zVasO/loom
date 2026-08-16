@@ -132,10 +132,45 @@ public final class AppModel {
     private func reloadPersistedSessions() {
         let all = ((try? store?.allSessions()) ?? nil) ?? []
         allRecords = all
-        interruptedSessions = all.filter { $0.state == .interrupted }
-        historySessions = all.filter { [.completed, .failed, .archived].contains($0.state) }
+        // Une session fermée sans conversation persistée n'a rien à montrer ni à
+        // reprendre : elle n'encombre pas les listes (les épaves d'identifiants
+        // d'avant-correctif disparaissent du même coup).
+        interruptedSessions = all.filter {
+            $0.state == .interrupted && ClaudeNativeSessions.exists($0.id)
+        }
+        historySessions = all.filter {
+            [.completed, .failed, .archived].contains($0.state) && ClaudeNativeSessions.exists($0.id)
+        }
         projects = ((try? store?.activeProjects()) ?? nil) ?? []
         if selectedProject == nil { selectedProject = projects.first?.id }
+    }
+
+    /// SES-05 : renommage — la carte, le fil d'Ariane et la base suivent.
+    public func renameSession(_ id: SessionID, to title: String) {
+        let cleaned = title.trimmingCharacters(in: .whitespaces)
+        guard !cleaned.isEmpty else { return }
+        try? store?.rename(session: id, to: cleaned)
+        if let index = sessions.firstIndex(where: { $0.id == id }) {
+            sessions[index].title = cleaned
+        }
+        reloadPersistedSessions()
+    }
+
+    /// Nom auto à la naissance, dans la vibe de la référence : `<projet>-<hex>`.
+    static func generatedName(project: ProjectRecord?) -> String {
+        let suffix = UUID().uuidString.prefix(4).lowercased()
+        return "\(project?.name ?? "session")-\(suffix)"
+    }
+
+    /// Le helper `/` du champ de saisie : skills du worktree de la session (le
+    /// checkout embarque ceux du projet — SKL-08) + skills globaux.
+    public func skills(for id: SessionID) -> [SkillEntry] {
+        let record = (try? store?.session(id: id)) ?? nil
+        let projectDirectory = (record?.worktreePath
+            ?? record?.projectID.flatMap { pid in project(pid)?.path })
+            .map { URL(fileURLWithPath: $0).appendingPathComponent(".claude/skills") }
+        return SkillsCatalog.scan(globalDirectory: SkillsCatalog.defaultGlobalDirectory,
+                                  projectDirectory: projectDirectory)
     }
 
     // MARK: - Compteurs des cartes projet (référence : « 2 active · 4 sessions »)
@@ -249,7 +284,7 @@ public final class AppModel {
             spec.projectID = project?.id
             // Un seul UUID de bout en bout : celui de `--session-id` — la Reprise en dépend.
             spec.sessionID = sessionID
-            spec.title = initialPrompt ?? "Session"
+            spec.title = initialPrompt ?? Self.generatedName(project: project)
             // GIT-01 : un repo Git → un worktree isolé par session, jamais le dossier nu.
             if FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
                 spec.worktree = .create(repo: directory, slug: Self.slug(from: initialPrompt ?? ""))
@@ -257,7 +292,7 @@ public final class AppModel {
             let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
             let record = (try? store?.session(id: id)) ?? nil
-            sessions.insert(SessionItem(id: id, title: initialPrompt ?? "Session",
+            sessions.insert(SessionItem(id: id, title: record?.title ?? "Session",
                                         state: .starting, projectID: project?.id,
                                         branch: record?.branch), at: 0)
             reloadPersistedSessions()

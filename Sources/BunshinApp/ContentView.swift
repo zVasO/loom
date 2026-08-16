@@ -1,3 +1,4 @@
+import BunshinAgents
 import BunshinCore
 import BunshinGit
 import BunshinPersistence
@@ -315,6 +316,8 @@ struct SessionsView: View {
     let model: AppModel
     @Binding var selected: SessionID?
     let onNewSession: (ProjectID) -> Void
+    @State private var renameTarget: SessionID?
+    @State private var renameText = ""
 
     var body: some View {
         HStack(spacing: 0) {
@@ -363,6 +366,16 @@ struct SessionsView: View {
         }
         .frame(width: 280)
         .background(DefaultTheme.background)
+        .alert("Renommer la session", isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } })) {
+            TextField("Nom", text: $renameText)
+            Button("Renommer") {
+                if let target = renameTarget { model.renameSession(target, to: renameText) }
+                renameTarget = nil
+            }
+            Button("Annuler", role: .cancel) { renameTarget = nil }
+        }
     }
 
     @ViewBuilder
@@ -417,6 +430,10 @@ struct SessionsView: View {
         .contentShape(Rectangle())
         .onTapGesture { selected = item.id }
         .contextMenu {
+            Button("Renommer…") {
+                renameText = item.title
+                renameTarget = item.id
+            }
             Button("Archiver") { Task { await model.archiveSession(item.id) } }
         }
     }
@@ -466,6 +483,19 @@ struct SessionDetailView: View {
     @State private var input = ""
     @State private var gitShown = false
     @State private var gitData: AppModel.GitPanelData?
+    @State private var skills: [SkillEntry] = []
+
+    /// Le helper est actif tant qu'on tape le nom du skill (« /dep… ») ;
+    /// dès un espace, on est dans les arguments — Entrée envoie.
+    private var skillHelperActive: Bool {
+        input.hasPrefix("/") && !input.contains(" ")
+    }
+
+    private var skillSuggestions: [SkillEntry] {
+        let query = String(input.dropFirst())
+        let ranked = CommandPalette.rank(query: query, in: skills.map(\.name))
+        return ranked.prefix(8).compactMap { name in skills.first { $0.name == name } }
+    }
 
     private var item: AppModel.SessionItem? {
         model.sessions.first { $0.id == sessionID }
@@ -533,21 +563,65 @@ struct SessionDetailView: View {
     }
 
     private func inputBar(_ surface: TerminalSurface) -> some View {
-        HStack(spacing: 8) {
-            TextField("Répondre à l'agent…", text: $input)
+        VStack(spacing: 6) {
+            if skillHelperActive && !skillSuggestions.isEmpty {
+                skillHelper
+            }
+            TextField("Répondre à l'agent…  (/ pour les skills)", text: $input)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13, design: .monospaced))
                 .foregroundStyle(DefaultTheme.primaryText)
                 .padding(.horizontal, 12).padding(.vertical, 9)
                 .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .onChange(of: input) { _, newValue in
+                    if newValue.hasPrefix("/") && skills.isEmpty {
+                        skills = model.skills(for: sessionID)
+                    }
+                }
                 .onSubmit {
-                    surface.send(input + "\r")
-                    input = ""
+                    if skillHelperActive, let first = skillSuggestions.first {
+                        input = "/" + first.name + " "
+                    } else {
+                        surface.send(input + "\r")
+                        input = ""
+                    }
                 }
         }
         .padding(10)
         .background(DefaultTheme.background)
+    }
+
+    /// SKL-01 : les skills visibles par l'agent dans ce worktree, projet devant.
+    private var skillHelper: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(skillSuggestions, id: \.name) { skill in
+                Button {
+                    input = "/" + skill.name + " "
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("/" + skill.name)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(DefaultTheme.accent)
+                        Text(skill.description)
+                            .font(.system(size: 11))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(skill.scope == .project ? "projet" : "global")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(skill.scope == .project ? DefaultTheme.accent : DefaultTheme.mutedText)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(DefaultTheme.surfaceRaised, in: Capsule())
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
     private var gitPanel: some View {
