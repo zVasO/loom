@@ -219,18 +219,23 @@ public final class AppModel {
 
     // MARK: - Actions (UC-1, SES-06)
 
-    /// UC-1 : lance dans le projet sélectionné (worktree si repo Git), ou dans le
-    /// home pour une session générale (PRJ-05).
-    public func launchSession(prompt: String) async {
-        guard let manager else { return }
+    /// UC-1, à la référence : un clic lance claude immédiatement dans le projet —
+    /// aucune saisie préalable ; l'objectif se tape ensuite dans le terminal.
+    /// (`prompt` reste possible pour la palette ou des raccourcis futurs.)
+    /// Retourne l'identifiant de la session créée.
+    @discardableResult
+    public func launchSession(prompt: String? = nil, in projectID: ProjectID? = nil) async -> SessionID? {
+        guard let manager else { return nil }
+        if let projectID { selectedProject = projectID }
         let project = project(selectedProject)
         let directory = project.map { URL(fileURLWithPath: $0.path) }
             ?? FileManager.default.homeDirectoryForCurrentUser
+        let initialPrompt = (prompt?.isEmpty == false) ? prompt : nil
         do {
             let sessionID = SessionID()
             let token = UUID().uuidString
             var spec = SessionManager.SessionSpec(
-                command: adapter.launchCommand(session: sessionID, initialPrompt: prompt,
+                command: adapter.launchCommand(session: sessionID, initialPrompt: initialPrompt,
                                                hookToken: token),
                 workingDirectory: directory,
                 samplingInterval: .milliseconds(500),
@@ -238,17 +243,19 @@ public final class AppModel {
             spec.projectID = project?.id
             // GIT-01 : un repo Git → un worktree isolé par session, jamais le dossier nu.
             if FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
-                spec.worktree = .create(repo: directory, slug: Self.slug(from: prompt))
+                spec.worktree = .create(repo: directory, slug: Self.slug(from: initialPrompt ?? ""))
             }
             let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
             let record = (try? store?.session(id: id)) ?? nil
-            sessions.insert(SessionItem(id: id, title: prompt.isEmpty ? "Session" : prompt,
+            sessions.insert(SessionItem(id: id, title: initialPrompt ?? "Session",
                                         state: .starting, projectID: project?.id,
                                         branch: record?.branch), at: 0)
             reloadPersistedSessions()
+            return id
         } catch {
             startupError = String(describing: error)
+            return nil
         }
     }
 

@@ -20,7 +20,6 @@ struct ContentView: View {
     @State private var browserShown = false
     @State private var paletteShown = false
     @State private var paletteQuery = ""
-    @State private var newSessionShown = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,25 +30,17 @@ struct ContentView: View {
                 model.selectedProject = project
                 tab = .sessions
             }, onNewSession: { project in
-                model.selectedProject = project
-                newSessionShown = true
+                createSession(in: project)
             })
             case .sessions: SessionsView(model: model, selected: $selected,
                                          onNewSession: { project in
-                                             model.selectedProject = project
-                                             newSessionShown = true
+                                             createSession(in: project)
                                          })
             }
         }
         .background(DefaultTheme.background)
         .preferredColorScheme(.dark)
         .onAppear { model.start() }
-        .sheet(isPresented: $newSessionShown) {
-            NewSessionSheet(model: model) { id in
-                selected = id
-                tab = .sessions
-            }
-        }
         .sheet(isPresented: $browserShown) {
             BrowserPanelView(onVisit: { url, title in model.recordVisit(url: url, title: title) })
                 .frame(minWidth: 960, minHeight: 640)
@@ -81,7 +72,7 @@ struct ContentView: View {
             NavTab("Projects", isActive: tab == .projects) { tab = .projects }
             NavTab("Sessions", isActive: tab == .sessions) { tab = .sessions }
             Button {
-                newSessionShown = true
+                createSession(in: model.selectedProject)
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .bold))
@@ -145,6 +136,17 @@ struct ContentView: View {
 
     private var paletteMatches: [String] {
         CommandPalette.rank(query: paletteQuery, in: allSessionTitles.map(\.title))
+    }
+
+    /// Le + de la référence : une session claude démarre immédiatement,
+    /// l'objectif se tape dans le terminal.
+    private func createSession(in projectID: ProjectID?) {
+        Task {
+            if let id = await model.launchSession(in: projectID) {
+                selected = id
+                tab = .sessions
+            }
+        }
     }
 
     private func openFromPalette(_ title: String) {
@@ -585,52 +587,5 @@ struct SessionDetailView: View {
         case .renamed: "arrow.right"
         case .untracked: "questionmark"
         }
-    }
-}
-
-// MARK: - Nouvelle session
-
-struct NewSessionSheet: View {
-    let model: AppModel
-    let onLaunched: (SessionID?) -> Void
-    @State private var prompt = ""
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Nouvelle session")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(DefaultTheme.primaryText)
-            TextField("Décris la tâche…", text: $prompt, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .lineLimit(3...6)
-                .padding(10)
-                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
-            HStack {
-                Picker("Projet", selection: Binding(get: { model.selectedProject },
-                                                    set: { model.selectedProject = $0 })) {
-                    Text("Sans projet").tag(ProjectID?.none)
-                    ForEach(model.projects, id: \.id) { project in
-                        Text(project.name).tag(ProjectID?.some(project.id))
-                    }
-                }
-                .frame(maxWidth: 220)
-                Spacer()
-                GhostButton("Annuler") { dismiss() }
-                AccentButton("Lancer") {
-                    let task = prompt
-                    dismiss()
-                    Task {
-                        await model.launchSession(prompt: task)
-                        onLaunched(model.sessions.first?.id)
-                    }
-                }
-            }
-        }
-        .padding(20)
-        .frame(minWidth: 460)
-        .background(DefaultTheme.background)
     }
 }
