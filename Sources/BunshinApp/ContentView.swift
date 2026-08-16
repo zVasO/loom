@@ -1,6 +1,7 @@
 import BunshinCore
 import BunshinTerminal
 import BunshinUI
+import BunshinWeb
 import SwiftUI
 
 struct ContentView: View {
@@ -8,6 +9,7 @@ struct ContentView: View {
     @State private var selected: SessionID?
     @State private var prompt = ""
     @State private var directory = FileManager.default.homeDirectoryForCurrentUser
+    @State private var browserShown = false
 
     var body: some View {
         NavigationSplitView {
@@ -29,6 +31,17 @@ struct ContentView: View {
             }
         }
         .background(DefaultTheme.background)
+        .toolbar {
+            Button {
+                browserShown.toggle()
+            } label: {
+                Label("Navigateur", systemImage: "globe")
+            }
+        }
+        .sheet(isPresented: $browserShown) {
+            BrowserPanelView(onVisit: { url, title in model.recordVisit(url: url, title: title) })
+                .frame(minWidth: 900, minHeight: 600)
+        }
         .onAppear { model.start() }
         .alert("Démarrage incomplet", isPresented: .constant(model.startupError != nil)) {
             Button("OK") {}

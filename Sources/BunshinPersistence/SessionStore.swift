@@ -35,7 +35,41 @@ public final class SessionStore: Sendable {
                 t.column("at", .datetime).notNull()
             }
         }
+        migrator.registerMigration("v2-web-history") { db in
+            try db.create(table: "webHistory") { t in
+                t.autoIncrementedPrimaryKey("rowID")
+                t.column("url", .text).notNull().indexed()
+                t.column("title", .text).notNull()
+                t.column("visitedAt", .datetime).notNull()
+            }
+        }
         try migrator.migrate(database)
+    }
+
+    // MARK: - Historique navigateur (WEB-01)
+
+    public func recordVisit(url: String, title: String, at date: Date) throws {
+        try database.write { db in
+            try db.execute(sql: "INSERT INTO webHistory (url, title, visitedAt) VALUES (?, ?, ?)",
+                           arguments: [url, title, date])
+        }
+    }
+
+    public struct VisitSuggestion: Sendable, Equatable {
+        public let url: String
+        public let title: String
+    }
+
+    /// Suggestions de la barre d'adresse : préfixe respecté, dernière visite d'abord,
+    /// une entrée par URL.
+    public func historySuggestions(prefix: String, limit: Int = 8) throws -> [VisitSuggestion] {
+        try database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT url, title, MAX(visitedAt) AS lastVisit FROM webHistory
+                WHERE url LIKE ? GROUP BY url ORDER BY lastVisit DESC LIMIT ?
+                """, arguments: [prefix + "%", limit])
+            return rows.map { VisitSuggestion(url: $0["url"], title: $0["title"]) }
+        }
     }
 
     // MARK: - Sessions

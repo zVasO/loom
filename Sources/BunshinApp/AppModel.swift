@@ -72,6 +72,7 @@ public final class AppModel {
         do {
             try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
             let store = try SessionStore(path: supportDirectory.appendingPathComponent("bunshin.sqlite").path)
+            self.store = store
             try store.markLiveSessionsInterrupted()
 
             let transcripts = try FileTranscriptSink(
@@ -161,6 +162,13 @@ public final class AppModel {
             .map { $0.isLetter || $0.isNumber ? $0 : "-" }
         let slug = String(cleaned).split(separator: "-").joined(separator: "-").prefix(40)
         return slug.isEmpty ? "session" : String(slug)
+    }
+
+    private var store: SessionStore?
+
+    /// Historique de la barre d'adresse (WEB-01) — best-effort, jamais bloquant.
+    public func recordVisit(url: String, title: String) {
+        try? store?.recordVisit(url: url, title: title, at: Date())
     }
 
     public func stopSession(_ id: SessionID) async {

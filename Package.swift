@@ -47,5 +47,6 @@ let package = Package(
         .testTarget(name: "BunshinIPCTests", dependencies: ["BunshinIPC"]),
         .testTarget(name: "BunshinGitTests", dependencies: ["BunshinGit"]),
         .testTarget(name: "BunshinPersistenceTests", dependencies: ["BunshinPersistence"]),
+        .testTarget(name: "BunshinWebTests", dependencies: ["BunshinWeb"]),
     ]
 )

@@ -65,6 +65,23 @@ struct SessionStoreTests {
         #expect(try store.session(id: done)?.state == .completed, "les états terminaux ne bougent pas")
     }
 
+    @Test("l'historique navigateur : visites enregistrées, suggestions par préfixe (WEB-01)")
+    func historiqueNavigateur() throws {
+        let store = try makeStore()
+        try store.recordVisit(url: "https://github.com/vaso/bunshin/pulls", title: "Pull requests",
+                              at: Date(timeIntervalSince1970: 1000))
+        try store.recordVisit(url: "https://docs.swift.org/swift-book", title: "Swift Book",
+                              at: Date(timeIntervalSince1970: 2000))
+        try store.recordVisit(url: "https://github.com/vaso/bunshin", title: "bunshin",
+                              at: Date(timeIntervalSince1970: 3000))
+
+        let suggestions = try store.historySuggestions(prefix: "https://github.com")
+        #expect(suggestions.map(\.url) == ["https://github.com/vaso/bunshin",
+                                           "https://github.com/vaso/bunshin/pulls"],
+                "préfixe respecté, plus récent d'abord")
+        #expect(try store.historySuggestions(prefix: "https://exemple.fr").isEmpty)
+    }
+
     @Test("l'état persisté suit les mises à jour")
     func miseAJourDEtat() throws {
         let store = try makeStore()
