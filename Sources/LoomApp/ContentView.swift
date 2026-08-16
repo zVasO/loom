@@ -162,26 +162,73 @@ struct ContentView: View {
     // MARK: - ⌘K palette
 
     private var palette: some View {
-        VStack(spacing: 0) {
-            TextField("Go to a session…", text: $paletteQuery)
+        // v2: the palette searches TITLES (fuzzy ranking) and TRANSCRIPTS
+        // (FTS5 full-text, with a highlighted excerpt per hit).
+        let transcriptHits = paletteQuery.count >= 2 ? model.searchTranscripts(paletteQuery) : []
+        return VStack(spacing: 0) {
+            TextField("Session title or any word from a conversation…", text: $paletteQuery)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
                 .padding(14)
             Divider().overlay(DefaultTheme.cardBorder)
-            List(paletteMatches, id: \.self) { title in
-                Text(title)
-                    .foregroundStyle(DefaultTheme.primaryText)
-                    .contentShape(Rectangle())
-                    .onTapGesture { openFromPalette(title) }
-                    .listRowBackground(Color.clear)
+            List {
+                if !paletteMatches.isEmpty {
+                    Section("Sessions") {
+                        ForEach(paletteMatches, id: \.self) { title in
+                            Text(title)
+                                .foregroundStyle(DefaultTheme.primaryText)
+                                .contentShape(Rectangle())
+                                .onTapGesture { openFromPalette(title) }
+                                .listRowBackground(Color.clear)
+                        }
+                    }
+                }
+                if !transcriptHits.isEmpty {
+                    Section("In transcripts") {
+                        ForEach(transcriptHits, id: \.id) { hit in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(hit.title)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(DefaultTheme.primaryText)
+                                Text(hit.snippet)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(DefaultTheme.secondaryText)
+                                    .lineLimit(2)
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture { openSessionByID(hit.id) }
+                            .listRowBackground(Color.clear)
+                        }
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
             .frame(minHeight: 260)
         }
-        .frame(minWidth: 520)
+        .frame(minWidth: 560)
         .background(DefaultTheme.surface)
         .onSubmit {
-            if let first = paletteMatches.first { openFromPalette(first) }
+            if let first = paletteMatches.first {
+                openFromPalette(first)
+            } else if let hit = transcriptHits.first {
+                openSessionByID(hit.id)
+            }
+        }
+    }
+
+    /// Opens a session found by search: resumes it first when it is dormant.
+    private func openSessionByID(_ id: SessionID) {
+        paletteShown = false
+        paletteQuery = ""
+        if model.sessions.contains(where: { $0.id == id }) {
+            selected = .session(id)
+            tab = .sessions
+        } else {
+            Task {
+                await model.resumeDormant(id)
+                selected = .session(id)
+                tab = .sessions
+            }
         }
     }
 

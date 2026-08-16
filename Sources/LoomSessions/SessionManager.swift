@@ -89,11 +89,18 @@ public actor SessionManager {
         case create(repo: URL, slug: String)
     }
 
+    /// v2 (search): per-session transcript sinks — every session writes to its
+    /// own files, so transcripts can be indexed per session instead of being
+    /// interleaved in shared TerminalID-named files. `nil` keeps the shared sink.
+    private let transcriptFactory: (@Sendable (SessionID) throws -> any TranscriptSink)?
+
     public init(runtimeDependencies: SessionRuntime.Dependencies, store: SessionStore? = nil,
                 tuning: StateEngine.Tuning = .standard,
                 interpreter: HeuristicInterpreter = HeuristicInterpreter(),
                 git: GitService = GitService(),
-                notifier: (any SessionNotifier)? = nil) {
+                notifier: (any SessionNotifier)? = nil,
+                transcriptFactory: (@Sendable (SessionID) throws -> any TranscriptSink)? = nil) {
+        self.transcriptFactory = transcriptFactory
         self.runtimeDependencies = runtimeDependencies
         self.store = store
         self.tuning = tuning
@@ -115,12 +122,16 @@ public actor SessionManager {
             worktree = created
             workingDirectory = created.path
         }
+        var dependencies = runtimeDependencies
+        if let transcriptFactory, let sink = try? transcriptFactory(id) {
+            dependencies.transcript = sink
+        }
         let (runtime, events) = try SessionRuntime.launch(
             SessionLaunchPlan(command: spec.command,
                               workingDirectory: workingDirectory,
                               geometry: spec.geometry,
                               samplingInterval: spec.samplingInterval),
-            using: runtimeDependencies)
+            using: dependencies)
         runtimes[id] = runtime
         states[id] = StateEngine.State(session: .starting)
         let token = spec.hookToken ?? UUID().uuidString
@@ -147,12 +158,16 @@ public actor SessionManager {
                        geometry: TerminalGeometry = .default,
                        samplingInterval: Duration? = nil, hookToken: String? = nil) async throws {
         let id = record.id
+        var dependencies = runtimeDependencies
+        if let transcriptFactory, let sink = try? transcriptFactory(id) {
+            dependencies.transcript = sink
+        }
         let (runtime, events) = try SessionRuntime.launch(
             SessionLaunchPlan(command: command,
                               workingDirectory: workingDirectory,
                               geometry: geometry,
                               samplingInterval: samplingInterval),
-            using: runtimeDependencies)
+            using: dependencies)
         runtimes[id] = runtime
         states[id] = StateEngine.State(session: .interrupted)
         let token = hookToken ?? UUID().uuidString

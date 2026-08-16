@@ -144,11 +144,18 @@ public final class AppModel {
 
             let transcripts = try FileTranscriptSink(
                 directory: supportDirectory.appendingPathComponent("transcripts"))
+            // v2 (search): one sink per session, in its own directory — this is
+            // what makes transcripts indexable per session.
+            let transcriptsRoot = supportDirectory.appendingPathComponent("transcripts")
             let manager = SessionManager(
                 runtimeDependencies: SessionRuntime.Dependencies(ptyHost: ForkPTYHost(),
                                                                  transcript: transcripts),
                 store: store,
-                notifier: UserNotificationsNotifier())
+                notifier: UserNotificationsNotifier(),
+                transcriptFactory: { id in
+                    try FileTranscriptSink(directory: transcriptsRoot
+                        .appendingPathComponent(id.rawValue.uuidString))
+                })
             self.manager = manager
             if Bundle.main.bundleIdentifier != nil {
                 UNUserNotificationCenter.current()
@@ -169,6 +176,7 @@ public final class AppModel {
             Task { await self.observeStates(of: manager) }
             reloadPersistedSessions()
             restoreStackChildren()
+            Task { reindexAllSessions() }
         } catch {
             startupError = String(describing: error)
         }
@@ -192,6 +200,42 @@ public final class AppModel {
         projects = ((try? store?.activeProjects()) ?? nil) ?? []
         applySavedProjectOrder()
         if selectedProject == nil { selectedProject = projects.first?.id }
+    }
+
+    // MARK: - Full-text search (v2): transcripts indexed per session
+
+    /// The de-ANSI-fied transcript of a session, concatenated from its own
+    /// directory (per-session sinks) — nil when the session never wrote one.
+    private func transcriptText(for id: SessionID) -> String? {
+        let directory = supportDirectory
+            .appendingPathComponent("transcripts")
+            .appendingPathComponent(id.rawValue.uuidString)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil) else { return nil }
+        let plain = files.filter { $0.pathExtension == "txt" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        var text = ""
+        for file in plain {
+            if let chunk = try? String(contentsOf: file, encoding: .utf8) { text += chunk }
+            if text.count > 2_000_000 { break }   // FTS does not need more to be useful
+        }
+        return text.isEmpty ? nil : text
+    }
+
+    func indexSessionForSearch(_ id: SessionID) {
+        guard let record = (try? store?.session(id: id)) ?? nil,
+              let text = transcriptText(for: id) else { return }
+        try? store?.indexForSearch(session: id, title: record.title, transcript: text)
+    }
+
+    /// Startup pass: (re)index every known session that has a transcript —
+    /// idempotent, keeps the index honest after crashes or renames.
+    private func reindexAllSessions() {
+        for record in allRecords { indexSessionForSearch(record.id) }
+    }
+
+    public func searchTranscripts(_ query: String) -> [SessionStore.SearchHit] {
+        ((try? store?.searchTranscripts(matching: query)) ?? nil) ?? []
     }
 
     /// A session's record for the info panel (breadcrumb chevron).
@@ -572,9 +616,11 @@ public final class AppModel {
             // on its own — the session reappears "inactive" in its stack if it
             // has a conversation, disappears otherwise (reload filter).
             if [.completed, .failed, .interrupted].contains(update.state) {
+                let closed = sessions[index].id
                 sessions.remove(at: index)
                 saveStackChildren()
                 reloadPersistedSessions()
+                indexSessionForSearch(closed)
             } else {
                 sessions[index].state = update.state
             }

@@ -152,3 +152,32 @@ struct SessionStoreTests {
         #expect(fetched?.endedAt != nil)
     }
 }
+
+@Suite("Full-text transcript search (v2)")
+struct TranscriptSearchTests {
+
+    @Test("a word in a transcript yields the session with a highlighted snippet")
+    func snippetSearch() throws {
+        let store = try SessionStore(path: ":memory:")
+        let alpha = SessionID(), beta = SessionID()
+        try store.insert(SessionRecord(id: alpha, title: "Fix payment bug", agentID: "claude-code",
+                                       state: .completed, createdAt: Date()))
+        try store.insert(SessionRecord(id: beta, title: "Refactor onboarding", agentID: "claude-code",
+                                       state: .completed, createdAt: Date()))
+        try store.indexForSearch(session: alpha, title: "Fix payment bug",
+                                 transcript: "The stripe webhook retries were failing because of a stale signature")
+        try store.indexForSearch(session: beta, title: "Refactor onboarding",
+                                 transcript: "Moved the signup flow into its own module")
+        let hits = try store.searchTranscripts(matching: "webhook")
+        #expect(hits.count == 1)
+        #expect(hits.first?.id == alpha)
+        #expect(hits.first?.title == "Fix payment bug")
+        #expect(hits.first?.snippet.contains("webhook") == true)
+    }
+
+    @Test("an empty or quote-only query yields nothing, never an FTS error")
+    func sanitizedQuery() throws {
+        let store = try SessionStore(path: ":memory:")
+        #expect(try store.searchTranscripts(matching: "  \"\"  ").isEmpty)
+    }
+}

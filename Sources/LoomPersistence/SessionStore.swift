@@ -115,6 +115,36 @@ public final class SessionStore: Sendable {
         }
     }
 
+    /// A full-text hit: the session plus the transcript excerpt that matched,
+    /// with the match highlighted by FTS5's snippet().
+    public struct SearchHit: Sendable, Equatable {
+        public let id: SessionID
+        public let title: String
+        public let snippet: String
+    }
+
+    /// v2 search: sessions ranked by FTS5 relevance, each with a short excerpt
+    /// around the match. Same sanitation as `searchSessions` — user input can
+    /// never produce a MATCH syntax error.
+    public func searchTranscripts(matching query: String) throws -> [SearchHit] {
+        let sanitized = query.replacingOccurrences(of: "\"", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitized.isEmpty else { return [] }
+        let match = "\"\(sanitized)\"*"
+        return try database.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT sessionID, title,
+                       snippet(sessionFTS, 2, '', '', '…', 12) AS excerpt
+                FROM sessionFTS WHERE sessionFTS MATCH ? ORDER BY rank LIMIT 20
+                """, arguments: [match])
+            return rows.compactMap { row in
+                UUID(uuidString: row["sessionID"]).map {
+                    SearchHit(id: SessionID($0), title: row["title"], snippet: row["excerpt"])
+                }
+            }
+        }
+    }
+
     // MARK: - Browser history (WEB-01)
 
     public func recordVisit(url: String, title: String, at date: Date) throws {
