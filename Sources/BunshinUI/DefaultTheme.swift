@@ -27,6 +27,8 @@ public enum DefaultTheme {
     // Sémantique
     public static let branch = Color(red: 0.36, green: 0.784, blue: 0.76)         // cyan mono
     public static let danger = Color(red: 0.898, green: 0.392, blue: 0.424)
+    /// En-têtes de groupes de la sidebar — le vert de la référence.
+    public static let groupHeader = Color(red: 0.298, green: 0.764, blue: 0.541)
 
     /// Sémantique invariante (THM-08) : un thème ajuste la teinte, jamais le sens.
     public static func badgeColor(for state: SessionState) -> Color {

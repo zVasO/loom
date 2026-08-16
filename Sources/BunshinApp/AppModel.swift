@@ -5,6 +5,7 @@ import BunshinIPC
 import BunshinPersistence
 import BunshinSessions
 import BunshinTerminal
+import BunshinWeb
 import Foundation
 import Observation
 import UserNotifications
@@ -175,6 +176,41 @@ public final class AppModel {
             startupError = String(describing: error)
             return nil
         }
+    }
+
+    // MARK: - Panneaux navigateur (WEB-03 : un navigateur dédié DANS la pile d'une session)
+
+    public struct BrowserPane: Identifiable {
+        public let id = UUID()
+        public var title: String
+        public var parentID: SessionID?
+        public let controller: BrowserController
+
+        @MainActor
+        init(title: String, parentID: SessionID?) {
+            self.title = title
+            self.parentID = parentID
+            self.controller = BrowserController()
+        }
+    }
+
+    public private(set) var browserPanes: [BrowserPane] = []
+
+    /// Chaque ouverture crée un panneau dédié, enfant de la session (ou global si nil).
+    @discardableResult
+    public func openBrowserPane(for parent: SessionID?) -> UUID {
+        let count = browserPanes.filter { $0.parentID == parent }.count + 1
+        let pane = BrowserPane(title: "Web \(count)", parentID: parent)
+        browserPanes.append(pane)
+        return pane.id
+    }
+
+    public func closeBrowserPane(_ id: UUID) {
+        browserPanes.removeAll { $0.id == id }
+    }
+
+    public func browserPane(_ id: UUID) -> BrowserPane? {
+        browserPanes.first { $0.id == id }
     }
 
     /// SES-05 : renommage — la carte, le fil d'Ariane et la base suivent.

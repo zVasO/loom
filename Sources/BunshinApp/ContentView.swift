@@ -18,14 +18,13 @@ enum MainTab {
 /// comme les autres (WEB-03).
 enum DetailSelection: Hashable {
     case session(SessionID)
-    case browser
+    case webPane(UUID)
 }
 
 struct ContentView: View {
     @State private var model = AppModel()
     @State private var tab: MainTab = .projects
     @State private var selected: DetailSelection?
-    @State private var browserController = BrowserController()
     @State private var paletteShown = false
     @State private var paletteQuery = ""
 
@@ -41,7 +40,6 @@ struct ContentView: View {
                 createSession(in: project)
             })
             case .sessions: SessionsView(model: model, selected: $selected,
-                                         browserController: browserController,
                                          onVisit: { url, title in model.recordVisit(url: url, title: title) },
                                          onNewSession: { project in
                                              createSession(in: project)
@@ -91,8 +89,12 @@ struct ContentView: View {
             Spacer()
 
             GhostButton(systemImage: "globe") {
+                // WEB-03 : le navigateur naît DANS la pile de la session courante.
+                var parent: SessionID?
+                if case .session(let id) = selected { parent = id }
+                let pane = model.openBrowserPane(for: parent)
                 tab = .sessions
-                selected = .browser
+                selected = .webPane(pane)
             }
             Button {
                 paletteShown = true
@@ -318,12 +320,11 @@ struct ProjectRow: View {
     }
 }
 
-// MARK: - Vue Sessions (référence : sidebar groupée + détail)
+// MARK: - Vue Sessions (référence : piles par session — parent + terminaux + webs)
 
 struct SessionsView: View {
     let model: AppModel
     @Binding var selected: DetailSelection?
-    let browserController: BrowserController
     let onVisit: (String, String) -> Void
     let onNewSession: (ProjectID) -> Void
     @State private var renameTarget: SessionID?
@@ -333,44 +334,61 @@ struct SessionsView: View {
         HStack(spacing: 0) {
             sidebar
             Divider().overlay(DefaultTheme.cardBorder)
-            if case .session(let sessionID) = selected {
+            switch selected {
+            case .session(let sessionID):
                 SessionDetailView(model: model, sessionID: sessionID)
                     .id(sessionID)
-            } else if selected == .browser {
-                BrowserPanelView(controller: browserController, onVisit: onVisit)
-                    .background(DefaultTheme.contentBackground)
-            } else {
-                VStack(spacing: 8) {
-                    Text("Aucune session ouverte")
-                        .foregroundStyle(DefaultTheme.secondaryText)
-                    Text("Choisis-en une à gauche, ou ⌘K")
-                        .font(.system(size: 12))
-                        .foregroundStyle(DefaultTheme.mutedText)
+            case .webPane(let paneID):
+                if let pane = model.browserPane(paneID) {
+                    BrowserPanelView(controller: pane.controller, onVisit: onVisit)
+                        .id(paneID)
+                        .background(DefaultTheme.contentBackground)
+                } else {
+                    placeholder
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(DefaultTheme.contentBackground)
+            case nil:
+                placeholder
             }
         }
     }
 
+    private var placeholder: some View {
+        VStack(spacing: 8) {
+            Text("Aucune session ouverte")
+                .foregroundStyle(DefaultTheme.secondaryText)
+            Text("Choisis-en une à gauche, ou ⌘K")
+                .font(.system(size: 12))
+                .foregroundStyle(DefaultTheme.mutedText)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DefaultTheme.contentBackground)
+    }
+
     private var sidebar: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                browserCard
+            VStack(alignment: .leading, spacing: 14) {
+                let globalPanes = model.browserPanes.filter { $0.parentID == nil }
+                if !globalPanes.isEmpty {
+                    groupHeader("NAVIGATEUR", projectID: nil)
+                    ForEach(globalPanes) { pane in paneRow(pane, parentTitle: nil).stackChrome(
+                        isSelected: selected == .webPane(pane.id)) }
+                }
                 ForEach(model.projects, id: \.id) { project in
                     let items = model.sessions.filter { $0.projectID == project.id }
                     let interrupted = model.interruptedSessions.filter { $0.projectID == project.id }
                     if !items.isEmpty || !interrupted.isEmpty {
-                        projectGroup(project, items: items, interrupted: interrupted)
+                        groupHeader(project.name.uppercased(), projectID: project.id)
+                        projectStacks(items: items)
+                        ForEach(interrupted, id: \.id) { record in interruptedCard(record) }
                     }
                 }
                 let orphans = model.sessions.filter { model.project($0.projectID) == nil }
                 if !orphans.isEmpty {
-                    groupHeader("Sans projet", projectID: nil)
-                    ForEach(orphans) { item in sessionCard(item) }
+                    groupHeader("SANS PROJET", projectID: nil)
+                    projectStacks(items: orphans)
                 }
                 if !model.historySessions.isEmpty {
-                    groupHeader("Historique", projectID: nil)
+                    groupHeader("HISTORIQUE", projectID: nil)
                     ForEach(model.historySessions.prefix(12), id: \.id) { record in
                         historyCard(record)
                     }
@@ -392,66 +410,76 @@ struct SessionsView: View {
         }
     }
 
+    /// La pile de la référence : la session et ses enfants (terminaux, webs) forment
+    /// UN bloc joint ; chaque pile est séparée de la suivante.
     @ViewBuilder
-    private func projectGroup(_ project: ProjectRecord, items: [AppModel.SessionItem],
-                              interrupted: [SessionRecord]) -> some View {
-        groupHeader(project.name.uppercased(), projectID: project.id)
+    private func projectStacks(items: [AppModel.SessionItem]) -> some View {
         ForEach(items.filter { !$0.isShell }) { item in
-            sessionCard(item)
-            ForEach(items.filter { $0.parentID == item.id }) { shell in
-                shellCard(shell, parent: item)
-            }
+            sessionStack(item,
+                         shells: items.filter { $0.parentID == item.id },
+                         panes: model.browserPanes.filter { $0.parentID == item.id })
         }
-        ForEach(interrupted, id: \.id) { record in interruptedCard(record) }
     }
 
-    /// Le navigateur vit en onglet, comme une session (WEB-03).
-    private var browserCard: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "globe")
-                .font(.system(size: 12))
-                .foregroundStyle(DefaultTheme.accent)
-            Text("Navigateur")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(DefaultTheme.primaryText)
-            Spacer()
-            if !browserController.tabs.isEmpty {
-                Text("\(browserController.tabs.count)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.secondaryText)
+    private func sessionStack(_ item: AppModel.SessionItem,
+                              shells: [AppModel.SessionItem],
+                              panes: [AppModel.BrowserPane]) -> some View {
+        VStack(spacing: 0) {
+            SidebarSessionCard(
+                item: item,
+                childCount: shells.count + panes.count,
+                isSelected: selected == .session(item.id),
+                onSelect: { selected = .session(item.id) },
+                onNewTerminal: {
+                    Task {
+                        if let id = await model.launchShell(for: item) { selected = .session(id) }
+                    }
+                },
+                onOpenBrowser: {
+                    let pane = model.openBrowserPane(for: item.id)
+                    selected = .webPane(pane)
+                },
+                onRename: {
+                    renameText = item.title
+                    renameTarget = item.id
+                },
+                onArchive: { Task { await model.archiveSession(item.id) } })
+                .stackChrome(isSelected: selected == .session(item.id))
+            ForEach(shells) { shell in
+                Divider().overlay(DefaultTheme.cardBorder)
+                shellRow(shell, parentTitle: item.title)
+                    .stackChrome(isSelected: selected == .session(shell.id))
+            }
+            ForEach(panes) { pane in
+                Divider().overlay(DefaultTheme.cardBorder)
+                paneRow(pane, parentTitle: item.title)
+                    .stackChrome(isSelected: selected == .webPane(pane.id))
             }
         }
-        .padding(10)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9)
-            .stroke(selected == .browser ? DefaultTheme.accent : DefaultTheme.cardBorder, lineWidth: 1))
-        .contentShape(Rectangle())
-        .onTapGesture { selected = .browser }
+        .background(DefaultTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
-    /// SES-04 : le terminal secondaire, indenté sous sa session parente.
-    private func shellCard(_ shell: AppModel.SessionItem, parent: AppModel.SessionItem) -> some View {
+    /// SES-04 : le terminal secondaire dans la pile (« >_ Term n · parent »).
+    private func shellRow(_ shell: AppModel.SessionItem, parentTitle: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "terminal")
-                .font(.system(size: 10))
-                .foregroundStyle(DefaultTheme.secondaryText)
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(shell.title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(DefaultTheme.primaryText)
-                Text(parent.title)
-                    .font(.system(size: 9))
+                Label(parentTitle, systemImage: "link")
+                    .font(.system(size: 10))
                     .foregroundStyle(DefaultTheme.mutedText)
+                    .lineLimit(1)
+                StatusLabel(shell.state)
             }
             Spacer()
-            StatusLabel(shell.state)
         }
-        .padding(8)
-        .padding(.leading, 14)
-        .background(DefaultTheme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(selected == .session(shell.id) ? DefaultTheme.accent : DefaultTheme.cardBorder,
-                    lineWidth: 1))
+        .padding(10)
         .contentShape(Rectangle())
         .onTapGesture { selected = .session(shell.id) }
         .contextMenu {
@@ -459,15 +487,50 @@ struct SessionsView: View {
         }
     }
 
+    /// WEB-03 : le navigateur dédié dans la pile (« 🌐 Web n · parent »).
+    private func paneRow(_ pane: AppModel.BrowserPane, parentTitle: String?) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "globe")
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pane.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                if let parentTitle {
+                    Label(parentTitle, systemImage: "link")
+                        .font(.system(size: 10))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                        .lineLimit(1)
+                }
+                if !pane.controller.tabs.isEmpty {
+                    Text("\(pane.controller.tabs.count) onglet\(pane.controller.tabs.count > 1 ? "s" : "")")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                }
+            }
+            Spacer()
+        }
+        .padding(10)
+        .contentShape(Rectangle())
+        .onTapGesture { selected = .webPane(pane.id) }
+        .contextMenu {
+            Button("Fermer") {
+                if selected == .webPane(pane.id) { selected = nil }
+                model.closeBrowserPane(pane.id)
+            }
+        }
+    }
+
     private func groupHeader(_ title: String, projectID: ProjectID?) -> some View {
         HStack {
             Image(systemName: "chevron.down")
                 .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(DefaultTheme.mutedText)
+                .foregroundStyle(DefaultTheme.groupHeader)
             Text(title)
                 .font(.system(size: 10, weight: .semibold))
                 .kerning(0.8)
-                .foregroundStyle(DefaultTheme.secondaryText)
+                .foregroundStyle(DefaultTheme.groupHeader)
             Spacer()
             if let projectID {
                 Button {
@@ -481,24 +544,6 @@ struct SessionsView: View {
             }
         }
         .padding(.horizontal, 2)
-    }
-
-    private func sessionCard(_ item: AppModel.SessionItem) -> some View {
-        SidebarSessionCard(
-            item: item,
-            isSelected: selected == .session(item.id),
-            onSelect: { selected = .session(item.id) },
-            onNewTerminal: {
-                Task {
-                    if let id = await model.launchShell(for: item) { selected = .session(id) }
-                }
-            },
-            onOpenBrowser: { selected = .browser },
-            onRename: {
-                renameText = item.title
-                renameTarget = item.id
-            },
-            onArchive: { Task { await model.archiveSession(item.id) } })
     }
 
     private func interruptedCard(_ record: SessionRecord) -> some View {
@@ -534,6 +579,26 @@ struct SessionsView: View {
         .contextMenu {
             Button("Archiver") { Task { await model.archiveSession(record.id) } }
         }
+    }
+}
+
+/// La sélection d'un élément de pile : liseré accent inséré, fond teinté — comme
+/// la référence.
+private struct StackChrome: ViewModifier {
+    let isSelected: Bool
+    func body(content: Content) -> some View {
+        content
+            .background(isSelected ? DefaultTheme.accent.opacity(0.08) : .clear)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? DefaultTheme.accent : .clear, lineWidth: 1)
+                    .padding(2))
+    }
+}
+
+private extension View {
+    func stackChrome(isSelected: Bool) -> some View {
+        modifier(StackChrome(isSelected: isSelected))
     }
 }
 
@@ -738,10 +803,11 @@ struct SessionDetailView: View {
     }
 }
 
-// MARK: - Carte de session (référence : icônes au survol — terminal, navigateur)
+// MARK: - Carte parent d'une pile (icônes au survol — terminal, navigateur)
 
 struct SidebarSessionCard: View {
     let item: AppModel.SessionItem
+    let childCount: Int
     let isSelected: Bool
     let onSelect: () -> Void
     let onNewTerminal: () -> Void
@@ -772,26 +838,33 @@ struct SidebarSessionCard: View {
                             .foregroundStyle(DefaultTheme.secondaryText)
                     }
                     .buttonStyle(.plain)
-                    .help("Ouvrir le navigateur")
+                    .help("Navigateur dédié dans cette pile")
                 }
             }
             if let branch = item.branch {
                 MonoTag(branch, systemImage: "arrow.triangle.branch",
                         color: DefaultTheme.secondaryText)
             }
-            StatusLabel(item.state)
+            HStack(spacing: 6) {
+                StatusLabel(item.state)
+                if childCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+                        Text("\(childCount)").font(.system(size: 10))
+                    }
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                }
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9)
-            .stroke(isSelected ? DefaultTheme.accent : DefaultTheme.cardBorder, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
         .contextMenu {
             Button("Renommer…", action: onRename)
             Button("Nouveau terminal", action: onNewTerminal)
+            Button("Navigateur dédié", action: onOpenBrowser)
             Button("Archiver", action: onArchive)
         }
     }
