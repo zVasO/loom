@@ -229,6 +229,14 @@ struct ProjectsView: View {
     @State private var removalTarget: ProjectRecord?
     @State private var projectTab: ProjectTab = .overview
     @State private var skillFilter: SkillFilter = .all
+    @State private var viewedDocument: ViewedDocument?
+
+    struct ViewedDocument: Equatable {
+        var title: String
+        var path: URL
+        var content: String
+        var isText: Bool
+    }
 
     enum SkillFilter: String, CaseIterable {
         case all = "Tous", global = "Global", project = "Projet"
@@ -320,15 +328,19 @@ struct ProjectsView: View {
                 VStack(alignment: .leading, spacing: 26) {
                     header(project)
                     tabBar
-                    switch projectTab {
-                    case .overview:
-                        goalField(project)
-                        activeSection(project)
-                        recentSection(project)
-                    case .git: gitTab(project)
-                    case .files: filesTab(project)
-                    case .skills: skillsTab(project)
-                    case .rules: rulesTab(project)
+                    if let document = viewedDocument {
+                        documentViewer(document)
+                    } else {
+                        switch projectTab {
+                        case .overview:
+                            goalField(project)
+                            activeSection(project)
+                            recentSection(project)
+                        case .git: gitTab(project)
+                        case .files: filesTab(project)
+                        case .skills: skillsTab(project)
+                        case .rules: rulesTab(project)
+                        }
                     }
                 }
                 .frame(maxWidth: 860, alignment: .leading)
@@ -342,7 +354,9 @@ struct ProjectsView: View {
             projectTab = .overview
             filesPath = ""
             gitData = nil
+            viewedDocument = nil
         }
+        .onChange(of: projectTab) { viewedDocument = nil }
         .task(id: "\(current?.id.rawValue.uuidString ?? "")-\(projectTab.rawValue)") {
             if projectTab == .git, let project = current {
                 gitData = await model.projectGit(project.id)
@@ -439,8 +453,8 @@ struct ProjectsView: View {
                         if entry.isDirectory {
                             filesPath = entry.path
                         } else {
-                            NSWorkspace.shared.open(
-                                URL(fileURLWithPath: project.path).appendingPathComponent(entry.path))
+                            openDocument(at: URL(fileURLWithPath: project.path)
+                                .appendingPathComponent(entry.path), title: entry.name)
                         }
                     }
                 }
@@ -491,10 +505,81 @@ struct ProjectsView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)],
                       alignment: .leading, spacing: 12) {
                 ForEach(filtered, id: \.name) { skill in
-                    SkillCard(skill: skill)
+                    SkillCard(skill: skill) {
+                        if let path = skill.path {
+                            openDocument(at: path, title: skill.name)
+                        }
+                    }
                 }
             }
         }
+    }
+
+    /// Ouvre un fichier DANS l'app : texte affiché en place, binaire signalé.
+    private func openDocument(at url: URL, title: String) {
+        if let content = try? String(contentsOf: url, encoding: .utf8) {
+            viewedDocument = ViewedDocument(title: title, path: url,
+                                            content: String(content.prefix(200_000)),
+                                            isText: true)
+        } else {
+            viewedDocument = ViewedDocument(title: title, path: url, content: "",
+                                            isText: false)
+        }
+    }
+
+    /// Lecteur intégré : retour, titre, chemin, Finder — contenu mono, markdown
+    /// léger pour les .md (gras, code…), sélectionnable.
+    private func documentViewer(_ document: ViewedDocument) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                HoverIconButton(systemImage: "arrow.left", help: "Retour") {
+                    viewedDocument = nil
+                }
+                Text(document.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                Text(document.path.path)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.mutedText)
+                    .lineLimit(1)
+                Spacer()
+                GhostButton("Finder", systemImage: "arrow.up.forward.square") {
+                    NSWorkspace.shared.activateFileViewerSelecting([document.path])
+                }
+            }
+            if document.isText {
+                Text(renderedContent(document))
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.primaryText.opacity(0.92))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12)
+                        .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "doc.zipper")
+                        .font(.system(size: 28))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                    Text("Fichier binaire — ouvre-le depuis le Finder")
+                        .font(.system(size: 12))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 60)
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+    }
+
+    private func renderedContent(_ document: ViewedDocument) -> AttributedString {
+        guard document.path.pathExtension.lowercased() == "md",
+              let markdown = try? AttributedString(
+                  markdown: document.content,
+                  options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
+        else { return AttributedString(document.content) }
+        return markdown
     }
 
     private func filterPill(_ title: String, isActive: Bool,
@@ -524,8 +609,8 @@ struct ProjectsView: View {
                       alignment: .leading, spacing: 12) {
                 ForEach(rules) { rule in
                     RuleCard(rule: rule) {
-                        NSWorkspace.shared.open(
-                            URL(fileURLWithPath: project.path).appendingPathComponent(rule.name))
+                        openDocument(at: URL(fileURLWithPath: project.path)
+                            .appendingPathComponent(rule.name), title: rule.name)
                     }
                 }
             }
@@ -730,6 +815,7 @@ struct StackTab: View {
 /// lignes de description, chip de portée.
 struct SkillCard: View {
     let skill: SkillEntry
+    let onOpen: () -> Void
     @State private var hovered = false
 
     var body: some View {
@@ -757,7 +843,10 @@ struct SkillCard: View {
         .background(hovered ? DefaultTheme.surfaceRaised : DefaultTheme.surface,
                     in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10)
-            .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .stroke(hovered ? DefaultTheme.accent.opacity(0.5) : DefaultTheme.cardBorder,
+                    lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onOpen)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
     }

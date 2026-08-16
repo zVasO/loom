@@ -28,9 +28,12 @@ struct SkillsCatalogTests {
             ("deploy", "---\nname: deploy\ndescription: Déploie sur la préproduction\n---\n# Deploy"),
         ])
         let entries = SkillsCatalog.scan(globalDirectory: global, projectDirectory: nil)
-        #expect(entries == [SkillEntry(name: "deploy",
-                                       description: "Déploie sur la préproduction",
-                                       scope: .global)])
+        #expect(entries.count == 1)
+        #expect(entries.first?.name == "deploy")
+        #expect(entries.first?.description == "Déploie sur la préproduction")
+        #expect(entries.first?.scope == .global)
+        // Le chemin du SKILL.md est exposé : l'app l'ouvre dans son lecteur.
+        #expect(entries.first?.path?.lastPathComponent == "SKILL.md")
     }
 
     @Test("un SKILL.md mal formé apparaît quand même : nom = dossier (SKL-02)")

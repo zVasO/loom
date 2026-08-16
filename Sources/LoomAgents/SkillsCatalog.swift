@@ -7,11 +7,14 @@ public struct SkillEntry: Equatable, Sendable {
     public let name: String
     public let description: String
     public let scope: Scope
+    /// Le SKILL.md sur disque — pour l'ouvrir dans l'app.
+    public let path: URL?
 
-    public init(name: String, description: String, scope: Scope) {
+    public init(name: String, description: String, scope: Scope, path: URL? = nil) {
         self.name = name
         self.description = description
         self.scope = scope
+        self.path = path
     }
 }
 
@@ -48,7 +51,8 @@ public enum SkillsCatalog {
                 let front = frontmatter(of: content)
                 return SkillEntry(name: front["name"] ?? folder.lastPathComponent,
                                   description: front["description"] ?? "",
-                                  scope: scope)
+                                  scope: scope,
+                                  path: skillFile)
             }
             .sorted { $0.name < $1.name }
     }
