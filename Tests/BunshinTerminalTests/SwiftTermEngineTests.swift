@@ -1,6 +1,7 @@
 import Testing
 import BunshinCore
 import BunshinTerminal
+import BunshinTerminalTestSupport
 import Dispatch
 
 // L'adapter de production du seam TerminalEngine, testé au même seam que LineEngine :

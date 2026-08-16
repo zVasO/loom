@@ -6,19 +6,25 @@ import Foundation
 // Adapters de test au seam PTY (docs/design/session-runtime.md §Tests) :
 // aucun process réel, l'ordre des événements est piloté par le test.
 
-final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
+public final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
+    public init() {}
+
     private let lock = NSLock()
     private var sink: (@Sendable (PTYEvent) -> Void)?
     private var queue: DispatchQueue?
-    struct SignalDelivery: Equatable {
-        let signal: PTYSignal
-        let scope: PTYSignalScope
+    public struct SignalDelivery: Equatable {
+        public let signal: PTYSignal
+        public let scope: PTYSignalScope
+        public init(signal: PTYSignal, scope: PTYSignalScope) {
+            self.signal = signal
+            self.scope = scope
+        }
     }
 
-    private(set) var writtenBytes: [UInt8] = []
-    private(set) var receivedSignals: [SignalDelivery] = []
-    private(set) var openedEnvironment: [String: String] = [:]
-    private(set) var closeCount = 0
+    public private(set) var writtenBytes: [UInt8] = []
+    public private(set) var receivedSignals: [SignalDelivery] = []
+    public private(set) var openedEnvironment: [String: String] = [:]
+    public private(set) var closeCount = 0
 
     fileprivate func recordClose() {
         lock.lock()
@@ -32,7 +38,7 @@ final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
         lock.unlock()
     }
 
-    func open(command: Command,
+    public func open(command: Command,
               workingDirectory: URL,
               environment: [String: String],
               geometry: TerminalGeometry,
@@ -47,22 +53,22 @@ final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
     }
 
     /// Réaction scriptée aux signaux (« l'agent sort sur SIGINT », « ignore tout sauf SIGKILL »…).
-    var onSignal: (@Sendable (PTYSignal, ScriptedPTYHost) -> Void)?
+    public var onSignal: (@Sendable (PTYSignal, ScriptedPTYHost) -> Void)?
 
     // Pilotage par le test : chaque événement part sur la queue de session, comme en prod.
     // `exit` livre terminated puis EOF (l'ordre courant) ; pour l'ordre adverse, composer
     // avec les primitives brutes deliverTerminated/emit/emitEOF.
-    func emit(_ text: String) { deliver(.bytes(Array(text.utf8))) }
-    func emitEOF() { deliver(.endOfFile) }
-    func exit(code: Int32) {
+    public func emit(_ text: String) { deliver(.bytes(Array(text.utf8))) }
+    public func emitEOF() { deliver(.endOfFile) }
+    public func exit(code: Int32) {
         deliver(.terminated(ExitStatus(code: code)))
         deliver(.endOfFile)
     }
-    func exit(bySignal signal: Int32) {
+    public func exit(bySignal signal: Int32) {
         deliver(.terminated(ExitStatus(code: nil, signal: signal)))
         deliver(.endOfFile)
     }
-    func deliverTerminated(code: Int32) { deliver(.terminated(ExitStatus(code: code))) }
+    public func deliverTerminated(code: Int32) { deliver(.terminated(ExitStatus(code: code))) }
 
     private func deliver(_ event: PTYEvent) {
         lock.lock()
@@ -90,7 +96,7 @@ private final class ScriptedChannel: PTYChannel, @unchecked Sendable {
     private weak var host: ScriptedPTYHost?
     init(host: ScriptedPTYHost) { self.host = host }
     func write(_ bytes: ArraySlice<UInt8>) { host?.record(write: bytes) }
-    func resize(to geometry: TerminalGeometry) {}
+    public func resize(to geometry: TerminalGeometry) {}
     func signal(_ signal: PTYSignal, scope: PTYSignalScope) { host?.record(signal: signal, scope: scope) }
     func close() {
         host?.releaseSink()
@@ -103,19 +109,19 @@ private final class ScriptedChannel: PTYChannel, @unchecked Sendable {
 
 /// Moteur de test : buffer de lignes en clair, pas d'ANSI hors CR/LF. Rend les
 /// assertions d'écran lisibles sans dépendre du parseur d'un tiers.
-final class LineEngine: TerminalEngine {
+public final class LineEngine: TerminalEngine {
     private let geometry: TerminalGeometry
     private var text = ""
     private var revision: UInt64 = 0
 
-    init(geometry: TerminalGeometry) { self.geometry = geometry }
+    public init(geometry: TerminalGeometry) { self.geometry = geometry }
 
-    func feed(_ bytes: ArraySlice<UInt8>) {
+    public func feed(_ bytes: ArraySlice<UInt8>) {
         text += String(decoding: bytes, as: UTF8.self)
         revision += 1
     }
 
-    func snapshot() -> TerminalScreen {
+    public func snapshot() -> TerminalScreen {
         let lines = text
             .replacingOccurrences(of: "\r\n", with: "\n")
             .split(separator: "\n", omittingEmptySubsequences: false)
@@ -126,32 +132,34 @@ final class LineEngine: TerminalEngine {
                               revision: revision)
     }
 
-    func resize(to geometry: TerminalGeometry) {}
-    func takeDirtyRows() -> IndexSet { IndexSet() }
-    func setScrollback(_ lines: Int) {}
+    public func resize(to geometry: TerminalGeometry) {}
+    public func takeDirtyRows() -> IndexSet { IndexSet() }
+    public func setScrollback(_ lines: Int) {}
 }
 
-final class MemoryTranscriptSink: TranscriptSink, @unchecked Sendable {
+public final class MemoryTranscriptSink: TranscriptSink, @unchecked Sendable {
+    public init() {}
+
     private let lock = NSLock()
     private var bytes: [UInt8] = []
-    private(set) var isFinished = false
+    public private(set) var isFinished = false
     /// Vrai si un append est arrivé APRÈS finish() — violation de la barrière de drainage.
-    private(set) var appendedAfterFinish = false
+    public private(set) var appendedAfterFinish = false
 
-    var text: String {
+    public var text: String {
         lock.lock()
         defer { lock.unlock() }
         return String(decoding: bytes, as: UTF8.self)
     }
 
-    func append(_ bytes: ArraySlice<UInt8>, terminal: TerminalID) {
+    public func append(_ bytes: ArraySlice<UInt8>, terminal: TerminalID) {
         lock.lock()
         if isFinished { appendedAfterFinish = true }
         self.bytes.append(contentsOf: bytes)
         lock.unlock()
     }
 
-    func finish(terminal: TerminalID) async {
+    public func finish(terminal: TerminalID) async {
         lock.withLock { isFinished = true }
     }
 }

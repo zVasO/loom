@@ -1,6 +1,7 @@
 import Testing
 import BunshinCore
 import BunshinTerminal
+import BunshinTerminalTestSupport
 import Foundation
 
 // La projection MainActor du terminal pour SwiftUI (design C retenu, ADR-0008) :

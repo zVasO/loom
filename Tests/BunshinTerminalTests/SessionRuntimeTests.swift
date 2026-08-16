@@ -1,6 +1,7 @@
 import Testing
 import BunshinCore
 import BunshinTerminal
+import BunshinTerminalTestSupport
 import Foundation
 
 // Tests au seam convenu : l'interface publique de SessionRuntime, via ScriptedPTYHost.
