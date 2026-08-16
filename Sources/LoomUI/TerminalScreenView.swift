@@ -76,6 +76,7 @@ public struct TerminalScreenView: View {
     private func row(_ line: TerminalLine, height: CGFloat, cursorCol: Int? = nil) -> some View {
         Text(attributed(line))
             .font(.system(size: TerminalMetrics.fontSize, design: .monospaced))
+            .textSelection(.enabled)   // sélection à la souris + ⌘C
             .frame(height: height, alignment: .leading)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)

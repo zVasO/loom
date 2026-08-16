@@ -1,3 +1,4 @@
+import LoomUI
 import SwiftUI
 import WebKit
 
@@ -39,25 +40,17 @@ public struct BrowserPanelView: View {
 
             if !controller.tabs.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 3) {
                         ForEach(controller.tabs, id: \.id) { tab in
-                            HStack(spacing: 4) {
-                                Text(tab.title).lineLimit(1)
-                                Button { controller.close(tab.id) } label: {
-                                    Image(systemName: "xmark").imageScale(.small)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(controller.activeTab == tab.id ? Color.accentColor.opacity(0.25) : .clear,
-                                        in: Capsule())
-                            .onTapGesture { controller.activate(tab.id) }
+                            BrowserTabButton(title: tab.title,
+                                             isActive: controller.activeTab == tab.id,
+                                             onSelect: { controller.activate(tab.id) },
+                                             onClose: { controller.close(tab.id) })
                         }
                     }
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
                 }
-                .frame(height: 30)
+                .background(DefaultTheme.background)
             }
 
             if let webView = controller.activeWebView {
@@ -73,6 +66,50 @@ public struct BrowserPanelView: View {
         .onChange(of: controller.activeWebView?.url) { _, url in
             if let url { address = url.absoluteString }
         }
+    }
+}
+
+/// Onglet horizontal du navigateur — même langage que la barre de pile
+/// (icône, titre, croix au survol ou sur l'actif).
+struct BrowserTabButton: View {
+    let title: String
+    let isActive: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "globe")
+                .font(.system(size: 9))
+                .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
+            Text(title.isEmpty ? "Nouvel onglet" : title)
+                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
+                                                     : DefaultTheme.secondaryText)
+                .lineLimit(1)
+                .frame(maxWidth: 150, alignment: .leading)
+                .fixedSize(horizontal: true, vertical: false)
+            if hovered || isActive {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(hovered ? DefaultTheme.primaryText
+                                                 : DefaultTheme.secondaryText)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(isActive ? DefaultTheme.surfaceRaised
+                    : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
+                    in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7)
+            .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovered)
     }
 }
 

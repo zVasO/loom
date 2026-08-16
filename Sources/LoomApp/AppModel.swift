@@ -199,6 +199,14 @@ public final class AppModel {
         (try? store?.session(id: id)) ?? nil
     }
 
+    /// Retire le projet de l'app (archivage en base) : le dossier local et les
+    /// enregistrements de sessions restent intacts.
+    public func removeProject(_ id: ProjectID) {
+        try? store?.archiveProject(id)
+        if selectedProject == id { selectedProject = nil }
+        reloadPersistedSessions()
+    }
+
     /// L'ordre de la sidebar appartient à l'utilisateur (glisser-déposer) : simple
     /// préférence d'affichage, persistée hors base — les inconnus vont à la fin.
     public func reorderProjects(dragged: ProjectID, before target: ProjectID) {

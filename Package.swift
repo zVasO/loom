@@ -23,7 +23,7 @@ let package = Package(
         .target(name: "LoomTerminal", dependencies: ["LoomCore", .product(name: "SwiftTerm", package: "SwiftTerm")]),
         .target(name: "LoomAgents", dependencies: ["LoomCore"]),
         .target(name: "LoomGit", dependencies: ["LoomCore"]),
-        .target(name: "LoomWeb", dependencies: ["LoomCore"]),
+        .target(name: "LoomWeb", dependencies: ["LoomCore", "LoomUI"]),
         .target(name: "LoomPersistence", dependencies: ["LoomCore", "LoomTerminal", .product(name: "GRDB", package: "GRDB.swift")]),
         .target(name: "LoomIPC", dependencies: ["LoomCore"]),
         // Le helper appelé par les hooks des agents (ADR-0005) : stdin → socket, sans dépendance.

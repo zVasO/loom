@@ -23,5 +23,26 @@ struct LoomApp: App {
         // La navbar custom occupe le haut de la fenêtre, comme la référence :
         // barre de titre masquée, les feux tricolores flottent dessus.
         .windowStyle(.hiddenTitleBar)
+        .commands {
+            // Le menu Édition standard (copier/coller…) reste intact : on ne
+            // remplace que Fichier > Nouveau.
+            CommandGroup(replacing: .newItem) {
+                Button("Nouvelle session claude") {
+                    NotificationCenter.default.post(name: .loomNewSession, object: nil)
+                }
+                .keyboardShortcut("n", modifiers: .command)
+                Button("Nouvel onglet dans la pile") {
+                    NotificationCenter.default.post(name: .loomNewTab, object: nil)
+                }
+                .keyboardShortcut("t", modifiers: .command)
+            }
+        }
     }
+}
+
+extension Notification.Name {
+    /// ⌘N — une session claude dans le projet courant.
+    static let loomNewSession = Notification.Name("loom.newSession")
+    /// ⌘T — contextuel : onglet web dans le navigateur, terminal dans une session.
+    static let loomNewTab = Notification.Name("loom.newTab")
 }

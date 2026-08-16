@@ -88,6 +88,9 @@ struct ContentView: View {
                                 atomically: true, encoding: .utf8)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .loomNewSession)) { _ in
+            createSession(in: model.selectedProject)
+        }
         .sheet(isPresented: $paletteShown) { palette }
         .alert("Démarrage incomplet", isPresented: .constant(model.startupError != nil)) {
             Button("OK") { model.clearError() }
@@ -223,6 +226,7 @@ struct ProjectsView: View {
     @State private var goal = ""
     @FocusState private var goalFocused: Bool
     @State private var draggedProject: ProjectID?
+    @State private var removalTarget: ProjectRecord?
     @State private var projectTab: ProjectTab = .overview
     @State private var skillFilter: SkillFilter = .all
 
@@ -272,9 +276,9 @@ struct ProjectsView: View {
             ForEach(model.projects, id: \.id) { project in
                 ProjectSidebarRow(project: project,
                                   isSelected: current?.id == project.id,
-                                  activeCount: model.activeCount(for: project.id)) {
-                    model.selectedProject = project.id
-                }
+                                  activeCount: model.activeCount(for: project.id),
+                                  onSelect: { model.selectedProject = project.id },
+                                  onRemove: { removalTarget = project })
                 .opacity(draggedProject == project.id ? 0.35 : 1)
                 .onDrag {
                     draggedProject = project.id
@@ -295,6 +299,17 @@ struct ProjectsView: View {
         .padding(.horizontal, 8)
         .frame(width: 216)
         .background(DefaultTheme.background)
+        .alert("Supprimer « \(removalTarget?.name ?? "") » ?",
+               isPresented: Binding(get: { removalTarget != nil },
+                                    set: { if !$0 { removalTarget = nil } })) {
+            Button("Supprimer", role: .destructive) {
+                if let target = removalTarget { model.removeProject(target.id) }
+                removalTarget = nil
+            }
+            Button("Annuler", role: .cancel) { removalTarget = nil }
+        } message: {
+            Text("Le projet disparaît de Loom — le dossier local et l'historique des sessions ne sont pas touchés.")
+        }
     }
 
     // MARK: Détail du projet
@@ -669,6 +684,48 @@ struct ProjectsView: View {
     }
 }
 
+/// Onglet horizontal d'une pile (référence : barre du Terminal) : icône,
+/// titre, croix visible au survol ou sur l'actif. Dormant = atténué.
+struct StackTab: View {
+    let icon: String
+    let title: String
+    let isActive: Bool
+    var isDormant: Bool = false
+    let onSelect: () -> Void
+    let onClose: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 9))
+                .foregroundStyle(isDormant ? DefaultTheme.mutedText
+                                 : isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
+            Text(title)
+                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .foregroundStyle(isDormant ? DefaultTheme.secondaryText
+                                 : isActive || hovered ? DefaultTheme.primaryText
+                                                       : DefaultTheme.secondaryText)
+                .lineLimit(1)
+                .frame(maxWidth: 150, alignment: .leading)
+                .fixedSize(horizontal: true, vertical: false)
+            if hovered || isActive {
+                HoverIconButton(systemImage: "xmark", help: "Fermer", action: onClose)
+            }
+        }
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(isActive ? DefaultTheme.surfaceRaised
+                    : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
+                    in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7)
+            .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
+    }
+}
+
 /// Carte skill de la référence : étincelle dans un carré teinté, nom, deux
 /// lignes de description, chip de portée.
 struct SkillCard: View {
@@ -812,6 +869,7 @@ struct ProjectSidebarRow: View {
     let isSelected: Bool
     let activeCount: Int
     let onSelect: () -> Void
+    let onRemove: () -> Void
     @State private var hovered = false
 
     var body: some View {
@@ -830,10 +888,14 @@ struct ProjectSidebarRow: View {
                 .lineLimit(1)
             Spacer()
             if hovered {
-                // La poignée : l'affordance du glisser-déposer pour réordonner.
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 9))
-                    .foregroundStyle(DefaultTheme.mutedText)
+                // La poignée (glisser-déposer) + la croix (retrait du projet).
+                HStack(spacing: 4) {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 9))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                    HoverIconButton(systemImage: "xmark", help: "Supprimer le projet",
+                                    action: onRemove)
+                }
             } else if activeCount > 0 {
                 Circle()
                     .fill(DefaultTheme.badgeColor(for: .working))
@@ -965,21 +1027,41 @@ struct SessionsView: View {
         HStack(spacing: 0) {
             sidebar
             Divider().overlay(DefaultTheme.cardBorder)
-            switch selected {
-            case .session(let sessionID):
-                SessionDetailView(model: model, sessionID: sessionID,
-                                  onBack: onShowProject)
-                    .id(sessionID)
-            case .webPane(let paneID):
-                if let pane = model.browserPane(paneID) {
-                    BrowserPanelView(controller: pane.controller, onVisit: onVisit)
-                        .id(paneID)
-                        .background(DefaultTheme.contentBackground)
-                } else {
+            VStack(spacing: 0) {
+                stackTabStrip
+                switch selected {
+                case .session(let sessionID):
+                    SessionDetailView(model: model, sessionID: sessionID,
+                                      onBack: onShowProject)
+                        .id(sessionID)
+                case .webPane(let paneID):
+                    if let pane = model.browserPane(paneID) {
+                        BrowserPanelView(controller: pane.controller, onVisit: onVisit)
+                            .id(paneID)
+                            .background(DefaultTheme.contentBackground)
+                    } else {
+                        placeholder
+                    }
+                case nil:
                     placeholder
                 }
+            }
+        }
+        // ⌘T : un onglet DANS le contexte affiché — web si navigateur, terminal sinon.
+        .onReceive(NotificationCenter.default.publisher(for: .loomNewTab)) { _ in
+            switch selected {
+            case .webPane(let paneID):
+                model.browserPane(paneID)?.controller.openTab(urlString: "google.com")
+            case .session:
+                if let parent = currentStackParent {
+                    Task {
+                        if let id = await model.launchShell(for: parent) {
+                            selected = .session(id)
+                        }
+                    }
+                }
             case nil:
-                placeholder
+                break
             }
         }
         // Le process de la session affichée est mort (⌃C⌃C, exit) : le tab se
@@ -990,6 +1072,104 @@ struct SessionsView: View {
                !live.contains(where: { $0.id == id }) {
                 selected = nil
             }
+        }
+    }
+
+    /// La pile de l'élément affiché : son parent claude, qu'on soit sur lui,
+    /// sur un de ses terminaux ou sur un de ses navigateurs.
+    private var currentStackParent: AppModel.SessionItem? {
+        func dormantItem(_ record: SessionRecord) -> AppModel.SessionItem {
+            AppModel.SessionItem(id: record.id, title: record.title, state: record.state,
+                                 projectID: record.projectID, branch: record.branch,
+                                 parentID: nil, isShell: false, isDormant: true)
+        }
+        func parentItem(_ id: SessionID) -> AppModel.SessionItem? {
+            model.sessions.first { $0.id == id }
+                ?? model.dormantSessions.first { $0.id == id }.map(dormantItem)
+        }
+        switch selected {
+        case .session(let id):
+            guard let item = parentItem(id) else { return nil }
+            if item.isShell, let parentID = item.parentID { return parentItem(parentID) }
+            return item
+        case .webPane(let paneID):
+            guard let parentID = model.browserPane(paneID)?.parentID else { return nil }
+            return parentItem(parentID)
+        case nil:
+            return nil
+        }
+    }
+
+    /// La barre d'onglets horizontale de la référence : les membres de la pile
+    /// (claude, terminaux, navigateurs), croix comprise, « + » = ⌘T.
+    @ViewBuilder
+    private var stackTabStrip: some View {
+        if let parent = currentStackParent {
+            let shells = model.sessions.filter { $0.parentID == parent.id && $0.isShell }
+            let dormants = model.dormantShells.filter { $0.parentID == parent.id }
+            let panes = model.browserPanes.filter { $0.parentID == parent.id }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 3) {
+                    StackTab(icon: "sparkle", title: parent.title,
+                             isActive: selected == .session(parent.id),
+                             isDormant: parent.isDormant,
+                             onSelect: {
+                                 if parent.isDormant {
+                                     Task {
+                                         await model.resumeDormant(parent.id)
+                                         selected = .session(parent.id)
+                                     }
+                                 } else {
+                                     selected = .session(parent.id)
+                                 }
+                             },
+                             onClose: {
+                                 Task {
+                                     if parent.isDormant { await model.archiveSession(parent.id) }
+                                     else { await model.stopSession(parent.id) }
+                                 }
+                             })
+                    ForEach(shells) { shell in
+                        StackTab(icon: "terminal", title: shell.title,
+                                 isActive: selected == .session(shell.id),
+                                 onSelect: { selected = .session(shell.id) },
+                                 onClose: { Task { await model.stopSession(shell.id) } })
+                    }
+                    ForEach(dormants) { dormant in
+                        StackTab(icon: "terminal", title: dormant.title,
+                                 isActive: false, isDormant: true,
+                                 onSelect: {
+                                     Task {
+                                         if let id = await model.reopenDormantShell(dormant) {
+                                             selected = .session(id)
+                                         }
+                                     }
+                                 },
+                                 onClose: { model.forgetDormantShell(dormant) })
+                    }
+                    ForEach(panes) { pane in
+                        StackTab(icon: "globe", title: pane.title,
+                                 isActive: selected == .webPane(pane.id),
+                                 onSelect: { selected = .webPane(pane.id) },
+                                 onClose: {
+                                     if selected == .webPane(pane.id) { selected = nil }
+                                     model.closeBrowserPane(pane.id)
+                                 })
+                    }
+                    HoverIconButton(systemImage: "plus",
+                                    help: "Nouveau terminal dans cette pile (⌘T)") {
+                        Task {
+                            if let id = await model.launchShell(for: parent) {
+                                selected = .session(id)
+                            }
+                        }
+                    }
+                    .padding(.leading, 3)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+            }
+            .background(DefaultTheme.background)
+            Divider().overlay(DefaultTheme.cardBorder)
         }
     }
 
