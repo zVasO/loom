@@ -67,6 +67,8 @@ struct ContentView: View {
             if let selected {
                 SessionDetailView(model: model, sessionID: selected)
                     .id(selected)
+            } else if model.sessions.isEmpty && model.interruptedSessions.isEmpty {
+                emptyState
             } else {
                 Text("Choisis une session, ou lances-en une")
                     .foregroundStyle(DefaultTheme.secondaryText)
@@ -135,6 +137,37 @@ struct ContentView: View {
         }
         paletteShown = false
         paletteQuery = ""
+    }
+
+    /// UIX-06 : l'état vide accueille et diagnostique — jamais un écran muet.
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            Text("分身").font(.system(size: 56))
+            Text("Bunshin").font(.largeTitle.bold()).foregroundStyle(DefaultTheme.primaryText)
+            Text("Ajoute un projet, décris une tâche, et laisse tes clones travailler en parallèle.")
+                .foregroundStyle(DefaultTheme.secondaryText)
+                .multilineTextAlignment(.center)
+            Divider().frame(maxWidth: 320)
+            if let path = model.claudePath {
+                Label("Claude Code trouvé : \(path.path)", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.callout)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Claude Code introuvable", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                    Text("Emplacements vérifiés :").font(.caption)
+                    ForEach(model.claudeSearchedLocations, id: \.self) { location in
+                        Text(location).font(.system(.caption2, design: .monospaced))
+                    }
+                    Text("Installation : npm install -g @anthropic-ai/claude-code")
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+                .foregroundStyle(DefaultTheme.secondaryText)
+            }
+        }
+        .padding(40)
     }
 
     private func activeCard(_ item: AppModel.SessionItem) -> some View {

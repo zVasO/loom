@@ -52,9 +52,15 @@ public final class AppModel {
     private let supportDirectory: URL
     private var socketURL: URL { supportDirectory.appendingPathComponent("bunshin.sock") }
 
+    /// UIX-06 : le binaire claude localisé au lancement (les apps GUI ne voient pas
+    /// le PATH du shell — un chemin absolu est la seule voie fiable).
+    public private(set) var claudePath: URL? = ClaudeLocator.locate()
+    public var claudeSearchedLocations: [String] { ClaudeLocator.wellKnownLocations }
+
     /// L'adapter parle au CLI avec le câblage hooks complet (ADR-0005).
     private var adapter: ClaudeCodeAdapter {
-        ClaudeCodeAdapter(hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
+        ClaudeCodeAdapter(executable: claudePath?.path ?? "claude",
+                          hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
                                        socket: socketURL))
     }
 

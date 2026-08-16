@@ -6,3 +6,5 @@ xcuserdata/
 .DS_Store
 .bunshin/
 .omc/
+.env
+dist/
