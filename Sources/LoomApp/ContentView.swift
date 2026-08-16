@@ -810,6 +810,27 @@ struct SessionDetailView: View {
     }
 }
 
+/// Icône d'action des cartes : grise au repos, accent au survol — le pointeur
+/// dit ce qui est cliquable.
+struct HoverIconButton: View {
+    let systemImage: String
+    let help: String
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10))
+                .foregroundStyle(hovered ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(help)
+    }
+}
+
 // MARK: - Carte parent d'une pile (icônes au survol — terminal, navigateur)
 
 struct SidebarSessionCard: View {
@@ -832,20 +853,12 @@ struct SidebarSessionCard: View {
                     .lineLimit(1)
                 Spacer()
                 if hovered {
-                    Button(action: onNewTerminal) {
-                        Image(systemName: "terminal")
-                            .font(.system(size: 10))
-                            .foregroundStyle(DefaultTheme.secondaryText)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Nouveau terminal dans ce worktree")
-                    Button(action: onOpenBrowser) {
-                        Image(systemName: "globe")
-                            .font(.system(size: 10))
-                            .foregroundStyle(DefaultTheme.secondaryText)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Navigateur dédié dans cette pile")
+                    HoverIconButton(systemImage: "terminal",
+                                    help: "Nouveau terminal dans ce worktree",
+                                    action: onNewTerminal)
+                    HoverIconButton(systemImage: "globe",
+                                    help: "Navigateur dédié dans cette pile",
+                                    action: onOpenBrowser)
                 }
             }
             if let branch = item.branch {
