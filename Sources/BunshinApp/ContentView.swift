@@ -650,6 +650,18 @@ struct SessionDetailView: View {
                     .background(DefaultTheme.contentBackground)
                     if gitShown { gitPanel }
                 }
+                // Le helper / FLOTTE au-dessus du feed : il ne participe pas au
+                // layout — la grille du PTY ne bouge pas d'un pixel quand il
+                // apparaît, le feed de la session reste immobile.
+                .overlay(alignment: .bottomLeading) {
+                    if skillHelperActive && !skillSuggestions.isEmpty {
+                        skillHelper
+                            .frame(maxWidth: 560)
+                            .shadow(color: .black.opacity(0.5), radius: 18, y: 6)
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 6)
+                    }
+                }
                 inputBar(surface)
                     .task { await surface.attached() }
             } else {
@@ -692,9 +704,6 @@ struct SessionDetailView: View {
 
     private func inputBar(_ surface: TerminalSurface) -> some View {
         VStack(spacing: 6) {
-            if skillHelperActive && !skillSuggestions.isEmpty {
-                skillHelper
-            }
             TextField("Répondre à l'agent…  (/ pour les skills)", text: $input)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13, design: .monospaced))
