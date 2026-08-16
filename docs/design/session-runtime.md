@@ -26,6 +26,6 @@ Le squelette **C**, durci par deux emprunts :
 2. **Seams internes** (`Dependencies` avec défauts, aucun appelant de production ne les nomme) : `PTYHost`/`PTYChannel` forme B (PTYEvent, capabilities, pas de fd), `TerminalEngine` + fabrique (snapshot(), takeDirtyRows(), setScrollback — élargissement assumé du §6.2 du cahier des charges), `TranscriptSink`, `Clock`, `EnvironmentResolver`.
 3. **Rejets explicites** : registre d'observateurs (v2 si la recherche live/iOS se confirment — reprendre B §1.5) ; exposition du moteur ou de la queue ; décision d'état dans le runtime.
 
-**Risque principal retenu (C §5.4)** : l'interface est orientée snapshot — elle parie que Bunshin dessine depuis des valeurs. À valider au spike M0 : rendu 120 Hz depuis snapshots sur session en streaming continu. Si le banc dit non, c'est ce design qu'on revoit, pas ses appelants.
+**Risque principal retenu (C §5.4)** : l'interface est orientée snapshot — elle parie que Loom dessine depuis des valeurs. À valider au spike M0 : rendu 120 Hz depuis snapshots sur session en streaming continu. Si le banc dit non, c'est ce design qu'on revoit, pas ses appelants.
 
 **Tests (seams convenus, à confirmer avant le premier test — discipline TDD)** : l'interface publique de `SessionRuntime` + `TerminalSurface` est la surface de test ; `ScriptedPTYHost` et `TestClock` sont les adapters de test ; aucun test ne franchit la queue ni ne touche le moteur.

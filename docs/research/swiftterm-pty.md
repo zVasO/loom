@@ -1,6 +1,6 @@
 # SwiftTerm & PTY — recherche sur sources primaires
 
-Recherche menée le 2026-08-14 pour le projet **bunshin**.
+Recherche menée le 2026-08-14 pour le projet **loom**.
 
 **Méthode.** Toutes les affirmations ci-dessous proviennent de sources primaires :
 le dépôt officiel `migueldeicaza/SwiftTerm` cloné et lu localement, sa
@@ -14,7 +14,7 @@ HEAD = `1052996` (« Merge pull request #632 from faisalmumtaz89/decrqss-nonasci
 
 > ⚠️ **Avertissement de lecture.** La section 2 (thread-safety) contredit
 > frontalement la documentation officielle de SwiftTerm. C'est le point le plus
-> important de ce document pour bunshin. Voir §2.
+> important de ce document pour loom. Voir §2.
 
 ---
 
@@ -100,7 +100,7 @@ public func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
 > ⚠️ **`HeadlessTerminal` ne fait PAS ce second appel.** Il expose
 > `getWindowSize()` (utilisé au démarrage du process) mais n'a aucun code
 > appelant `setWinSize` après coup — vérifié par lecture intégrale de
-> `HeadlessTerminal.swift`. Pour bunshin, un resize d'une session headless
+> `HeadlessTerminal.swift`. Pour loom, un resize d'une session headless
 > impose donc **deux** appels manuels : `terminal.resize(cols:rows:)` **et**
 > `PseudoTerminalHelpers.setWinSize(masterPtyDescriptor: process.childfd, windowSize: &ws)`.
 
@@ -120,7 +120,7 @@ API publiques (Terminal.swift, listées aussi dans
 | `getCursorLocation()` | 6338 | `(x, y)` relatif à la partie visible |
 | `getTopVisibleRow()` | 6345 | `buffer.yDisp` |
 
-Et pour l'invalidation incrémentale (utile si bunshin veut ne re-parser que le
+Et pour l'invalidation incrémentale (utile si loom veut ne re-parser que le
 delta) : `getUpdateRange()` (6262), `getScrollInvariantUpdateRange()` (6312),
 `clearUpdateRange()` (6325), `updateFullScreen()` (6244).
 
@@ -140,7 +140,7 @@ for row in 0..<b.lines.count {
 
 Pour n'obtenir **que** l'écran visible, il faut boucler `0..<terminal.rows` avec
 `getLine(row:)` — c'est d'ailleurs le second exemple du même document DocC.
-Distinction critique pour bunshin : « ce qui est à l'écran » ≠ « tout ce qui a
+Distinction critique pour loom : « ce qui est à l'écran » ≠ « tout ce qui a
 été produit ».
 
 `BufferLine.translateToString(trimRight:startCol:endCol:skipNullCellsFollowingWide:characterProvider:)`
@@ -179,7 +179,7 @@ Les 30 autres (`bell`, `bufferActivated`, `showCursor`, `hideCursor`,
 `setTerminalTitle`, `scrolled`, `linefeed`, `selectionChanged`, `windowCommand`,
 `isProcessTrusted`, `colorChanged`, `createImageFromBitmap`, `progressReport`,
 `synchronizedOutputChanged`, etc.) ont un défaut no-op. Un délégué headless
-minimal tient donc en ~5 lignes. C'est excellent pour bunshin s'il veut piloter
+minimal tient donc en ~5 lignes. C'est excellent pour loom s'il veut piloter
 son propre transport (pas seulement un process local).
 
 ### 1.6 Licence & intégration SPM
@@ -227,7 +227,7 @@ v1.18.0 (2026-08-09), v1.17.0 (2026-08-09), v1.16.0 (2026-08-07).
 > « Small improvements by the community worth distributing **before the IO
 > changes** » et pour v1.17.0 « OSC133 + fixes **before the big IO layer
 > changes** » — indiquant une refonte de la couche I/O annoncée mais non encore
-> livrée. À surveiller pour bunshin : la cadence est rapide (3 releases en 3 jours).
+> livrée. À surveiller pour loom : la cadence est rapide (3 releases en 3 jours).
 
 ---
 
@@ -335,7 +335,7 @@ DispatchQueue(label: "Runner", qos: .userInteractive, attributes: .concurrent, .
 
 > 🔎 Détail intéressant : cette queue de test est `.concurrent`. La sérialisation
 > ne vient donc **pas** de la queue mais du fait qu'une seule chaîne de lecture
-> DispatchIO est active à la fois. Fragile par construction — si bunshin ajoute
+> DispatchIO est active à la fois. Fragile par construction — si loom ajoute
 > une seconde source qui `feed` le même `Terminal`, la sérialisation disparaît.
 > **Recommandation : utiliser une queue `serial` par session**, ce qui rend
 > l'invariant explicite plutôt qu'accidentel.
@@ -359,21 +359,21 @@ private func scheduleSynchronizedOutputTimeout () {
 
 avec `private let synchronizedOutputTimeoutSeconds: TimeInterval = 1.0` (Terminal.swift:388).
 
-**Conséquence concrète pour bunshin.** Ce timer est armé quand l'application
+**Conséquence concrète pour loom.** Ce timer est armé quand l'application
 invitée active le mode DEC 2026 « synchronized output » (Terminal.swift:5304,
 5552 — référencé à `contour-terminal/vt-extensions` ; utilisé par tmux, neovim,
 Ghostty…). Si le timeout expire, `endSynchronizedOutput()` s'exécute **sur la
 main queue** et appelle `refresh(startRow:0, endRow:rows-1)`, qui mute
 `refreshStart`/`refreshEnd`/`scrollInvariantRefresh*` — **pendant qu'un `feed`
 peut tourner sur la queue de fond**. C'est une data race réelle, non protégée,
-dans le scénario précis que bunshin vise (parsing hors-main de sessions non
+dans le scénario précis que loom vise (parsing hors-main de sessions non
 affichées exécutant des TUI modernes).
 
 Atténuations : la fenêtre est étroite (1 s après un `BSU` non suivi d'un `ESU`),
 et les champs en cause sont des `Int` scalaires — la corruption pratique se
 limiterait à une plage de rafraîchissement fausse, pas à un crash du buffer.
 Mais sous Thread Sanitizer, cela **sera** signalé. À valider par un test TSan
-dédié côté bunshin.
+dédié côté loom.
 
 À noter : `Terminal.resize(cols:rows:)` appelle `endSynchronizedOutput()` de
 façon synchrone, ce qui est correct si le resize est fait sur la queue du
@@ -434,7 +434,7 @@ La docstring de `LocalProcess` affirme pourtant encore « This implementation us
 swift-subprocess with openpty/login_tty for pseudo-terminal support » — **c'est
 une docstring périmée** qui décrit le chemin mort. Ne pas s'y fier.
 
-**Implication pour bunshin.** Si vous voulez `posix_spawn` + `openpty` (par
+**Implication pour loom.** Si vous voulez `posix_spawn` + `openpty` (par
 exemple pour éviter les dangers de `fork()` dans un process multi-threadé —
 `forkpty` appelle `fork()`, et entre `fork` et `execve` seules les fonctions
 async-signal-safe sont légales), **vous devrez l'implémenter vous-même**.
@@ -470,7 +470,7 @@ commentaire dans `startProcessWithForkpty` :
 > « processTerminated() reads self.shellPid (a 0 here makes `waitpid(0, ...)`
 > target the caller's process group, which never matches the **setsid child**) »
 
-### 3.4 Briques disponibles si bunshin réimplémente le PTY
+### 3.4 Briques disponibles si loom réimplémente le PTY
 
 Vérifié sur cette machine (SDK `MacOSX.sdk`, Xcode) :
 
@@ -523,7 +523,7 @@ io.read(offset: 0, length: readSize, queue: readQueue) { [weak self] done, data,
 ```
 
 Le commentaire justifie le `cleanupHandler` : « This prevents **EV_VANISHED
-crash** by ensuring proper cleanup order ». Leçon à reprendre si bunshin
+crash** by ensuring proper cleanup order ». Leçon à reprendre si loom
 réimplémente : ne **jamais** `close()` un fd encore détenu par un `DispatchIO`.
 
 Écriture — `send(data:)` utilise `DispatchIO.write` sur
@@ -537,7 +537,7 @@ cm.setEventHandler(handler: { [weak self] in self?.processTerminated () })
 if #available(macOS 10.12, *) { cm.activate() } else { cm.resume() }
 ```
 
-Le commentaire adjacent documente un bug corrigé, précieux pour bunshin :
+Le commentaire adjacent documente un bug corrigé, précieux pour loom :
 « **NOTE_EXIT is delivered at most once**; if the source is activated first and a
 fast-exiting child's exit fires before the handler is set, the event is dropped
 and never redelivered, so `processTerminated()` never runs — the child is not
@@ -546,7 +546,7 @@ reaped and callers waiting on exit hang. » ⇒ **poser le handler avant
 
 `terminate()` fait `io?.close()`, met `childfd = -1`, puis `kill(shellPid, SIGTERM)`.
 Le `deinit` ferme le `DispatchIO` mais **n'envoie pas** `SIGTERM` (choix
-délibéré et commenté). ⚠️ Pour bunshin : oublier `terminate()` laisse le shell
+délibéré et commenté). ⚠️ Pour loom : oublier `terminate()` laisse le shell
 enfant vivant.
 
 ### 3.6 ⚠️ Piège majeur : la queue par défaut est la MAIN queue
@@ -583,7 +583,7 @@ Preuve par l'usage officiel : `Sources/Termcast/TermcastRecorder.swift` construi
 86, faire tourner explicitement `RunLoop.main.run()`. Un outil CLI qui a besoin
 d'une run loop main : c'est la signature du défaut sur la main queue.
 
-> 🔴 **Conséquence directe pour bunshin.** Un démon / CLI sans run loop main
+> 🔴 **Conséquence directe pour loom.** Un démon / CLI sans run loop main
 > active qui instancie `HeadlessTerminal` sans queue **ne recevra jamais aucune
 > donnée** — le process tournera, le PTY se remplira, et rien n'arrivera. La
 > parade est en une ligne : **toujours passer une `DispatchQueue` sérielle
@@ -623,10 +623,10 @@ demandes intermédiaires. Même mécanisme pour Metal (`queueMetalDisplay`,
 is already scheduled [...] don't post another [...] instead of flooding the main
 queue with one updateDisplay per chunk. »
 
-> **Pertinent pour bunshin** : tout ce throttling vit dans la **couche vue**. En
+> **Pertinent pour loom** : tout ce throttling vit dans la **couche vue**. En
 > headless, il n'y en a **aucun** — `feed` parse à la vitesse d'arrivée des
 > octets. C'est ce que vous voulez pour du parsing, mais cela signifie que le
-> coût CPU est proportionnel au débit, sans amortissement. Si bunshin n'a besoin
+> coût CPU est proportionnel au débit, sans amortissement. Si loom n'a besoin
 > que d'un snapshot périodique, il faut throttler **la lecture du buffer**
 > (`getLine`/`getBufferAsData`), pas le `feed`.
 
@@ -661,8 +661,8 @@ Second garde-fou documenté, sur le ré-armement des lectures :
 > a fast producer the chains multiply and hundreds of MB of in-flight reads pile
 > up. One op must spawn exactly one successor. »
 
-> 🔴 **Point critique pour bunshin.** Cette backpressure n'est appliquée que sur
-> `if usesMainQueue`. Sur le chemin **queue custom** — celui que bunshin va
+> 🔴 **Point critique pour loom.** Cette backpressure n'est appliquée que sur
+> `if usesMainQueue`. Sur le chemin **queue custom** — celui que loom va
 > utiliser — la branche est `dispatchQueue.sync { delegate?.dataReceived(...) }`.
 > Le `sync` fournit une backpressure *implicite* (la readQueue bloque tant que le
 > `feed` n'est pas fini, donc le PTY n'est pas relu, donc le kernel finit par
@@ -700,7 +700,7 @@ remplies.
 
 Autre limite mémoire à connaître : `kittyImageCacheLimitBytes`, « defaults to
 **320MB** and is clamped to 4GB » (TerminalOptions.swift). ⚠️ Par session, cela
-peut peser lourd si bunshin multiplie les sessions et que les programmes émettent
+peut peser lourd si loom multiplie les sessions et que les programmes émettent
 des images Kitty. À réduire explicitement. `Terminal.garbageCollectPayload()`
 (6277) libère les payloads (images, URLs) devenus inatteignables.
 
@@ -741,7 +741,7 @@ flag and arm a safety timer ». Contexte utile pour le risque décrit en §2.5.
 ### 4.5 Outillage de mesure fourni
 
 `PERFORMANCE.md` documente trois niveaux, dont deux directement réutilisables
-par bunshin :
+par loom :
 
 1. **Headless feed benchmarks** — « measure the terminal-emulation engine (parser
    + buffer) **with no rendering** ». Dans `Tests/SwiftTermTests/PerformanceTest.swift`.
@@ -761,11 +761,11 @@ noise ». Un build **Release** est impératif : « Debug builds SwiftTerm at
 `-Onone` and exaggerates Swift-level costs ».
 
 Chaque `feed` est instrumenté par un `os_signpost` (sous-système
-`org.tirania.SwiftTerm`) — exploitable directement dans Instruments par bunshin.
+`org.tirania.SwiftTerm`) — exploitable directement dans Instruments par loom.
 
 ---
 
-## 5. Recommandations pour bunshin
+## 5. Recommandations pour loom
 
 Découlant directement des constats ci-dessus :
 
@@ -807,7 +807,7 @@ Listé explicitement, par honnêteté méthodologique.
    "SIGWINCH|window size"` sur cette man page ne renvoie aucune ligne l'affirmant.
    `SIGWINCH` existe bien (`sys/signal.h:119`, « window size changes ») et c'est
    le comportement BSD/XNU attendu, mais **je ne peux pas le sourcer depuis la
-   documentation Apple**. À valider empiriquement par bunshin (test : resize d'un
+   documentation Apple**. À valider empiriquement par loom (test : resize d'un
    PTY hébergeant `vim`, observer la réaction).
 2. **Résolution de l'issue #294.** Le fetch de la page n'a renvoyé que le rapport
    initial, sans les commentaires ni le commit de correction. Le statut « Closed »
@@ -893,14 +893,14 @@ mémoire. C'est la suite logique du diagnostic de #373 (§4.4), qui attribuait
 L'issue **ne contient ni benchmark, ni cas de test, ni critère d'acceptation** —
 c'est une note d'intention du mainteneur, pas un plan.
 
-> **Lecture pour bunshin.** Les deux issues perf ouvertes (#373, #379) visent
+> **Lecture pour loom.** Les deux issues perf ouvertes (#373, #379) visent
 > toutes deux la représentation interne du buffer. Une telle refonte, combinée à
 > la « big IO layer change » annoncée dans les notes de v1.17/v1.18 (§1.6),
 > renforce la recommandation n°8 : **épingler la version**.
 
 ### 7.3 ⚠️ `getEnvironmentVariables` n'inclut PAS `PATH` — piège opérationnel
 
-Point non couvert plus haut, et directement bloquant pour bunshin.
+Point non couvert plus haut, et directement bloquant pour loom.
 
 `LocalProcess.startProcess` construit l'environnement de l'enfant ainsi
 (`LocalProcess.swift`, `startProcessWithForkpty`) :
@@ -983,7 +983,7 @@ passe `running` à `false` **sans** notifier le délégué ; seul `NOTE_EXIT` d�
 existe précisément pour que l'EOF n'annule pas le moniteur qui portera le code de
 sortie.
 
-> **Pour bunshin :** ne pas traiter `dataReceived` s'arrêtant comme la fin de
+> **Pour loom :** ne pas traiter `dataReceived` s'arrêtant comme la fin de
 > session, et ne pas conclure non plus depuis `running == false`. **La seule
 > source de vérité pour la terminaison et le code de sortie est le callback
 > `processTerminated(_:exitCode:)`.** Corollaire : le dernier lot d'octets peut
@@ -1015,7 +1015,7 @@ Deux enseignements :
    protégée à la main, au cas par cas (ici par `userInputLock`).
 2. Complément à §4.1 : le throttle 60 fps admet un **contournement** — pendant
    150 ms après une frappe utilisateur, le rendu est immédiat. Sans effet en
-   headless (aucune vue), mais bon à savoir si bunshin affiche un jour une session.
+   headless (aucune vue), mais bon à savoir si loom affiche un jour une session.
 
 ---
 

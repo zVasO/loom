@@ -1,10 +1,10 @@
-# Bunshin 分身
+# Loom 分身
 
 Environnement de développement agentique natif macOS : chaque session d'agent CLI
 (Claude Code en tête) vit dans un terminal persistant sur son propre worktree Git,
 avec détection d'état en temps réel, transcripts continus et historique complet.
 
-Le cahier des charges fait foi : [`cahier-des-charges-bunshin.md`](cahier-des-charges-bunshin.md).
+Le cahier des charges fait foi : [`cahier-des-charges-loom.md`](cahier-des-charges-loom.md).
 Le vocabulaire canonique vit dans [`CONTEXT.md`](CONTEXT.md), les décisions dans
 [`docs/adr/`](docs/adr/), les recherches en sources primaires dans [`docs/research/`](docs/research/).
 
@@ -12,20 +12,20 @@ Le vocabulaire canonique vit dans [`CONTEXT.md`](CONTEXT.md), les décisions dan
 
 ```sh
 swift test        # 95 tests, 17 suites — process réels, repos Git réels, sockets réels
-swift run BunshinApp
+swift run LoomApp
 ```
 
 Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 étapes).
 
 ## Ce que la v1 sait faire
 
-- **Sessions** : lancement depuis un objectif (UC-1), worktree isolé `bunshin/<slug>`
+- **Sessions** : lancement depuis un objectif (UC-1), worktree isolé `loom/<slug>`
   par session, arrêt escaladé SIGINT→SIGTERM→SIGKILL, Reprise après crash sous le
   même identifiant (`claude --resume`, UUID imposé au lancement), archivage,
   historique, recherche FTS5, palette ⌘K.
 - **Détection d'état — le différenciateur** : deux canaux fusionnés par une machine
   à états pure (fenêtre de priorité hooks 10 s, hystérésis 2 s, péremption 4 s).
-  Canal hooks : `--settings` injecté par session → binaire `bunshin-hook` → socket
+  Canal hooks : `--settings` injecté par session → binaire `loom-hook` → socket
   Unix 0600 → token par session → réducteur. Canal heuristique (agents sans hooks) :
   silence/octets/motifs d'invite/CPU. `needs_input` badge la carte et notifie.
 - **Terminal** : SwiftTerm headless confiné à une queue sérielle par session
@@ -44,11 +44,11 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
 ## Architecture
 
 Packages SPM aux frontières imposées (§6.1 du cahier des charges, ADR-0009) :
-`BunshinCore` (états, réducteur) ← `BunshinTerminal` (PTY, moteur, runtime) ·
-`BunshinAgents` (adapter Claude Code, classification) · `BunshinGit` · `BunshinWeb` ·
-`BunshinPersistence` (GRDB, transcripts) · `BunshinIPC` (socket hooks) ←
-`BunshinSessions` (SessionManager, orchestration) ← `BunshinApp` (SwiftUI).
-Exécutable compagnon : `bunshin-hook`.
+`LoomCore` (états, réducteur) ← `LoomTerminal` (PTY, moteur, runtime) ·
+`LoomAgents` (adapter Claude Code, classification) · `LoomGit` · `LoomWeb` ·
+`LoomPersistence` (GRDB, transcripts) · `LoomIPC` (socket hooks) ←
+`LoomSessions` (SessionManager, orchestration) ← `LoomApp` (SwiftUI).
+Exécutable compagnon : `loom-hook`.
 
 Aucun service ne dépend de l'UI ; l'UI ne voit que des valeurs (`TerminalScreen`),
 jamais le moteur. Tout accès moteur est confiné à la queue sérielle de sa session.

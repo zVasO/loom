@@ -186,7 +186,7 @@ finish() {
 
 TOTAL_STAGES=8
 
-banner "Release Bunshin — signature, notarisation, DMG"
+banner "Release Loom — signature, notarisation, DMG"
 
 # ── Stage 1 : prérequis ───────────────────────────────────────────────────
 stage "Prérequis — Xcode et compte développeur"
@@ -209,31 +209,31 @@ pause "Fait ? Entrée pour vérifier."
 say "Identités de signature présentes :"
 security find-identity -v -p codesigning | grep "Developer ID Application" || warn "aucune trouvée — le certificat n'est pas installé"
 step "Copie l'identité complète, ex. : Developer ID Application: Ton Nom (TEAMID)"
-ask BUNSHIN_SIGN_IDENTITY "Colle l'identité de signature :"
-write_env BUNSHIN_SIGN_IDENTITY "$BUNSHIN_SIGN_IDENTITY"
+ask LOOM_SIGN_IDENTITY "Colle l'identité de signature :"
+write_env LOOM_SIGN_IDENTITY "$LOOM_SIGN_IDENTITY"
 
 # ── Stage 3 : identifiant de bundle ───────────────────────────────────────
 stage "Identifiant de bundle"
-say "L'identifiant unique de l'app (reverse-DNS), ex. com.tondomaine.bunshin."
-ask BUNSHIN_BUNDLE_ID "Bundle ID :"
-write_env BUNSHIN_BUNDLE_ID "$BUNSHIN_BUNDLE_ID"
+say "L'identifiant unique de l'app (reverse-DNS), ex. com.tondomaine.loom."
+ask LOOM_BUNDLE_ID "Bundle ID :"
+write_env LOOM_BUNDLE_ID "$LOOM_BUNDLE_ID"
 
 # ── Stage 4 : build release et assemblage du .app ─────────────────────────
-stage "Build release et assemblage de Bunshin.app"
+stage "Build release et assemblage de Loom.app"
 say "Compilation SPM en release puis assemblage du bundle…"
 swift build -c release
-APP=dist/Bunshin.app
+APP=dist/Loom.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/BunshinApp "$APP/Contents/MacOS/Bunshin"
-cp .build/release/bunshin-hook "$APP/Contents/MacOS/bunshin-hook"
+cp .build/release/LoomApp "$APP/Contents/MacOS/Loom"
+cp .build/release/loom-hook "$APP/Contents/MacOS/loom-hook"
 VERSION=$(git describe --tags --always 2>/dev/null || echo "0.1.0")
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleExecutable</key><string>Bunshin</string>
-  <key>CFBundleIdentifier</key><string>${BUNSHIN_BUNDLE_ID}</string>
-  <key>CFBundleName</key><string>Bunshin</string>
+  <key>CFBundleExecutable</key><string>Loom</string>
+  <key>CFBundleIdentifier</key><string>${LOOM_BUNDLE_ID}</string>
+  <key>CFBundleName</key><string>Loom</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -245,8 +245,8 @@ pause
 
 # ── Stage 5 : signature Hardened Runtime ──────────────────────────────────
 stage "Signature (Hardened Runtime, ADR-0004)"
-codesign --force --options runtime --sign "$BUNSHIN_SIGN_IDENTITY" "$APP/Contents/MacOS/bunshin-hook"
-codesign --force --options runtime --sign "$BUNSHIN_SIGN_IDENTITY" "$APP"
+codesign --force --options runtime --sign "$LOOM_SIGN_IDENTITY" "$APP/Contents/MacOS/loom-hook"
+codesign --force --options runtime --sign "$LOOM_SIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP" && say "✓ signature vérifiée"
 pause
 
@@ -254,28 +254,28 @@ pause
 stage "Identifiants notarytool (mot de passe d'app)"
 say "La notarisation utilise ton Apple ID + un mot de passe d'application."
 open_url "https://account.apple.com/account/manage"
-step "Connexion → Sécurité → Mots de passe d'app → + → nomme-le « bunshin-notary »."
+step "Connexion → Sécurité → Mots de passe d'app → + → nomme-le « loom-notary »."
 ask APPLE_ID "Ton Apple ID (email) :"
 ask APPLE_TEAM_ID "Ton Team ID (10 caractères, visible sur developer.apple.com/account) :"
 ask_secret APPLE_APP_PASSWORD "Colle le mot de passe d'app (caché) :"
-xcrun notarytool store-credentials bunshin-notary \
+xcrun notarytool store-credentials loom-notary \
   --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
 write_env APPLE_TEAM_ID "$APPLE_TEAM_ID"
-say "✓ profil « bunshin-notary » enregistré dans le trousseau (le mot de passe n'est PAS écrit en clair)"
+say "✓ profil « loom-notary » enregistré dans le trousseau (le mot de passe n'est PAS écrit en clair)"
 
 # ── Stage 7 : notarisation et staple ──────────────────────────────────────
 stage "Notarisation Apple (quelques minutes)"
-ditto -c -k --keepParent "$APP" dist/Bunshin.zip
-xcrun notarytool submit dist/Bunshin.zip --keychain-profile bunshin-notary --wait
+ditto -c -k --keepParent "$APP" dist/Loom.zip
+xcrun notarytool submit dist/Loom.zip --keychain-profile loom-notary --wait
 xcrun stapler staple "$APP"
 spctl --assess --type execute "$APP" && say "✓ Gatekeeper accepte l'app"
 pause
 
 # ── Stage 8 : DMG ─────────────────────────────────────────────────────────
 stage "Image disque de distribution"
-rm -f dist/Bunshin.dmg
-hdiutil create -volname "Bunshin" -srcfolder "$APP" -ov -format UDZO dist/Bunshin.dmg
-say "✓ dist/Bunshin.dmg prêt à distribuer"
+rm -f dist/Loom.dmg
+hdiutil create -volname "Loom" -srcfolder "$APP" -ov -format UDZO dist/Loom.dmg
+say "✓ dist/Loom.dmg prêt à distribuer"
 note "Sparkle (mises à jour auto) : étape ultérieure — génération de clés EdDSA"
 note "et appcast auto-hébergé, à câbler quand un canal de distribution existera."
 pause

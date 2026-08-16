@@ -4,5 +4,5 @@ Trois designs concurrents de `SessionRuntime` ont été produits sous contrainte
 
 ## Consequences
 
-- L'interface parie que Bunshin dessine le terminal depuis des valeurs (`TerminalScreen`). Le spike M0 doit valider un rendu 120 Hz depuis snapshots sur session en streaming continu ; si le banc échoue, c'est ce design qu'on revoit, pas ses appelants.
+- L'interface parie que Loom dessine le terminal depuis des valeurs (`TerminalScreen`). Le spike M0 doit valider un rendu 120 Hz depuis snapshots sur session en streaming continu ; si le banc échoue, c'est ce design qu'on revoit, pas ses appelants.
 - La surface de test convenue est l'interface publique de `SessionRuntime` + `TerminalSurface`, avec `ScriptedPTYHost` et une horloge de test ; aucun test ne franchit la queue de session.

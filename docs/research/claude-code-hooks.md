@@ -2,11 +2,11 @@
 
 Sources primaires : [code.claude.com/docs/en/hooks](https://code.claude.com/docs/en/hooks) et [code.claude.com/docs/en/cli-reference](https://code.claude.com/docs/en/cli-reference), consultées le 2026-08-14. Toutes les citations proviennent de ces deux pages.
 
-## 1. Événements de hooks pertinents pour Bunshin
+## 1. Événements de hooks pertinents pour Loom
 
 Le catalogue complet compte ~30 événements. Ceux qui portent la détection d'état :
 
-| Événement | Déclenchement (doc) | Usage Bunshin |
+| Événement | Déclenchement (doc) | Usage Loom |
 |---|---|---|
 | `SessionStart` | « When a session begins or resumes » — matcher `startup`/`resume`/`clear`/`compact`/`fork` | confirmation de démarrage, capture du `session_id` natif |
 | `UserPromptSubmit` | à la soumission d'un prompt | transition → `working` |
@@ -32,9 +32,9 @@ Points clés vérifiés :
 
 ## 3. Installation des hooks sans toucher aux settings globaux
 
-Trois mécanismes vérifiés, du plus adapté au moins adapté pour Bunshin :
+Trois mécanismes vérifiés, du plus adapté au moins adapté pour Loom :
 
-1. **Flag `--settings <path-or-json>`** : « Path to a settings JSON file or an inline JSON string. Values you set here override the same keys in your settings.json files for this session. » Accepte un fichier (≤ 2 MiB) ou du JSON inline. Portée : la session lancée, rien d'écrit sur disque utilisateur. **C'est le canal recommandé pour Bunshin.**
+1. **Flag `--settings <path-or-json>`** : « Path to a settings JSON file or an inline JSON string. Values you set here override the same keys in your settings.json files for this session. » Accepte un fichier (≤ 2 MiB) ou du JSON inline. Portée : la session lancée, rien d'écrit sur disque utilisateur. **C'est le canal recommandé pour Loom.**
 2. `.claude/settings.local.json` dans le worktree : « Gitignored automatically », portée projet. Solution de repli, mais laisse un fichier dans le worktree.
 3. Les hooks des différents niveaux **se fusionnent** (ils ne se remplacent pas) : injecter nos hooks via `--settings` n'écrase donc pas les hooks personnels de l'utilisateur — cohabitation garantie.
 
@@ -53,7 +53,7 @@ Conclusion : la frontière tranchée dans `CONTEXT.md` (« termine par une quest
 
 ## 5. Reprise et identité de session — découverte qui change le design
 
-- **`--session-id "<uuid>"`** : « Use a specific session ID for the conversation (must be a valid UUID) ». **Bunshin peut donc imposer l'UUID à la création** au lieu de le capturer via `SessionStart` comme le prévoit le cahier des charges (§6.4). Bénéfice : plus de fenêtre de crash entre lancement et premier hook ; l'ID est connu avant même le fork.
+- **`--session-id "<uuid>"`** : « Use a specific session ID for the conversation (must be a valid UUID) ». **Loom peut donc imposer l'UUID à la création** au lieu de le capturer via `SessionStart` comme le prévoit le cahier des charges (§6.4). Bénéfice : plus de fenêtre de crash entre lancement et premier hook ; l'ID est connu avant même le fork.
 - **`--resume <session-id-or-name>`** : cherche « the current project directory and its git worktrees, then every other project on this machine » (≥ v2.1.223) — compatible avec nos worktrees.
 - **`--fork-session`** : reprendre en créant un nouvel ID — utile pour « dupliquer la configuration » (SES-05) à partir d'une session existante.
 - **`--continue`** : dernière conversation du répertoire courant — repli si l'ID est perdu.
@@ -63,4 +63,4 @@ Conclusion : la frontière tranchée dans `CONTEXT.md` (« termine par une quest
 - Le seuil de déclenchement exact de `idle_prompt` (délai, configurabilité) n'est pas précisé sur les pages consultées.
 - Comportement réel de la fusion de hooks quand `--settings` définit le même événement que les settings utilisateur (la doc dit « merge », à confirmer par test).
 - La disponibilité de `agent_needs_input`/`agent_completed` hors contexte d'agent-teams (à tester : sessions simples).
-- Versions minimales : `prompt_id` exige ≥ v2.1.196, recherche `--resume` étendue ≥ v2.1.223 — fixer une version plancher de Claude Code pour Bunshin (canary check au lancement, cf. risque n°2 du cahier des charges).
+- Versions minimales : `prompt_id` exige ≥ v2.1.196, recherche `--resume` étendue ≥ v2.1.223 — fixer une version plancher de Claude Code pour Loom (canary check au lancement, cf. risque n°2 du cahier des charges).

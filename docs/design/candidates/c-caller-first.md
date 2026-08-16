@@ -67,7 +67,7 @@ public struct SessionLaunchPlan: Sendable {
     /// (cf. §3.7). `nil` = l'Agent est lancé sans saisie (le prompt est déjà en argv).
     public var initialInput: String?
     public var geometry: TerminalGeometry = .default
-    /// `nil` → `~/Library/Application Support/Bunshin/transcripts/<session-id>/` (DAT-01).
+    /// `nil` → `~/Library/Application Support/Loom/transcripts/<session-id>/` (DAT-01).
     public var transcriptDirectory: URL?
     /// Cadence d'échantillonnage vers le `StateEngine`. Défaut 250 ms (STA-02).
     public var samplingInterval: Duration = .milliseconds(250)
@@ -595,7 +595,7 @@ public protocol TranscriptSink: Sendable {
 
 - **Prod — `FileTranscriptSink`.** Deux flux (brut + texte dé-ANSI-isé pour FTS5), batch
   250 ms, rotation à 10 Mo, écritures atomiques (NFR-R), sous
-  `~/Library/Application Support/Bunshin/transcripts/<session-id>/`.
+  `~/Library/Application Support/Loom/transcripts/<session-id>/`.
 - **Test — `MemoryTranscriptSink`.** Octets en mémoire, plus un mode `failing` pour
   vérifier que l'ouverture impossible produit un `.notice` et **non** un échec de `launch`.
 
@@ -699,7 +699,7 @@ moteur. Trois familles :
 
 ### 5.4 Le risque principal
 
-L'interface est **orientée snapshot** : elle suppose que Bunshin dessine lui-même le
+L'interface est **orientée snapshot** : elle suppose que Loom dessine lui-même le
 terminal à partir de valeurs, conformément au chemin chaud décrit en §6.3 du cahier. Si la
 v1.x adopte un renderer tiers qui exige de posséder son propre moteur et sa propre vue —
 `TerminalView` de SwiftTerm, ou libghostty via TRM-01 — alors `TerminalSurface` est de la

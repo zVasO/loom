@@ -1,4 +1,4 @@
-# Bunshin
+# Loom
 
 Application macOS native qui orchestre des sessions d'agents de codage CLI : chaque session vit dans un terminal persistant sur son propre worktree Git, avec détection d'état en temps réel et historique complet.
 
@@ -8,18 +8,18 @@ Application macOS native qui orchestre des sessions d'agents de codage CLI : cha
 
 **Projet** :
 Un dossier local (généralement un repo Git) auquel se rattachent des sessions.
-_Avoid_ : workspace, repo (« repo » désigne le dépôt Git lui-même, pas le concept Bunshin)
+_Avoid_ : workspace, repo (« repo » désigne le dépôt Git lui-même, pas le concept Loom)
 
 **Session** :
-L'unité centrale : un agent CLI exécuté dans un terminal persistant, attaché à un répertoire de travail, avec un cycle de vie et un transcript. C'est toujours la session *Bunshin* ; pour celle du CLI, dire « session native ».
+L'unité centrale : un agent CLI exécuté dans un terminal persistant, attaché à un répertoire de travail, avec un cycle de vie et un transcript. C'est toujours la session *Loom* ; pour celle du CLI, dire « session native ».
 _Avoid_ : tâche, task, conversation
 
 **Session native** :
-La session interne au CLI de l'agent (ex. l'ID que `claude --resume` accepte). Une Session Bunshin référence au plus une session native.
+La session interne au CLI de l'agent (ex. l'ID que `claude --resume` accepte). Une Session Loom référence au plus une session native.
 _Avoid_ : session agent, session Claude (ambigu avec Session)
 
 **Agent** :
-Le programme CLI hébergé par une session (Claude Code, Codex, Gemini CLI). Bunshin l'héberge, ne le remplace pas.
+Le programme CLI hébergé par une session (Claude Code, Codex, Gemini CLI). Loom l'héberge, ne le remplace pas.
 _Avoid_ : bot, modèle, IA
 
 **Terminal principal** :
@@ -77,7 +77,7 @@ L'origine d'une transition d'état : hook, heuristique, process (exit), ou utili
 ### Personnalisation
 
 **Skill** :
-Dossier d'instructions réutilisable par un agent (ex. `SKILL.md`), à portée globale ou projet. Bunshin les affiche et les gère, ne les exécute jamais.
+Dossier d'instructions réutilisable par un agent (ex. `SKILL.md`), à portée globale ou projet. Loom les affiche et les gère, ne les exécute jamais.
 
 **Rule** :
 Fichier d'instructions injecté en contexte par l'agent (ex. `CLAUDE.md`), à portée globale ou projet.

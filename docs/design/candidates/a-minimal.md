@@ -584,7 +584,7 @@ les connaît pas : il pousse des octets dans un `TranscriptSink` et des valeurs 
   l'agent de la même session. Le cas est plausible (`yes`, un build verbeux dans « Term 2 »).
   Correctif possible sans changer l'interface, à mesurer au jalon M1.
 - **Le module est gros.** PTY, moteur, tee, échantillonnage, snapshot, signaux. Il porte le risque
-  de devenir le god-module de Bunshin. Le garde-fou est la liste de §4.5 : tout ce qui *interprète*
+  de devenir le god-module de Loom. Le garde-fou est la liste de §4.5 : tout ce qui *interprète*
   (états, heuristiques, hooks, git) est dehors, définitivement. Le runtime observe et transporte,
   il ne décide de rien — sauf de quand un process meurt.
 - **`stop` rend `SessionOutcome` et non l'état de session.** Le mapping exit 0 → `completed`,

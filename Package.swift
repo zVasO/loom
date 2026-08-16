@@ -2,14 +2,14 @@
 import PackageDescription
 
 // Frontières imposées par l'architecture (§6.1 du cahier des charges) :
-// les services ne dépendent jamais de BunshinUI ; tout le monde peut dépendre de BunshinCore.
+// les services ne dépendent jamais de LoomUI ; tout le monde peut dépendre de LoomCore.
 let package = Package(
-    name: "Bunshin",
+    name: "Loom",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "BunshinApp", targets: ["BunshinApp"]),
-        .executable(name: "bunshin-hook", targets: ["bunshin-hook"]),
-        .library(name: "BunshinCore", targets: ["BunshinCore"]),
+        .executable(name: "LoomApp", targets: ["LoomApp"]),
+        .executable(name: "loom-hook", targets: ["loom-hook"]),
+        .library(name: "LoomCore", targets: ["LoomCore"]),
     ],
     dependencies: [
         // Épinglé en minor : cadence de release rapide et refonte I/O annoncée
@@ -19,35 +19,35 @@ let package = Package(
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
     ],
     targets: [
-        .target(name: "BunshinCore"),
-        .target(name: "BunshinTerminal", dependencies: ["BunshinCore", .product(name: "SwiftTerm", package: "SwiftTerm")]),
-        .target(name: "BunshinAgents", dependencies: ["BunshinCore"]),
-        .target(name: "BunshinGit", dependencies: ["BunshinCore"]),
-        .target(name: "BunshinWeb", dependencies: ["BunshinCore"]),
-        .target(name: "BunshinPersistence", dependencies: ["BunshinCore", "BunshinTerminal", .product(name: "GRDB", package: "GRDB.swift")]),
-        .target(name: "BunshinIPC", dependencies: ["BunshinCore"]),
+        .target(name: "LoomCore"),
+        .target(name: "LoomTerminal", dependencies: ["LoomCore", .product(name: "SwiftTerm", package: "SwiftTerm")]),
+        .target(name: "LoomAgents", dependencies: ["LoomCore"]),
+        .target(name: "LoomGit", dependencies: ["LoomCore"]),
+        .target(name: "LoomWeb", dependencies: ["LoomCore"]),
+        .target(name: "LoomPersistence", dependencies: ["LoomCore", "LoomTerminal", .product(name: "GRDB", package: "GRDB.swift")]),
+        .target(name: "LoomIPC", dependencies: ["LoomCore"]),
         // Le helper appelé par les hooks des agents (ADR-0005) : stdin → socket, sans dépendance.
-        .executableTarget(name: "bunshin-hook"),
-        .target(name: "BunshinSessions", dependencies: ["BunshinCore", "BunshinTerminal", "BunshinAgents", "BunshinPersistence", "BunshinGit"]),
+        .executableTarget(name: "loom-hook"),
+        .target(name: "LoomSessions", dependencies: ["LoomCore", "LoomTerminal", "LoomAgents", "LoomPersistence", "LoomGit"]),
         // Adapters de test du seam PTY, partagés par les cibles de test (jamais exposé en produit).
-        .target(name: "BunshinTerminalTestSupport", dependencies: ["BunshinCore", "BunshinTerminal"]),
-        .target(name: "BunshinUI", dependencies: ["BunshinCore", "BunshinTerminal"]),
+        .target(name: "LoomTerminalTestSupport", dependencies: ["LoomCore", "LoomTerminal"]),
+        .target(name: "LoomUI", dependencies: ["LoomCore", "LoomTerminal"]),
         .executableTarget(
-            name: "BunshinApp",
+            name: "LoomApp",
             dependencies: [
-                "BunshinCore", "BunshinUI", "BunshinTerminal", "BunshinAgents",
-                "BunshinGit", "BunshinWeb", "BunshinPersistence", "BunshinIPC",
-                "BunshinSessions",
+                "LoomCore", "LoomUI", "LoomTerminal", "LoomAgents",
+                "LoomGit", "LoomWeb", "LoomPersistence", "LoomIPC",
+                "LoomSessions",
             ]
         ),
-        .testTarget(name: "BunshinCoreTests", dependencies: ["BunshinCore"]),
-        .testTarget(name: "BunshinAgentsTests", dependencies: ["BunshinAgents"]),
-        .testTarget(name: "BunshinTerminalTests", dependencies: ["BunshinTerminal", "BunshinTerminalTestSupport"]),
-        .testTarget(name: "BunshinSessionsTests", dependencies: ["BunshinSessions", "BunshinTerminalTestSupport"]),
-        .testTarget(name: "BunshinIPCTests", dependencies: ["BunshinIPC"]),
-        .testTarget(name: "BunshinGitTests", dependencies: ["BunshinGit"]),
-        .testTarget(name: "BunshinPersistenceTests", dependencies: ["BunshinPersistence"]),
-        .testTarget(name: "BunshinWebTests", dependencies: ["BunshinWeb"]),
-        .testTarget(name: "BunshinUITests", dependencies: ["BunshinUI"]),
+        .testTarget(name: "LoomCoreTests", dependencies: ["LoomCore"]),
+        .testTarget(name: "LoomAgentsTests", dependencies: ["LoomAgents"]),
+        .testTarget(name: "LoomTerminalTests", dependencies: ["LoomTerminal", "LoomTerminalTestSupport"]),
+        .testTarget(name: "LoomSessionsTests", dependencies: ["LoomSessions", "LoomTerminalTestSupport"]),
+        .testTarget(name: "LoomIPCTests", dependencies: ["LoomIPC"]),
+        .testTarget(name: "LoomGitTests", dependencies: ["LoomGit"]),
+        .testTarget(name: "LoomPersistenceTests", dependencies: ["LoomPersistence"]),
+        .testTarget(name: "LoomWebTests", dependencies: ["LoomWeb"]),
+        .testTarget(name: "LoomUITests", dependencies: ["LoomUI"]),
     ]
 )
