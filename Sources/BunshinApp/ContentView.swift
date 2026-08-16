@@ -638,6 +638,7 @@ struct SessionDetailView: View {
     @State private var gitShown = false
     @State private var gitData: AppModel.GitPanelData?
     @State private var skills: [SkillEntry] = []
+    @State private var firstResizeDone = false
 
     /// Le helper est actif tant qu'on tape le nom du skill (« /dep… ») ;
     /// dès un espace, on est dans les arguments — Entrée envoie.
@@ -667,10 +668,17 @@ struct SessionDetailView: View {
                             // s'annule à chaque changement de taille — debounce gratuit
                             // pendant le redimensionnement de la fenêtre.
                             .task(id: proxy.size) {
-                                try? await Task.sleep(for: .milliseconds(80))
-                                guard !Task.isCancelled else { return }
+                                // Première mesure : immédiate, pour que le SIGWINCH
+                                // parte AVANT la bannière de l'agent. Les suivantes
+                                // sont debouncées (annulation du task).
+                                if firstResizeDone {
+                                    try? await Task.sleep(for: .milliseconds(80))
+                                    guard !Task.isCancelled else { return }
+                                }
+                                firstResizeDone = true
                                 let grid = TerminalMetrics.grid(fitting: proxy.size)
                                 surface.resize(cols: grid.cols, rows: grid.rows)
+                                model.noteTerminalGrid(cols: grid.cols, rows: grid.rows)
                             }
                     }
                     .background(DefaultTheme.contentBackground)

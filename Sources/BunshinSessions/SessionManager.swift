@@ -144,11 +144,13 @@ public actor SessionManager {
     /// reste un fil continu. La commande (`claude --resume <uuid>` + hooks) est
     /// construite par l'appelant, qui possède le câblage.
     public func resume(_ record: SessionRecord, command: Command, workingDirectory: URL,
+                       geometry: TerminalGeometry = .default,
                        samplingInterval: Duration? = nil, hookToken: String? = nil) async throws {
         let id = record.id
         let (runtime, events) = try SessionRuntime.launch(
             SessionLaunchPlan(command: command,
                               workingDirectory: workingDirectory,
+                              geometry: geometry,
                               samplingInterval: samplingInterval),
             using: runtimeDependencies)
         runtimes[id] = runtime

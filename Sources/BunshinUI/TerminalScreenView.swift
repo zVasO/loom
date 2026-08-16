@@ -8,11 +8,17 @@ public enum TerminalMetrics {
     public static let fontSize: CGFloat = 12.5
     static let nsFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
 
-    public static var cellSize: CGSize {
-        let width = ("0" as NSString).size(withAttributes: [.font: nsFont]).width
-        let height = ceil(nsFont.ascender - nsFont.descender + nsFont.leading) + 1
-        return CGSize(width: width, height: height)
-    }
+    /// Mesure sur une SONDE de 100 caractères via TextKit : l'avance d'un glyphe
+    /// mono est fractionnaire (≈7,52 pt à 12,5) — la mesurer sur un seul caractère
+    /// arrondit, et l'erreur ×100 colonnes faisait annoncer au PTY plus de colonnes
+    /// que la vue n'en affiche : texte rogné à droite.
+    public static let cellSize: CGSize = {
+        let probe = NSAttributedString(string: String(repeating: "0", count: 100),
+                                       attributes: [.font: nsFont])
+        let measured = probe.size()
+        return CGSize(width: measured.width / 100,
+                      height: ceil(measured.height) + 1)
+    }()
 
     /// Combien de cellules tiennent dans `size` (padding de la vue déduit).
     public static func grid(fitting size: CGSize, insets: CGFloat = 16) -> (cols: Int, rows: Int) {

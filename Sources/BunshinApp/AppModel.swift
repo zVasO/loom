@@ -61,6 +61,22 @@ public final class AppModel {
     private let supportDirectory: URL
     private var socketURL: URL { supportDirectory.appendingPathComponent("bunshin.sock") }
 
+    /// La grille réellement affichée, mémorisée à chaque mesure de la vue : les
+    /// sessions suivantes NAISSENT à la bonne taille — claude peint sa bannière
+    /// directement pour la vraie grille, plus de reflow mutilant au démarrage.
+    public private(set) var preferredGrid: TerminalGeometry = {
+        let cols = UserDefaults.standard.integer(forKey: "bunshin.terminal.cols")
+        let rows = UserDefaults.standard.integer(forKey: "bunshin.terminal.rows")
+        return cols >= 20 && rows >= 4 ? TerminalGeometry(cols: cols, rows: rows) : .default
+    }()
+
+    public func noteTerminalGrid(cols: Int, rows: Int) {
+        guard cols >= 20, rows >= 4 else { return }
+        preferredGrid = TerminalGeometry(cols: cols, rows: rows)
+        UserDefaults.standard.set(cols, forKey: "bunshin.terminal.cols")
+        UserDefaults.standard.set(rows, forKey: "bunshin.terminal.rows")
+    }
+
     /// UIX-06 : le binaire claude localisé au lancement (les apps GUI ne voient pas
     /// le PATH du shell — un chemin absolu est la seule voie fiable).
     public private(set) var claudePath: URL? = ClaudeLocator.locate()
@@ -163,6 +179,7 @@ public final class AppModel {
         var spec = SessionManager.SessionSpec(
             command: Command(executable: shell, arguments: ["-l"]),
             workingDirectory: directory,
+            geometry: preferredGrid,
             samplingInterval: .seconds(1))
         spec.title = "Term \(count)"
         spec.projectID = parent.projectID
@@ -285,6 +302,7 @@ public final class AppModel {
             ?? FileManager.default.homeDirectoryForCurrentUser
         do {
             try await manager.resume(record, command: command, workingDirectory: directory,
+                                     geometry: preferredGrid,
                                      samplingInterval: .milliseconds(500), hookToken: token)
             tokenRegistry.register(token: token, session: record.id)
             sessions.append(SessionItem(id: record.id, title: record.title, state: .starting,
@@ -347,6 +365,7 @@ public final class AppModel {
                 command: adapter.launchCommand(session: sessionID, initialPrompt: initialPrompt,
                                                hookToken: token),
                 workingDirectory: directory,
+                geometry: preferredGrid,
                 samplingInterval: .milliseconds(500),
                 hookToken: token)
             spec.projectID = project?.id
