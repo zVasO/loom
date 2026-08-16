@@ -156,6 +156,83 @@ struct SessionManagerTests {
         #expect(second?.state == .needsInput, "seules les transitions réelles sont poussées")
     }
 
+    @Test("UC-1 complet : le lancement crée le worktree et la session y travaille isolée")
+    func lancementSurWorktree() async throws {
+        let repo = try await makeFixtureRepo()
+        let dbURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bunshin-wt-\(UUID().uuidString.prefix(8)).sqlite")
+        let store = try SessionStore(path: dbURL.path)
+        let pty = ScriptedPTYHost()
+        let manager = SessionManager(
+            runtimeDependencies: SessionRuntime.Dependencies(ptyHost: pty,
+                                                             transcript: MemoryTranscriptSink()),
+            store: store)
+
+        var spec = spec()
+        spec.worktree = .create(repo: repo, slug: "corrige-le-cache")
+        let id = try await manager.launch(spec)
+
+        let opened = try #require(pty.openedWorkingDirectory)
+        #expect(opened.lastPathComponent == "corrige-le-cache",
+                "l'agent démarre DANS le worktree, pas dans le repo")
+        #expect(FileManager.default.fileExists(atPath: opened.appendingPathComponent("README.md").path),
+                "le worktree est un checkout complet")
+        let record = try #require(try store.session(id: id))
+        #expect(record.branch == "bunshin/corrige-le-cache", "la branche de session est en base")
+        #expect(record.worktreePath == opened.path)
+    }
+
+    @Test("needs_input déclenche la notification, et elle seule (STA-04)")
+    func notificationSurNeedsInput() async throws {
+        let spy = SpyNotifier()
+        let manager = SessionManager(
+            runtimeDependencies: SessionRuntime.Dependencies(ptyHost: ScriptedPTYHost(),
+                                                             transcript: MemoryTranscriptSink()),
+            notifier: spy)
+        let id = try await manager.launch(spec())
+
+        await manager.apply(.hook(.userPromptSubmit), to: id)
+        #expect(spy.all().isEmpty, "working ne notifie pas")
+
+        await manager.apply(.hook(.stop(awaitsReply: true)), to: id)
+        #expect(spy.all().map(\.session) == [id], "le badge needs_input part en notification")
+
+        await manager.apply(.hook(.stop(awaitsReply: true)), to: id)
+        #expect(spy.all().count == 1, "pas de spam : une transition, une notification")
+    }
+
+    private final class SpyNotifier: SessionNotifier, @unchecked Sendable {
+        struct Entry { let session: SessionID; let title: String }
+        private let lock = NSLock()
+        private var entries: [Entry] = []
+        func sessionNeedsInput(_ session: SessionID, title: String) {
+            lock.withLock { entries.append(Entry(session: session, title: title)) }
+        }
+        func all() -> [Entry] { lock.withLock { entries } }
+    }
+
+    private func makeFixtureRepo() async throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bunshin-mgr-repo-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        @discardableResult func git(_ arguments: [String]) throws -> Int32 {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = arguments
+            process.currentDirectoryURL = dir
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus
+        }
+        try git(["init", "-b", "main"])
+        try "# Fixture".write(to: dir.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+        try git(["add", "."])
+        try git(["-c", "user.email=t@t", "-c", "user.name=T", "commit", "-m", "init"])
+        return dir
+    }
+
     private func pollUntil(_ condition: () async -> Bool) async -> Bool {
         for _ in 0..<200 {
             if await condition() { return true }

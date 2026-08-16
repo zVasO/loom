@@ -6,6 +6,21 @@ import BunshinSessions
 import BunshinTerminal
 import Foundation
 import Observation
+import UserNotifications
+
+/// STA-04 : notification système quand une session attend une réponse.
+/// Second adapter du seam SessionNotifier (l'espion de test est le premier).
+struct UserNotificationsNotifier: SessionNotifier {
+    func sessionNeedsInput(_ session: SessionID, title: String) {
+        guard Bundle.main.bundleIdentifier != nil else { return }   // swift run sans bundle
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = "La session attend une réponse"
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: session.rawValue.uuidString,
+                                  content: content, trigger: nil))
+    }
+}
 
 /// Racine de composition de l'app : démarre le store (marquage `interrupted` à
 /// l'ouverture — UC-7), le manager, le serveur IPC des hooks, et projette les
@@ -64,8 +79,13 @@ public final class AppModel {
             let manager = SessionManager(
                 runtimeDependencies: SessionRuntime.Dependencies(ptyHost: ForkPTYHost(),
                                                                  transcript: transcripts),
-                store: store)
+                store: store,
+                notifier: UserNotificationsNotifier())
             self.manager = manager
+            if Bundle.main.bundleIdentifier != nil {
+                UNUserNotificationCenter.current()
+                    .requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+            }
 
             let registry = tokenRegistry
             let server = HookSocketServer(
@@ -115,18 +135,32 @@ public final class AppModel {
         do {
             let sessionID = SessionID()
             let token = UUID().uuidString
-            let id = try await manager.launch(SessionManager.SessionSpec(
+            var spec = SessionManager.SessionSpec(
                 command: adapter.launchCommand(session: sessionID, initialPrompt: prompt,
                                                hookToken: token),
                 workingDirectory: directory,
                 samplingInterval: .milliseconds(500),
-                hookToken: token))
+                hookToken: token)
+            // GIT-01 : un repo Git → un worktree isolé par session, jamais le dossier nu.
+            if FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
+                spec.worktree = .create(repo: directory, slug: Self.slug(from: prompt))
+            }
+            let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
             sessions.insert(SessionItem(id: id, title: prompt.isEmpty ? "Session" : prompt,
                                         state: .starting), at: 0)
         } catch {
             startupError = String(describing: error)
         }
+    }
+
+    /// « Corrige le bug de cache ! » → `corrige-le-bug-de-cache` (GIT-02).
+    static func slug(from prompt: String) -> String {
+        let cleaned = prompt.lowercased()
+            .folding(options: .diacriticInsensitive, locale: nil)
+            .map { $0.isLetter || $0.isNumber ? $0 : "-" }
+        let slug = String(cleaned).split(separator: "-").joined(separator: "-").prefix(40)
+        return slug.isEmpty ? "session" : String(slug)
     }
 
     public func stopSession(_ id: SessionID) async {

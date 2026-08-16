@@ -1,8 +1,15 @@
 import BunshinAgents
 import BunshinCore
+import BunshinGit
 import BunshinPersistence
 import BunshinTerminal
 import Foundation
+
+/// Notifications système (STA-04) : seam à deux adapters — UserNotifications en
+/// prod (couche app), espion en test.
+public protocol SessionNotifier: Sendable {
+    func sessionNeedsInput(_ session: SessionID, title: String)
+}
 
 /// L'acteur central (§6.2 du cahier des charges, placé ici par ADR-0009) : crée les
 /// sessions, route leurs événements vers la machine à états, porte la vérité des
@@ -18,6 +25,9 @@ public actor SessionManager {
         /// Token IPC déjà embarqué dans la commande (hooks --settings) ; `nil` = le
         /// manager en génère un.
         public var hookToken: String?
+        /// GIT-01 : `.create` fabrique le worktree AVANT le fork et la session y
+        /// travaille isolée sur sa branche `bunshin/<slug>`.
+        public var worktree: WorktreeStrategy = .none
         public init(command: Command, workingDirectory: URL,
                     geometry: TerminalGeometry = .default,
                     samplingInterval: Duration? = nil,
@@ -59,22 +69,47 @@ public actor SessionManager {
 
     private let tuning: StateEngine.Tuning
     private let interpreter: HeuristicInterpreter
+    private let git: GitService
+    private let notifier: (any SessionNotifier)?
+
+    public enum WorktreeStrategy: Sendable {
+        /// La session travaille directement dans le dossier fourni.
+        case none
+        /// Worktree dédié : `<repo>-worktrees/<slug>` sur `bunshin/<slug>` (GIT-01,
+        /// racine sibling par défaut — décision du premier avis sur le cahier des
+        /// charges : jamais de worktrees imbriqués sous les yeux des agents).
+        case create(repo: URL, slug: String)
+    }
 
     public init(runtimeDependencies: SessionRuntime.Dependencies, store: SessionStore? = nil,
                 tuning: StateEngine.Tuning = .standard,
-                interpreter: HeuristicInterpreter = HeuristicInterpreter()) {
+                interpreter: HeuristicInterpreter = HeuristicInterpreter(),
+                git: GitService = GitService(),
+                notifier: (any SessionNotifier)? = nil) {
         self.runtimeDependencies = runtimeDependencies
         self.store = store
         self.tuning = tuning
         self.interpreter = interpreter
+        self.git = git
+        self.notifier = notifier
     }
 
-    /// UC-1 : crée le runtime, arme le pump d'événements, la session naît en `starting`.
+    /// UC-1 : worktree (si demandé) → runtime → pump d'événements ; la session naît
+    /// en `starting`.
     public func launch(_ spec: SessionSpec) async throws -> SessionID {
         let id = SessionID()
+        var workingDirectory = spec.workingDirectory
+        var worktree: Worktree?
+        if case .create(let repo, let slug) = spec.worktree {
+            let root = repo.deletingLastPathComponent()
+                .appendingPathComponent(repo.lastPathComponent + "-worktrees")
+            let created = try await git.createWorktree(repo: repo, root: root, slug: slug)
+            worktree = created
+            workingDirectory = created.path
+        }
         let (runtime, events) = try SessionRuntime.launch(
             SessionLaunchPlan(command: spec.command,
-                              workingDirectory: spec.workingDirectory,
+                              workingDirectory: workingDirectory,
                               geometry: spec.geometry,
                               samplingInterval: spec.samplingInterval),
             using: runtimeDependencies)
@@ -85,6 +120,8 @@ public actor SessionManager {
         tokensBySession[id] = token
         try? store?.insert(SessionRecord(id: id, title: spec.command.executable,
                                          agentID: "claude-code", state: .starting,
+                                         branch: worktree?.branch,
+                                         worktreePath: worktree?.path.path,
                                          createdAt: Date()))
         pumps[id] = Task { [weak self] in
             for await event in events {
@@ -102,6 +139,10 @@ public actor SessionManager {
         states[id] = next
         guard next.session != current.session else { return }
         stateContinuation?.yield(StateUpdate(id: id, state: next.session))
+        if next.session == .needsInput {
+            let record = (try? store?.session(id: id)) ?? nil
+            notifier?.sessionNeedsInput(id, title: record?.title ?? "Session")
+        }
         // La transition est réelle : journal STA-06 + état courant en base.
         try? store?.recordTransition(session: id, from: current.session, to: next.session,
                                      source: Self.source(of: event), at: Date())

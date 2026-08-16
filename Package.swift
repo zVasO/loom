@@ -28,7 +28,7 @@ let package = Package(
         .target(name: "BunshinIPC", dependencies: ["BunshinCore"]),
         // Le helper appelé par les hooks des agents (ADR-0005) : stdin → socket, sans dépendance.
         .executableTarget(name: "bunshin-hook"),
-        .target(name: "BunshinSessions", dependencies: ["BunshinCore", "BunshinTerminal", "BunshinAgents", "BunshinPersistence"]),
+        .target(name: "BunshinSessions", dependencies: ["BunshinCore", "BunshinTerminal", "BunshinAgents", "BunshinPersistence", "BunshinGit"]),
         // Adapters de test du seam PTY, partagés par les cibles de test (jamais exposé en produit).
         .target(name: "BunshinTerminalTestSupport", dependencies: ["BunshinCore", "BunshinTerminal"]),
         .target(name: "BunshinUI", dependencies: ["BunshinCore", "BunshinTerminal"]),

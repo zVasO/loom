@@ -24,6 +24,7 @@ public final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
     public private(set) var writtenBytes: [UInt8] = []
     public private(set) var receivedSignals: [SignalDelivery] = []
     public private(set) var openedEnvironment: [String: String] = [:]
+    public private(set) var openedWorkingDirectory: URL?
     public private(set) var closeCount = 0
 
     fileprivate func recordClose() {
@@ -49,6 +50,7 @@ public final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
         self.sink = sink
         self.queue = queue
         self.openedEnvironment = environment
+        self.openedWorkingDirectory = workingDirectory
         return ScriptedChannel(host: self)
     }
 
