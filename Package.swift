@@ -14,6 +14,8 @@ let package = Package(
         // Épinglé en minor : cadence de release rapide et refonte I/O annoncée
         // (docs/research/swiftterm-pty.md §1.6, recommandation 8).
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", .upToNextMinor(from: "1.18.0")),
+        // ADR-0002 : GRDB pour migrations contrôlées, FTS5, accès concurrents.
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
     ],
     targets: [
         .target(name: "BunshinCore"),
@@ -21,7 +23,7 @@ let package = Package(
         .target(name: "BunshinAgents", dependencies: ["BunshinCore"]),
         .target(name: "BunshinGit", dependencies: ["BunshinCore"]),
         .target(name: "BunshinWeb", dependencies: ["BunshinCore"]),
-        .target(name: "BunshinPersistence", dependencies: ["BunshinCore"]),
+        .target(name: "BunshinPersistence", dependencies: ["BunshinCore", .product(name: "GRDB", package: "GRDB.swift")]),
         .target(name: "BunshinIPC", dependencies: ["BunshinCore"]),
         .target(name: "BunshinSessions", dependencies: ["BunshinCore", "BunshinTerminal", "BunshinAgents"]),
         // Adapters de test du seam PTY, partagés par les cibles de test (jamais exposé en produit).
@@ -41,5 +43,6 @@ let package = Package(
         .testTarget(name: "BunshinSessionsTests", dependencies: ["BunshinSessions", "BunshinTerminalTestSupport"]),
         .testTarget(name: "BunshinIPCTests", dependencies: ["BunshinIPC"]),
         .testTarget(name: "BunshinGitTests", dependencies: ["BunshinGit"]),
+        .testTarget(name: "BunshinPersistenceTests", dependencies: ["BunshinPersistence"]),
     ]
 )
