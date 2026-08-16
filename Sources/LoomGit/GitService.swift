@@ -102,6 +102,32 @@ public struct GitService: Sendable {
         _ = try await run(arguments, in: repo)
     }
 
+    // MARK: - Ship (v2): commit and publish straight from a session worktree
+
+    /// Stages EVERYTHING and commits. Throws when there is nothing to commit —
+    /// the UI must report the truth, not a phantom commit.
+    public func commitAll(in worktree: URL, message: String) async throws {
+        _ = try await run(["add", "-A"], in: worktree)
+        _ = try await run(["commit", "-m", message], in: worktree)
+    }
+
+    /// Publishes the current branch to origin (`-u` so the next pushes are bare).
+    /// GIT_TERMINAL_PROMPT=0 (see run): a missing credential fails fast instead
+    /// of hanging on an invisible prompt.
+    public func push(in worktree: URL) async throws {
+        let branch = try await currentBranch(in: worktree)
+        _ = try await run(["push", "-u", "origin", branch], in: worktree)
+    }
+
+    /// Commits ahead of origin/<branch> — what "Ship" is about to publish.
+    /// `nil` when the branch has no upstream yet (never pushed).
+    public func aheadCount(in worktree: URL) async throws -> Int? {
+        let branch = try await currentBranch(in: worktree)
+        guard let output = try? await run(["rev-list", "--count", "origin/\(branch)..HEAD"],
+                                          in: worktree) else { return nil }
+        return Int(output)
+    }
+
     // MARK: - Execution
 
     @discardableResult

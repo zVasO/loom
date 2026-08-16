@@ -93,7 +93,9 @@ struct GitServiceTests {
 
     // MARK: - Fixtures
 
-    private func makeFixtureRepo() async throws -> URL {
+}
+
+fileprivate func makeFixtureRepo() async throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("loom-git-\(UUID().uuidString.prefix(8))")
             .appendingPathComponent("repo")
@@ -105,8 +107,8 @@ struct GitServiceTests {
         return dir
     }
 
-    @discardableResult
-    private func git(_ arguments: [String], in dir: URL) async throws -> String {
+@discardableResult
+fileprivate func git(_ arguments: [String], in dir: URL) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = arguments
@@ -118,5 +120,46 @@ struct GitServiceTests {
         process.waitUntilExit()
         let data = out.fileHandleForReading.readDataToEndOfFile()
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+// v2 "Ship": commit and push straight from a session worktree.
+@Suite("GitService — ship (v2)", .serialized)
+struct GitShipTests {
+
+    let service = GitService()
+
+    @Test("commitAll stages everything and creates the commit")
+    func commitAll() async throws {
+        let repo = try await makeFixtureRepo()
+        try "new work".write(to: repo.appendingPathComponent("feature.txt"),
+                             atomically: true, encoding: .utf8)
+        try await service.commitAll(in: repo, message: "Ship the feature")
+        let subject = try await git(["log", "-1", "--pretty=%s"], in: repo)
+        #expect(subject == "Ship the feature")
+        let status = try await service.status(in: repo)
+        #expect(status.isEmpty, "nothing left uncommitted")
+    }
+
+    @Test("commitAll with nothing to commit throws instead of lying")
+    func commitAllEmpty() async throws {
+        let repo = try await makeFixtureRepo()
+        await #expect(throws: (any Error).self) {
+            try await service.commitAll(in: repo, message: "empty")
+        }
+    }
+
+    @Test("push publishes the branch to origin (local bare remote)")
+    func pushToBareRemote() async throws {
+        let repo = try await makeFixtureRepo()
+        let bare = repo.deletingLastPathComponent()
+            .appendingPathComponent("remote-\(UUID().uuidString.prefix(6)).git")
+        _ = try await git(["init", "--bare", bare.path], in: repo)
+        _ = try await git(["remote", "add", "origin", bare.path], in: repo)
+        try "pushed work".write(to: repo.appendingPathComponent("pushed.txt"),
+                                atomically: true, encoding: .utf8)
+        try await service.commitAll(in: repo, message: "To publish")
+        try await service.push(in: repo)
+        let remoteLog = try await git(["log", "-1", "--pretty=%s", "main"], in: bare)
+        #expect(remoteLog == "To publish")
     }
 }

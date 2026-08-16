@@ -1736,6 +1736,9 @@ struct SessionDetailView: View {
     @State private var firstResizeDone = false
     /// Incremented on each click on the terminal: the key capture regains focus.
     @State private var focusTick = 0
+    @State private var shipMessage = ""
+    @State private var shipOutput: String?
+    @State private var shipBusy = false
 
     private var item: AppModel.SessionItem? {
         model.sessions.first { $0.id == sessionID }
@@ -1907,6 +1910,8 @@ struct SessionDetailView: View {
                     Task { gitData = await model.gitPanel(for: sessionID) }
                 }
             }
+            shipSection
+            Divider().overlay(DefaultTheme.cardBorder)
             if let gitData {
                 if gitData.changes.isEmpty {
                     Text("Clean worktree").font(.system(size: 12))
@@ -1934,6 +1939,69 @@ struct SessionDetailView: View {
         .padding(12)
         .frame(minWidth: 280, maxWidth: 420)
         .background(DefaultTheme.background)
+    }
+
+    /// v2 — Ship: commit, publish and open a PR without leaving the session.
+    /// Every outcome is reported verbatim (stderr included) — no phantom success.
+    private var shipSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                TextField("Commit message…", text: $shipMessage)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 8).padding(.vertical, 6)
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7)
+                        .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                AccentButton("Commit") {
+                    let message = shipMessage.trimmingCharacters(in: .whitespaces)
+                    guard !message.isEmpty else { shipOutput = "Write a commit message first."; return }
+                    shipBusy = true
+                    Task {
+                        let error = await model.shipCommit(sessionID, message: message)
+                        shipOutput = error ?? "Committed ✓"
+                        if error == nil { shipMessage = "" }
+                        gitData = await model.gitPanel(for: sessionID)
+                        shipBusy = false
+                    }
+                }
+            }
+            HStack(spacing: 6) {
+                GhostButton("Push", systemImage: "arrow.up.circle") {
+                    shipBusy = true
+                    Task {
+                        let error = await model.shipPush(sessionID)
+                        shipOutput = error ?? "Pushed to origin ✓"
+                        shipBusy = false
+                    }
+                }
+                if AppModel.ghPath != nil {
+                    GhostButton("Create PR", systemImage: "arrow.triangle.pull") {
+                        shipBusy = true
+                        Task {
+                            if let result = await model.shipCreatePR(sessionID) {
+                                shipOutput = result.message
+                                if result.success,
+                                   let url = URL(string: result.message.split(separator: "\n").last.map(String.init) ?? "") {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }
+                            shipBusy = false
+                        }
+                    }
+                }
+                if shipBusy { ProgressView().controlSize(.small) }
+                Spacer()
+            }
+            if let shipOutput {
+                Text(shipOutput)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(shipOutput.hasSuffix("✓") ? DefaultTheme.groupHeader
+                                                               : DefaultTheme.secondaryText)
+                    .textSelection(.enabled)
+                    .lineLimit(4)
+            }
+        }
     }
 
     private func symbol(for kind: FileChange.Kind) -> String {

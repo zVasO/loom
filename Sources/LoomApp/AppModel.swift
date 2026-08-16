@@ -701,6 +701,59 @@ public final class AppModel {
         public let diff: String
     }
 
+    // MARK: - Ship (v2): commit / push / PR from a session worktree
+
+    private func worktreeURL(for id: SessionID) -> URL? {
+        ((try? store?.session(id: id)) ?? nil)?.worktreePath.map(URL.init(fileURLWithPath:))
+    }
+
+    /// Each action returns nil on success, or the error text to display —
+    /// the panel reports the truth, never a phantom success.
+    public func shipCommit(_ id: SessionID, message: String) async -> String? {
+        guard let worktree = worktreeURL(for: id) else { return "No worktree for this session" }
+        do { try await GitService().commitAll(in: worktree, message: message); return nil }
+        catch { return Self.gitErrorText(error) }
+    }
+
+    public func shipPush(_ id: SessionID) async -> String? {
+        guard let worktree = worktreeURL(for: id) else { return "No worktree for this session" }
+        do { try await GitService().push(in: worktree); return nil }
+        catch { return Self.gitErrorText(error) }
+    }
+
+    /// `gh pr create --fill` in the worktree. Success carries the PR URL.
+    public func shipCreatePR(_ id: SessionID) async -> (success: Bool, message: String)? {
+        guard let worktree = worktreeURL(for: id), let gh = Self.ghPath else { return nil }
+        let process = Process()
+        process.executableURL = gh
+        process.arguments = ["pr", "create", "--fill"]
+        process.currentDirectoryURL = worktree
+        let stdout = Pipe(), stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        do { try process.run() } catch { return (false, String(describing: error)) }
+        return await withCheckedContinuation { continuation in
+            process.terminationHandler = { finished in
+                let out = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(),
+                                 as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                let err = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(),
+                                 as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                continuation.resume(returning: finished.terminationStatus == 0
+                                    ? (true, out) : (false, err.isEmpty ? out : err))
+            }
+        }
+    }
+
+    /// GUI apps do not inherit the shell PATH: well-known locations only.
+    public static let ghPath: URL? = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
+        .map(URL.init(fileURLWithPath:))
+        .first { FileManager.default.isExecutableFile(atPath: $0.path) }
+
+    private static func gitErrorText(_ error: Error) -> String {
+        if case GitError.commandFailed(_, _, let stderr) = error, !stderr.isEmpty { return stderr }
+        return String(describing: error)
+    }
+
     /// GIT-03: status + diff of the session's worktree, read-only.
     public func gitPanel(for id: SessionID) async -> GitPanelData? {
         let record = (try? store?.session(id: id)) ?? nil
