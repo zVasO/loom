@@ -15,6 +15,8 @@ public final class TerminalSurface {
     /// premier attachement, dernier écran connu ensuite. La vue n'a aucun état de
     /// chargement à rendre (transition UIX-03 correcte dès la première frame).
     public private(set) var screen: TerminalScreen
+    /// Queue du scrollback (au plus 400 lignes) — le défilement de la vue.
+    public private(set) var history: [TerminalLine] = []
     public private(set) var isAttached = false
 
     private weak var runtime: SessionRuntime?
@@ -78,9 +80,10 @@ public final class TerminalSurface {
 
     private var lastRequestedGeometry: TerminalGeometry?
 
-    func receive(_ screen: TerminalScreen) {
+    func receive(_ screen: TerminalScreen, history: [TerminalLine]) {
         guard isAttached else { return }
         self.screen = screen
+        self.history = history
     }
 
     private var lifecycleContinuation: CheckedContinuation<Void, Never>?

@@ -28,26 +28,48 @@ public enum TerminalMetrics {
 /// aucun défilement, aucun repli — l'agent dessine pour la taille réelle.
 public struct TerminalScreenView: View {
     public let screen: TerminalScreen
+    public let history: [TerminalLine]
+    /// Collé en bas pendant le stream ; remonter dans l'historique décroche,
+    /// revenir en bas raccroche (suivi de la géométrie de défilement).
+    @State private var pinnedToBottom = true
 
-    public init(screen: TerminalScreen) {
+    public init(screen: TerminalScreen, history: [TerminalLine] = []) {
         self.screen = screen
+        self.history = history
     }
 
     public var body: some View {
         let cell = TerminalMetrics.cellSize
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(screen.lines.enumerated()), id: \.offset) { _, line in
-                Text(attributed(line))
-                    .font(.system(size: TerminalMetrics.fontSize, design: .monospaced))
-                    .frame(height: cell.height, alignment: .leading)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(history.enumerated()), id: \.offset) { _, line in
+                        row(line, height: cell.height)
+                    }
+                    ForEach(Array(screen.lines.enumerated()), id: \.offset) { _, line in
+                        row(line, height: cell.height)
+                    }
+                    Color.clear.frame(height: 1).id("bas")
+                }
+                .padding(8)
             }
+            .scrollGeometryPinning($pinnedToBottom)
+            .onChange(of: screen.revision) {
+                if pinnedToBottom { proxy.scrollTo("bas", anchor: .bottom) }
+            }
+            .onAppear { proxy.scrollTo("bas", anchor: .bottom) }
         }
-        .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
         .background(DefaultTheme.contentBackground)
+    }
+
+    private func row(_ line: TerminalLine, height: CGFloat) -> some View {
+        Text(attributed(line))
+            .font(.system(size: TerminalMetrics.fontSize, design: .monospaced))
+            .frame(height: height, alignment: .leading)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     private func attributed(_ line: TerminalLine) -> AttributedString {
@@ -63,5 +85,24 @@ public struct TerminalScreenView: View {
             result.append(piece)
         }
         return result
+    }
+}
+
+
+private extension View {
+    /// macOS 15+ : suit la position réelle de défilement pour décider de l'ancrage
+    /// bas ; en deçà, on reste toujours collé (repli honnête).
+    @ViewBuilder
+    func scrollGeometryPinning(_ pinned: Binding<Bool>) -> some View {
+        if #available(macOS 15.0, *) {
+            self.onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.containerSize.height
+                    >= geometry.contentSize.height - 24
+            } action: { _, isAtBottom in
+                pinned.wrappedValue = isAtBottom
+            }
+        } else {
+            self
+        }
     }
 }

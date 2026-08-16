@@ -136,6 +136,7 @@ public final class LineEngine: TerminalEngine {
 
     public func resize(to geometry: TerminalGeometry) {}
     public func takeDirtyRows() -> IndexSet { IndexSet() }
+    public func historyTail(_ limit: Int) -> [TerminalLine] { [] }
     public func setScrollback(_ lines: Int) {}
 }
 

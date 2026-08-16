@@ -71,6 +71,24 @@ public final class SwiftTermEngine: TerminalEngine {
                               revision: revision)
     }
 
+    public func historyTail(_ limit: Int) -> [TerminalLine] {
+        let scrollbackRows = terminal.getTopVisibleRow()   // yDisp = nb de lignes au-dessus
+        guard scrollbackRows > 0 else { return [] }
+        let start = max(0, scrollbackRows - limit)
+        return (start..<scrollbackRows).map { row in
+            guard let bufferLine = terminal.getScrollInvariantLine(row: row) else {
+                return TerminalLine(cells: [])
+            }
+            let cells = (0..<geometry.cols).map { col -> TerminalCell in
+                let charData = bufferLine[col]
+                let character = charData.getCharacter()
+                return TerminalCell(character: character == "\0" ? " " : character,
+                                    style: Self.cellStyle(from: charData.attribute))
+            }
+            return TerminalLine(cells: cells)
+        }
+    }
+
     public func takeDirtyRows() -> IndexSet {
         defer { dirtyRows.removeAll() }
         return dirtyRows

@@ -636,7 +636,7 @@ struct SessionDetailView: View {
             if let surface {
                 HSplitView {
                     GeometryReader { proxy in
-                        TerminalScreenView(screen: surface.screen)
+                        TerminalScreenView(screen: surface.screen, history: surface.history)
                             // TRM-02 : la vue annonce sa grille au PTY ; le task(id:)
                             // s'annule à chaque changement de taille — debounce gratuit
                             // pendant le redimensionnement de la fenêtre.

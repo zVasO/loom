@@ -64,3 +64,22 @@ struct SwiftTermEngineTests {
         }
     }
 }
+
+extension SwiftTermEngineTests {
+    @Test("le scrollback est accessible : les lignes sorties de l'écran restent lisibles")
+    func scrollbackAccessible() {
+        let engine = makeEngine(cols: 40, rows: 6)
+        queue.sync {
+            for index in 1...30 {
+                engine.feed(ArraySlice("ligne-\(index)\r\n".utf8))
+            }
+            let history = engine.historyTail(10)
+            #expect(history.count == 10, "on demande les 10 dernières lignes au-dessus de l'écran")
+            #expect(history.contains { $0.text.hasPrefix("ligne-2") },
+                    "les lignes chassées de l'écran par le flux sont dans l'historique")
+            let screen = engine.snapshot()
+            #expect(screen.lines.contains { $0.text.hasPrefix("ligne-30") },
+                    "l'écran visible, lui, montre la fin du flux")
+        }
+    }
+}

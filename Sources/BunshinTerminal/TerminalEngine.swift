@@ -21,6 +21,9 @@ public protocol TerminalEngine: AnyObject {
     func takeDirtyRows() -> IndexSet
     /// Réduit l'empreinte d'un terminal détaché (NFR-M) sans toucher au transcript.
     func setScrollback(_ lines: Int)
+    /// Les `limit` dernières lignes SORTIES de l'écran (queue du scrollback),
+    /// de la plus ancienne à la plus récente — pour le défilement de la vue.
+    func historyTail(_ limit: Int) -> [TerminalLine]
 }
 
 // MARK: - Écran

@@ -127,9 +127,10 @@ public final class SessionRuntime: @unchecked Sendable {
         let watching = lock.withLock { attachedTerminals }
         guard !watching.isEmpty, let engine else { return }
         let snapshot = engine.snapshot()
+        let history = engine.historyTail(400)
         Task { @MainActor in
             for terminal in watching {
-                self.surfaces[terminal]?.receive(snapshot)
+                self.surfaces[terminal]?.receive(snapshot, history: history)
             }
         }
     }
