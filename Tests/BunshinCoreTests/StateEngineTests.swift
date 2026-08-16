@@ -81,6 +81,17 @@ struct StateEngineTests {
         #expect(s.session == .needsInput)
     }
 
+    @Test("archiver une session terminée : la seule action qui traverse un état terminal (SES-07)")
+    func archivageDepuisTerminal() {
+        var s = StateEngine.State(session: .completed)
+        s = StateEngine.reduce(s, .user(.archive), at: t0)
+        #expect(s.session == .archived, "le cas nominal de l'archivage EST la session terminée")
+
+        var live = StateEngine.State(session: .idle)
+        live = StateEngine.reduce(live, .user(.archive), at: t0)
+        #expect(live.session == .archived, "une session vivante peut aussi être archivée")
+    }
+
     @Test("l'arrêt de l'app interrompt, et seule une session interrompue se reprend (UC-7)")
     func interruptionPuisReprise() {
         var s = StateEngine.State(session: .working)

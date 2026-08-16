@@ -201,6 +201,53 @@ struct SessionManagerTests {
         #expect(spy.all().count == 1, "pas de spam : une transition, une notification")
     }
 
+    @Test("la Reprise relance la session interrompue sous le MÊME identifiant (UC-7)")
+    func repriseDeSessionInterrompue() async throws {
+        let dbURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bunshin-resume-\(UUID().uuidString.prefix(8)).sqlite")
+        let store = try SessionStore(path: dbURL.path)
+        let pty = ScriptedPTYHost()
+        let manager = SessionManager(
+            runtimeDependencies: SessionRuntime.Dependencies(ptyHost: pty,
+                                                             transcript: MemoryTranscriptSink()),
+            store: store)
+
+        let id = SessionID()
+        let record = SessionRecord(id: id, title: "reprise-moi", agentID: "claude-code",
+                                   state: .interrupted, createdAt: Date())
+        try store.insert(record)
+
+        let command = Command(executable: "claude",
+                              arguments: ["--resume", id.rawValue.uuidString])
+        try await manager.resume(record, command: command,
+                                 workingDirectory: URL(fileURLWithPath: "/tmp/worktree"))
+
+        #expect(await manager.sessions() == [id], "même identifiant : l'historique reste un fil continu")
+        #expect(await manager.state(of: id) == .starting)
+        #expect(try store.session(id: id)?.state == .starting, "la base suit la reprise")
+    }
+
+    @Test("archiver via le manager : état + base (SES-07)")
+    func archiverUneSession() async throws {
+        let dbURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bunshin-arch-\(UUID().uuidString.prefix(8)).sqlite")
+        let store = try SessionStore(path: dbURL.path)
+        let pty = ScriptedPTYHost()
+        let manager = makeManagerWithStore(store: store, pty: pty)
+        let id = try await manager.launch(spec())
+        pty.exit(code: 0)
+        _ = await pollUntil { await manager.state(of: id) == .completed }
+
+        await manager.archive(id)
+        #expect(await manager.state(of: id) == .archived)
+        #expect(try store.session(id: id)?.state == .archived)
+    }
+
+    private func makeManagerWithStore(store: SessionStore, pty: ScriptedPTYHost) -> SessionManager {
+        SessionManager(runtimeDependencies: SessionRuntime.Dependencies(
+            ptyHost: pty, transcript: MemoryTranscriptSink()), store: store)
+    }
+
     private final class SpyNotifier: SessionNotifier, @unchecked Sendable {
         struct Entry { let session: SessionID; let title: String }
         private let lock = NSLock()

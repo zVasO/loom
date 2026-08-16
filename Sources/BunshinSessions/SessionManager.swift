@@ -131,6 +131,40 @@ public actor SessionManager {
         return id
     }
 
+    /// UC-7 : relance une session interrompue sous le MÊME identifiant — l'historique
+    /// reste un fil continu. La commande (`claude --resume <uuid>` + hooks) est
+    /// construite par l'appelant, qui possède le câblage.
+    public func resume(_ record: SessionRecord, command: Command, workingDirectory: URL,
+                       samplingInterval: Duration? = nil, hookToken: String? = nil) async throws {
+        let id = record.id
+        let (runtime, events) = try SessionRuntime.launch(
+            SessionLaunchPlan(command: command,
+                              workingDirectory: workingDirectory,
+                              samplingInterval: samplingInterval),
+            using: runtimeDependencies)
+        runtimes[id] = runtime
+        states[id] = StateEngine.State(session: .interrupted)
+        let token = hookToken ?? UUID().uuidString
+        tokens[token] = id
+        tokensBySession[id] = token
+        pumps[id] = Task { [weak self] in
+            for await event in events {
+                await self?.handle(event, for: id)
+            }
+        }
+        apply(.user(.resume), to: id)   // interrupted → starting, journalisé, base et UI à jour
+    }
+
+    /// SES-07 : archive — y compris une session de l'historique, absente de la mémoire.
+    public func archive(_ id: SessionID) {
+        if states[id] == nil {
+            let record = (try? store?.session(id: id)) ?? nil
+            guard let record else { return }
+            states[id] = StateEngine.State(session: record.state)
+        }
+        apply(.user(.archive), to: id)
+    }
+
     /// Point d'entrée des hooks (serveur IPC) et des heuristiques : toute transition
     /// passe par le réducteur — le manager n'écrit jamais un état à la main.
     public func apply(_ event: StateEngine.Event, to id: SessionID) {

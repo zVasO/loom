@@ -36,6 +36,10 @@ public final class AppModel {
     }
 
     public private(set) var sessions: [SessionItem] = []
+    /// UC-7 : proposées à la Reprise au relancement.
+    public private(set) var interruptedSessions: [SessionRecord] = []
+    /// SES-07 : terminées/échouées/archivées, consultables.
+    public private(set) var historySessions: [SessionRecord] = []
     public private(set) var startupError: String?
 
     private(set) var manager: SessionManager?
@@ -100,9 +104,41 @@ public final class AppModel {
             hookServer = server
 
             Task { await self.observeStates(of: manager) }
+            reloadPersistedSessions()
         } catch {
             startupError = String(describing: error)
         }
+    }
+
+    private func reloadPersistedSessions() {
+        let all = (try? store?.allSessions()) ?? []
+        interruptedSessions = (all ?? []).filter { $0.state == .interrupted }
+        historySessions = (all ?? []).filter { [.completed, .failed, .archived].contains($0.state) }
+    }
+
+    /// UC-7 : la Reprise — même identifiant, hooks ré-injectés, worktree d'origine.
+    public func resumeSession(_ record: SessionRecord) async {
+        guard let manager else { return }
+        let token = UUID().uuidString
+        let command = adapter.resumeCommand(session: record.id, hookToken: token)
+        let directory = record.worktreePath.map(URL.init(fileURLWithPath:))
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        do {
+            try await manager.resume(record, command: command, workingDirectory: directory,
+                                     samplingInterval: .milliseconds(500), hookToken: token)
+            tokenRegistry.register(token: token, session: record.id)
+            sessions.insert(SessionItem(id: record.id, title: record.title, state: .starting), at: 0)
+            interruptedSessions.removeAll { $0.id == record.id }
+        } catch {
+            startupError = String(describing: error)
+        }
+    }
+
+    /// SES-07 : archive et bascule dans l'historique.
+    public func archiveSession(_ id: SessionID) async {
+        await manager?.archive(id)
+        sessions.removeAll { $0.id == id }
+        reloadPersistedSessions()
     }
 
     /// Le serveur IPC valide de façon SYNCHRONE sur sa propre queue : le registre des

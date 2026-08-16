@@ -55,6 +55,7 @@ public enum StateEngine {
     /// Action explicite de l'utilisateur dans l'app.
     public enum UserAction: Sendable, Equatable {
         case resume
+        case archive
     }
 
     /// Signal émis par l'agent lui-même via ses hooks — source d'état prioritaire (STA-03).
@@ -82,6 +83,14 @@ public enum StateEngine {
 
     public static func reduce(_ state: State, _ event: Event, at instant: ContinuousClock.Instant,
                               tuning: Tuning = .standard) -> State {
+        // SES-07 : l'archivage est la seule action qui traverse un état terminal —
+        // son cas nominal est précisément la session terminée.
+        if event == .user(.archive) {
+            var next = state
+            next.session = .archived
+            next.candidate = nil
+            return next
+        }
         guard !terminalStates.contains(state.session) else { return state }
         var next = state
         switch event {
@@ -100,6 +109,8 @@ public enum StateEngine {
                 next.session = .starting
                 next.candidate = nil
             }
+        case .user(.archive):
+            break   // traité avant le switch (traverse les états terminaux)
         case .heuristic(let guess):
             if let lastHookAt = state.lastHookAt, instant - lastHookAt < tuning.hookPriorityWindow {
                 break

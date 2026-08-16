@@ -58,6 +58,16 @@ struct ClaudeCodeAdapterTests {
         #expect(command.arguments == ["--resume", id.rawValue.uuidString])
     }
 
+    @Test("la Reprise ré-injecte les hooks : la session reprise reste observée")
+    func repriseAvecHooks() {
+        let adapter = ClaudeCodeAdapter(hooks: .init(
+            helper: URL(fileURLWithPath: "/tmp/bunshin-hook"),
+            socket: URL(fileURLWithPath: "/tmp/bunshin.sock")))
+        let command = adapter.resumeCommand(session: SessionID(), hookToken: "jeton-reprise")
+        #expect(command.arguments.contains("--settings"),
+                "sans hooks ré-injectés, la session reprise serait aveugle pour la détection d'état")
+    }
+
     @Test("les payloads de hooks deviennent les événements du réducteur (STA-01)")
     func payloadsDeviennentDesEvenements() throws {
         func payload(_ fields: [String: Any]) -> Data {

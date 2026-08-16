@@ -13,10 +13,42 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(model.sessions, selection: $selected) { item in
-                SessionCardView(title: item.title, state: item.state, preview: "")
-                    .tag(item.id)
-                    .listRowBackground(Color.clear)
+            List(selection: $selected) {
+                Section("Actives") {
+                    ForEach(model.sessions) { item in
+                        SessionCardView(title: item.title, state: item.state, preview: "")
+                            .tag(item.id)
+                            .listRowBackground(Color.clear)
+                            .contextMenu {
+                                Button("Archiver") { Task { await model.archiveSession(item.id) } }
+                            }
+                    }
+                }
+                if !model.interruptedSessions.isEmpty {
+                    Section("Interrompues") {
+                        ForEach(model.interruptedSessions, id: \.id) { record in
+                            HStack {
+                                SessionCardView(title: record.title, state: record.state, preview: "")
+                                Button("Reprendre") {
+                                    Task { await model.resumeSession(record) }
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                            .listRowBackground(Color.clear)
+                        }
+                    }
+                }
+                if !model.historySessions.isEmpty {
+                    Section("Historique") {
+                        ForEach(model.historySessions, id: \.id) { record in
+                            SessionCardView(title: record.title, state: record.state, preview: "")
+                                .listRowBackground(Color.clear)
+                                .contextMenu {
+                                    Button("Archiver") { Task { await model.archiveSession(record.id) } }
+                                }
+                        }
+                    }
+                }
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 260, ideal: 300)

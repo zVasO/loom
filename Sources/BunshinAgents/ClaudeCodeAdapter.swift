@@ -76,8 +76,13 @@ public struct ClaudeCodeAdapter: Sendable {
     }
 
     /// UC-7 : l'UUID ayant été imposé au lancement, la Reprise est un simple `--resume`.
-    public func resumeCommand(session: SessionID) -> Command {
-        Command(executable: executable, arguments: ["--resume", session.rawValue.uuidString])
+    public func resumeCommand(session: SessionID, hookToken: String? = nil) -> Command {
+        var arguments = ["--resume", session.rawValue.uuidString]
+        if let hooks, let hookToken,
+           let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken) {
+            arguments.append(contentsOf: ["--settings", settings])
+        }
+        return Command(executable: executable, arguments: arguments)
     }
 
     private static func hookSettingsJSON(wiring: HookWiring, token: String) -> String? {
