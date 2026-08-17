@@ -24,6 +24,8 @@ enum DetailSelection: Hashable {
 struct ContentView: View {
     @State private var model = AppModel()
     @State private var tab: MainTab = .projects
+    /// Where Mission Control was toggled FROM — a second ⌘G returns there.
+    @State private var tabBeforeOverview: MainTab = .projects
     @State private var selected: DetailSelection?
     @State private var paletteShown = false
     @State private var paletteQuery = ""
@@ -141,9 +143,15 @@ struct ContentView: View {
 
             Spacer()
 
-            // v2 — Mission Control: the fleet at a glance (⌘G).
+            // v2 — Mission Control: the fleet at a glance (⌘G). A TOGGLE:
+            // press again to return to the view you came from.
             Button {
-                tab = .overview
+                if tab == .overview {
+                    tab = tabBeforeOverview
+                } else {
+                    tabBeforeOverview = tab
+                    tab = .overview
+                }
             } label: {
                 Image(systemName: "square.grid.2x2")
                     .font(.system(size: 12))
