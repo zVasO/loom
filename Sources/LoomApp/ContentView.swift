@@ -95,6 +95,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .loomNewSession)) { _ in
             createSession(in: model.selectedProject)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .loomFrameRateChanged)) { _ in
+            model.applyFrameRate()
+        }
         .sheet(isPresented: $paletteShown) { palette }
         .alert("Incomplete startup", isPresented: .constant(model.startupError != nil)) {
             Button("OK") { model.clearError() }
@@ -2185,7 +2188,8 @@ struct SessionDetailView: View {
             if let surface {
                 HSplitView {
                     GeometryReader { proxy in
-                        TerminalScreenView(screen: surface.screen, history: surface.history)
+                        TerminalScreenView(screen: surface.screen, history: surface.history,
+                                           historyBase: surface.historyBase)
                             // TRM-02: the view announces its grid to the PTY; the task(id:)
                             // cancels on every size change — free debounce
                             // while the window is being resized.

@@ -107,6 +107,18 @@ public final class AppModel {
         return cols >= 40 && rows >= 10 ? TerminalGeometry(cols: cols, rows: rows) : .default
     }()
 
+    /// P0 perf — the Settings refresh rate as a frame interval (default 30 fps).
+    public static func preferredFrameInterval() -> Duration {
+        let fps = UserDefaults.standard.integer(forKey: "loom.terminal.fps")
+        let clamped = [30, 60, 120].contains(fps) ? fps : 30
+        return .milliseconds(1000 / clamped)
+    }
+
+    public func applyFrameRate() {
+        let interval = Self.preferredFrameInterval()
+        Task { await manager?.setFrameInterval(interval) }
+    }
+
     public func noteTerminalGrid(cols: Int, rows: Int) {
         // Only a grid plausible for a real window is remembered: a transient
         // measurement (layout in progress) must never poison the launch
@@ -192,6 +204,7 @@ public final class AppModel {
                         .appendingPathComponent(id.rawValue.uuidString))
                 })
             self.manager = manager
+            applyFrameRate()
             if Bundle.main.bundleIdentifier != nil {
                 UNUserNotificationCenter.current()
                     .requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }

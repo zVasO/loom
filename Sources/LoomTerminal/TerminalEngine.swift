@@ -24,6 +24,14 @@ public protocol TerminalEngine: AnyObject {
     /// The last `limit` lines that have SCROLLED OFF the screen (scrollback tail),
     /// oldest to newest — for view scrolling.
     func historyTail(_ limit: Int) -> [TerminalLine]
+    /// Rows above the screen — absolute base giving history lines a stable identity.
+    var scrollbackRows: Int { get }
+}
+
+public extension TerminalEngine {
+    /// Adapters without a scrollback (test line engines) sit at base zero.
+    var scrollbackRows: Int { 0 }
+
 }
 
 // MARK: - Screen

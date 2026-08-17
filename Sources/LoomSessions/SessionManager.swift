@@ -75,6 +75,14 @@ public actor SessionManager {
         return stream
     }
 
+    /// P0 perf: the user's terminal refresh setting, applied to every runtime.
+    private var frameInterval: Duration = .milliseconds(33)
+
+    public func setFrameInterval(_ interval: Duration) {
+        frameInterval = interval
+        for runtime in runtimes.values { runtime.setFrameInterval(interval) }
+    }
+
     private let tuning: StateEngine.Tuning
     private let interpreter: HeuristicInterpreter
     private let git: GitService
@@ -132,6 +140,7 @@ public actor SessionManager {
                               geometry: spec.geometry,
                               samplingInterval: spec.samplingInterval),
             using: dependencies)
+        runtime.setFrameInterval(frameInterval)
         runtimes[id] = runtime
         states[id] = StateEngine.State(session: .starting)
         let token = spec.hookToken ?? UUID().uuidString
@@ -168,6 +177,7 @@ public actor SessionManager {
                               geometry: geometry,
                               samplingInterval: samplingInterval),
             using: dependencies)
+        runtime.setFrameInterval(frameInterval)
         runtimes[id] = runtime
         states[id] = StateEngine.State(session: .interrupted)
         let token = hookToken ?? UUID().uuidString

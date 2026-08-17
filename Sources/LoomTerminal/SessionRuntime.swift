@@ -111,14 +111,38 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
-    /// On the session queue: schedules at most one frame delivery.
+    // P0 perf: frames used to fire at network-chunk rate (each paying a full
+    // snapshot + history extraction). The cap coalesces them: leading edge
+    // immediate, trailing edge scheduled — at most 1000/interval frames per
+    // second regardless of the output rate. Confined to the session queue.
+    private var frameInterval: Duration = .milliseconds(33)
+    private var lastFrameAt: ContinuousClock.Instant?
+
+    /// The user's refresh-rate setting (30/60/120 fps). Applied on the queue.
+    public func setFrameInterval(_ interval: Duration) {
+        queue.async { self.frameInterval = interval }
+    }
+
+    /// On the session queue: schedules at most one frame delivery per interval.
     private func scheduleFrame() {
         let anyoneWatching = lock.withLock { !attachedTerminals.isEmpty }
         guard anyoneWatching, !frameScheduled else { return }
         frameScheduled = true
-        queue.async {
+        let now = ContinuousClock().now
+        let sinceLast = lastFrameAt.map { now - $0 } ?? frameInterval
+        let remaining = frameInterval - sinceLast
+        let deliver = {
             self.frameScheduled = false
+            self.lastFrameAt = ContinuousClock().now
             self.deliverFrame()
+        }
+        if remaining <= .zero {
+            queue.async(execute: deliver)
+        } else {
+            let nanoseconds = remaining.components.seconds * 1_000_000_000
+                + remaining.components.attoseconds / 1_000_000_000
+            queue.asyncAfter(deadline: .now() + .nanoseconds(Int(nanoseconds)),
+                             execute: deliver)
         }
     }
 
@@ -128,9 +152,10 @@ public final class SessionRuntime: @unchecked Sendable {
         guard !watching.isEmpty, let engine else { return }
         let snapshot = engine.snapshot()
         let history = engine.historyTail(400)
+        let base = engine.scrollbackRows - history.count
         Task { @MainActor in
             for terminal in watching {
-                self.surfaces[terminal]?.receive(snapshot, history: history)
+                self.surfaces[terminal]?.receive(snapshot, history: history, base: base)
             }
         }
     }

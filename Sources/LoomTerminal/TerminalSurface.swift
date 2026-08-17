@@ -17,6 +17,8 @@ public final class TerminalSurface {
     public private(set) var screen: TerminalScreen
     /// Scrollback tail (at most 400 lines) — what the view scrolls through.
     public private(set) var history: [TerminalLine] = []
+    /// Absolute scrollback index of history[0]: stable identity for the view diff.
+    public private(set) var historyBase = 0
     public private(set) var isAttached = false
 
     private weak var runtime: SessionRuntime?
@@ -80,10 +82,11 @@ public final class TerminalSurface {
 
     private var lastRequestedGeometry: TerminalGeometry?
 
-    func receive(_ screen: TerminalScreen, history: [TerminalLine]) {
+    func receive(_ screen: TerminalScreen, history: [TerminalLine], base: Int = 0) {
         guard isAttached else { return }
         self.screen = screen
         self.history = history
+        self.historyBase = base
     }
 
     private var lifecycleContinuation: CheckedContinuation<Void, Never>?

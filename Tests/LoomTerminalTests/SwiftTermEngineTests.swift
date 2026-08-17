@@ -82,4 +82,36 @@ extension SwiftTermEngineTests {
                     "the visible screen, meanwhile, shows the end of the stream")
         }
     }
+
+    // P0 perf: the tail is cached and grown incrementally — correctness first.
+    @Test("incremental tail equals a from-scratch rebuild after growth")
+    func incrementalTailCorrectness() {
+        let engine = makeEngine(cols: 40, rows: 6)
+        queue.sync {
+            for index in 1...20 { engine.feed(ArraySlice("first-\(index)\r\n".utf8)) }
+            _ = engine.historyTail(400)                       // primes the cache
+            for index in 21...40 { engine.feed(ArraySlice("second-\(index)\r\n".utf8)) }
+            let incremental = engine.historyTail(400)
+
+            let fresh = makeEngine(cols: 40, rows: 6)
+            for index in 1...20 { fresh.feed(ArraySlice("first-\(index)\r\n".utf8)) }
+            for index in 21...40 { fresh.feed(ArraySlice("second-\(index)\r\n".utf8)) }
+            #expect(incremental == fresh.historyTail(400), "cache must never change the result")
+        }
+    }
+
+    @Test("a resize invalidates the tail cache (scrollback reflows)")
+    func tailCacheInvalidatedOnResize() {
+        let engine = makeEngine(cols: 40, rows: 6)
+        queue.sync {
+            for index in 1...30 { engine.feed(ArraySlice("row-\(index)\r\n".utf8)) }
+            _ = engine.historyTail(400)
+            engine.resize(to: TerminalGeometry(cols: 60, rows: 8))
+            let after = engine.historyTail(400)
+            let fresh = makeEngine(cols: 40, rows: 6)
+            for index in 1...30 { fresh.feed(ArraySlice("row-\(index)\r\n".utf8)) }
+            fresh.resize(to: TerminalGeometry(cols: 60, rows: 8))
+            #expect(after == fresh.historyTail(400))
+        }
+    }
 }
