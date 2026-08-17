@@ -6,40 +6,45 @@ import SwiftUI
 /// near-black background, flat outlined cards, warm orange accent, mono for
 /// paths and branches. The full theme system (Theme/ThemeResolver) translates
 /// to these tokens; no hardcoded color in the views.
+@MainActor
 public enum DefaultTheme {
 
-    // Backgrounds
-    public static let background = Color(red: 0.051, green: 0.051, blue: 0.055)   // #0D0D0E
-    public static let contentBackground = Color(red: 0.067, green: 0.067, blue: 0.075) // #111113
-    public static let surface = Color(red: 0.090, green: 0.090, blue: 0.102)      // #17171A
-    public static let surfaceRaised = Color(red: 0.118, green: 0.118, blue: 0.133)
-    public static let cardBorder = Color(red: 0.149, green: 0.149, blue: 0.169)   // #26262B
+    /// Every token proxies the ACTIVE palette (ThemeStore) — views observe the
+    /// store through these reads, so a theme switch re-renders live without a
+    /// single call-site change.
+    static var palette: ThemePalette { ThemeStore.shared.palette }
 
-    // Accent (filled buttons: dark text on top, like the reference)
-    public static let accent = Color(red: 0.910, green: 0.580, blue: 0.360)       // #E8945C
-    public static let accentText = Color(red: 0.125, green: 0.071, blue: 0.016)
+    // Backgrounds
+    public static var background: Color { palette.background }
+    public static var contentBackground: Color { palette.contentBackground }
+    public static var surface: Color { palette.surface }
+    public static var surfaceRaised: Color { palette.surfaceRaised }
+    public static var cardBorder: Color { palette.cardBorder }
+
+    // Accent (filled buttons: contrasting text on top, like the reference)
+    public static var accent: Color { palette.accent }
+    public static var accentText: Color { palette.accentText }
 
     // Text
-    public static let primaryText = Color(red: 0.925, green: 0.925, blue: 0.933)
-    public static let secondaryText = Color(red: 0.525, green: 0.525, blue: 0.557) // #86868E
-    public static let mutedText = Color(red: 0.42, green: 0.42, blue: 0.45)
+    public static var primaryText: Color { palette.primaryText }
+    public static var secondaryText: Color { palette.secondaryText }
+    public static var mutedText: Color { palette.mutedText }
 
     // Semantics
-    public static let branch = Color(red: 0.36, green: 0.784, blue: 0.76)         // mono cyan
-    public static let danger = Color(red: 0.898, green: 0.392, blue: 0.424)
-    /// Sidebar group headers — the reference's green.
-    public static let groupHeader = Color(red: 0.298, green: 0.764, blue: 0.541)
+    public static var branch: Color { palette.branch }
+    public static var danger: Color { palette.danger }
+    /// Sidebar group headers.
+    public static var groupHeader: Color { palette.groupHeader }
 
     /// Invariant semantics (THM-08): a theme adjusts the hue, never the meaning.
     public static func badgeColor(for state: SessionState) -> Color {
         switch state {
-        case .working: Color(red: 0.298, green: 0.764, blue: 0.541)               // green
-        case .needsInput: Color(red: 0.898, green: 0.706, blue: 0.333)            // amber
+        case .working: palette.stateWorking
+        case .needsInput: palette.stateNeedsInput
         // "inactive" (closed but not destroyed) shares the resting blue.
-        case .idle, .starting, .completed, .interrupted:
-            Color(red: 0.416, green: 0.635, blue: 0.910)                          // blue
-        case .archived, .draft: secondaryText
-        case .failed: danger
+        case .idle, .starting, .completed, .interrupted: palette.stateIdle
+        case .archived, .draft: palette.secondaryText
+        case .failed: palette.danger
         }
     }
 

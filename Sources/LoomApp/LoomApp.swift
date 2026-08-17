@@ -3,6 +3,9 @@ import SwiftUI
 
 @main
 struct LoomApp: App {
+    @AppStorage("loom.shortcut.newSession") private var keyNewSession = "n"
+    @AppStorage("loom.shortcut.newTab") private var keyNewTab = "t"
+
     init() {
         // Launched outside an .app bundle (`swift run`), the process is treated as background:
         // no Dock icon, window never in the foreground. We force activation — with no
@@ -40,34 +43,12 @@ struct LoomApp: App {
     }
 }
 
-/// Settings (⌘,) — the terminal refresh rate. 30 fps default: fluid on any
-/// Mac; 60/120 for fast machines now that frame production is cheap.
-struct LoomSettingsView: View {
-    @AppStorage("loom.terminal.fps") private var fps = 30
-
-    var body: some View {
-        Form {
-            Picker("Terminal refresh rate", selection: $fps) {
-                Text("30 fps — recommended, fluid everywhere").tag(30)
-                Text("60 fps — fast Macs").tag(60)
-                Text("120 fps — ProMotion, recent Macs").tag(120)
-            }
-            .pickerStyle(.radioGroup)
-            Text("Caps how often terminal frames are produced during streaming. Lower is lighter on CPU; the first frame of any burst is always immediate.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-        }
-        .padding(20)
-        .frame(width: 440)
-        .onChange(of: fps) {
-            NotificationCenter.default.post(name: .loomFrameRateChanged, object: nil)
-        }
-    }
-}
 
 extension Notification.Name {
     /// Settings changed the terminal refresh rate.
     static let loomFrameRateChanged = Notification.Name("loom.frameRateChanged")
+    /// Settings changed the global or a per-project theme.
+    static let loomThemeChanged = Notification.Name("loom.themeChanged")
     /// ⌘N — a claude session in the current project.
     static let loomNewSession = Notification.Name("loom.newSession")
     /// ⌘T — contextual: web tab in the browser, terminal in a session.

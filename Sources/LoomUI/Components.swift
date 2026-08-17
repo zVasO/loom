@@ -174,9 +174,11 @@ public struct StatusLabel: View {
 public struct MonoTag: View {
     let text: String
     let systemImage: String?
-    let color: Color
+    /// nil = the theme's branch color, resolved at render time (a default
+    /// argument would be evaluated outside the main actor).
+    let color: Color?
 
-    public init(_ text: String, systemImage: String? = nil, color: Color = DefaultTheme.branch) {
+    public init(_ text: String, systemImage: String? = nil, color: Color? = nil) {
         self.text = text
         self.systemImage = systemImage
         self.color = color
@@ -187,7 +189,7 @@ public struct MonoTag: View {
             if let systemImage { Image(systemName: systemImage).font(.system(size: 10)) }
             Text(text).font(.system(size: 11, design: .monospaced))
         }
-        .foregroundStyle(color)
+        .foregroundStyle(color ?? DefaultTheme.branch)
         .lineLimit(1)
     }
 }

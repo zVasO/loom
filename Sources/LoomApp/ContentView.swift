@@ -11,7 +11,7 @@ import SwiftUI
 // Projects view as a centered column, Sessions view as grouped sidebar + detail.
 
 enum MainTab {
-    case projects, sessions, overview
+    case projects, sessions, overview, settings
 }
 
 /// The Sessions view's detail: a session… or the browser, as a tab
@@ -26,6 +26,9 @@ struct ContentView: View {
     @State private var tab: MainTab = .projects
     /// Where Mission Control was toggled FROM — a second ⌘G returns there.
     @State private var tabBeforeOverview: MainTab = .projects
+    @State private var tabBeforeSettings: MainTab = .projects
+    @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
+    @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
     @State private var selected: DetailSelection?
     @State private var paletteShown = false
     @State private var paletteQuery = ""
@@ -49,6 +52,7 @@ struct ContentView: View {
                 selected = .session(id)
                 tab = .sessions
             })
+            case .settings: SettingsPage(model: model)
             case .sessions: SessionsView(model: model, selected: $selected,
                                          onVisit: { url, title in model.recordVisit(url: url, title: title) },
                                          onNewSession: { project in
@@ -61,8 +65,18 @@ struct ContentView: View {
             }
         }
         .background(DefaultTheme.background)
-        .preferredColorScheme(.dark)
-        .onAppear { model.start() }
+        .preferredColorScheme(ThemeStore.shared.palette.isLight ? .light : .dark)
+        .onAppear {
+            model.start()
+            applyTheme()
+        }
+        // The app follows the project you are working in: override, else global.
+        .onChange(of: model.selectedProject) { applyTheme() }
+        .onChange(of: selected) { applyTheme() }
+        .onChange(of: tab) { applyTheme() }
+        .onReceive(NotificationCenter.default.publisher(for: .loomThemeChanged)) { _ in
+            applyTheme()
+        }
         .task {
             // Autonomous repro (diagnostics): LOOM_AUTOTEST=1 simulates the
             // "+" click two seconds after launch — same code path.
@@ -107,6 +121,19 @@ struct ContentView: View {
         } message: {
             Text(model.startupError ?? "")
         }
+    }
+
+    private var contextProjectID: ProjectID? {
+        if tab == .sessions, case .session(let id) = selected {
+            return model.sessions.first(where: { $0.id == id })?.projectID
+                ?? model.dormantSessions.first(where: { $0.id == id })?.projectID
+                ?? model.selectedProject
+        }
+        return model.selectedProject
+    }
+
+    private func applyTheme() {
+        ThemeStore.shared.apply(projectID: contextProjectID)
     }
 
     // MARK: - Navigation bar
@@ -163,8 +190,8 @@ struct ContentView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .keyboardShortcut("g", modifiers: .command)
-            .help("Mission Control — every live session (⌘G)")
+            .keyboardShortcut(KeyEquivalent(keyMissionControl.first ?? "g"), modifiers: .command)
+            .help("Mission Control — every live session (⌘\(keyMissionControl.uppercased()))")
             GhostButton(systemImage: "globe") {
                 // WEB-03: the browser is born INSIDE the current session's stack.
                 var parent: SessionID?
@@ -176,7 +203,7 @@ struct ContentView: View {
             Button {
                 paletteShown = true
             } label: {
-                Text("⌘K")
+                Text("⌘\(keyPalette.uppercased())")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .padding(.horizontal, 8).padding(.vertical, 5)
@@ -184,7 +211,28 @@ struct ContentView: View {
                     .hoverBrightness(0.1)
             }
             .buttonStyle(.plain)
-            .keyboardShortcut("k", modifiers: .command)
+            .keyboardShortcut(KeyEquivalent(keyPalette.first ?? "k"), modifiers: .command)
+            // Settings: the gear toggles the in-app page.
+            Button {
+                if tab == .settings {
+                    tab = tabBeforeSettings
+                } else {
+                    tabBeforeSettings = tab
+                    tab = .settings
+                }
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 12))
+                    .foregroundStyle(tab == .settings ? DefaultTheme.accent
+                                                      : DefaultTheme.secondaryText)
+                    .padding(.horizontal, 8).padding(.vertical, 6)
+                    .background(tab == .settings ? DefaultTheme.surfaceRaised : .clear,
+                                in: RoundedRectangle(cornerRadius: 7))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(",", modifiers: .command)
+            .help("Settings (⌘,)")
         }
         .padding(.horizontal, 14)
         .frame(height: 52)
