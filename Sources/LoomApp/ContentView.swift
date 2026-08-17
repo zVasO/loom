@@ -2231,6 +2231,23 @@ struct SessionDetailView: View {
                             .background(KeyCaptureView(focusTick: focusTick) { surface.send($0) })
                             .contentShape(Rectangle())
                             .onTapGesture { focusTick += 1 }
+                            // claude's own boot (plugins, MCP handshakes) takes
+                            // seconds — a silent black screen reads as broken.
+                            .overlay {
+                                if surface.screen.revision == 0 {
+                                    VStack(spacing: 10) {
+                                        ProgressView().controlSize(.small)
+                                        Text("claude is starting…")
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(DefaultTheme.secondaryText)
+                                        Text("Plugins and MCP servers load first — unauthenticated MCP servers slow this down (run /mcp).")
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(DefaultTheme.mutedText)
+                                            .multilineTextAlignment(.center)
+                                            .frame(maxWidth: 380)
+                                    }
+                                }
+                            }
                     }
                     .background(DefaultTheme.contentBackground)
                     if gitShown { gitPanel }

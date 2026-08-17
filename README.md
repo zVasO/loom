@@ -11,9 +11,12 @@ Le vocabulaire canonique vit dans [`CONTEXT.md`](CONTEXT.md), les décisions dan
 ## Démarrer
 
 ```sh
-swift test        # 95 tests, 17 suites — process réels, repos Git réels, sockets réels
-swift run LoomApp
+swift build -c release          # construit l'app ET loom-hook (détection d'état)
+swift run -c release LoomApp    # IMPORTANT : release — le debug est 10-50× plus lent
+                                # sur le rendu terminal (parse par cellule non optimisé)
 ```
+
+Tests : `swift test` (process réels, repos Git réels, sockets réels).
 
 Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 étapes).
 
