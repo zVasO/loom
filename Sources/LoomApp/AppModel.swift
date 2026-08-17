@@ -245,6 +245,59 @@ public final class AppModel {
         if selectedProject == nil { selectedProject = projects.first?.id }
     }
 
+    /// v3 — on-demand review: a fresh claude session IN THE SAME worktree,
+    /// primed to review the pending diff. Sibling in the stack (same parent
+    /// project), so the reviewer and the author sit side by side.
+    public func launchReviewSession(reviewing id: SessionID) async -> SessionID? {
+        guard let manager, let record = (try? store?.session(id: id)) ?? nil,
+              let worktreePath = record.worktreePath else { return nil }
+        let prompt = """
+        Review the current uncommitted changes in this worktree (git status, git diff). \
+        Report: correctness issues first, then design concerns, then nitpicks. \
+        Quote file:line for every finding. End with a verdict: ship / fix first.
+        """
+        do {
+            let sessionID = SessionID()
+            let token = UUID().uuidString
+            var spec = SessionManager.SessionSpec(
+                command: adapter.launchCommand(session: sessionID, initialPrompt: prompt,
+                                               hookToken: token),
+                workingDirectory: URL(fileURLWithPath: worktreePath),
+                geometry: preferredGrid,
+                samplingInterval: .milliseconds(500),
+                hookToken: token)
+            spec.projectID = record.projectID
+            spec.sessionID = sessionID
+            spec.title = "Review · \(record.title)"
+            let reviewID = try await manager.launch(spec)
+            tokenRegistry.register(token: token, session: reviewID)
+            sessions.append(SessionItem(id: reviewID, title: "Review · \(record.title)",
+                                        state: .starting, projectID: record.projectID,
+                                        branch: record.branch))
+            reloadPersistedSessions()
+            return reviewID
+        } catch {
+            startupError = String(describing: error)
+            return nil
+        }
+    }
+
+    // MARK: - Pipelines (v3): chain a follow-up session on completion
+
+    /// "When this session ends, start a new one with this goal" — the minimal
+    /// pipeline: one link, same project, fresh worktree. In-memory by design:
+    /// a follow-up only makes sense for a session alive in this app run.
+    public private(set) var followUps: [SessionID: String] = [:]
+
+    public func setFollowUp(_ prompt: String?, for id: SessionID) {
+        let cleaned = prompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if cleaned.isEmpty {
+            followUps.removeValue(forKey: id)
+        } else {
+            followUps[id] = cleaned
+        }
+    }
+
     // MARK: - Full-text search (v2): transcripts indexed per session
 
     /// The de-ANSI-fied transcript of a session, concatenated from its own
@@ -660,10 +713,15 @@ public final class AppModel {
             // has a conversation, disappears otherwise (reload filter).
             if [.completed, .failed, .interrupted].contains(update.state) {
                 let closed = sessions[index].id
+                let closedProject = sessions[index].projectID
                 sessions.remove(at: index)
                 saveStackChildren()
                 reloadPersistedSessions()
                 indexSessionForSearch(closed)
+                // v3 pipeline: the queued follow-up takes over, same project.
+                if let next = followUps.removeValue(forKey: closed) {
+                    Task { await self.launchSession(prompt: next, in: closedProject) }
+                }
             } else {
                 sessions[index].state = update.state
             }

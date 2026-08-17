@@ -294,6 +294,7 @@ struct ProjectsView: View {
     @FocusState private var goalFocused: Bool
     @State private var draggedProject: ProjectID?
     @State private var removalTarget: ProjectRecord?
+    @State private var fanOut = 1
     @State private var projectTab: ProjectTab = .overview
     @State private var skillFilter: SkillFilter = .all
     @State private var viewedDocument: ViewedDocument?
@@ -709,29 +710,54 @@ struct ProjectsView: View {
     /// The reference's central gesture: describing the goal HERE launches the
     /// session — the prompt goes straight into the agent's terminal.
     private func goalField(_ project: ProjectRecord) -> some View {
-        TextField("What are we building? Describe your goal — Enter starts a session…",
-                  text: $goal)
-            .textFieldStyle(.plain)
-            .font(.system(size: 14))
-            .foregroundStyle(DefaultTheme.primaryText)
-            .focused($goalFocused)
-            .onSubmit { submitGoal(project) }
-            .padding(.horizontal, 18).padding(.vertical, 17)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12)
-                .stroke(goalFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
-                        lineWidth: 1))
-            .animation(.hover, value: goalFocused)
+        HStack(spacing: 10) {
+            TextField("What are we building? Describe your goal — Enter starts a session…",
+                      text: $goal)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .foregroundStyle(DefaultTheme.primaryText)
+                .focused($goalFocused)
+                .onSubmit { submitGoal(project) }
+            // v3 — fan-out: the same goal, N parallel sessions, N worktrees.
+            Menu {
+                ForEach(1...4, id: \.self) { count in
+                    Button("×\(count)\(count > 1 ? " parallel sessions" : " session")") {
+                        fanOut = count
+                    }
+                }
+            } label: {
+                Text("×\(fanOut)")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(fanOut > 1 ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Launch the goal in N parallel sessions, each on its own worktree")
+        }
+        .padding(.horizontal, 18).padding(.vertical, 17)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12)
+            .stroke(goalFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
+                    lineWidth: 1))
+        .animation(.hover, value: goalFocused)
     }
 
     private func submitGoal(_ project: ProjectRecord) {
         let trimmed = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         goal = ""
+        let count = fanOut
         Task {
-            if let id = await model.launchSession(prompt: trimmed, in: project.id) {
-                onOpenSession(id)
+            var first: SessionID?
+            for _ in 0..<count {
+                if let id = await model.launchSession(prompt: trimmed, in: project.id) {
+                    if first == nil { first = id }
+                }
             }
+            if let first { onOpenSession(first) }
         }
     }
 
@@ -1195,7 +1221,8 @@ struct SessionsView: View {
                 switch selected {
                 case .session(let sessionID):
                     SessionDetailView(model: model, sessionID: sessionID,
-                                      onBack: onShowProject)
+                                      onBack: onShowProject,
+                                      selectedAfterReview: { selected = .session($0) })
                         .id(sessionID)
                 case .webPane(let paneID):
                     if let pane = model.browserPane(paneID) {
@@ -1729,6 +1756,8 @@ struct SessionDetailView: View {
     let model: AppModel
     let sessionID: SessionID
     let onBack: (ProjectID?) -> Void
+    /// v3 — opens the reviewer session that the Ship panel just launched.
+    var selectedAfterReview: ((SessionID) -> Void)?
     @State private var infoShown = false
     @State private var surface: TerminalSurface?
     @State private var gitShown = false
@@ -1739,6 +1768,8 @@ struct SessionDetailView: View {
     @State private var shipMessage = ""
     @State private var shipOutput: String?
     @State private var shipBusy = false
+    @State private var followUpShown = false
+    @State private var followUpDraft = ""
 
     private var item: AppModel.SessionItem? {
         model.sessions.first { $0.id == sessionID }
@@ -1820,6 +1851,50 @@ struct SessionDetailView: View {
                 StatusLabel(state)
             }
             Spacer()
+            // v3 — pipeline: queue the next goal, it launches when this ends.
+            GhostButton(systemImage: "arrow.turn.down.right") {
+                followUpDraft = model.followUps[sessionID] ?? ""
+                followUpShown.toggle()
+            }
+            .overlay(alignment: .topTrailing) {
+                if model.followUps[sessionID] != nil {
+                    Circle().fill(DefaultTheme.accent).frame(width: 5, height: 5)
+                        .offset(x: -3, y: 5)
+                }
+            }
+            .help("Chain: when this session ends, start the next one")
+            .popover(isPresented: $followUpShown, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("When this session ends…")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                    TextField("…start a new session with this goal", text: $followUpDraft)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .padding(8)
+                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
+                        .frame(width: 320)
+                        .onSubmit {
+                            model.setFollowUp(followUpDraft, for: sessionID)
+                            followUpShown = false
+                        }
+                    HStack {
+                        GhostButton("Clear") {
+                            model.setFollowUp(nil, for: sessionID)
+                            followUpDraft = ""
+                            followUpShown = false
+                        }
+                        Spacer()
+                        AccentButton("Queue") {
+                            model.setFollowUp(followUpDraft, for: sessionID)
+                            followUpShown = false
+                        }
+                    }
+                }
+                .padding(14)
+                .background(DefaultTheme.surface)
+                .preferredColorScheme(.dark)
+            }
             GhostButton("Git", systemImage: "arrow.triangle.branch") {
                 gitShown.toggle()
                 if gitShown { Task { gitData = await model.gitPanel(for: sessionID) } }
@@ -1984,6 +2059,14 @@ struct SessionDetailView: View {
                         shipBusy = false
                     }
                 }
+                GhostButton("Review", systemImage: "eyes") {
+                    Task {
+                        if let id = await model.launchReviewSession(reviewing: sessionID) {
+                            selectedAfterReview?(id)
+                        }
+                    }
+                }
+                .help("A second claude reviews this worktree's diff")
                 if AppModel.ghPath != nil {
                     GhostButton("Create PR", systemImage: "arrow.triangle.pull") {
                         shipBusy = true
