@@ -106,8 +106,8 @@ public struct ShutdownLadder: Sendable, Equatable {
     /// SIGTERM/SIGKILL serve only as a safety net.
     public static let close = ShutdownLadder(steps: [
         Step(signal: .interrupt, scope: .process, grace: .milliseconds(350)),
-        Step(signal: .interrupt, scope: .process, grace: .seconds(2)),
-        Step(signal: .terminate, scope: .group, grace: .seconds(3)),
+        Step(signal: .interrupt, scope: .process, grace: .milliseconds(1200)),
+        Step(signal: .terminate, scope: .group, grace: .seconds(2)),
         Step(signal: .kill, scope: .group, grace: .seconds(1)),
     ])
     public static let immediate = ShutdownLadder(steps: [Step(signal: .kill, scope: .group, grace: .seconds(1))])

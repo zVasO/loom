@@ -860,14 +860,21 @@ public final class AppModel {
     private func observeStates(of manager: SessionManager) async {
         let updates = await manager.stateUpdates()
         for await update in updates {
-            guard let index = sessions.firstIndex(where: { $0.id == update.id }) else { continue }
+            let index = sessions.firstIndex(where: { $0.id == update.id })
+            // A terminal state must be processed even when the item is already
+            // gone (optimistic close) — that is what turns the record into an
+            // "inactive" card, indexes the transcript and fires the follow-up.
+            guard index != nil || pendingCloseProjects[update.id] != nil else { continue }
             // The process is dead (⌃C⌃C, exit, crash): the live card closes
             // on its own — the session reappears "inactive" in its stack if it
             // has a conversation, disappears otherwise (reload filter).
             if [.completed, .failed, .interrupted].contains(update.state) {
-                let closed = sessions[index].id
-                let closedProject = sessions[index].projectID
-                sessions.remove(at: index)
+                let closed = update.id
+                // The item may already be gone (optimistic close) — its project
+                // was parked in pendingCloseProjects.
+                let closedProject = sessions.first(where: { $0.id == closed })?.projectID
+                    ?? pendingCloseProjects.removeValue(forKey: closed) ?? nil
+                sessions.removeAll { $0.id == closed }
                 nativeExistsCache.removeValue(forKey: closed)   // settled at close: rescan once
                 saveStackChildren()
                 reloadPersistedSessions()
@@ -876,7 +883,7 @@ public final class AppModel {
                 if let next = followUps.removeValue(forKey: closed) {
                     Task { await self.launchSession(prompt: next, in: closedProject) }
                 }
-            } else {
+            } else if let index {
                 sessions[index].state = update.state
             }
         }
@@ -954,9 +961,20 @@ public final class AppModel {
         try? store?.recordVisit(url: url, title: title, at: Date())
     }
 
+    /// Sessions whose tab was optimistically removed while the shutdown
+    /// ladder still runs — the exit observer finishes their bookkeeping.
+    private var pendingCloseProjects: [SessionID: ProjectID?] = [:]
+
     public func stopSession(_ id: SessionID) async {
-        // Closing a tab = the user's double Ctrl+C: claude exits cleanly
-        // in ~½ s instead of waiting for the SIGTERM escalation at 5 s.
+        // OPTIMISTIC close: the tab disappears NOW — claude's exit takes
+        // seconds (stop hooks, plugin teardown) and the ladder guarantees
+        // death (double Ctrl+C, then SIGTERM/SIGKILL). The card returns as
+        // "inactive" once the exit is observed and the record settles.
+        if let item = sessions.first(where: { $0.id == id }) {
+            pendingCloseProjects[id] = item.projectID
+            sessions.removeAll { $0.id == id }
+            saveStackChildren()
+        }
         await manager?.stop(id, ladder: .close)
     }
 
