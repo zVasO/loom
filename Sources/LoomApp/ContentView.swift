@@ -295,6 +295,17 @@ struct ProjectsView: View {
     @State private var draggedProject: ProjectID?
     @State private var removalTarget: ProjectRecord?
     @State private var fanOut = 1
+    // v4 — PR review
+    @State private var prs: [GitHubService.PullRequest] = []
+    @State private var prsLoading = false
+    @State private var selectedPR: GitHubService.PullRequest?
+    @State private var prDetail: GitHubService.PRDetail?
+    @State private var prDiff = ""
+    @State private var prTour: PRTour?
+    @State private var tourLoading = false
+    @State private var reviewBody = ""
+    @State private var prActionOutput: String?
+    @State private var prActionBusy = false
     @State private var projectTab: ProjectTab = .overview
     @State private var skillFilter: SkillFilter = .all
     @State private var viewedDocument: ViewedDocument?
@@ -314,7 +325,7 @@ struct ProjectsView: View {
 
     enum ProjectTab: String, CaseIterable {
         case overview = "Overview", git = "Git", files = "Files"
-        case skills = "Skills", rules = "Rules"
+        case skills = "Skills", rules = "Rules", prs = "PRs"
     }
 
     private var current: ProjectRecord? {
@@ -408,6 +419,7 @@ struct ProjectsView: View {
                         case .files: filesTab(project)
                         case .skills: skillsTab(project)
                         case .rules: rulesTab(project)
+                        case .prs: prsTab(project)
                         }
                     }
                 }
@@ -423,8 +435,12 @@ struct ProjectsView: View {
             filesPath = ""
             gitData = nil
             viewedDocument = nil
+            resetPRState()
         }
-        .onChange(of: projectTab) { viewedDocument = nil }
+        .onChange(of: projectTab) {
+            viewedDocument = nil
+            if projectTab != .prs { resetPRState() }
+        }
         .task(id: "\(current?.id.rawValue.uuidString ?? "")-\(projectTab.rawValue)") {
             if projectTab == .git, let project = current {
                 gitData = await model.projectGit(project.id)
@@ -805,6 +821,252 @@ struct ProjectsView: View {
         }
     }
 
+    // MARK: PRs tab (v4) — inbox, detail, verdict, guided tour
+
+    private func resetPRState() {
+        prs = []
+        selectedPR = nil
+        prDetail = nil
+        prDiff = ""
+        prTour = nil
+        reviewBody = ""
+        prActionOutput = nil
+    }
+
+    @ViewBuilder
+    private func prsTab(_ project: ProjectRecord) -> some View {
+        if !GitHubService.isAvailable {
+            Text("Install the GitHub CLI (brew install gh) and authenticate (gh auth login) to review pull requests here.")
+                .font(.system(size: 12))
+                .foregroundStyle(DefaultTheme.secondaryText)
+        } else if let pr = selectedPR {
+            prDetailView(pr, project: project)
+        } else {
+            prListView(project)
+        }
+    }
+
+    private func prListView(_ project: ProjectRecord) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                sectionHeader("OPEN PULL REQUESTS", count: prs.count,
+                              color: DefaultTheme.badgeColor(for: .working))
+                Spacer()
+                if prsLoading { ProgressView().controlSize(.small) }
+                GhostButton(systemImage: "arrow.clockwise") { loadPRs(project) }
+            }
+            if prs.isEmpty && !prsLoading {
+                Text("No open pull request — or gh is not authenticated for this repo.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
+            VStack(spacing: 6) {
+                ForEach(prs) { pr in
+                    PRRow(pr: pr) {
+                        selectedPR = pr
+                        loadPRDetail(pr, project: project)
+                    }
+                }
+            }
+        }
+        .task(id: current?.id) { loadPRs(project) }
+    }
+
+    private func loadPRs(_ project: ProjectRecord) {
+        prsLoading = true
+        Task {
+            prs = await model.listPRs(for: project.id)
+            prsLoading = false
+        }
+    }
+
+    private func loadPRDetail(_ pr: GitHubService.PullRequest, project: ProjectRecord) {
+        prDetail = nil
+        prDiff = ""
+        prTour = nil
+        Task {
+            prDetail = await model.prDetail(pr.number, in: project.id)
+            prDiff = await model.prDiff(pr.number, in: project.id)
+        }
+    }
+
+    private func prDetailView(_ pr: GitHubService.PullRequest,
+                              project: ProjectRecord) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                HoverIconButton(systemImage: "arrow.left", help: "Back to the list") {
+                    selectedPR = nil
+                }
+                Text("#\(pr.number)")
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.accent)
+                Text(pr.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .lineLimit(1)
+                Spacer()
+                GhostButton("GitHub", systemImage: "arrow.up.forward.square") {
+                    if let url = URL(string: pr.url) { NSWorkspace.shared.open(url) }
+                }
+            }
+
+            // The playful part: the guided tour.
+            tourSection(pr, project: project)
+
+            if let detail = prDetail {
+                if !detail.body.isEmpty {
+                    Text(detail.body)
+                        .font(.system(size: 12))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .textSelection(.enabled)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                }
+                if !detail.reviews.isEmpty || !detail.comments.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        sectionHeader("CONVERSATION",
+                                      count: detail.reviews.count + detail.comments.count,
+                                      color: DefaultTheme.secondaryText)
+                        ForEach(Array(detail.reviews.enumerated()), id: \.offset) { _, review in
+                            conversationRow(author: review.author,
+                                            chip: review.state.replacingOccurrences(of: "_", with: " ").lowercased(),
+                                            body: review.body)
+                        }
+                        ForEach(Array(detail.comments.enumerated()), id: \.offset) { _, comment in
+                            conversationRow(author: comment.author, chip: nil, body: comment.body)
+                        }
+                    }
+                }
+            } else {
+                ProgressView().controlSize(.small)
+            }
+
+            if !prDiff.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    sectionHeader("DIFF", count: prDiff.split(separator: "\n").count,
+                                  color: DefaultTheme.secondaryText)
+                    ScrollView {
+                        Text(prDiff)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(DefaultTheme.primaryText.opacity(0.9))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                    }
+                    .frame(maxHeight: 320)
+                    .background(DefaultTheme.contentBackground,
+                                in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+
+            // Verdict bar.
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Review comment…", text: $reviewBody, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .lineLimit(2...5)
+                    .padding(10)
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
+                    .overlay(RoundedRectangle(cornerRadius: 9)
+                        .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                HStack(spacing: 8) {
+                    AccentButton("Approve") { submitReview(pr, .approve, project) }
+                    GhostButton("Request changes", systemImage: "exclamationmark.bubble") {
+                        submitReview(pr, .requestChanges, project)
+                    }
+                    GhostButton("Comment", systemImage: "bubble.left") {
+                        submitReview(pr, .comment, project)
+                    }
+                    if prActionBusy { ProgressView().controlSize(.small) }
+                    Spacer()
+                }
+                if let prActionOutput {
+                    Text(prActionOutput)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(prActionOutput.hasSuffix("✓") ? DefaultTheme.groupHeader
+                                                                       : DefaultTheme.secondaryText)
+                }
+            }
+        }
+    }
+
+    private func submitReview(_ pr: GitHubService.PullRequest,
+                              _ verdict: GitHubService.Verdict,
+                              _ project: ProjectRecord) {
+        if verdict != .approve, reviewBody.trimmingCharacters(in: .whitespaces).isEmpty {
+            prActionOutput = "Write the comment first."
+            return
+        }
+        prActionBusy = true
+        Task {
+            let error = await model.submitPRReview(pr.number, verdict: verdict,
+                                                   body: reviewBody, in: project.id)
+            prActionOutput = error ?? "Review sent ✓"
+            if error == nil {
+                reviewBody = ""
+                loadPRDetail(pr, project: project)
+            }
+            prActionBusy = false
+        }
+    }
+
+    private func conversationRow(author: String, chip: String?, body: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text("@" + author)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.branch)
+                if let chip, !chip.isEmpty {
+                    Text(chip)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(chip.contains("changes") ? DefaultTheme.danger
+                                                                  : DefaultTheme.secondaryText)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(DefaultTheme.surfaceRaised, in: Capsule())
+                }
+            }
+            if !body.isEmpty {
+                Text(body)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.primaryText.opacity(0.9))
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    @ViewBuilder
+    private func tourSection(_ pr: GitHubService.PullRequest,
+                             project: ProjectRecord) -> some View {
+        if let tour = prTour {
+            PRTourView(tour: tour) {
+                Task {
+                    if let id = await model.askGuide(about: pr.number, title: pr.title,
+                                                     tour: tour, in: project.id) {
+                        onOpenSession(id)
+                    }
+                }
+            }
+        } else {
+            HStack(spacing: 8) {
+                GhostButton(tourLoading ? "The guide is reading the PR…" : "Explain this PR",
+                            systemImage: "sparkles") {
+                    guard !tourLoading else { return }
+                    tourLoading = true
+                    Task {
+                        prTour = await model.generateTour(pr.number, in: project.id)
+                        if prTour == nil { prActionOutput = "The guide could not read this PR." }
+                        tourLoading = false
+                    }
+                }
+                if tourLoading { ProgressView().controlSize(.small) }
+            }
+        }
+    }
+
     private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {
         HStack(spacing: 8) {
             Text(title)
@@ -993,6 +1255,147 @@ struct RuleCard: View {
         .onTapGesture(perform: onOpen)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
+    }
+}
+
+/// v4 — a pull request in the inbox: number, title, author, branch, checks
+/// dot, review-state chip. Green dot = CI passing; red = at least one failure.
+struct PRRow: View {
+    let pr: GitHubService.PullRequest
+    let onOpen: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(pr.checksPassing ? DefaultTheme.groupHeader : DefaultTheme.danger)
+                .frame(width: 7, height: 7)
+            Text("#\(pr.number)")
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(DefaultTheme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pr.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    Text("@" + pr.author)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                    MonoTag(pr.branch, systemImage: "arrow.triangle.branch",
+                            color: DefaultTheme.mutedText)
+                }
+            }
+            Spacer()
+            if pr.isDraft {
+                Text("draft")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.mutedText)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(DefaultTheme.surfaceRaised, in: Capsule())
+            }
+            if !pr.reviewDecision.isEmpty {
+                Text(pr.reviewDecision.replacingOccurrences(of: "_", with: " ").lowercased())
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(pr.reviewDecision == "APPROVED" ? DefaultTheme.groupHeader
+                                                                     : DefaultTheme.secondaryText)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(DefaultTheme.surfaceRaised, in: Capsule())
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(hovered ? DefaultTheme.surfaceRaised : DefaultTheme.surface,
+                    in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(hovered ? DefaultTheme.accent.opacity(0.5) : DefaultTheme.cardBorder,
+                    lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onOpen)
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
+    }
+}
+
+/// v4 — the guided tour rendered: pitch, story chapters, playful risk gauge,
+/// warnings with file:line, and the door to an interactive guide session.
+struct PRTourView: View {
+    let tour: PRTour
+    let onAskGuide: () -> Void
+
+    private var gauge: (label: String, color: Color) {
+        switch tour.riskLevel {
+        case "quiet": ("Quiet waters", DefaultTheme.groupHeader)
+        case "dragon": ("There be dragons", DefaultTheme.danger)
+        default: ("Watch out", DefaultTheme.badgeColor(for: .needsInput))
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(DefaultTheme.accent)
+                Text(tour.pitch)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                Spacer()
+                Label(gauge.label, systemImage: "gauge.with.needle")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(gauge.color)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(gauge.color.opacity(0.14), in: Capsule())
+            }
+            ForEach(Array(tour.chapters.enumerated()), id: \.offset) { index, chapter in
+                HStack(alignment: .top, spacing: 10) {
+                    Text("\(index + 1)")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.accent)
+                        .frame(width: 20, height: 20)
+                        .background(DefaultTheme.accent.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(chapter.title)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(DefaultTheme.primaryText)
+                            if !chapter.file.isEmpty {
+                                MonoTag(chapter.file, color: DefaultTheme.mutedText)
+                            }
+                        }
+                        Text(chapter.explanation)
+                            .font(.system(size: 11))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                    }
+                }
+            }
+            if !tour.warnings.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(tour.warnings.enumerated()), id: \.offset) { _, warning in
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(gauge.color)
+                            Text("\(warning.file)\(warning.line.map { ":\($0)" } ?? "")")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(DefaultTheme.primaryText)
+                            Text(warning.note)
+                                .font(.system(size: 10))
+                                .foregroundStyle(DefaultTheme.secondaryText)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .padding(.top, 2)
+            }
+            GhostButton("Ask the guide", systemImage: "bubble.left.and.text.bubble.right") {
+                onAskGuide()
+            }
+            .help("Opens an interactive claude session, checked out on this PR, primed as its guide")
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 11))
+        .overlay(RoundedRectangle(cornerRadius: 11)
+            .stroke(DefaultTheme.accent.opacity(0.35), lineWidth: 1))
     }
 }
 

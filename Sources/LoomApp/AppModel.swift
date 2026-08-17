@@ -245,6 +245,122 @@ public final class AppModel {
         if selectedProject == nil { selectedProject = projects.first?.id }
     }
 
+    // MARK: - v4: GitHub PR review through the user's authenticated gh
+
+    private func projectRepo(_ id: ProjectID?) -> URL? {
+        project(id).map { URL(fileURLWithPath: $0.path) }
+    }
+
+    public func listPRs(for projectID: ProjectID) async -> [GitHubService.PullRequest] {
+        guard let repo = projectRepo(projectID) else { return [] }
+        return (try? await GitHubService().listPRs(in: repo)) ?? []
+    }
+
+    public func prDetail(_ number: Int, in projectID: ProjectID) async -> GitHubService.PRDetail? {
+        guard let repo = projectRepo(projectID) else { return nil }
+        return try? await GitHubService().prDetail(number, in: repo)
+    }
+
+    public func prDiff(_ number: Int, in projectID: ProjectID) async -> String {
+        guard let repo = projectRepo(projectID) else { return "" }
+        return (try? await GitHubService().prDiff(number, in: repo)) ?? ""
+    }
+
+    /// nil on success, error text otherwise — the panel reports the truth.
+    public func submitPRReview(_ number: Int, verdict: GitHubService.Verdict,
+                               body: String, in projectID: ProjectID) async -> String? {
+        guard let repo = projectRepo(projectID) else { return "No repo for this project" }
+        do { try await GitHubService().submitReview(number, verdict: verdict, body: body, in: repo); return nil }
+        catch { return Self.ghErrorText(error) }
+    }
+
+    public func commentPR(_ number: Int, body: String, in projectID: ProjectID) async -> String? {
+        guard let repo = projectRepo(projectID) else { return "No repo for this project" }
+        do { try await GitHubService().comment(number, body: body, in: repo); return nil }
+        catch { return Self.ghErrorText(error) }
+    }
+
+    private static func ghErrorText(_ error: Error) -> String {
+        if case GitHubService.GitHubError.commandFailed(_, let stderr) = error, !stderr.isEmpty {
+            return stderr
+        }
+        return String(describing: error)
+    }
+
+    /// The guided tour: claude -p over the PR diff, strict-JSON answer parsed
+    /// into chapters + a playful risk gauge. Slow (an agent run) — call it from
+    /// a task, show progress.
+    public func generateTour(_ number: Int, in projectID: ProjectID) async -> PRTour? {
+        guard let repo = projectRepo(projectID), let claude = claudePath else { return nil }
+        let diff = String((try? await GitHubService().prDiff(number, in: repo))?.prefix(40_000) ?? "")
+        guard !diff.isEmpty else { return nil }
+        let prompt = """
+        You are a playful but rigorous code-tour guide. Given this pull-request diff, \
+        respond with ONLY a JSON object, no prose: {"pitch": string (the PR in two vivid \
+        sentences), "chapters": [{"title", "explanation", "file"}] (3 to 6, ordered as a \
+        story: intent, key changes, risky spots; 2-3 beginner-friendly sentences each), \
+        "riskLevel": "quiet"|"watch"|"dragon", "warnings": [{"file", "line": int, "note"}]}.
+
+        DIFF:
+        \(diff)
+        """
+        let process = Process()
+        process.executableURL = claude
+        process.arguments = ["-p", prompt, "--output-format", "json"]
+        process.currentDirectoryURL = repo
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = Pipe()
+        do { try process.run() } catch { return nil }
+        let output: String = await withCheckedContinuation { continuation in
+            process.terminationHandler = { _ in
+                continuation.resume(returning: String(
+                    decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+            }
+        }
+        return PRTourParser.parse(claudeOutput: output)
+    }
+
+    /// "Ask the guide": the PR checked out into a dedicated worktree, and an
+    /// interactive session primed as its tour guide.
+    public func askGuide(about number: Int, title: String, tour: PRTour?,
+                         in projectID: ProjectID) async -> SessionID? {
+        guard let manager, let repo = projectRepo(projectID) else { return nil }
+        guard let worktree = try? await GitHubService().checkoutPR(number, repo: repo) else { return nil }
+        let pitch = tour?.pitch ?? ""
+        let prompt = """
+        You are the tour guide for PR #\(number) ("\(title)"), checked out in this worktree. \
+        \(pitch.isEmpty ? "" : "Your own summary of it: \(pitch) ")\
+        The user will ask questions about what it does and why. Inspect the real code and \
+        the diff (git diff main...HEAD or gh pr view) to answer precisely. Greet them with \
+        a one-paragraph orientation.
+        """
+        do {
+            let sessionID = SessionID()
+            let token = UUID().uuidString
+            var spec = SessionManager.SessionSpec(
+                command: adapter.launchCommand(session: sessionID, initialPrompt: prompt,
+                                               hookToken: token),
+                workingDirectory: worktree,
+                geometry: preferredGrid,
+                samplingInterval: .milliseconds(500),
+                hookToken: token)
+            spec.projectID = projectID
+            spec.sessionID = sessionID
+            spec.title = "PR #\(number) · guide"
+            let id = try await manager.launch(spec)
+            tokenRegistry.register(token: token, session: id)
+            sessions.append(SessionItem(id: id, title: "PR #\(number) · guide",
+                                        state: .starting, projectID: projectID,
+                                        branch: nil))
+            reloadPersistedSessions()
+            return id
+        } catch {
+            startupError = String(describing: error)
+            return nil
+        }
+    }
+
     /// v3 — on-demand review: a fresh claude session IN THE SAME worktree,
     /// primed to review the pending diff. Sibling in the stack (same parent
     /// project), so the reviewer and the author sit side by side.

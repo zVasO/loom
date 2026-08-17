@@ -121,3 +121,30 @@ struct NativeUsageTests {
         #expect(ClaudeNativeSessions.usage(fromJSONL: "{\"type\":\"mode\"}") == nil)
     }
 }
+
+// v4 — the PR guided tour: claude -p emits JSON; parsing is the pure seam.
+@Suite("PR tour parsing")
+struct PRTourParsingTests {
+
+    @Test("outer envelope + fenced inner JSON both peeled")
+    func parseTour() {
+        let inner = """
+        {"pitch": "Moves cache invalidation server-side.",
+         "chapters": [{"title": "The intent", "explanation": "Why the cache lied", "file": "cache.ts"}],
+         "riskLevel": "watch",
+         "warnings": [{"file": "cache.ts", "line": 42, "note": "TTL race"}]}
+        """
+        let outer = "{\"result\": \"```json\\n\(inner.replacingOccurrences(of: "\"", with: "\\\"").replacingOccurrences(of: "\n", with: "\\n"))\\n```\"}"
+        let tour = PRTourParser.parse(claudeOutput: outer)
+        #expect(tour?.pitch == "Moves cache invalidation server-side.")
+        #expect(tour?.chapters.first?.title == "The intent")
+        #expect(tour?.riskLevel == "watch")
+        #expect(tour?.warnings.first?.line == 42)
+    }
+
+    @Test("garbage yields nil, never a crash or an empty tour passed as real")
+    func parseGarbage() {
+        #expect(PRTourParser.parse(claudeOutput: "not json") == nil)
+        #expect(PRTourParser.parse(claudeOutput: "{\"result\": \"no json here\"}") == nil)
+    }
+}
