@@ -73,12 +73,55 @@ public struct KeyCaptureView: NSViewRepresentable {
     public final class CaptureNSView: NSView {
         var onText: ((String) -> Void)?
         var lastFocusTick = 0
+        private var clickMonitor: Any?
+        private var responderObservation: NSKeyValueObservation?
 
         public override var acceptsFirstResponder: Bool { true }
 
         public override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            window?.makeFirstResponder(self)
+            teardownFocusWatchers()
+            guard let window else { return }
+            window.makeFirstResponder(self)
+            // FOCUS BUG FIX — two ways typing used to die, both independent of
+            // SwiftUI updates (an idle session produces none, so updateNSView
+            // could stay silent forever):
+            // 1. A dismissed text field (commit message, palette…) dropped the
+            //    first responder back to the window and nothing reclaimed it.
+            //    KVO on firstResponder reclaims the instant focus lands on
+            //    "nothing" — and never steals from a real text field.
+            responderObservation = window.observe(\.firstResponder) { [weak self] window, _ in
+                guard let self, window.firstResponder === window else { return }
+                DispatchQueue.main.async { [weak self] in
+                    self.map { $0.window?.makeFirstResponder($0) }
+                }
+            }
+            // 2. Clicking the transcript is consumed by text selection — the
+            //    SwiftUI tap never fired. A local monitor sees every click in
+            //    the window; one inside our bounds refocuses the terminal
+            //    (async: the selection interaction still runs first).
+            clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+                guard let self, event.window === self.window else { return event }
+                let point = self.convert(event.locationInWindow, from: nil)
+                if self.bounds.contains(point) {
+                    DispatchQueue.main.async { [weak self] in
+                        self.map { $0.window?.makeFirstResponder($0) }
+                    }
+                }
+                return event
+            }
+        }
+
+        private func teardownFocusWatchers() {
+            responderObservation?.invalidate()
+            responderObservation = nil
+            if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+            clickMonitor = nil
+        }
+
+        deinit {
+            responderObservation?.invalidate()
+            if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         }
 
         public override func mouseDown(with event: NSEvent) {
