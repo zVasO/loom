@@ -98,3 +98,26 @@ struct ClaudeCodeAdapterTests {
                 "a corrupted payload never produces a transition")
     }
 }
+
+// v3 — real counters: token usage parsed from claude's native .jsonl.
+@Suite("Native session usage")
+struct NativeUsageTests {
+
+    @Test("the LAST assistant entry gives the context; output accumulates")
+    func parseUsage() {
+        let jsonl = """
+        {"type":"mode","mode":"normal"}
+        {"type":"assistant","message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":100,"cache_read_input_tokens":50,"output_tokens":10}}}
+        {"type":"user","message":{"content":"hi"}}
+        {"type":"assistant","message":{"usage":{"input_tokens":5,"cache_creation_input_tokens":30,"cache_read_input_tokens":160,"output_tokens":25}}}
+        """
+        let usage = ClaudeNativeSessions.usage(fromJSONL: jsonl)
+        #expect(usage?.contextTokens == 195, "5 + 30 + 160 — the last turn's real window")
+        #expect(usage?.outputTokens == 35, "10 + 25 accumulated")
+    }
+
+    @Test("no assistant entry — no usage, never zeros passed off as truth")
+    func noUsage() {
+        #expect(ClaudeNativeSessions.usage(fromJSONL: "{\"type\":\"mode\"}") == nil)
+    }
+}

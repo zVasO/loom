@@ -1856,6 +1856,11 @@ struct SessionDetailView: View {
             }
             if let branch = record?.branch { infoRow("Branch", branch) }
             infoRow("Agent", record?.agentID ?? "claude-code")
+            // v3 — real counters, read from claude's own native records.
+            if let usage = ClaudeNativeSessions.usage(for: sessionID) {
+                infoRow("Context", "\(Self.tokens(usage.contextTokens)) tokens (last turn)")
+                infoRow("Output", "\(Self.tokens(usage.outputTokens)) tokens total")
+            }
             HStack(spacing: 10) {
                 Text("State")
                     .font(.system(size: 11))
@@ -1891,6 +1896,10 @@ struct SessionDetailView: View {
             Spacer(minLength: 0)
             trailing()
         }
+    }
+
+    static func tokens(_ count: Int) -> String {
+        count >= 10_000 ? String(format: "%.1fk", Double(count) / 1000) : "\(count)"
     }
 
     private static let infoDate: DateFormatter = {

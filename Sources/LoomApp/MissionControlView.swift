@@ -1,3 +1,4 @@
+import LoomAgents
 import LoomCore
 import LoomTerminal
 import LoomUI
@@ -54,6 +55,8 @@ private struct FleetCard: View {
     let onOpen: () -> Void
     @State private var surface: TerminalSurface?
     @State private var hovered = false
+    @State private var quickReply = ""
+    @State private var usage: ClaudeNativeSessions.SessionUsage?
 
     private var borderColor: Color {
         if item.state == .needsInput { return DefaultTheme.badgeColor(for: .needsInput).opacity(0.8) }
@@ -85,11 +88,37 @@ private struct FleetCard: View {
                 .background(DefaultTheme.contentBackground)
                 .clipped()
 
-            if let branch = item.branch {
+            // v3 — instant reply: answer the agent right from the fleet,
+            // without opening the session.
+            if item.state == .needsInput, let surface {
                 Divider().overlay(DefaultTheme.cardBorder)
-                MonoTag(branch, systemImage: "arrow.triangle.branch",
-                        color: DefaultTheme.secondaryText)
-                    .padding(.horizontal, 12).padding(.vertical, 7)
+                TextField("Reply to the agent…", text: $quickReply)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .onSubmit {
+                        let text = quickReply.trimmingCharacters(in: .whitespaces)
+                        guard !text.isEmpty else { return }
+                        surface.send(text + "\r")
+                        quickReply = ""
+                    }
+            }
+            if item.branch != nil || usage != nil {
+                Divider().overlay(DefaultTheme.cardBorder)
+                HStack(spacing: 10) {
+                    if let branch = item.branch {
+                        MonoTag(branch, systemImage: "arrow.triangle.branch",
+                                color: DefaultTheme.secondaryText)
+                    }
+                    Spacer()
+                    if let usage {
+                        MonoTag("ctx \(SessionDetailView.tokens(usage.contextTokens))",
+                                systemImage: "gauge.with.needle",
+                                color: DefaultTheme.mutedText)
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 7)
             }
         }
         .background(DefaultTheme.surface)
@@ -99,7 +128,10 @@ private struct FleetCard: View {
         .onTapGesture(perform: onOpen)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
-        .task { surface = await model.surface(for: item.id) }
+        .task {
+            surface = await model.surface(for: item.id)
+            usage = ClaudeNativeSessions.usage(for: item.id)
+        }
     }
 
     /// Live miniature: the LAST populated screen lines, tiny mono type. The

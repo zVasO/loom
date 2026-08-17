@@ -13,14 +13,48 @@ import UserNotifications
 /// STA-04: system notification when a session needs input.
 /// Second adapter of the SessionNotifier seam (the test spy is the first).
 struct UserNotificationsNotifier: SessionNotifier {
+    static let replyCategory = "loom.session.needsInput"
+    static let replyAction = "loom.session.reply"
+
     func sessionNeedsInput(_ session: SessionID, title: String) {
         guard Bundle.main.bundleIdentifier != nil else { return }   // swift run without a bundle
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = "The session needs input"
+        // v3 — actionable: reply straight from the banner, no app switch.
+        content.categoryIdentifier = Self.replyCategory
+        content.userInfo = ["sessionID": session.rawValue.uuidString]
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: session.rawValue.uuidString,
                                   content: content, trigger: nil))
+    }
+
+    static func registerCategories() {
+        let reply = UNTextInputNotificationAction(
+            identifier: replyAction, title: "Reply",
+            options: [], textInputButtonTitle: "Send",
+            textInputPlaceholder: "Answer the agent…")
+        let category = UNNotificationCategory(
+            identifier: replyCategory, actions: [reply],
+            intentIdentifiers: [], options: [])
+        UNUserNotificationCenter.current().setNotificationCategories([category])
+    }
+}
+
+/// Routes the banner's typed reply back to the session's PTY. The center's
+/// delegate must be an NSObject — this tiny adapter carries the closure.
+final class NotificationReplyHandler: NSObject, UNUserNotificationCenterDelegate {
+    var onReply: ((SessionID, String) -> Void)?
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        defer { completionHandler() }
+        guard let textResponse = response as? UNTextInputNotificationResponse,
+              response.actionIdentifier == UserNotificationsNotifier.replyAction,
+              let raw = response.notification.request.content.userInfo["sessionID"] as? String,
+              let uuid = UUID(uuidString: raw) else { return }
+        onReply?(SessionID(uuid), textResponse.userText)
     }
 }
 
@@ -59,6 +93,7 @@ public final class AppModel {
     }
 
     private(set) var manager: SessionManager?
+    private let replyHandler = NotificationReplyHandler()
     private var hookServer: HookSocketServer?
     private let supportDirectory: URL
     private var socketURL: URL { supportDirectory.appendingPathComponent("loom.sock") }
@@ -160,6 +195,14 @@ public final class AppModel {
             if Bundle.main.bundleIdentifier != nil {
                 UNUserNotificationCenter.current()
                     .requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+                UserNotificationsNotifier.registerCategories()
+                UNUserNotificationCenter.current().delegate = replyHandler
+                replyHandler.onReply = { [weak self] id, text in
+                    Task { @MainActor [weak self] in
+                        guard let surface = await self?.surface(for: id) else { return }
+                        surface.send(text + "\r")
+                    }
+                }
             }
 
             let registry = tokenRegistry
