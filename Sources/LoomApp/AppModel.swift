@@ -232,7 +232,7 @@ public final class AppModel {
             Task { await self.observeStates(of: manager) }
             reloadPersistedSessions()
             restoreStackChildren()
-            Task { reindexAllSessions() }
+            reindexAllSessions()
         } catch {
             startupError = String(describing: error)
         }
@@ -241,6 +241,18 @@ public final class AppModel {
     /// All known records — counters and dates for the project cards.
     public private(set) var allRecords: [SessionRecord] = []
 
+    /// P1 perf: exists() scans ~/.claude/projects directories — memoized per
+    /// session; a closed session's native file is settled, so entries only
+    /// need invalidation right when a session closes.
+    private var nativeExistsCache: [SessionID: Bool] = [:]
+
+    private func nativeSessionExists(_ id: SessionID) -> Bool {
+        if let cached = nativeExistsCache[id] { return cached }
+        let exists = ClaudeNativeSessions.exists(id)
+        nativeExistsCache[id] = exists
+        return exists
+    }
+
     private func reloadPersistedSessions() {
         let all = ((try? store?.allSessions()) ?? nil) ?? []
         allRecords = all
@@ -248,10 +260,10 @@ public final class AppModel {
         // to resume: it doesn't clutter the lists (pre-fix identifier wrecks
         // disappear at the same time).
         interruptedSessions = all.filter {
-            $0.state == .interrupted && ClaudeNativeSessions.exists($0.id)
+            $0.state == .interrupted && nativeSessionExists($0.id)
         }
         historySessions = all.filter {
-            [.completed, .failed, .archived].contains($0.state) && ClaudeNativeSessions.exists($0.id)
+            [.completed, .failed, .archived].contains($0.state) && nativeSessionExists($0.id)
         }
         projects = ((try? store?.activeProjects()) ?? nil) ?? []
         applySavedProjectOrder()
@@ -431,10 +443,9 @@ public final class AppModel {
 
     /// The de-ANSI-fied transcript of a session, concatenated from its own
     /// directory (per-session sinks) — nil when the session never wrote one.
-    private func transcriptText(for id: SessionID) -> String? {
-        let directory = supportDirectory
-            .appendingPathComponent("transcripts")
-            .appendingPathComponent(id.rawValue.uuidString)
+    /// nonisolated static: runs on any executor, never blocks the UI (P1 perf).
+    private nonisolated static func transcriptText(root: URL, id: SessionID) -> String? {
+        let directory = root.appendingPathComponent(id.rawValue.uuidString)
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: nil) else { return nil }
         let plain = files.filter { $0.pathExtension == "txt" }
@@ -448,15 +459,28 @@ public final class AppModel {
     }
 
     func indexSessionForSearch(_ id: SessionID) {
-        guard let record = (try? store?.session(id: id)) ?? nil,
-              let text = transcriptText(for: id) else { return }
-        try? store?.indexForSearch(session: id, title: record.title, transcript: text)
+        guard let store else { return }
+        let root = supportDirectory.appendingPathComponent("transcripts")
+        Task.detached(priority: .utility) {
+            guard let record = (try? store.session(id: id)) ?? nil,
+                  let text = Self.transcriptText(root: root, id: id) else { return }
+            try? store.indexForSearch(session: id, title: record.title, transcript: text)
+        }
     }
 
     /// Startup pass: (re)index every known session that has a transcript —
-    /// idempotent, keeps the index honest after crashes or renames.
+    /// idempotent, off the main actor (P1 perf: MBs of file reads).
     private func reindexAllSessions() {
-        for record in allRecords { indexSessionForSearch(record.id) }
+        guard let store else { return }
+        let root = supportDirectory.appendingPathComponent("transcripts")
+        let ids = allRecords.map(\.id)
+        Task.detached(priority: .utility) {
+            for id in ids {
+                guard let record = (try? store.session(id: id)) ?? nil,
+                      let text = Self.transcriptText(root: root, id: id) else { continue }
+                try? store.indexForSearch(session: id, title: record.title, transcript: text)
+            }
+        }
     }
 
     public func searchTranscripts(_ query: String) -> [SessionStore.SearchHit] {
@@ -844,6 +868,7 @@ public final class AppModel {
                 let closed = sessions[index].id
                 let closedProject = sessions[index].projectID
                 sessions.remove(at: index)
+                nativeExistsCache.removeValue(forKey: closed)   // settled at close: rescan once
                 saveStackChildren()
                 reloadPersistedSessions()
                 indexSessionForSearch(closed)
@@ -915,8 +940,17 @@ public final class AppModel {
     private var store: SessionStore?
 
     /// Address bar history (WEB-01) — best-effort, never blocking.
+    private var pendingStackSave: Task<Void, Never>?
+
     public func recordVisit(url: String, title: String) {
-        saveStackChildren()   // the panes' tabs are part of the remembered stack
+        // The panes' tabs are part of the remembered stack — debounced: page
+        // navigations arrive in bursts (P2 perf).
+        pendingStackSave?.cancel()
+        pendingStackSave = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.saveStackChildren()
+        }
         try? store?.recordVisit(url: url, title: title, at: Date())
     }
 

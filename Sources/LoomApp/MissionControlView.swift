@@ -130,7 +130,12 @@ private struct FleetCard: View {
         .animation(.hover, value: hovered)
         .task {
             surface = await model.surface(for: item.id)
-            usage = ClaudeNativeSessions.usage(for: item.id)
+            // P1 perf: the native .jsonl can be MBs — read only its tail, off
+            // the main actor (the context figure lives in the LAST entry).
+            let id = item.id
+            usage = await Task.detached(priority: .utility) {
+                ClaudeNativeSessions.usage(for: id, tailBytes: 65_536)
+            }.value
         }
     }
 
@@ -152,16 +157,12 @@ private struct MiniTerminalPreview: View {
     let surface: TerminalSurface
 
     private var lines: [String] {
-        let all = surface.screen.lines.map { line in
-            String(line.cells.map(\.character))
-        }
-        // Trim trailing blank lines so the tail of the conversation is visible.
-        var trimmed = all
-        while let last = trimmed.last,
-              last.trimmingCharacters(in: .whitespaces).isEmpty {
-            trimmed.removeLast()
-        }
-        return trimmed.suffix(22).map { String($0.prefix(120)) }
+        // P2 perf: find the populated tail FIRST, then map only what we show.
+        let all = surface.screen.lines
+        var end = all.count
+        while end > 0, all[end - 1].cells.allSatisfy({ $0.character == " " }) { end -= 1 }
+        let start = max(0, end - 22)
+        return all[start..<end].map { String($0.cells.prefix(120).map(\.character)) }
     }
 
     var body: some View {

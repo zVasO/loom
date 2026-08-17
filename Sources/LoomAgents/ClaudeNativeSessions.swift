@@ -65,11 +65,26 @@ public enum ClaudeNativeSessions {
         return SessionUsage(contextTokens: lastContext, outputTokens: totalOutput)
     }
 
-    /// Disk convenience: locate the native file and parse it.
+    /// Disk convenience: locate the native file and parse it. `tailBytes` reads
+    /// only the file's tail (the context figure lives in the LAST assistant
+    /// entry) — the cumulative output count then covers the tail only.
     public static func usage(for id: SessionID,
-                             projectsDirectory: URL = defaultProjectsDirectory) -> SessionUsage? {
-        guard let file = path(for: id, projectsDirectory: projectsDirectory),
-              let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+                             projectsDirectory: URL = defaultProjectsDirectory,
+                             tailBytes: Int? = nil) -> SessionUsage? {
+        guard let file = path(for: id, projectsDirectory: projectsDirectory) else { return nil }
+        let text: String
+        if let tailBytes,
+           let handle = try? FileHandle(forReadingFrom: file) {
+            defer { try? handle.close() }
+            let size = (try? handle.seekToEnd()) ?? 0
+            let offset = size > UInt64(tailBytes) ? size - UInt64(tailBytes) : 0
+            try? handle.seek(toOffset: offset)
+            guard let data = try? handle.readToEnd() else { return nil }
+            text = String(decoding: data, as: UTF8.self)
+        } else {
+            guard let full = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+            text = full
+        }
         return usage(fromJSONL: text)
     }
 }

@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var selected: DetailSelection?
     @State private var paletteShown = false
     @State private var paletteQuery = ""
+    @State private var transcriptHits: [SessionStore.SearchHit] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -185,10 +186,9 @@ struct ContentView: View {
     // MARK: - ⌘K palette
 
     private var palette: some View {
-        // v2: the palette searches TITLES (fuzzy ranking) and TRANSCRIPTS
-        // (FTS5 full-text, with a highlighted excerpt per hit).
-        let transcriptHits = paletteQuery.count >= 2 ? model.searchTranscripts(paletteQuery) : []
-        return VStack(spacing: 0) {
+        // v2: the palette searches TITLES (fuzzy ranking) and TRANSCRIPTS.
+        // P1 perf: the FTS query is debounced into @State — never run in body.
+        VStack(spacing: 0) {
             TextField("Session title or any word from a conversation…", text: $paletteQuery)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
@@ -230,6 +230,12 @@ struct ContentView: View {
         }
         .frame(minWidth: 560)
         .background(DefaultTheme.surface)
+        .task(id: paletteQuery) {
+            guard paletteQuery.count >= 2 else { transcriptHits = []; return }
+            try? await Task.sleep(for: .milliseconds(150))   // debounce keystrokes
+            guard !Task.isCancelled else { return }
+            transcriptHits = model.searchTranscripts(paletteQuery)
+        }
         .onSubmit {
             if let first = paletteMatches.first {
                 openFromPalette(first)
@@ -309,6 +315,9 @@ struct ProjectsView: View {
     @State private var reviewBody = ""
     @State private var prActionOutput: String?
     @State private var prActionBusy = false
+    // P1 perf: filesystem scans live in .task, never in body.
+    @State private var loadedSkills: [SkillEntry] = []
+    @State private var loadedRules: [AppModel.RuleFile] = []
     @State private var projectTab: ProjectTab = .overview
     @State private var skillFilter: SkillFilter = .all
     @State private var viewedDocument: ViewedDocument?
@@ -445,8 +454,12 @@ struct ProjectsView: View {
             if projectTab != .prs { resetPRState() }
         }
         .task(id: "\(current?.id.rawValue.uuidString ?? "")-\(projectTab.rawValue)") {
-            if projectTab == .git, let project = current {
-                gitData = await model.projectGit(project.id)
+            guard let project = current else { return }
+            switch projectTab {
+            case .git: gitData = await model.projectGit(project.id)
+            case .skills: loadedSkills = model.skills(forProject: project.id)
+            case .rules: loadedRules = model.ruleFiles(for: project.id)
+            default: break
             }
         }
     }
@@ -570,7 +583,7 @@ struct ProjectsView: View {
     // MARK: Skills tab — what agents can invoke here (cards, Xirp ref.)
 
     private func skillsTab(_ project: ProjectRecord) -> some View {
-        let skills = model.skills(forProject: project.id)
+        let skills = loadedSkills
         let globals = skills.filter { $0.scope == .global }
         let projets = skills.filter { $0.scope == .project }
         let filtered = switch skillFilter {
@@ -685,7 +698,7 @@ struct ProjectsView: View {
     // MARK: Rules tab — the instructions agents will read (cards)
 
     private func rulesTab(_ project: ProjectRecord) -> some View {
-        let rules = model.ruleFiles(for: project.id)
+        let rules = loadedRules
         return VStack(alignment: .leading, spacing: 16) {
             if rules.isEmpty {
                 Text("No rule files (CLAUDE.md, AGENTS.md, CONTEXT.md…) at the root.")
