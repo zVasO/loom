@@ -1,4 +1,4 @@
-# Loom 分身
+# Loom
 
 Environnement de développement agentique natif macOS : chaque session d'agent CLI
 (Claude Code en tête) vit dans un terminal persistant sur son propre worktree Git,
