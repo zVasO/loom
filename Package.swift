@@ -38,7 +38,8 @@ let package = Package(
                 "LoomCore", "LoomUI", "LoomTerminal", "LoomAgents",
                 "LoomGit", "LoomWeb", "LoomPersistence", "LoomIPC",
                 "LoomSessions",
-            ]
+            ],
+            resources: [.process("Resources")]
         ),
         .testTarget(name: "LoomCoreTests", dependencies: ["LoomCore"]),
         .testTarget(name: "LoomAgentsTests", dependencies: ["LoomAgents"]),

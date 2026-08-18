@@ -11,6 +11,12 @@ struct LoomApp: App {
         // no Dock icon, window never in the foreground. We force activation — with no
         // undesirable effect once packaged by the release wizard.
         NSApplication.shared.setActivationPolicy(.regular)
+        // The woven logo as Dock icon — set at runtime so even `swift run`
+        // (no .app bundle) shows it; the release wizard bakes Assets/loom.icns.
+        if let url = Bundle.module.url(forResource: "loom-logo", withExtension: "png"),
+           let logo = NSImage(contentsOf: url) {
+            NSApplication.shared.applicationIconImage = logo
+        }
         DispatchQueue.main.async {
             NSApplication.shared.activate(ignoringOtherApps: true)
             NSApp.windows.first?.makeKeyAndOrderFront(nil)

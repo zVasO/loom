@@ -10,6 +10,27 @@ import SwiftUI
 // Structure of the validated reference: custom navbar (Projects / Sessions / +),
 // Projects view as a centered column, Sessions view as grouped sidebar + detail.
 
+/// The woven logo, loaded once from the module resources.
+struct LogoMark: View {
+    let size: CGFloat
+    private static let image: NSImage? = Bundle.module
+        .url(forResource: "loom-logo", withExtension: "png")
+        .flatMap(NSImage.init(contentsOf:))
+
+    var body: some View {
+        if let image = Self.image {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: size, height: size)
+        } else {
+            Image(systemName: "square.stack.3d.down.right.fill")
+                .font(.system(size: size * 0.75))
+                .foregroundStyle(DefaultTheme.accent)
+        }
+    }
+}
+
 enum MainTab {
     case projects, sessions, overview, settings
 }
@@ -140,9 +161,7 @@ struct ContentView: View {
         HStack(spacing: 10) {
             // Space for the traffic lights (title bar hidden).
             Spacer().frame(width: 70)
-            Image(systemName: "square.stack.3d.down.right.fill")
-                .font(.system(size: 15))
-                .foregroundStyle(DefaultTheme.accent)
+            LogoMark(size: 20)
             Text("Loom").font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(DefaultTheme.primaryText)
             Text("beta")
@@ -1178,9 +1197,7 @@ struct ProjectsView: View {
 
     private var emptyState: some View {
         VStack(spacing: 12) {
-            Image(systemName: "square.stack.3d.down.right.fill")
-                .font(.system(size: 40))
-                .foregroundStyle(DefaultTheme.accent)
+            LogoMark(size: 72)
             Text("Add your first project")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(DefaultTheme.primaryText)
