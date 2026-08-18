@@ -388,6 +388,87 @@ public final class AppModel {
         return String(describing: error)
     }
 
+    // MARK: - Global PRs tab: cache + PR ↔ review session mapping
+
+    public private(set) var prCache: [ProjectID: [GitHubService.PullRequest]] = [:]
+    public private(set) var prLoading: Set<ProjectID> = []
+
+    public func refreshPRs(for projectID: ProjectID) async {
+        guard !prLoading.contains(projectID) else { return }
+        prLoading.insert(projectID)
+        prCache[projectID] = await listPRs(for: projectID)
+        prLoading.remove(projectID)
+    }
+
+    private func prKey(_ number: Int, _ projectID: ProjectID) -> String {
+        "\(projectID.rawValue.uuidString)#\(number)"
+    }
+
+    /// The review session attached to a PR, when it still exists somewhere
+    /// (live or resumable). Mapping persisted across launches.
+    public func reviewSession(forPR number: Int, in projectID: ProjectID) -> SessionID? {
+        let map = UserDefaults.standard.dictionary(forKey: "loom.pr.sessions") as? [String: String]
+        guard let raw = map?[prKey(number, projectID)], let uuid = UUID(uuidString: raw)
+        else { return nil }
+        let id = SessionID(uuid)
+        let known = sessions.contains { $0.id == id } || allRecords.contains { $0.id == id }
+        return known ? id : nil
+    }
+
+    private func rememberReviewSession(_ id: SessionID, forPR number: Int, in projectID: ProjectID) {
+        var map = (UserDefaults.standard.dictionary(forKey: "loom.pr.sessions")
+                   as? [String: String]) ?? [:]
+        map[prKey(number, projectID)] = id.rawValue.uuidString
+        UserDefaults.standard.set(map, forKey: "loom.pr.sessions")
+    }
+
+    /// The PR tab's quick action: ONE review session per PR — reattached when
+    /// it exists (resumed if dormant), created otherwise: PR checked out in a
+    /// dedicated worktree, claude primed as reviewer, badge "PR #n".
+    public func launchPRReviewSession(_ pr: GitHubService.PullRequest,
+                                      in projectID: ProjectID) async -> SessionID? {
+        if let existing = reviewSession(forPR: pr.number, in: projectID) {
+            if sessions.contains(where: { $0.id == existing }) { return existing }
+            await resumeDormant(existing)
+            return existing
+        }
+        guard let manager, let repo = projectRepo(projectID) else { return nil }
+        guard let worktree = try? await GitHubService().checkoutPR(pr.number, repo: repo)
+        else { return nil }
+        let prompt = """
+        You are reviewing PR #\(pr.number) ("\(pr.title)"), checked out in this worktree. \
+        Read the diff (gh pr diff \(pr.number)) and the touched files. Report findings in \
+        order: correctness first, then design, then nitpicks — quote file:line for each. \
+        End with a verdict: ship / fix first. The user may then ask about specific lines.
+        """
+        do {
+            let sessionID = SessionID()
+            let token = UUID().uuidString
+            var spec = SessionManager.SessionSpec(
+                command: adapter.launchCommand(session: sessionID, initialPrompt: prompt,
+                                               hookToken: token),
+                workingDirectory: worktree,
+                geometry: preferredGrid,
+                samplingInterval: .milliseconds(500),
+                hookToken: token)
+            spec.projectID = projectID
+            spec.sessionID = sessionID
+            spec.title = "PR #\(pr.number) · review"
+            spec.badge = "PR #\(pr.number)"
+            let id = try await manager.launch(spec)
+            tokenRegistry.register(token: token, session: id)
+            sessions.append(SessionItem(id: id, title: "PR #\(pr.number) · review",
+                                        state: .starting, projectID: projectID,
+                                        branch: pr.branch, badge: "PR #\(pr.number)"))
+            rememberReviewSession(id, forPR: pr.number, in: projectID)
+            reloadPersistedSessions()
+            return id
+        } catch {
+            startupError = String(describing: error)
+            return nil
+        }
+    }
+
     /// The guided tour: claude -p over the PR diff, strict-JSON answer parsed
     /// into chapters + a playful risk gauge. Slow (an agent run) — call it from
     /// a task, show progress.
