@@ -141,7 +141,31 @@ public struct GitHubService: Sendable {
         // (reviewing your OWN pr from the same repo, the common case).
         _ = try await runGit(["fetch", "origin", "pull/\(number)/head"], in: path)
         _ = try await runGit(["checkout", "--detach", "FETCH_HEAD"], in: path)
+        try await protectWorktree(path, repo: repo)
         return path
+    }
+
+    /// Makes a review worktree commit-proof: guard hooks (pre-commit,
+    /// pre-push, pre-rebase) scoped to THIS worktree via core.hooksPath —
+    /// a review session can build and test, but never lands work on another
+    /// dev's branch by accident. (A determined `--no-verify` still bypasses;
+    /// the guard is against accidents, not adversaries.)
+    public func protectWorktree(_ path: URL, repo: URL) async throws {
+        _ = try await runGit(["config", "extensions.worktreeConfig", "true"], in: repo)
+        let hooksDir = path.appendingPathComponent(".loom-guard-hooks")
+        try FileManager.default.createDirectory(at: hooksDir, withIntermediateDirectories: true)
+        let script = """
+        #!/bin/sh
+        echo "This is a READ-ONLY Loom review worktree - commits and pushes are blocked." >&2
+        exit 1
+        """
+        for hook in ["pre-commit", "pre-push", "pre-rebase"] {
+            let file = hooksDir.appendingPathComponent(hook)
+            try script.write(to: file, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755],
+                                                  ofItemAtPath: file.path)
+        }
+        _ = try await runGit(["config", "--worktree", "core.hooksPath", hooksDir.path], in: path)
     }
 
     public enum GitHubError: Error, Sendable {

@@ -163,3 +163,42 @@ struct GitShipTests {
         #expect(remoteLog == "To publish")
     }
 }
+
+// Review worktrees are READ-ONLY: guard hooks block commit and push — a
+// review session must never land work on another dev's branch.
+@Suite("Read-only review worktrees", .serialized)
+struct ReadOnlyWorktreeTests {
+
+    @Test("a protected worktree refuses commits")
+    func commitBlocked() async throws {
+        let repo = try await makeFixtureRepo()
+        let path = repo.deletingLastPathComponent().appendingPathComponent("review-wt")
+        _ = try await git(["worktree", "add", "--detach", path.path], in: repo)
+
+        try await GitHubService().protectWorktree(path, repo: repo)
+
+        try "tampering".write(to: path.appendingPathComponent("evil.txt"),
+                              atomically: true, encoding: .utf8)
+        _ = try await git(["add", "."], in: path)
+        let output = try await gitWithStatus(["-c", "user.email=t@t", "-c", "user.name=T",
+                                              "commit", "-m", "should fail"], in: path)
+        #expect(output.status != 0, "the guard hook must reject the commit")
+        #expect(output.stderr.contains("READ-ONLY"), "and say why")
+    }
+}
+
+@discardableResult
+fileprivate func gitWithStatus(_ arguments: [String], in dir: URL) async throws
+    -> (status: Int32, stderr: String) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = arguments
+    process.currentDirectoryURL = dir
+    let err = Pipe()
+    process.standardOutput = Pipe()
+    process.standardError = err
+    try process.run()
+    process.waitUntilExit()
+    return (process.terminationStatus,
+            String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+}

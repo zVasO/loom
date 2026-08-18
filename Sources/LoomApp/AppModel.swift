@@ -448,7 +448,8 @@ public final class AppModel {
         You are reviewing PR #\(pr.number) ("\(pr.title)"), checked out in this worktree. \
         Read the diff (gh pr diff \(pr.number)) and the touched files. Report findings in \
         order: correctness first, then design, then nitpicks — quote file:line for each. \
-        End with a verdict: ship / fix first. The user may then ask about specific lines.
+        End with a verdict: ship / fix first. The user may then ask about specific lines. \
+        This worktree is READ-ONLY for review: never commit, push or amend here.
         """
         do {
             let sessionID = SessionID()
