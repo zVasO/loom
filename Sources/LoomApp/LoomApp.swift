@@ -49,6 +49,8 @@ extension Notification.Name {
     static let loomFrameRateChanged = Notification.Name("loom.frameRateChanged")
     /// Settings changed the global or a per-project theme.
     static let loomThemeChanged = Notification.Name("loom.themeChanged")
+    /// The palette asks to rename the selected session.
+    static let loomRenameSession = Notification.Name("loom.renameSession")
     /// ⌘N — a claude session in the current project.
     static let loomNewSession = Notification.Name("loom.newSession")
     /// ⌘T — contextual: web tab in the browser, terminal in a session.

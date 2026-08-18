@@ -31,8 +31,6 @@ struct ContentView: View {
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
     @State private var selected: DetailSelection?
     @State private var paletteShown = false
-    @State private var paletteQuery = ""
-    @State private var transcriptHits: [SessionStore.SearchHit] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -239,72 +237,122 @@ struct ContentView: View {
         .background(DefaultTheme.background)
     }
 
-    // MARK: - ⌘K palette
+    // MARK: - ⌘K action palette (Raycast-style)
+
+    /// Everything ⌘K can do, assembled with full app context. Closures capture
+    /// the navigation state — the palette itself stays dumb.
+    private var paletteActions: [PaletteAction] {
+        var actions: [PaletteAction] = []
+
+        // Navigation
+        actions.append(PaletteAction(id: "nav.projects", icon: "house",
+                                     title: "Go to Projects", subtitle: "View all projects",
+                                     section: "Navigation") { tab = .projects })
+        actions.append(PaletteAction(id: "nav.sessions", icon: "square.stack",
+                                     title: "Go to Sessions", subtitle: "The stacks and their tabs",
+                                     section: "Navigation") { tab = .sessions })
+        actions.append(PaletteAction(id: "nav.overview", icon: "square.grid.2x2",
+                                     title: "Open Mission Control",
+                                     subtitle: "Every live session in a grid",
+                                     section: "Navigation",
+                                     shortcut: "⌘\(keyMissionControl.uppercased())") { tab = .overview })
+        actions.append(PaletteAction(id: "nav.settings", icon: "gearshape",
+                                     title: "Open Settings",
+                                     subtitle: "Shortcuts, themes, projects",
+                                     section: "Navigation", shortcut: "⌘,") { tab = .settings })
+
+        // Actions
+        actions.append(PaletteAction(id: "act.newSession", icon: "plus",
+                                     title: "New claude session",
+                                     subtitle: "In the current project",
+                                     section: "Actions", shortcut: "⌘N") {
+            createSession(in: model.selectedProject)
+        })
+        if case .session(let id) = selected,
+           let item = model.sessions.first(where: { $0.id == id }) {
+            let parent = item.isShell
+                ? model.sessions.first { $0.id == item.parentID } ?? item
+                : item
+            actions.append(PaletteAction(id: "act.newTerminal", icon: "terminal",
+                                         title: "New terminal in the stack",
+                                         subtitle: "Same worktree as \(parent.title)",
+                                         section: "Actions", shortcut: "⌘T") {
+                Task {
+                    if let shellID = await model.launchShell(for: parent) {
+                        selected = .session(shellID)
+                    }
+                }
+            })
+            actions.append(PaletteAction(id: "act.newBrowser", icon: "globe",
+                                         title: "New browser in the stack",
+                                         subtitle: "Dedicated web pane under \(parent.title)",
+                                         section: "Actions") {
+                selected = .webPane(model.openBrowserPane(for: parent.id))
+            })
+            actions.append(PaletteAction(id: "act.rename", icon: "pencil",
+                                         title: "Rename session",
+                                         subtitle: item.title,
+                                         section: "Actions") {
+                NotificationCenter.default.post(name: .loomRenameSession, object: nil)
+            })
+            actions.append(PaletteAction(id: "act.stop", icon: "xmark",
+                                         title: "Close session",
+                                         subtitle: "Stops claude — resumable as inactive",
+                                         section: "Actions") {
+                Task { await model.stopSession(parent.id) }
+            })
+        }
+
+        // Themes — quick-apply, filterable by name.
+        for palette in ThemePalette.all {
+            actions.append(PaletteAction(id: "theme.\(palette.name)", icon: "paintpalette",
+                                         title: "Set theme: \(palette.name)",
+                                         subtitle: "Global theme",
+                                         section: "Theme") {
+                ThemeStore.shared.setGlobalTheme(palette.name)
+                NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
+            })
+        }
+
+        // Projects
+        for project in model.projects {
+            actions.append(PaletteAction(id: "project.\(project.id.rawValue.uuidString)",
+                                         icon: "folder",
+                                         title: project.name,
+                                         subtitle: "Open project",
+                                         section: "Projects") {
+                model.selectedProject = project.id
+                tab = .projects
+            })
+        }
+
+        // Sessions (live + resumable)
+        let dormantIDs = Set(model.dormantSessions.map(\.id))
+        let entries = model.sessions.filter { !$0.isShell }.map { ($0.title, $0.id) }
+            + model.dormantSessions.map { ($0.title, $0.id) }
+        for (title, id) in entries {
+            actions.append(PaletteAction(id: "session.\(id.rawValue.uuidString)",
+                                         icon: "sparkle",
+                                         title: title,
+                                         subtitle: dormantIDs.contains(id)
+                                             ? "Resume session" : "Open session",
+                                         section: "Sessions") {
+                openSessionByID(id)
+            })
+        }
+        return actions
+    }
 
     private var palette: some View {
-        // v2: the palette searches TITLES (fuzzy ranking) and TRANSCRIPTS.
-        // P1 perf: the FTS query is debounced into @State — never run in body.
-        VStack(spacing: 0) {
-            TextField("Session title or any word from a conversation…", text: $paletteQuery)
-                .textFieldStyle(.plain)
-                .font(.system(size: 16))
-                .padding(14)
-            Divider().overlay(DefaultTheme.cardBorder)
-            List {
-                if !paletteMatches.isEmpty {
-                    Section("Sessions") {
-                        ForEach(paletteMatches, id: \.self) { title in
-                            Text(title)
-                                .foregroundStyle(DefaultTheme.primaryText)
-                                .contentShape(Rectangle())
-                                .onTapGesture { openFromPalette(title) }
-                                .listRowBackground(Color.clear)
-                        }
-                    }
-                }
-                if !transcriptHits.isEmpty {
-                    Section("In transcripts") {
-                        ForEach(transcriptHits, id: \.id) { hit in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(hit.title)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(DefaultTheme.primaryText)
-                                Text(hit.snippet)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(DefaultTheme.secondaryText)
-                                    .lineLimit(2)
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture { openSessionByID(hit.id) }
-                            .listRowBackground(Color.clear)
-                        }
-                    }
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .frame(minHeight: 260)
-        }
-        .frame(minWidth: 560)
-        .background(DefaultTheme.surface)
-        .task(id: paletteQuery) {
-            guard paletteQuery.count >= 2 else { transcriptHits = []; return }
-            try? await Task.sleep(for: .milliseconds(150))   // debounce keystrokes
-            guard !Task.isCancelled else { return }
-            transcriptHits = model.searchTranscripts(paletteQuery)
-        }
-        .onSubmit {
-            if let first = paletteMatches.first {
-                openFromPalette(first)
-            } else if let hit = transcriptHits.first {
-                openSessionByID(hit.id)
-            }
-        }
+        ActionPaletteView(actions: paletteActions,
+                          transcriptSearch: { model.searchTranscripts($0) },
+                          onOpenSession: { openSessionByID($0) },
+                          isPresented: $paletteShown)
     }
 
     /// Opens a session found by search: resumes it first when it is dormant.
     private func openSessionByID(_ id: SessionID) {
         paletteShown = false
-        paletteQuery = ""
         if model.sessions.contains(where: { $0.id == id }) {
             selected = .session(id)
             tab = .sessions
@@ -315,16 +363,6 @@ struct ContentView: View {
                 tab = .sessions
             }
         }
-    }
-
-    private var allSessionTitles: [(title: String, id: SessionID)] {
-        model.sessions.map { ($0.title, $0.id) }
-            + model.interruptedSessions.map { ($0.title, $0.id) }
-            + model.historySessions.map { ($0.title, $0.id) }
-    }
-
-    private var paletteMatches: [String] {
-        CommandPalette.rank(query: paletteQuery, in: allSessionTitles.map(\.title))
     }
 
     /// The reference's +: a claude session starts immediately,
@@ -338,14 +376,6 @@ struct ContentView: View {
         }
     }
 
-    private func openFromPalette(_ title: String) {
-        if let match = allSessionTitles.first(where: { $0.title == title }) {
-            selected = .session(match.id)
-            tab = .sessions
-        }
-        paletteShown = false
-        paletteQuery = ""
-    }
 }
 
 // MARK: - Projects view (reference: project sidebar + detail — goal → session)
@@ -1722,6 +1752,12 @@ struct SessionsView: View {
             Button("Cancel", role: .cancel) { pendingClose = nil }
         } message: {
             Text(pendingClose?.message ?? "")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loomRenameSession)) { _ in
+            if case .session(let id) = selected {
+                renameText = model.sessions.first(where: { $0.id == id })?.title ?? ""
+                renameTarget = id
+            }
         }
         // ⌘T only exists in a terminal or browser context, and NECESSARILY
         // creates a tab of the same type, in the horizontal bar.
