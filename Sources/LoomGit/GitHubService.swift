@@ -128,7 +128,7 @@ public struct GitHubService: Sendable {
     /// Checks the PR branch out into a dedicated worktree (`<repo>-worktrees/pr-N`)
     /// so the guide — or the user's session — can inspect real code, never the
     /// user's own checkout.
-    public func checkoutPR(_ number: Int, repo: URL) async throws -> URL {
+    public func checkoutPR(_ number: Int, repo: URL, readOnly: Bool = true) async throws -> URL {
         let root = repo.deletingLastPathComponent()
             .appendingPathComponent(repo.lastPathComponent + "-worktrees")
         let path = root.appendingPathComponent("pr-\(number)")
@@ -141,8 +141,20 @@ public struct GitHubService: Sendable {
         // (reviewing your OWN pr from the same repo, the common case).
         _ = try await runGit(["fetch", "origin", "pull/\(number)/head"], in: path)
         _ = try await runGit(["checkout", "--detach", "FETCH_HEAD"], in: path)
-        try await protectWorktree(path, repo: repo)
+        // Read-only is a user setting: protect or UNprotect — the worktree is
+        // reused across checkouts, so a change of mind must apply to it.
+        if readOnly {
+            try await protectWorktree(path, repo: repo)
+        } else {
+            try await unprotectWorktree(path)
+        }
         return path
+    }
+
+    /// Reverses `protectWorktree` (setting turned off on a reused worktree).
+    public func unprotectWorktree(_ path: URL) async throws {
+        _ = try? await runGit(["config", "--worktree", "--unset", "core.hooksPath"], in: path)
+        try? FileManager.default.removeItem(at: path.appendingPathComponent(".loom-guard-hooks"))
     }
 
     /// Makes a review worktree commit-proof: guard hooks (pre-commit,

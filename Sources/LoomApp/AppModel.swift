@@ -165,6 +165,13 @@ public final class AppModel {
         return cols >= 40 && rows >= 10 ? TerminalGeometry(cols: cols, rows: rows) : .default
     }()
 
+    /// Review worktrees are read-only (guard hooks) unless the user opts out —
+    /// absent key means true: safe by default.
+    public var reviewWorktreesReadOnly: Bool {
+        get { (UserDefaults.standard.object(forKey: "loom.review.readOnly") as? Bool) ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "loom.review.readOnly") }
+    }
+
     // MARK: - Worktree preference (per project, default OFF)
 
     /// Whether new sessions of a project run in an isolated worktree (GIT-01)
@@ -439,7 +446,8 @@ public final class AppModel {
         guard let manager, let repo = projectRepo(projectID) else { return nil }
         let worktree: URL
         do {
-            worktree = try await GitHubService().checkoutPR(pr.number, repo: repo)
+            worktree = try await GitHubService().checkoutPR(pr.number, repo: repo,
+                                                            readOnly: reviewWorktreesReadOnly)
         } catch {
             startupError = "Could not check out PR #\(pr.number): \(Self.ghErrorText(error))"
             return nil
@@ -448,8 +456,9 @@ public final class AppModel {
         You are reviewing PR #\(pr.number) ("\(pr.title)"), checked out in this worktree. \
         Read the diff (gh pr diff \(pr.number)) and the touched files. Report findings in \
         order: correctness first, then design, then nitpicks — quote file:line for each. \
-        End with a verdict: ship / fix first. The user may then ask about specific lines. \
-        This worktree is READ-ONLY for review: never commit, push or amend here.
+        End with a verdict: ship / fix first. The user may then ask about specific lines.\
+        \(reviewWorktreesReadOnly
+          ? " This worktree is READ-ONLY for review: never commit, push or amend here." : "")
         """
         do {
             let sessionID = SessionID()
@@ -533,7 +542,8 @@ public final class AppModel {
     public func askGuide(about number: Int, title: String, tour: PRTour?,
                          in projectID: ProjectID) async -> SessionID? {
         guard let manager, let repo = projectRepo(projectID) else { return nil }
-        guard let worktree = try? await GitHubService().checkoutPR(number, repo: repo) else { return nil }
+        guard let worktree = try? await GitHubService().checkoutPR(
+            number, repo: repo, readOnly: reviewWorktreesReadOnly) else { return nil }
         let pitch = tour?.pitch ?? ""
         let prompt = """
         You are the tour guide for PR #\(number) ("\(title)"), checked out in this worktree. \

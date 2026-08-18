@@ -21,6 +21,7 @@ struct SettingsPage: View {
                     .foregroundStyle(DefaultTheme.primaryText)
 
                 generalSection
+                reviewSection
                 shortcutsSection
                 badgesSection
                 themesSection
@@ -122,6 +123,27 @@ struct SettingsPage: View {
                 .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
                 .overlay(RoundedRectangle(cornerRadius: 7)
                     .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        }
+    }
+
+    // MARK: Review
+
+    private var reviewSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("Review")
+            card {
+                Toggle(isOn: Binding(
+                    get: { model.reviewWorktreesReadOnly },
+                    set: { model.reviewWorktreesReadOnly = $0 })) {
+                    Text("Read-only review worktrees")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                Text("Guard hooks block commit/push in PR review worktrees — the session can build and test but never lands work on someone else's branch. Applies at the next checkout of each PR.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
         }
     }
 
