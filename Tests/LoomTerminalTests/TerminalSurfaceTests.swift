@@ -44,6 +44,25 @@ struct TerminalSurfaceTests {
         #expect(arrived, "the surface's screen must reproduce the parsed output")
     }
 
+    // What the view scrolls through: output pushed off the top must reach the
+    // surface as history, or the session pane has nothing to scroll.
+    @Test("output scrolled off the screen reaches the surface as history")
+    func surfaceExposeLHistorique() async throws {
+        let pty = ScriptedPTYHost()
+        let runtime = try makeRuntime(pty: pty)   // 6 rows
+        let surface = runtime.surface()
+        surface.attach()
+
+        for index in 1...40 { pty.emit("line \(index)\r\n") }
+
+        let hasHistory = await pollUntil { !surface.history.isEmpty }
+        #expect(hasHistory, "the scrollback tail must reach the view layer")
+        #expect(surface.history.count >= 30, "one line per scrolled-off row")
+        #expect(surface.history.last?.text.contains("line 3") == true,
+                "history ends just above the visible screen")
+        #expect(surface.historyBase >= 0)
+    }
+
     @Test("detached, the surface freezes on the last known screen — no frame produced")
     func surfaceDetacheeNeRecoitPlusRien() async throws {
         let pty = ScriptedPTYHost()
