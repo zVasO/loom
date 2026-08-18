@@ -2164,12 +2164,8 @@ struct SessionDetailView: View {
     /// v3 — opens the reviewer session that the Ship panel just launched.
     var selectedAfterReview: ((SessionID) -> Void)?
     @State private var infoShown = false
-    @State private var surface: TerminalSurface?
     @State private var gitShown = false
     @State private var gitData: AppModel.GitPanelData?
-    @State private var firstResizeDone = false
-    /// Incremented on each click on the terminal: the key capture regains focus.
-    @State private var focusTick = 0
     @State private var shipMessage = ""
     @State private var shipOutput: String?
     @State private var shipBusy = false
@@ -2184,67 +2180,12 @@ struct SessionDetailView: View {
         VStack(spacing: 0) {
             breadcrumb
             Divider().overlay(DefaultTheme.cardBorder)
-            if let surface {
-                HSplitView {
-                    GeometryReader { proxy in
-                        TerminalScreenView(screen: surface.screen, history: surface.history,
-                                           historyBase: surface.historyBase)
-                            // TRM-02: the view announces its grid to the PTY; the task(id:)
-                            // cancels on every size change — free debounce
-                            // while the window is being resized.
-                            .task(id: proxy.size) {
-                                // GeometryReader publishes a placeholder (100×100) before
-                                // the real layout: NEVER apply it — the agent
-                                // would receive a 20×5 SIGWINCH mid-startup and
-                                // paint its interface for five lines.
-                                guard proxy.size.width >= 300, proxy.size.height >= 200 else { return }
-                                // First real measurement: immediate, to correct the
-                                // launch grid before the agent's banner.
-                                // The following ones are debounced (task cancellation).
-                                if firstResizeDone {
-                                    try? await Task.sleep(for: .milliseconds(80))
-                                    guard !Task.isCancelled else { return }
-                                }
-                                firstResizeDone = true
-                                let grid = TerminalMetrics.grid(fitting: proxy.size)
-                                surface.resize(cols: grid.cols, rows: grid.rows)
-                                model.noteTerminalGrid(cols: grid.cols, rows: grid.rows)
-                            }
-                            // SES-05bis: keystrokes go to the agent's input
-                            // field — no bar of our own. The capture lives UNDER
-                            // the feed (the keyboard follows the first responder,
-                            // not the geometry); clicking the terminal regains focus.
-                            .background(KeyCaptureView(focusTick: focusTick) { surface.send($0) })
-                            .contentShape(Rectangle())
-                            .onTapGesture { focusTick += 1 }
-                            // claude's own boot (plugins, MCP handshakes) takes
-                            // seconds — a silent black screen reads as broken.
-                            .overlay {
-                                if surface.screen.revision == 0 {
-                                    VStack(spacing: 10) {
-                                        ProgressView().controlSize(.small)
-                                        Text("claude is starting…")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(DefaultTheme.secondaryText)
-                                        Text("Plugins and MCP servers load first — unauthenticated MCP servers slow this down (run /mcp).")
-                                            .font(.system(size: 10))
-                                            .foregroundStyle(DefaultTheme.mutedText)
-                                            .multilineTextAlignment(.center)
-                                            .frame(maxWidth: 380)
-                                    }
-                                }
-                            }
-                    }
-                    .background(DefaultTheme.contentBackground)
-                    if gitShown { gitPanel }
-                }
-                .task { await surface.attached() }
-            } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            HSplitView {
+                TerminalPane(model: model, sessionID: sessionID)
+                if gitShown { gitPanel }
             }
         }
         .background(DefaultTheme.contentBackground)
-        .task { surface = await model.surface(for: sessionID) }
     }
 
     private var breadcrumb: some View {

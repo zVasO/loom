@@ -15,6 +15,10 @@ struct GlobalPRsView: View {
 
     @State private var selectedProjectID: ProjectID?
     @State private var selectedPR: GitHubService.PullRequest?
+    /// The embedded review session (phase 3): shown on the right, so the user
+    /// switches diff ↔ session without leaving the tab.
+    @State private var paneSessionID: SessionID?
+    @State private var paneOpen = false
 
     private var gitProjects: [ProjectRecord] { model.projects }
 
@@ -113,7 +117,9 @@ struct GlobalPRsView: View {
         selectedPR = pr
         Task {
             if let id = await model.launchPRReviewSession(pr, in: project.id) {
-                onOpenSession(id)
+                // Stay in the PR tab: the session opens in the embedded pane.
+                paneSessionID = id
+                paneOpen = true
             }
         }
     }
@@ -127,8 +133,21 @@ struct GlobalPRsView: View {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
                     Spacer()
+                    if paneOpen {
+                        GhostButton("Hide session", systemImage: "sidebar.trailing") {
+                            paneOpen = false
+                        }
+                    } else if let existing = model.reviewSession(forPR: pr.number, in: project.id) {
+                        GhostButton("Show session", systemImage: "sidebar.trailing") {
+                            Task {
+                                _ = await model.launchPRReviewSession(pr, in: project.id)
+                                paneSessionID = existing
+                                paneOpen = true
+                            }
+                        }
+                    }
                     AccentButton(model.reviewSession(forPR: pr.number, in: project.id) != nil
-                                 ? "Open review session" : "Start review",
+                                 ? "Review session" : "Start review",
                                  systemImage: "sparkles") {
                         startReview(pr, project: project)
                     }
@@ -136,9 +155,18 @@ struct GlobalPRsView: View {
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .background(DefaultTheme.background)
                 Divider().overlay(DefaultTheme.cardBorder)
-                PRWorkspaceView(model: model, project: project, pr: pr,
-                                onBack: nil, onOpenSession: onOpenSession)
+                HSplitView {
+                    PRWorkspaceView(model: model, project: project, pr: pr,
+                                    onBack: nil, onOpenSession: onOpenSession)
+                        .frame(minWidth: 420)
+                    if paneOpen, let sessionID = paneSessionID {
+                        embeddedSession(sessionID)
+                            .frame(minWidth: 380)
+                    }
+                }
             }
+            .onChange(of: pr.number) { syncPane(pr, project: project) }
+            .onAppear { syncPane(pr, project: project) }
         } else {
             VStack(spacing: 8) {
                 Text("Pick a pull request")
@@ -149,6 +177,46 @@ struct GlobalPRsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DefaultTheme.contentBackground)
+        }
+    }
+}
+
+extension GlobalPRsView {
+    /// The pane follows the SELECTED PR: its session when one exists, hidden
+    /// otherwise — diff and conversation always talk about the same PR.
+    fileprivate func syncPane(_ pr: GitHubService.PullRequest, project: ProjectRecord) {
+        if let existing = model.reviewSession(forPR: pr.number, in: project.id),
+           model.sessions.contains(where: { $0.id == existing }) {
+            paneSessionID = existing
+        } else {
+            paneOpen = false
+            paneSessionID = nil
+        }
+    }
+
+    fileprivate func embeddedSession(_ sessionID: SessionID) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10))
+                    .foregroundStyle(DefaultTheme.accent)
+                Text(model.sessions.first { $0.id == sessionID }?.title ?? "Review session")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .lineLimit(1)
+                if let state = model.sessions.first(where: { $0.id == sessionID })?.state {
+                    StatusLabel(state)
+                }
+                Spacer()
+                HoverIconButton(systemImage: "arrow.up.forward.square",
+                                help: "Open in the Sessions tab") {
+                    onOpenSession(sessionID)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(DefaultTheme.background)
+            Divider().overlay(DefaultTheme.cardBorder)
+            TerminalPane(model: model, sessionID: sessionID)
         }
     }
 }
