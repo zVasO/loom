@@ -64,6 +64,10 @@ public final class SessionStore: Sendable {
                 t.add(column: "projectID", .text).indexed()
             }
         }
+        migrator.registerMigration("v5-badge") { db in
+            // Badges: a small label + color on a session (PR #42, review, wip…).
+            try db.alter(table: "session") { $0.add(column: "badge", .text) }
+        }
         try migrator.migrate(database)
     }
 
@@ -142,6 +146,13 @@ public final class SessionStore: Sendable {
                     SearchHit(id: SessionID($0), title: row["title"], snippet: row["excerpt"])
                 }
             }
+        }
+    }
+
+    public func setBadge(session id: SessionID, badge: String?) throws {
+        try database.write { db in
+            try db.execute(sql: "UPDATE session SET badge = ? WHERE id = ?",
+                           arguments: [badge, id.rawValue.uuidString])
         }
     }
 
@@ -254,11 +265,13 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
     public var projectID: ProjectID?
     public var createdAt: Date
     public var endedAt: Date?
+    /// Session badge label — resolved to a color by the badge definitions.
+    public var badge: String?
 
     public init(id: SessionID, title: String, agentID: String, state: SessionState,
                 branch: String? = nil, worktreePath: String? = nil, initialPrompt: String? = nil,
                 exitCode: Int32? = nil, projectID: ProjectID? = nil,
-                createdAt: Date, endedAt: Date? = nil) {
+                createdAt: Date, endedAt: Date? = nil, badge: String? = nil) {
         self.id = id
         self.title = title
         self.agentID = agentID
@@ -270,6 +283,7 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
         self.projectID = projectID
         self.createdAt = createdAt
         self.endedAt = endedAt
+        self.badge = badge
     }
 
     enum CodingKeys: String, CodingKey {

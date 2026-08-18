@@ -36,6 +36,8 @@ public actor SessionManager {
         public var sessionID: SessionID?
         /// Displayed title; `nil` = "Session".
         public var title: String?
+        /// Badge label persisted with the session (PR #42, review, …).
+        public var badge: String?
         public init(command: Command, workingDirectory: URL,
                     geometry: TerminalGeometry = .default,
                     samplingInterval: Duration? = nil,
@@ -151,7 +153,8 @@ public actor SessionManager {
                                          branch: worktree?.branch,
                                          worktreePath: worktree?.path.path,
                                          projectID: spec.projectID,
-                                         createdAt: Date()))
+                                         createdAt: Date(),
+                                         badge: spec.badge))
         pumps[id] = Task { [weak self] in
             for await event in events {
                 await self?.handle(event, for: id)

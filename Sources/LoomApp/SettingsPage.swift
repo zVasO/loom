@@ -22,6 +22,7 @@ struct SettingsPage: View {
 
                 generalSection
                 shortcutsSection
+                badgesSection
                 themesSection
                 projectsSection
             }
@@ -121,6 +122,62 @@ struct SettingsPage: View {
                 .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
                 .overlay(RoundedRectangle(cornerRadius: 7)
                     .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        }
+    }
+
+    // MARK: Badges
+
+    @State private var newBadgeName = ""
+    @State private var newBadgeColor = Color(red: 0.65, green: 0.55, blue: 0.95)
+
+    private var badgesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("Badges")
+            card {
+                Text("Right-click a session card (sidebar or Mission Control) to assign a badge.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                ForEach(model.badgeDefinitions) { definition in
+                    HStack(spacing: 10) {
+                        BadgeChip(label: definition.name,
+                                  color: AppModel.color(hex: definition.colorHex))
+                        Spacer()
+                        Text(definition.colorHex)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(DefaultTheme.mutedText)
+                        HoverIconButton(systemImage: "xmark", help: "Delete this badge") {
+                            model.saveBadgeDefinitions(
+                                model.badgeDefinitions.filter { $0.name != definition.name })
+                        }
+                    }
+                }
+                Divider().overlay(DefaultTheme.cardBorder)
+                HStack(spacing: 10) {
+                    TextField("New badge name…", text: $newBadgeName)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .padding(.horizontal, 8).padding(.vertical, 6)
+                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
+                        .frame(maxWidth: 220)
+                    ColorPicker("", selection: $newBadgeColor, supportsOpacity: false)
+                        .labelsHidden()
+                    AccentButton("Add") {
+                        let name = newBadgeName.trimmingCharacters(in: .whitespaces).lowercased()
+                        guard !name.isEmpty,
+                              !model.badgeDefinitions.contains(where: { $0.name == name })
+                        else { return }
+                        let resolved = NSColor(newBadgeColor).usingColorSpace(.deviceRGB) ?? .gray
+                        let hex = String(format: "#%02X%02X%02X",
+                                         Int(resolved.redComponent * 255),
+                                         Int(resolved.greenComponent * 255),
+                                         Int(resolved.blueComponent * 255))
+                        model.saveBadgeDefinitions(
+                            model.badgeDefinitions
+                                + [AppModel.BadgeDefinition(name: name, colorHex: hex)])
+                        newBadgeName = ""
+                    }
+                }
+            }
         }
     }
 

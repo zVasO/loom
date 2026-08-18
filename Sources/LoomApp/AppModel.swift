@@ -8,6 +8,7 @@ import LoomTerminal
 import LoomWeb
 import Foundation
 import Observation
+import SwiftUI
 import UserNotifications
 
 /// STA-04: system notification when a session needs input.
@@ -76,6 +77,63 @@ public final class AppModel {
         public var isShell: Bool = false
         /// Closed but not destroyed ("inactive"): clicking resumes the session.
         public var isDormant: Bool = false
+        /// Badge label — resolved to a color by the badge definitions.
+        public var badge: String?
+    }
+
+    // MARK: - Badges: user-defined labels with a color
+
+    public struct BadgeDefinition: Identifiable, Equatable, Codable {
+        public var id: String { name }
+        public var name: String
+        public var colorHex: String
+    }
+
+    public private(set) var badgeDefinitions: [BadgeDefinition] = {
+        if let data = UserDefaults.standard.data(forKey: "loom.badges"),
+           let saved = try? JSONDecoder().decode([BadgeDefinition].self, from: data) {
+            return saved
+        }
+        return [BadgeDefinition(name: "review", colorHex: "#4CC38A"),
+                BadgeDefinition(name: "wip", colorHex: "#E5B455"),
+                BadgeDefinition(name: "urgent", colorHex: "#E5646C")]
+    }()
+
+    public func saveBadgeDefinitions(_ definitions: [BadgeDefinition]) {
+        badgeDefinitions = definitions
+        if let data = try? JSONEncoder().encode(definitions) {
+            UserDefaults.standard.set(data, forKey: "loom.badges")
+        }
+    }
+
+    /// Label → color: a defined badge uses its color; "PR …" labels get the
+    /// fixed purple; anything else the muted default.
+    public func badgeColor(for label: String) -> Color {
+        if let definition = badgeDefinitions.first(where: { $0.name == label }) {
+            return Self.color(hex: definition.colorHex)
+        }
+        if label.hasPrefix("PR ") || label.hasPrefix("PR#") {
+            return Self.color(hex: "#A78BFA")
+        }
+        return Self.color(hex: "#86868E")
+    }
+
+    public static func color(hex: String) -> Color {
+        var value = hex
+        if value.hasPrefix("#") { value.removeFirst() }
+        guard value.count == 6, let number = UInt32(value, radix: 16) else { return .gray }
+        return Color(red: Double((number >> 16) & 0xFF) / 255,
+                     green: Double((number >> 8) & 0xFF) / 255,
+                     blue: Double(number & 0xFF) / 255)
+    }
+
+    /// Assigns (or clears) a session's badge — card, fleet, tabs and base follow.
+    public func setBadge(_ badge: String?, for id: SessionID) {
+        try? store?.setBadge(session: id, badge: badge)
+        if let index = sessions.firstIndex(where: { $0.id == id }) {
+            sessions[index].badge = badge
+        }
+        reloadPersistedSessions()
     }
 
     public private(set) var sessions: [SessionItem] = []
@@ -391,11 +449,12 @@ public final class AppModel {
             spec.projectID = projectID
             spec.sessionID = sessionID
             spec.title = "PR #\(number) · guide"
+            spec.badge = "PR #\(number)"
             let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(number) · guide",
                                         state: .starting, projectID: projectID,
-                                        branch: nil))
+                                        branch: nil, badge: "PR #\(number)"))
             reloadPersistedSessions()
             return id
         } catch {
@@ -428,11 +487,12 @@ public final class AppModel {
             spec.projectID = record.projectID
             spec.sessionID = sessionID
             spec.title = "Review · \(record.title)"
+            spec.badge = "review"
             let reviewID = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: reviewID)
             sessions.append(SessionItem(id: reviewID, title: "Review · \(record.title)",
                                         state: .starting, projectID: record.projectID,
-                                        branch: record.branch))
+                                        branch: record.branch, badge: "review"))
             reloadPersistedSessions()
             return reviewID
         } catch {
@@ -846,7 +906,8 @@ public final class AppModel {
                                      samplingInterval: .milliseconds(500), hookToken: token)
             tokenRegistry.register(token: token, session: record.id)
             sessions.append(SessionItem(id: record.id, title: record.title, state: .starting,
-                                        projectID: record.projectID, branch: record.branch))
+                                        projectID: record.projectID, branch: record.branch,
+                                        badge: record.badge))
             interruptedSessions.removeAll { $0.id == record.id }
         } catch {
             startupError = String(describing: error)

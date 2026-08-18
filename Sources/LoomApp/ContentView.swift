@@ -10,6 +10,46 @@ import SwiftUI
 // Structure of the validated reference: custom navbar (Projects / Sessions / +),
 // Projects view as a centered column, Sessions view as grouped sidebar + detail.
 
+/// A session badge: tiny colored capsule (PR #42, review, wip…).
+struct BadgeChip: View {
+    let label: String
+    let color: Color
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(color.opacity(0.14), in: Capsule())
+            .lineLimit(1)
+    }
+}
+
+/// The right-click "Badge" submenu, shared by cards and strip tabs.
+struct BadgeMenu: View {
+    let model: AppModel
+    let sessionID: SessionID
+    let current: String?
+
+    var body: some View {
+        Menu("Badge") {
+            Button("None") { model.setBadge(nil, for: sessionID) }
+            Divider()
+            ForEach(model.badgeDefinitions) { definition in
+                Button {
+                    model.setBadge(definition.name, for: sessionID)
+                } label: {
+                    if current == definition.name {
+                        Label(definition.name, systemImage: "checkmark")
+                    } else {
+                        Text(definition.name)
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The woven logo, loaded once from the module resources.
 struct LogoMark: View {
     let size: CGFloat
@@ -1262,6 +1302,9 @@ struct StackTab: View {
     let title: String
     let isActive: Bool
     var isDormant: Bool = false
+    /// Badge shown as a colored dot; right-click assigns via `badgeMenu`.
+    var badge: (label: String, color: Color)?
+    var badgeMenu: BadgeMenu?
     let onSelect: () -> Void
     let onClose: () -> Void
     @State private var hovered = false
@@ -1272,6 +1315,10 @@ struct StackTab: View {
                 .font(.system(size: 9))
                 .foregroundStyle(isDormant ? DefaultTheme.mutedText
                                  : isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
+            if let badge {
+                Circle().fill(badge.color).frame(width: 5, height: 5)
+                    .help(badge.label)
+            }
             Text(title)
                 .font(.system(size: 11, weight: isActive ? .semibold : .regular))
                 .foregroundStyle(isDormant ? DefaultTheme.secondaryText
@@ -1294,6 +1341,9 @@ struct StackTab: View {
         .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
+        .contextMenu {
+            if let badgeMenu { badgeMenu }
+        }
     }
 }
 
@@ -2014,6 +2064,7 @@ struct SessionsView: View {
                               panes: [AppModel.BrowserPane]) -> some View {
         VStack(spacing: 0) {
             SidebarSessionCard(
+                model: model,
                 item: item,
                 childCount: shells.count + dormantShells.count + panes.count,
                 isSelected: selected == .session(item.id),
@@ -2736,6 +2787,7 @@ struct HoverIconButton: View {
 // MARK: - Stack parent card (icons on hover — terminal, browser)
 
 struct SidebarSessionCard: View {
+    let model: AppModel
     let item: AppModel.SessionItem
     let childCount: Int
     let isSelected: Bool
@@ -2747,6 +2799,8 @@ struct SidebarSessionCard: View {
     let onClose: () -> Void
     @State private var hovered = false
 
+    private func badgeColor(_ label: String) -> Color { model.badgeColor(for: label) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -2754,6 +2808,9 @@ struct SidebarSessionCard: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(DefaultTheme.primaryText)
                     .lineLimit(1)
+                if let badge = item.badge {
+                    BadgeChip(label: badge, color: badgeColor(badge))
+                }
                 Spacer()
                 if hovered {
                     // Same cluster as the stack rows: identical spacing
@@ -2794,6 +2851,7 @@ struct SidebarSessionCard: View {
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
         .contextMenu {
+            BadgeMenu(model: model, sessionID: item.id, current: item.badge)
             Button("Rename…", action: onRename)
             Button("New terminal", action: onNewTerminal)
             Button("Dedicated browser", action: onOpenBrowser)

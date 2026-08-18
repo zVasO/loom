@@ -75,6 +75,9 @@ private struct FleetCard: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DefaultTheme.primaryText)
                     .lineLimit(1)
+                if let badge = item.badge {
+                    BadgeChip(label: badge, color: model.badgeColor(for: badge))
+                }
                 Spacer()
                 StatusLabel(item.state)
             }
@@ -126,6 +129,9 @@ private struct FleetCard: View {
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(borderColor, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
+        .contextMenu {
+            BadgeMenu(model: model, sessionID: item.id, current: item.badge)
+        }
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
         .task {
