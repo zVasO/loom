@@ -107,6 +107,24 @@ public final class AppModel {
         return cols >= 40 && rows >= 10 ? TerminalGeometry(cols: cols, rows: rows) : .default
     }()
 
+    // MARK: - Worktree preference (per project, default OFF)
+
+    /// Whether new sessions of a project run in an isolated worktree (GIT-01)
+    /// or straight in the project folder. Default: the folder — worktrees are
+    /// an explicit choice.
+    public func worktreeEnabled(for projectID: ProjectID?) -> Bool {
+        guard let projectID else { return false }
+        let map = UserDefaults.standard.dictionary(forKey: "loom.worktree.projects") as? [String: Bool]
+        return map?[projectID.rawValue.uuidString] ?? false
+    }
+
+    public func setWorktreeEnabled(_ enabled: Bool, for projectID: ProjectID) {
+        var map = (UserDefaults.standard.dictionary(forKey: "loom.worktree.projects")
+                   as? [String: Bool]) ?? [:]
+        map[projectID.rawValue.uuidString] = enabled
+        UserDefaults.standard.set(map, forKey: "loom.worktree.projects")
+    }
+
     /// P0 perf — the Settings refresh rate as a frame interval (default 30 fps).
     public static func preferredFrameInterval() -> Duration {
         let fps = UserDefaults.standard.integer(forKey: "loom.terminal.fps")
@@ -917,8 +935,10 @@ public final class AppModel {
             // A single UUID end to end: the `--session-id` one — Resume depends on it.
             spec.sessionID = sessionID
             spec.title = initialPrompt ?? Self.generatedName(project: project)
-            // GIT-01: a Git repo → an isolated worktree per session, never the bare folder.
-            if FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
+            // GIT-01 became a per-project CHOICE: worktree isolation only when
+            // the project opted in — by default sessions run in the folder.
+            if worktreeEnabled(for: project?.id),
+               FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
                 spec.worktree = .create(repo: directory, slug: Self.slug(from: initialPrompt ?? ""))
             }
             let id = try await manager.launch(spec)

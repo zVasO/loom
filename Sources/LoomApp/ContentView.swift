@@ -855,6 +855,25 @@ struct ProjectsView: View {
                 .foregroundStyle(DefaultTheme.primaryText)
                 .focused($goalFocused)
                 .onSubmit { submitGoal(project) }
+            // Worktree isolation is a per-project choice (default: off — the
+            // session works in the project folder).
+            Button {
+                model.setWorktreeEnabled(!model.worktreeEnabled(for: project.id), for: project.id)
+            } label: {
+                let enabled = model.worktreeEnabled(for: project.id)
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("worktree")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundStyle(enabled ? DefaultTheme.accentText : DefaultTheme.secondaryText)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(enabled ? DefaultTheme.accent : DefaultTheme.surfaceRaised,
+                            in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .help("On: each session gets an isolated git worktree on its own branch. Off: sessions work directly in the project folder.")
             // v3 — fan-out: the same goal, N parallel sessions, N worktrees.
             Menu {
                 ForEach(1...4, id: \.self) { count in
