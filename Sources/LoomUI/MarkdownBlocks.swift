@@ -169,14 +169,28 @@ public struct MarkdownBlockView: View {
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
             .fixedSize(horizontal: false, vertical: true)
-        case .code(let text, _):
-            Text(text)
-                .font(.system(size: 11.5, design: .monospaced))
-                .foregroundStyle(DefaultTheme.primaryText.opacity(0.9))
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(DefaultTheme.surfaceRaised,
-                            in: RoundedRectangle(cornerRadius: 7))
+        case .code(let text, let language):
+            // GitHub's appliable suggestions deserve to look like one.
+            let isSuggestion = language == "suggestion"
+            VStack(alignment: .leading, spacing: 0) {
+                if isSuggestion {
+                    Text("SUGGESTED CHANGE")
+                        .font(.system(size: 9, weight: .semibold))
+                        .kerning(0.7)
+                        .foregroundStyle(DefaultTheme.groupHeader)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(DefaultTheme.groupHeader.opacity(0.12))
+                }
+                Text(text)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.primaryText.opacity(0.9))
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(isSuggestion ? DefaultTheme.groupHeader.opacity(0.06)
+                                             : DefaultTheme.surfaceRaised)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 7))
         case .rule:
             Rectangle().fill(DefaultTheme.cardBorder).frame(height: 1)
         }

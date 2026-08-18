@@ -94,5 +94,38 @@ struct GitHubServiceTests {
         #expect(payload["start_line"] == nil)
         #expect(payload["line"] as? Int == 7)
     }
+
+    // Review comments anchored to code: shown INSIDE the diff, under the line
+    // they talk about (what GitHub's own file view does).
+    @Test("review comments carry their file, line span, author and body")
+    func reviewComments() throws {
+        let json = """
+        [{"id": 1, "path": "src/a.swift", "line": 14, "start_line": 10, "side": "RIGHT",
+          "body": "Rename this.", "user": {"login": "zVasO"},
+          "created_at": "2026-08-18T10:00:00Z", "in_reply_to_id": null},
+         {"id": 2, "path": "src/a.swift", "line": 14, "start_line": null, "side": "RIGHT",
+          "body": "Agreed.", "user": {"login": "other"},
+          "created_at": "2026-08-18T11:00:00Z", "in_reply_to_id": 1}]
+        """
+        let comments = try GitHubService.parseReviewComments(Data(json.utf8))
+        #expect(comments.count == 2)
+        #expect(comments[0].path == "src/a.swift")
+        #expect(comments[0].line == 14)
+        #expect(comments[0].startLine == 10)
+        #expect(comments[0].author == "zVasO")
+        #expect(comments[0].body == "Rename this.")
+        #expect(comments[1].replyToID == 1, "replies stay attached to their thread")
+    }
+
+    @Test("an outdated comment (its line vanished from the diff) is kept, flagged")
+    func outdatedComment() throws {
+        let json = """
+        [{"id": 3, "path": "src/b.swift", "line": null, "original_line": 22, "side": "RIGHT",
+          "body": "Stale.", "user": {"login": "a"}, "created_at": "2026-08-18T10:00:00Z"}]
+        """
+        let comments = try GitHubService.parseReviewComments(Data(json.utf8))
+        #expect(comments.first?.line == 22, "falls back to the original line")
+        #expect(comments.first?.isOutdated == true)
+    }
 }
 

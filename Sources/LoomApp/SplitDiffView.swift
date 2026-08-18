@@ -39,6 +39,10 @@ struct SplitDiffView: View {
     /// Posts a review comment on the PR; the Bool asks for a ```suggestion
     /// block (GitHub renders it as a one-click apply).
     var onComment: ((DiffSnippet, String, Bool) -> Void)?
+    /// Existing review comments, shown under the line they talk about.
+    var comments: [GitHubService.ReviewComment] = []
+    /// Replies inside a thread (thread's root comment id, text).
+    var onReply: ((Int, String) -> Void)?
 
     @State private var collapsed: Set<String> = []
     /// Selection: click anchors, shift-click extends — one hunk at a time.
@@ -47,9 +51,9 @@ struct SplitDiffView: View {
     /// What the action bar is composing, and its text.
     @State private var composer: Composer = .none
     @State private var draft = ""
-    /// Measured height of one diff row — turns a drag's y position into a
-    /// row index (all rows share the same single-line height).
-    @State private var rowHeight: CGFloat = 0
+    /// Row index → its y span in the hunk: comment threads break the uniform
+    /// row height, so a drag's position is looked up, not divided.
+    @State private var rowSpans: [Int: ClosedRange<CGFloat>] = [:]
 
     struct SelectionPoint: Equatable { let file: String; let hunk: Int; let row: Int }
     struct SelectionRange: Equatable { let file: String; let hunk: Int; let rows: ClosedRange<Int> }
@@ -301,24 +305,30 @@ struct SplitDiffView: View {
                     .overlay(Rectangle().fill(DefaultTheme.accent.opacity(
                         isSelected(file: file, hunk: hunkIndex, row: rowIndex) ? 0.10 : 0)))
                     .background {
-                        // One row publishes its height — a drag's y position
-                        // divided by it gives the row index.
-                        if rowIndex == 0 {
-                            GeometryReader { geometry in
-                                Color.clear.preference(key: DiffRowHeightKey.self,
-                                                       value: geometry.size.height)
-                            }
+                        // Each row publishes its y span: comment threads sit
+                        // between rows, so a drag's y can no longer be divided
+                        // by a uniform height — it is looked up.
+                        GeometryReader { geometry in
+                            let frame = geometry.frame(in: .named("hunk"))
+                            Color.clear.preference(key: DiffRowSpansKey.self,
+                                                   value: [rowIndex: frame.minY...frame.maxY])
                         }
+                    }
+                    // GitHub-style: the threads anchored to this line sit
+                    // right under it, inside the diff.
+                    ForEach(threads(file: file, row: row), id: \.root.id) { thread in
+                        CommentThreadView(thread: thread, onReply: onReply)
                     }
                 }
             }
+            .coordinateSpace(name: "hunk")
             .contentShape(Rectangle())
             // Press-and-drag selection: press anchors, dragging extends row
             // by row, releasing hands the snippet over (shift-press extends
             // from the previous anchor instead).
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { value in
-                    guard rowHeight > 0 else { return }
+                    guard !rowSpans.isEmpty else { return }
                     let row = rowAt(value.location.y, count: rows.count)
                     let start = rowAt(value.startLocation.y, count: rows.count)
                     let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
@@ -338,13 +348,37 @@ struct SplitDiffView: View {
                 // sent anywhere on its own.
                 .onEnded { _ in })
         }
-        .onPreferenceChange(DiffRowHeightKey.self) { height in
-            if height > 0, rowHeight != height { rowHeight = height }
+        .onPreferenceChange(DiffRowSpansKey.self) { spans in
+            if !spans.isEmpty { rowSpans = spans }
         }
     }
 
+    /// Which row a drag's y lands on: the span containing it, else the
+    /// nearest one (dragging past the last row selects to the end).
     private func rowAt(_ y: CGFloat, count: Int) -> Int {
-        min(max(Int(y / rowHeight), 0), count - 1)
+        if let hit = rowSpans.first(where: { $0.value.contains(y) })?.key { return hit }
+        let nearest = rowSpans.min {
+            abs(($0.value.lowerBound + $0.value.upperBound) / 2 - y)
+                < abs(($1.value.lowerBound + $1.value.upperBound) / 2 - y)
+        }
+        return min(max(nearest?.key ?? 0, 0), max(count - 1, 0))
+    }
+
+    /// The comment threads anchored to a diff row: matched on the new-side
+    /// line for additions/context, the old side for deletions.
+    private func threads(file: String, row: DiffParser.SplitRow) -> [CommentThread] {
+        guard !comments.isEmpty else { return [] }
+        let roots = comments.filter { comment in
+            guard comment.path == file, comment.replyToID == nil else { return false }
+            let number = comment.side == "LEFT" ? row.left?.oldNumber : row.right?.newNumber
+            guard let number else { return false }
+            // A multi-line comment hangs under its LAST line, like GitHub.
+            return comment.line == number
+        }
+        return roots.map { root in
+            CommentThread(root: root,
+                          replies: comments.filter { $0.replyToID == root.id })
+        }
     }
 
     /// One half of a row: number gutter + text, tinted by kind. An absent
@@ -383,12 +417,17 @@ struct SplitDiffView: View {
         .background(line == nil ? DefaultTheme.surface.opacity(0.4) : background)
     }
 
-    private struct DiffRowHeightKey: PreferenceKey {
-        static let defaultValue: CGFloat = 0
-        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-            let next = nextValue()
-            if next > 0 { value = next }
+    private struct DiffRowSpansKey: PreferenceKey {
+        static let defaultValue: [Int: ClosedRange<CGFloat>] = [:]
+        static func reduce(value: inout [Int: ClosedRange<CGFloat>],
+                           nextValue: () -> [Int: ClosedRange<CGFloat>]) {
+            value.merge(nextValue()) { _, new in new }
         }
+    }
+
+    struct CommentThread {
+        let root: GitHubService.ReviewComment
+        let replies: [GitHubService.ReviewComment]
     }
 
     private func marker(_ line: DiffParser.Line) -> String {
@@ -397,5 +436,91 @@ struct SplitDiffView: View {
         case .deletion: "− "
         case .context: "  "
         }
+    }
+}
+
+/// A review thread, shown inside the diff under the line it talks about —
+/// root comment, its replies, and an inline reply field.
+private struct CommentThreadView: View {
+    let thread: SplitDiffView.CommentThread
+    let onReply: ((Int, String) -> Void)?
+    @State private var replying = false
+    @State private var draft = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            comment(thread.root)
+            ForEach(thread.replies) { reply in
+                comment(reply)
+                    .padding(.leading, 18)
+            }
+            if let onReply {
+                if replying {
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField("Reply…", text: $draft, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12))
+                            .lineLimit(1...5)
+                            .padding(8)
+                            .background(DefaultTheme.surfaceRaised,
+                                        in: RoundedRectangle(cornerRadius: 7))
+                        HStack(spacing: 8) {
+                            Spacer()
+                            GhostButton("Cancel") { replying = false; draft = "" }
+                            AccentButton("Reply") {
+                                let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !text.isEmpty else { return }
+                                onReply(thread.root.id, text)
+                                replying = false
+                                draft = ""
+                            }
+                        }
+                    }
+                } else {
+                    GhostButton("Reply", systemImage: "arrowshape.turn.up.left") {
+                        replying = true
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DefaultTheme.surface)
+        .overlay(alignment: .leading) {
+            Rectangle().fill(DefaultTheme.accent.opacity(0.7)).frame(width: 3)
+        }
+    }
+
+    private func comment(_ item: GitHubService.ReviewComment) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                AsyncImage(url: URL(string: "https://github.com/\(item.author).png?size=48")) {
+                    image in image.resizable()
+                } placeholder: {
+                    Circle().fill(DefaultTheme.surfaceRaised)
+                }
+                .frame(width: 16, height: 16)
+                .clipShape(Circle())
+                Text("@" + item.author)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.branch)
+                if let start = item.startLine, start < item.line {
+                    Text("L\(start)–L\(item.line)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                }
+                if item.isOutdated {
+                    Text("outdated")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(DefaultTheme.surfaceRaised, in: Capsule())
+                }
+                Spacer()
+            }
+            MarkdownBlockView(item.body)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

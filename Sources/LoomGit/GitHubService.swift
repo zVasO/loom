@@ -48,6 +48,26 @@ public struct GitHubService: Sendable {
         public let reviews: [Review]
     }
 
+    /// A review comment anchored to code — shown inside the diff, under the
+    /// line it talks about.
+    public struct ReviewComment: Sendable, Equatable, Identifiable {
+        public let id: Int
+        public let path: String
+        /// The line it sits on in the CURRENT diff (or the original line when
+        /// the code moved and GitHub marked it outdated).
+        public let line: Int
+        /// Multi-line comments span startLine…line; nil when single-line.
+        public let startLine: Int?
+        public let side: String
+        public let author: String
+        public let body: String
+        public let createdAt: String
+        /// Set on replies: they belong to their parent's thread.
+        public let replyToID: Int?
+        /// The lines it referred to no longer exist in the diff.
+        public let isOutdated: Bool
+    }
+
     public enum Verdict: String, Sendable {
         case approve = "--approve"
         case requestChanges = "--request-changes"
@@ -93,6 +113,30 @@ public struct GitHubService: Sendable {
         }
         return PRDetail(body: object["body"] as? String ?? "",
                         comments: comments, reviews: reviews)
+    }
+
+    public static func parseReviewComments(_ data: Data) throws -> [ReviewComment] {
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        return rows.compactMap { row in
+            guard let id = row["id"] as? Int, let path = row["path"] as? String else { return nil }
+            // `line` goes null once the code moved: GitHub keeps original_line
+            // so the comment can still be shown, flagged as outdated.
+            let live = row["line"] as? Int
+            guard let line = live ?? (row["original_line"] as? Int) else { return nil }
+            return ReviewComment(
+                id: id,
+                path: path,
+                line: line,
+                startLine: row["start_line"] as? Int ?? row["original_start_line"] as? Int,
+                side: row["side"] as? String ?? "RIGHT",
+                author: (row["user"] as? [String: Any])?["login"] as? String ?? "—",
+                body: row["body"] as? String ?? "",
+                createdAt: row["created_at"] as? String ?? "",
+                replyToID: row["in_reply_to_id"] as? Int,
+                isOutdated: live == nil)
+        }
     }
 
     /// A review comment's body. GitHub turns a ```suggestion fence into a
@@ -148,6 +192,22 @@ public struct GitHubService: Sendable {
         _ = try await run(["pr", "comment", "\(number)", "--body", body], in: repo)
     }
 
+    /// Every review comment on the PR (the ones anchored to code).
+    public func reviewComments(_ number: Int, in repo: URL) async throws -> [ReviewComment] {
+        let data = try await run(["api", "--paginate",
+                                  "repos/{owner}/{repo}/pulls/\(number)/comments"], in: repo)
+        return try Self.parseReviewComments(data)
+    }
+
+    /// Replies inside an existing thread (GitHub's own "reply" on a comment).
+    public func replyToComment(_ number: Int, commentID: Int, body: String,
+                               in repo: URL) async throws {
+        let json = try JSONSerialization.data(withJSONObject: ["body": body])
+        _ = try await run(["api", "--method", "POST",
+                           "repos/{owner}/{repo}/pulls/\(number)/comments/\(commentID)/replies",
+                           "--input", "-"], in: repo, stdin: json)
+    }
+
     /// Posts a review comment anchored to real diff lines (what GitHub's own
     /// "comment on this line" does) — `suggestion` makes it appliable.
     public func commentOnLines(_ number: Int, path: String, firstLine: Int, lastLine: Int,
@@ -162,11 +222,9 @@ public struct GitHubService: Sendable {
         let json = try JSONSerialization.data(withJSONObject: payload)
         // --input - : the body travels as JSON on stdin, so newlines and
         // backticks survive intact.
-        _ = try await execute(Self.ghPath ?? URL(fileURLWithPath: "/usr/bin/false"),
-                              arguments: ["api", "--method", "POST",
-                                          "repos/{owner}/{repo}/pulls/\(number)/comments",
-                                          "--input", "-"],
-                              in: repo, stdin: json)
+        _ = try await run(["api", "--method", "POST",
+                           "repos/{owner}/{repo}/pulls/\(number)/comments",
+                           "--input", "-"], in: repo, stdin: json)
     }
 
     /// Checks the PR branch out into a dedicated worktree (`<repo>-worktrees/pr-N`)
@@ -238,9 +296,10 @@ public struct GitHubService: Sendable {
         case commandFailed(arguments: [String], stderr: String)
     }
 
-    private func run(_ arguments: [String], in directory: URL) async throws -> Data {
+    private func run(_ arguments: [String], in directory: URL,
+                     stdin: Data? = nil) async throws -> Data {
         guard let gh = Self.ghPath else { throw GitHubError.ghNotInstalled }
-        return try await execute(gh, arguments: arguments, in: directory)
+        return try await execute(gh, arguments: arguments, in: directory, stdin: stdin)
     }
 
     private func revParse(_ ref: String, in directory: URL) async throws -> String {

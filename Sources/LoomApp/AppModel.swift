@@ -396,6 +396,28 @@ public final class AppModel {
         catch { return Self.ghErrorText(error) }
     }
 
+    /// Review comments anchored to code, cached like the diff.
+    public func reviewComments(_ number: Int, in projectID: ProjectID,
+                               refresh: Bool = false) async -> [GitHubService.ReviewComment] {
+        guard let repo = projectRepo(projectID) else { return [] }
+        let key = prKey(number, projectID)
+        if !refresh, let cached = prCommentsCache[key] { return cached }
+        let comments = (try? await GitHubService().reviewComments(number, in: repo)) ?? []
+        prCommentsCache[key] = comments
+        return comments
+    }
+
+    /// Replies inside an existing thread. nil on success, error text otherwise.
+    public func replyToReviewComment(_ number: Int, commentID: Int, body: String,
+                                     in projectID: ProjectID) async -> String? {
+        guard let repo = projectRepo(projectID) else { return "No repo for this project" }
+        do {
+            try await GitHubService().replyToComment(number, commentID: commentID,
+                                                     body: body, in: repo)
+            return nil
+        } catch { return Self.ghErrorText(error) }
+    }
+
     /// Line-anchored review comment (optionally an appliable suggestion).
     /// nil on success, error text otherwise.
     public func commentOnLines(_ number: Int, path: String, firstLine: Int, lastLine: Int,
@@ -442,6 +464,7 @@ public final class AppModel {
     /// of re-running two gh processes. Invalidated by refreshPRs / submissions.
     private var prDetailCache: [String: GitHubService.PRDetail] = [:]
     private var prDiffCache: [String: String] = [:]
+    private var prCommentsCache: [String: [GitHubService.ReviewComment]] = [:]
 
     public func refreshPRs(for projectID: ProjectID) async {
         guard !prLoading.contains(projectID) else { return }
@@ -449,6 +472,7 @@ public final class AppModel {
         let prefix = "\(projectID.rawValue.uuidString)#"
         prDetailCache = prDetailCache.filter { !$0.key.hasPrefix(prefix) }
         prDiffCache = prDiffCache.filter { !$0.key.hasPrefix(prefix) }
+        prCommentsCache = prCommentsCache.filter { !$0.key.hasPrefix(prefix) }
         prCache[projectID] = await listPRs(for: projectID)
         prLoading.remove(projectID)
     }

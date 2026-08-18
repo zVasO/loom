@@ -87,6 +87,8 @@ struct PRWorkspaceView: View {
     /// Parsed + row-paired ONCE when the diff arrives (off the main thread) —
     /// parsing in `body` re-ran on every render and crawled on large PRs.
     @State private var diffFiles: [DiffFileRows] = []
+    /// Review comments anchored to code — rendered inside the diff.
+    @State private var lineComments: [GitHubService.ReviewComment] = []
     @State private var prTour: PRTour?
     @State private var tourLoading = false
     @State private var reviewBody = ""
@@ -112,6 +114,7 @@ struct PRWorkspaceView: View {
     /// parse/pair work off the main thread.
     private func load(refresh: Bool) async {
         prDetail = await model.prDetail(pr.number, in: project.id, refresh: refresh)
+        lineComments = await model.reviewComments(pr.number, in: project.id, refresh: refresh)
         let diff = await model.prDiff(pr.number, in: project.id, refresh: refresh)
         diffFiles = await Task.detached(priority: .userInitiated) {
             DiffFileRows.compute(DiffParser.parse(diff))
@@ -274,6 +277,18 @@ struct PRWorkspaceView: View {
                                   onComment: { snippet, text, isSuggestion in
                                       postLineComment(snippet, text: text,
                                                       isSuggestion: isSuggestion)
+                                  },
+                                  comments: lineComments,
+                                  onReply: { commentID, text in
+                                      prActionBusy = true
+                                      Task {
+                                          let error = await model.replyToReviewComment(
+                                              pr.number, commentID: commentID,
+                                              body: text, in: project.id)
+                                          prActionOutput = error ?? "Reply posted ✓"
+                                          if error == nil { await load(refresh: true) }
+                                          prActionBusy = false
+                                      }
                                   })
                 }
             }
