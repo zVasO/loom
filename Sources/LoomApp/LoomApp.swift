@@ -1,8 +1,15 @@
 import AppKit
 import SwiftUI
 
+/// Closing the window means quitting: otherwise a headless instance keeps the
+/// hook socket and the next launch reports "another instance running".
+final class LoomAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+}
+
 @main
 struct LoomApp: App {
+    @NSApplicationDelegateAdaptor(LoomAppDelegate.self) private var appDelegate
     @AppStorage("loom.shortcut.newSession") private var keyNewSession = "n"
     @AppStorage("loom.shortcut.newTab") private var keyNewTab = "t"
 

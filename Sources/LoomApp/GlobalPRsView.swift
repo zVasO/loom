@@ -19,6 +19,9 @@ struct GlobalPRsView: View {
     /// switches diff ↔ session without leaving the tab.
     @State private var paneSessionID: SessionID?
     @State private var paneOpen = false
+    /// Collapsed by default: gh is only queried when a project is EXPANDED —
+    /// opening the tab with many projects fires zero requests.
+    @State private var expandedProjects: Set<ProjectID> = []
 
     private var gitProjects: [ProjectRecord] { model.projects }
 
@@ -64,50 +67,68 @@ struct GlobalPRsView: View {
 
     private func projectGroup(_ project: ProjectRecord) -> some View {
         let prs = model.prCache[project.id] ?? []
+        let expanded = expandedProjects.contains(project.id)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text(project.name.uppercased())
-                    .font(.system(size: 10, weight: .semibold))
-                    .kerning(0.8)
+                Button {
+                    if expanded {
+                        expandedProjects.remove(project.id)
+                    } else {
+                        expandedProjects.insert(project.id)
+                        if model.prCache[project.id] == nil {
+                            Task { await model.refreshPRs(for: project.id) }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                            .rotationEffect(.degrees(expanded ? 0 : -90))
+                        Text(project.name.uppercased())
+                            .font(.system(size: 10, weight: .semibold))
+                            .kerning(0.8)
+                        if let cached = model.prCache[project.id], !cached.isEmpty {
+                            Text("\(cached.count)")
+                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(DefaultTheme.secondaryText)
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(DefaultTheme.surfaceRaised, in: Capsule())
+                        }
+                    }
                     .foregroundStyle(DefaultTheme.groupHeader)
-                if !prs.isEmpty {
-                    Text("\(prs.count)")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(DefaultTheme.secondaryText)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(DefaultTheme.surfaceRaised, in: Capsule())
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 Spacer()
                 if model.prLoading.contains(project.id) {
                     ProgressView().controlSize(.mini)
                 }
-                HoverIconButton(systemImage: "arrow.clockwise", help: "Refresh") {
-                    Task { await model.refreshPRs(for: project.id) }
+                if expanded {
+                    HoverIconButton(systemImage: "arrow.clockwise", help: "Refresh") {
+                        Task { await model.refreshPRs(for: project.id) }
+                    }
                 }
             }
             .padding(.horizontal, 2)
-            if prs.isEmpty && !model.prLoading.contains(project.id) {
-                Text("No open PR")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.mutedText)
-                    .padding(.leading, 2)
-            }
-            ForEach(prs) { pr in
-                PRSidebarRow(pr: pr,
-                             isSelected: selectedPR?.number == pr.number
-                                 && selectedProjectID == project.id,
-                             hasSession: model.reviewSession(forPR: pr.number,
-                                                             in: project.id) != nil,
-                             onSelect: {
-                                 selectedProjectID = project.id
-                                 selectedPR = pr
-                             },
-                             onStartReview: { startReview(pr, project: project) })
-            }
-        }
-        .task(id: project.id) {
-            if model.prCache[project.id] == nil {
-                await model.refreshPRs(for: project.id)
+            if expanded {
+                if prs.isEmpty && !model.prLoading.contains(project.id) {
+                    Text("No open PR")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                        .padding(.leading, 2)
+                }
+                ForEach(prs) { pr in
+                    PRSidebarRow(pr: pr,
+                                 isSelected: selectedPR?.number == pr.number
+                                     && selectedProjectID == project.id,
+                                 hasSession: model.reviewSession(forPR: pr.number,
+                                                                 in: project.id) != nil,
+                                 onSelect: {
+                                     selectedProjectID = project.id
+                                     selectedPR = pr
+                                 },
+                                 onStartReview: { startReview(pr, project: project) })
+                }
             }
         }
     }

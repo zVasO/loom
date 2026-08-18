@@ -310,7 +310,11 @@ public final class AppModel {
             restoreStackChildren()
             reindexAllSessions()
         } catch {
-            startupError = String(describing: error)
+            if case IPCError.anotherInstanceRunning = error {
+                startupError = "Another Loom instance is already running (or did not fully quit). Close it and relaunch — sessions work, but state hooks are disabled in this instance."
+            } else {
+                startupError = String(describing: error)
+            }
         }
     }
 
@@ -433,8 +437,13 @@ public final class AppModel {
             return existing
         }
         guard let manager, let repo = projectRepo(projectID) else { return nil }
-        guard let worktree = try? await GitHubService().checkoutPR(pr.number, repo: repo)
-        else { return nil }
+        let worktree: URL
+        do {
+            worktree = try await GitHubService().checkoutPR(pr.number, repo: repo)
+        } catch {
+            startupError = "Could not check out PR #\(pr.number): \(Self.ghErrorText(error))"
+            return nil
+        }
         let prompt = """
         You are reviewing PR #\(pr.number) ("\(pr.title)"), checked out in this worktree. \
         Read the diff (gh pr diff \(pr.number)) and the touched files. Report findings in \

@@ -8,6 +8,60 @@ import SwiftUI
 /// The shared PR workspace: header, Overview (description, conversation,
 /// guided tour, verdict) and Files (GitHub-style split diff). Used by the
 /// project detail AND the global PRs tab — one implementation.
+/// One comment/review of the conversation: collapsed to two lines when long,
+/// chevron to expand — long threads stay scannable.
+struct ConversationRow: View {
+    let author: String
+    let chip: String?
+    let text: String
+    @State private var expanded = false
+
+    private var isLong: Bool { text.count > 220 || text.contains("\n") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                AsyncImage(url: URL(string: "https://github.com/\(author).png?size=48")) { image in
+                    image.resizable()
+                } placeholder: {
+                    Circle().fill(DefaultTheme.surfaceRaised)
+                }
+                .frame(width: 16, height: 16)
+                .clipShape(Circle())
+                Text("@" + author)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.branch)
+                if let chip, !chip.isEmpty {
+                    Text(chip)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(chip.contains("changes") ? DefaultTheme.danger
+                                                                  : DefaultTheme.secondaryText)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(DefaultTheme.surfaceRaised, in: Capsule())
+                }
+                Spacer()
+                if isLong, !text.isEmpty {
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                }
+            }
+            if !text.isEmpty {
+                Text(PRWorkspaceView.markdown(text))
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.primaryText.opacity(0.9))
+                    .textSelection(.enabled)
+                    .lineLimit(expanded ? nil : 2)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
+        .contentShape(Rectangle())
+        .onTapGesture { if isLong { expanded.toggle() } }
+    }
+}
+
 struct PRWorkspaceView: View {
     let model: AppModel
     let project: ProjectRecord
@@ -39,6 +93,14 @@ struct PRWorkspaceView: View {
             prDetail = await model.prDetail(pr.number, in: project.id)
             prDiff = await model.prDiff(pr.number, in: project.id)
         }
+    }
+
+    /// Light markdown (bold, code, links) with line breaks preserved — a full
+    /// block parser would flatten lists; this keeps PR descriptions readable.
+    static func markdown(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text,
+                               options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(text)
     }
 
     private func deliver(_ message: String) {
@@ -97,12 +159,45 @@ struct PRWorkspaceView: View {
                 }
             }
 
+            // Who and where: author (GitHub avatar), head → base branches.
+            HStack(spacing: 10) {
+                AsyncImage(url: URL(string: "https://github.com/\(pr.author).png?size=80")) { image in
+                    image.resizable()
+                } placeholder: {
+                    Circle().fill(DefaultTheme.surfaceRaised)
+                }
+                .frame(width: 26, height: 26)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                Text("@" + pr.author)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.branch)
+                Text("wants to merge")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                MonoTag(pr.branch, systemImage: "arrow.triangle.branch")
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.mutedText)
+                MonoTag(pr.baseBranch.isEmpty ? "main" : pr.baseBranch,
+                        systemImage: "arrow.triangle.branch",
+                        color: DefaultTheme.secondaryText)
+                if pr.isDraft {
+                    Text("draft")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(DefaultTheme.surfaceRaised, in: Capsule())
+                }
+                Spacer()
+            }
+
             // The playful part: the guided tour.
             tourSection(pr, project: project)
 
             if let detail = prDetail {
                 if !detail.body.isEmpty {
-                    Text(detail.body)
+                    Text(Self.markdown(detail.body))
                         .font(.system(size: 12))
                         .foregroundStyle(DefaultTheme.secondaryText)
                         .textSelection(.enabled)
@@ -210,30 +305,7 @@ struct PRWorkspaceView: View {
     }
 
     private func conversationRow(author: String, chip: String?, body: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text("@" + author)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.branch)
-                if let chip, !chip.isEmpty {
-                    Text(chip)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(chip.contains("changes") ? DefaultTheme.danger
-                                                                  : DefaultTheme.secondaryText)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(DefaultTheme.surfaceRaised, in: Capsule())
-                }
-            }
-            if !body.isEmpty {
-                Text(body)
-                    .font(.system(size: 12))
-                    .foregroundStyle(DefaultTheme.primaryText.opacity(0.9))
-                    .textSelection(.enabled)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
+        ConversationRow(author: author, chip: chip, text: body)
     }
 
     @ViewBuilder

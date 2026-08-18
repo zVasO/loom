@@ -21,6 +21,8 @@ public struct GitHubService: Sendable {
         public let title: String
         public let author: String
         public let branch: String
+        /// The branch the PR wants to merge INTO (baseRefName).
+        public let baseBranch: String
         public let reviewDecision: String
         public let checksPassing: Bool
         public let isDraft: Bool
@@ -68,6 +70,7 @@ public struct GitHubService: Sendable {
                 title: title,
                 author: (row["author"] as? [String: Any])?["login"] as? String ?? "—",
                 branch: row["headRefName"] as? String ?? "",
+                baseBranch: row["baseRefName"] as? String ?? "",
                 reviewDecision: row["reviewDecision"] as? String ?? "",
                 checksPassing: !failing,
                 isDraft: row["isDraft"] as? Bool ?? false,
@@ -96,7 +99,7 @@ public struct GitHubService: Sendable {
 
     public func listPRs(in repo: URL) async throws -> [PullRequest] {
         let data = try await run(["pr", "list", "--json",
-                                  "number,title,author,headRefName,reviewDecision,statusCheckRollup,updatedAt,url,isDraft"],
+                                  "number,title,author,headRefName,baseRefName,reviewDecision,statusCheckRollup,updatedAt,url,isDraft"],
                                  in: repo)
         return try Self.parsePRList(data)
     }
@@ -133,7 +136,11 @@ public struct GitHubService: Sendable {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             _ = try await runGit(["worktree", "add", "--detach", path.path], in: repo)
         }
-        _ = try await run(["pr", "checkout", "\(number)"], in: path)
+        // Detached fetch of the PR head: never fights over branch names —
+        // `gh pr checkout` refuses when the branch is checked out elsewhere
+        // (reviewing your OWN pr from the same repo, the common case).
+        _ = try await runGit(["fetch", "origin", "pull/\(number)/head"], in: path)
+        _ = try await runGit(["checkout", "--detach", "FETCH_HEAD"], in: path)
         return path
     }
 
