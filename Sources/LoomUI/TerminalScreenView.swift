@@ -50,23 +50,48 @@ public struct TerminalScreenView: View {
 
     public var body: some View {
         let cell = TerminalMetrics.cellSize
+        // Auto-follow triggers on CONTENT, not on repaint: claude redraws its
+        // spinner several times a second even when idle, and snapping to the
+        // bottom on every revision made scrolling up a race the user always
+        // lost — the wheel moved 3-10 pt per event, the next repaint yanked
+        // the view back before the 24 pt unpin threshold could be crossed.
+        let totalRows = history.count + screen.lines.count
         ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(history.enumerated()), id: \.offset) { index, line in
-                        row(line, height: cell.height)
-                            .id(historyBase + index)
+            GeometryReader { container in
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(history.enumerated()), id: \.offset) { index, line in
+                            row(line, height: cell.height)
+                                .id(historyBase + index)
+                        }
+                        ForEach(Array(screen.lines.enumerated()), id: \.offset) { index, line in
+                            row(line, height: cell.height,
+                                cursorCol: index == screen.cursor.row ? screen.cursor.col : nil)
+                        }
+                        Color.clear.frame(height: 0).id("bas")   // anchor marker: zero height, otherwise it clips the top
                     }
-                    ForEach(Array(screen.lines.enumerated()), id: \.offset) { index, line in
-                        row(line, height: cell.height,
-                            cursorCol: index == screen.cursor.row ? screen.cursor.col : nil)
-                    }
-                    Color.clear.frame(height: 0).id("bas")   // anchor marker: zero height, otherwise it clips the top
+                    .padding(8)
+                    // Portable bottom tracking (works on macOS 14 too, which
+                    // previously fell back to "always pinned" — unscrollable):
+                    // distance between the content's bottom edge and the
+                    // viewport's bottom edge, published as a preference.
+                    .background(GeometryReader { content in
+                        Color.clear.preference(
+                            key: BottomDistanceKey.self,
+                            value: content.frame(in: .named("terminal.scroll")).maxY
+                                   - container.size.height)
+                    })
                 }
-                .padding(8)
+                .coordinateSpace(name: "terminal.scroll")
+                .onPreferenceChange(BottomDistanceKey.self) { distance in
+                    let atBottom = distance <= 24
+                    if pinnedToBottom != atBottom { pinnedToBottom = atBottom }
+                }
             }
-            .scrollGeometryPinning($pinnedToBottom)
-            .onChange(of: screen.revision) {
+            // The user always wins the race: the FIRST upward wheel tick over
+            // the terminal unpins, before any snap can fire.
+            .background(ScrollWheelUpSensor { pinnedToBottom = false })
+            .onChange(of: totalRows) {
                 if pinnedToBottom { proxy.scrollTo("bas", anchor: .bottom) }
             }
             .onAppear { proxy.scrollTo("bas", anchor: .bottom) }
@@ -120,20 +145,57 @@ public struct TerminalScreenView: View {
 }
 
 
-private extension View {
-    /// macOS 15+: tracks the actual scroll position to decide on bottom
-    /// anchoring; below that, always stay pinned (honest fallback).
-    @ViewBuilder
-    func scrollGeometryPinning(_ pinned: Binding<Bool>) -> some View {
-        if #available(macOS 15.0, *) {
-            self.onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.containerSize.height
-                    >= geometry.contentSize.height - 24
-            } action: { _, isAtBottom in
-                pinned.wrappedValue = isAtBottom
+/// Distance between the scroll content's bottom edge and the viewport's
+/// bottom edge — ≤ 0 means fully scrolled down.
+private struct BottomDistanceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// Invisible AppKit sensor: fires on upward scroll-wheel ticks INSIDE its own
+/// bounds. Wheel events land in the NSScrollView, never in SwiftUI gestures —
+/// a local event monitor is the only reliable tap, and the bounds check keeps
+/// one terminal pane from unpinning another.
+private struct ScrollWheelUpSensor: NSViewRepresentable {
+    let onScrollUp: () -> Void
+
+    func makeNSView(context: Context) -> SensorView {
+        let view = SensorView()
+        view.onScrollUp = onScrollUp
+        return view
+    }
+
+    func updateNSView(_ view: SensorView, context: Context) {
+        view.onScrollUp = onScrollUp
+    }
+
+    final class SensorView: NSView {
+        var onScrollUp: (() -> Void)?
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil {
+                if let monitor { NSEvent.removeMonitor(monitor) }
+                monitor = nil
+            } else if monitor == nil {
+                monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
+                    [weak self] event in
+                    guard let self, let window = self.window,
+                          event.window === window else { return event }
+                    let point = self.convert(event.locationInWindow, from: nil)
+                    if self.bounds.contains(point), event.scrollingDeltaY > 0 {
+                        self.onScrollUp?()
+                    }
+                    return event
+                }
             }
-        } else {
-            self
+        }
+
+        deinit {
+            if let monitor { NSEvent.removeMonitor(monitor) }
         }
     }
 }
