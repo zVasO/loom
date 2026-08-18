@@ -33,6 +33,10 @@ struct SplitDiffView: View {
     /// session actions (Copy always works).
     var onExplain: ((DiffSnippet) -> Void)?
     var onAsk: ((DiffSnippet, String) -> Void)?
+    /// When set (review session pane open), releasing a drag selection
+    /// transcribes the lines straight into the session — and replaces the
+    /// floating bar, which would duplicate it.
+    var onSelectionRelease: ((DiffSnippet) -> Void)?
 
     @State private var collapsed: Set<String> = []
     /// Selection: click anchors, shift-click extends — one hunk at a time.
@@ -40,6 +44,9 @@ struct SplitDiffView: View {
     @State private var range: SelectionRange?
     @State private var askText = ""
     @State private var asking = false
+    /// Measured height of one diff row — turns a drag's y position into a
+    /// row index (all rows share the same single-line height).
+    @State private var rowHeight: CGFloat = 0
 
     struct SelectionPoint: Equatable { let file: String; let hunk: Int; let row: Int }
     struct SelectionRange: Equatable { let file: String; let hunk: Int; let rows: ClosedRange<Int> }
@@ -53,7 +60,9 @@ struct SplitDiffView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if range != nil { quickActionBar }
+            // With a session pane open the release already transcribed the
+            // lines — the floating bar would only duplicate them.
+            if range != nil, onSelectionRelease == nil { quickActionBar }
         }
         .onExitCommand { clearSelection() }
     }
@@ -63,17 +72,6 @@ struct SplitDiffView: View {
         range = nil
         asking = false
         askText = ""
-    }
-
-    private func handleTap(file: String, hunk: Int, row: Int) {
-        let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
-        if shift, let anchor, anchor.file == file, anchor.hunk == hunk {
-            range = SelectionRange(file: file, hunk: hunk,
-                                   rows: min(anchor.row, row)...max(anchor.row, row))
-        } else {
-            anchor = SelectionPoint(file: file, hunk: hunk, row: row)
-            range = SelectionRange(file: file, hunk: hunk, rows: row...row)
-        }
     }
 
     private func isSelected(file: String, hunk: Int, row: Int) -> Bool {
@@ -227,14 +225,55 @@ struct SplitDiffView: View {
                             .frame(maxWidth: .infinity, alignment: .topLeading)
                     }
                     .fixedSize(horizontal: false, vertical: true)
-                    // Line selection: click anchors, shift-click extends.
                     .overlay(Rectangle().fill(DefaultTheme.accent.opacity(
                         isSelected(file: file, hunk: hunkIndex, row: rowIndex) ? 0.10 : 0)))
-                    .contentShape(Rectangle())
-                    .onTapGesture { handleTap(file: file, hunk: hunkIndex, row: rowIndex) }
+                    .background {
+                        // One row publishes its height — a drag's y position
+                        // divided by it gives the row index.
+                        if rowIndex == 0 {
+                            GeometryReader { geometry in
+                                Color.clear.preference(key: DiffRowHeightKey.self,
+                                                       value: geometry.size.height)
+                            }
+                        }
+                    }
                 }
             }
+            .contentShape(Rectangle())
+            // Press-and-drag selection: press anchors, dragging extends row
+            // by row, releasing hands the snippet over (shift-press extends
+            // from the previous anchor instead).
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    guard rowHeight > 0 else { return }
+                    let row = rowAt(value.location.y, count: rows.count)
+                    let start = rowAt(value.startLocation.y, count: rows.count)
+                    let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
+                    if shift, let anchor, anchor.file == file, anchor.hunk == hunkIndex {
+                        range = SelectionRange(file: file, hunk: hunkIndex,
+                                               rows: min(anchor.row, row)...max(anchor.row, row))
+                    } else {
+                        if anchor?.file != file || anchor?.hunk != hunkIndex
+                            || anchor?.row != start {
+                            anchor = SelectionPoint(file: file, hunk: hunkIndex, row: start)
+                        }
+                        range = SelectionRange(file: file, hunk: hunkIndex,
+                                               rows: min(start, row)...max(start, row))
+                    }
+                }
+                .onEnded { _ in
+                    if let onSelectionRelease, let snippet {
+                        onSelectionRelease(snippet)
+                    }
+                })
         }
+        .onPreferenceChange(DiffRowHeightKey.self) { height in
+            if height > 0, rowHeight != height { rowHeight = height }
+        }
+    }
+
+    private func rowAt(_ y: CGFloat, count: Int) -> Int {
+        min(max(Int(y / rowHeight), 0), count - 1)
     }
 
     /// One half of a row: number gutter + text, tinted by kind. An absent
@@ -251,7 +290,8 @@ struct SplitDiffView: View {
             .foregroundStyle(line?.kind == .context || line == nil
                              ? DefaultTheme.primaryText.opacity(0.75)
                              : DefaultTheme.primaryText)
-            .textSelection(.enabled)
+            // No .textSelection here: it captured the mouse and broke the
+            // press-and-drag line selection (Copy lives in the action bar).
             .lineLimit(1)
             .truncationMode(.tail)
         HStack(alignment: .top, spacing: 8) {
@@ -270,6 +310,14 @@ struct SplitDiffView: View {
         .padding(.horizontal, 8).padding(.vertical, 1.5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(line == nil ? DefaultTheme.surface.opacity(0.4) : background)
+    }
+
+    private struct DiffRowHeightKey: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+            let next = nextValue()
+            if next > 0 { value = next }
+        }
     }
 
     private func marker(_ line: DiffParser.Line) -> String {

@@ -47,11 +47,18 @@ struct ConversationRow: View {
                 }
             }
             if !text.isEmpty {
-                Text(PRWorkspaceView.markdown(text))
-                    .font(.system(size: 12))
-                    .foregroundStyle(DefaultTheme.primaryText.opacity(0.9))
-                    .textSelection(.enabled)
-                    .lineLimit(expanded ? nil : 2)
+                if expanded {
+                    // Full block rendering once opened; the collapsed teaser
+                    // stays a 2-line inline Text (lineLimit can't span blocks).
+                    MarkdownBlockView(text)
+                        .textSelection(.enabled)
+                } else {
+                    Text(PRWorkspaceView.markdown(text))
+                        .font(.system(size: 12))
+                        .foregroundStyle(DefaultTheme.primaryText.opacity(0.9))
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                }
             }
         }
         .padding(10)
@@ -72,6 +79,9 @@ struct PRWorkspaceView: View {
     /// ("Explain these lines…", "Ask about…"). nil = quick actions still work
     /// through a session opened in the Sessions tab.
     var sendToSession: ((String) -> Void)?
+    /// Review pane open: releasing a drag selection types the lines into the
+    /// session's input (no submit — the user adds their question).
+    var transcribeToSession: ((DiffSnippet) -> Void)?
 
     @State private var prDetail: GitHubService.PRDetail?
     /// Parsed + row-paired ONCE when the diff arrives (off the main thread) —
@@ -208,9 +218,9 @@ struct PRWorkspaceView: View {
 
             if let detail = prDetail {
                 if !detail.body.isEmpty {
-                    Text(Self.markdown(detail.body))
-                        .font(.system(size: 12))
-                        .foregroundStyle(DefaultTheme.secondaryText)
+                    // Block-level rendering: headings, lists, quotes and
+                    // fences as structure — not literal ## and -.
+                    MarkdownBlockView(detail.body)
                         .textSelection(.enabled)
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -259,7 +269,8 @@ struct PRWorkspaceView: View {
                                       \(snippet.code)
                                       ```
                                       """)
-                                  })
+                                  },
+                                  onSelectionRelease: transcribeToSession)
                 }
             }
 

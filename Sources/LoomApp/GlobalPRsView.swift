@@ -226,7 +226,19 @@ struct GlobalPRsView: View {
                                                 paneOpen = true
                                             }
                                         }
-                                    })
+                                    },
+                                    transcribeToSession: paneOpen ? { snippet in
+                                        guard let id = paneSessionID else { return }
+                                        Task {
+                                            await model.typeIntoSession("""
+                                            \(snippet.file) L\(snippet.firstLine)–L\(snippet.lastLine):
+                                            ```diff
+                                            \(snippet.code)
+                                            ```
+
+                                            """, id: id)
+                                        }
+                                    } : nil)
                         .frame(minWidth: 420)
                     if paneOpen, let sessionID = paneSessionID {
                         embeddedSession(sessionID)

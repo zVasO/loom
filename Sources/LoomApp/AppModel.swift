@@ -526,6 +526,14 @@ public final class AppModel {
         }
     }
 
+    /// Types text into a session's input WITHOUT submitting — wrapped in a
+    /// bracketed-paste sequence so claude treats the newlines as one pasted
+    /// block instead of submitting on each one.
+    public func typeIntoSession(_ text: String, id: SessionID) async {
+        guard let surface = await surface(for: id) else { return }
+        surface.send("\u{1B}[200~" + text + "\u{1B}[201~")
+    }
+
     /// Phase 4 — diff quick actions: guarantees the PR's review session and
     /// delivers the message once the agent has painted (fresh sessions boot
     /// for seconds; sending into the void helps nobody).
