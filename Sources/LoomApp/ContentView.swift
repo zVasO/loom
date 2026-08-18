@@ -315,6 +315,10 @@ struct ContentView: View {
         actions.append(PaletteAction(id: "nav.sessions", icon: "square.stack",
                                      title: "Go to Sessions", subtitle: "The stacks and their tabs",
                                      section: "Navigation") { tab = .sessions })
+        actions.append(PaletteAction(id: "nav.prs", icon: "arrow.triangle.pull",
+                                     title: "Go to Pull Requests",
+                                     subtitle: "Every project's open PRs",
+                                     section: "Navigation") { tab = .prs })
         actions.append(PaletteAction(id: "nav.overview", icon: "square.grid.2x2",
                                      title: "Open Mission Control",
                                      subtitle: "Every live session in a grid",

@@ -469,6 +469,21 @@ public final class AppModel {
         }
     }
 
+    /// Phase 4 — diff quick actions: guarantees the PR's review session and
+    /// delivers the message once the agent has painted (fresh sessions boot
+    /// for seconds; sending into the void helps nobody).
+    public func sendToPRReviewSession(_ message: String,
+                                      pr: GitHubService.PullRequest,
+                                      in projectID: ProjectID) async -> SessionID? {
+        guard let id = await launchPRReviewSession(pr, in: projectID) else { return nil }
+        guard let surface = await surface(for: id) else { return id }
+        for _ in 0..<40 where surface.screen.revision == 0 {
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        surface.send(message + "\r")
+        return id
+    }
+
     /// The guided tour: claude -p over the PR diff, strict-JSON answer parsed
     /// into chapters + a playful risk gauge. Slow (an agent run) — call it from
     /// a task, show progress.

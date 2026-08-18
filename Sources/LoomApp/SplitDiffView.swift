@@ -5,9 +5,30 @@ import SwiftUI
 /// GitHub-style side-by-side diff: per-file sections (path, +/- counts,
 /// collapsible), aligned old/new columns with line-number gutters and
 /// red/green tinted backgrounds.
+/// A selected span of diff lines, ready to be sent to the review session.
+struct DiffSnippet {
+    let file: String
+    let firstLine: Int
+    let lastLine: Int
+    let code: String
+}
+
 struct SplitDiffView: View {
     let files: [DiffParser.File]
+    /// Phase 4 — quick actions on a line selection. nil hides the bar's
+    /// session actions (Copy always works).
+    var onExplain: ((DiffSnippet) -> Void)?
+    var onAsk: ((DiffSnippet, String) -> Void)?
+
     @State private var collapsed: Set<String> = []
+    /// Selection: click anchors, shift-click extends — one hunk at a time.
+    @State private var anchor: SelectionPoint?
+    @State private var range: SelectionRange?
+    @State private var askText = ""
+    @State private var asking = false
+
+    struct SelectionPoint: Equatable { let file: String; let hunk: Int; let row: Int }
+    struct SelectionRange: Equatable { let file: String; let hunk: Int; let rows: ClosedRange<Int> }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -15,6 +36,112 @@ struct SplitDiffView: View {
                 fileSection(file)
             }
         }
+        .overlay(alignment: .bottom) {
+            if range != nil { quickActionBar }
+        }
+        .onExitCommand { clearSelection() }
+    }
+
+    private func clearSelection() {
+        anchor = nil
+        range = nil
+        asking = false
+        askText = ""
+    }
+
+    private func handleTap(file: String, hunk: Int, row: Int) {
+        let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
+        if shift, let anchor, anchor.file == file, anchor.hunk == hunk {
+            range = SelectionRange(file: file, hunk: hunk,
+                                   rows: min(anchor.row, row)...max(anchor.row, row))
+        } else {
+            anchor = SelectionPoint(file: file, hunk: hunk, row: row)
+            range = SelectionRange(file: file, hunk: hunk, rows: row...row)
+        }
+    }
+
+    private func isSelected(file: String, hunk: Int, row: Int) -> Bool {
+        guard let range else { return false }
+        return range.file == file && range.hunk == hunk && range.rows.contains(row)
+    }
+
+    /// The selected rows as a snippet: the NEW side when present, else the
+    /// old — with +/− markers so the agent sees what changed.
+    private var snippet: DiffSnippet? {
+        guard let range,
+              let file = files.first(where: { $0.path == range.file }),
+              range.hunk < file.hunks.count else { return nil }
+        let rows = DiffParser.splitRows(file.hunks[range.hunk])
+        let picked = range.rows.clamped(to: 0...(rows.count - 1))
+        var lines: [String] = []
+        var numbers: [Int] = []
+        for index in picked {
+            let row = rows[index]
+            if let left = row.left, row.right == nil {
+                lines.append("- " + left.text)
+                left.oldNumber.map { numbers.append($0) }
+            }
+            if let right = row.right {
+                lines.append((row.left == nil && right.kind == .addition ? "+ " :
+                              right.kind == .addition ? "+ " : "  ") + right.text)
+                right.newNumber.map { numbers.append($0) }
+            }
+        }
+        guard !lines.isEmpty else { return nil }
+        return DiffSnippet(file: range.file,
+                           firstLine: numbers.min() ?? 0,
+                           lastLine: numbers.max() ?? 0,
+                           code: lines.joined(separator: "\n"))
+    }
+
+    /// Floating bar over the diff: what is selected + what to do with it.
+    private var quickActionBar: some View {
+        HStack(spacing: 10) {
+            if let snippet {
+                Text("\(snippet.file) L\(snippet.firstLine)–\(snippet.lastLine)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .lineLimit(1)
+                if asking {
+                    TextField("Ask about these lines…", text: $askText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .frame(width: 240)
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
+                        .onSubmit {
+                            let question = askText.trimmingCharacters(in: .whitespaces)
+                            guard !question.isEmpty else { return }
+                            onAsk?(snippet, question)
+                            clearSelection()
+                        }
+                } else {
+                    if onExplain != nil {
+                        AccentButton("Explain these lines") {
+                            onExplain?(snippet)
+                            clearSelection()
+                        }
+                    }
+                    if onAsk != nil {
+                        GhostButton("Ask…", systemImage: "bubble.left") { asking = true }
+                    }
+                    GhostButton("Copy", systemImage: "doc.on.doc") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(snippet.code, forType: .string)
+                        clearSelection()
+                    }
+                }
+                HoverIconButton(systemImage: "xmark", help: "Clear selection (esc)") {
+                    clearSelection()
+                }
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(DefaultTheme.accent.opacity(0.5), lineWidth: 1))
+        .shadow(color: .black.opacity(0.5), radius: 14, y: 4)
+        .padding(.bottom, 10)
     }
 
     private func fileSection(_ file: DiffParser.File) -> some View {
@@ -47,8 +174,8 @@ struct SplitDiffView: View {
             }
 
             if !collapsed.contains(file.path) {
-                ForEach(Array(file.hunks.enumerated()), id: \.offset) { _, hunk in
-                    hunkView(hunk)
+                ForEach(Array(file.hunks.enumerated()), id: \.offset) { hunkIndex, hunk in
+                    hunkView(hunk, file: file.path, hunkIndex: hunkIndex)
                 }
             }
         }
@@ -57,7 +184,7 @@ struct SplitDiffView: View {
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
-    private func hunkView(_ hunk: DiffParser.Hunk) -> some View {
+    private func hunkView(_ hunk: DiffParser.Hunk, file: String, hunkIndex: Int) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(hunk.header)
                 .font(.system(size: 10, design: .monospaced))
@@ -67,7 +194,7 @@ struct SplitDiffView: View {
                 .background(DefaultTheme.surface)
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(DiffParser.splitRows(hunk).enumerated()), id: \.offset) { _, row in
+                    ForEach(Array(DiffParser.splitRows(hunk).enumerated()), id: \.offset) { rowIndex, row in
                         HStack(alignment: .top, spacing: 0) {
                             side(row.left, isOld: true)
                             Rectangle()
@@ -76,6 +203,11 @@ struct SplitDiffView: View {
                             side(row.right, isOld: false)
                         }
                         .fixedSize(horizontal: false, vertical: true)
+                        // Line selection: click anchors, shift-click extends.
+                        .overlay(Rectangle().fill(DefaultTheme.accent.opacity(
+                            isSelected(file: file, hunk: hunkIndex, row: rowIndex) ? 0.10 : 0)))
+                        .contentShape(Rectangle())
+                        .onTapGesture { handleTap(file: file, hunk: hunkIndex, row: rowIndex) }
                     }
                 }
             }

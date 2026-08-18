@@ -157,7 +157,16 @@ struct GlobalPRsView: View {
                 Divider().overlay(DefaultTheme.cardBorder)
                 HSplitView {
                     PRWorkspaceView(model: model, project: project, pr: pr,
-                                    onBack: nil, onOpenSession: onOpenSession)
+                                    onBack: nil, onOpenSession: onOpenSession,
+                                    sendToSession: { message in
+                                        Task {
+                                            if let id = await model.sendToPRReviewSession(
+                                                message, pr: pr, in: project.id) {
+                                                paneSessionID = id
+                                                paneOpen = true
+                                            }
+                                        }
+                                    })
                         .frame(minWidth: 420)
                     if paneOpen, let sessionID = paneSessionID {
                         embeddedSession(sessionID)

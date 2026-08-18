@@ -14,6 +14,10 @@ struct PRWorkspaceView: View {
     let pr: GitHubService.PullRequest
     var onBack: (() -> Void)?
     let onOpenSession: (SessionID) -> Void
+    /// Phase 4 — receives the composed message for the PR's review session
+    /// ("Explain these lines…", "Ask about…"). nil = quick actions still work
+    /// through a session opened in the Sessions tab.
+    var sendToSession: ((String) -> Void)?
 
     @State private var prDetail: GitHubService.PRDetail?
     @State private var prDiff = ""
@@ -34,6 +38,19 @@ struct PRWorkspaceView: View {
         .task(id: pr.number) {
             prDetail = await model.prDetail(pr.number, in: project.id)
             prDiff = await model.prDiff(pr.number, in: project.id)
+        }
+    }
+
+    private func deliver(_ message: String) {
+        if let sendToSession {
+            sendToSession(message)
+        } else {
+            // Fallback (project tab): route through the review session and jump to it.
+            Task {
+                if let id = await model.sendToPRReviewSession(message, pr: pr, in: project.id) {
+                    onOpenSession(id)
+                }
+            }
         }
     }
 
@@ -119,7 +136,25 @@ struct PRWorkspaceView: View {
                                   color: DefaultTheme.secondaryText)
                     // GitHub-style side-by-side: old on the left, new on the
                     // right, aligned and tinted, per-file collapsible sections.
-                    SplitDiffView(files: files)
+                    SplitDiffView(files: files,
+                                  onExplain: { snippet in
+                                      deliver("""
+                                      Explain these lines from \(snippet.file) \
+                                      (L\(snippet.firstLine)–L\(snippet.lastLine)):
+                                      ```diff
+                                      \(snippet.code)
+                                      ```
+                                      """)
+                                  },
+                                  onAsk: { snippet, question in
+                                      deliver("""
+                                      About these lines from \(snippet.file) \
+                                      (L\(snippet.firstLine)–L\(snippet.lastLine)): \(question)
+                                      ```diff
+                                      \(snippet.code)
+                                      ```
+                                      """)
+                                  })
                 }
             }
 
