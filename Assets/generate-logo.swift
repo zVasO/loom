@@ -4,12 +4,10 @@ import AppKit
 // threads — one orange, one cyan (the session woven into the project).
 // Over/under interlacing drawn by re-painting warp segments on top.
 
-func drawLogo(size: CGFloat) -> NSImage {
-    let image = NSImage(size: NSSize(width: size, height: size))
-    image.lockFocus()
-    guard let ctx = NSGraphicsContext.current?.cgContext else { fatalError() }
-
+func drawLogo(into ctx: CGContext, size: CGFloat) {
     let s = size / 1024.0   // design in 1024 space
+    // NO white backing: everything outside the rounded square stays transparent.
+    ctx.clear(CGRect(x: 0, y: 0, width: size, height: size))
 
     // Background: rounded square, near-black with a hint of depth.
     let corner = 232 * s
@@ -66,24 +64,23 @@ func drawLogo(size: CGFloat) -> NSImage {
         roundedBar(CGRect(x: x, y: weftY[1] - 14 * s, width: thread, height: thread + 28 * s), orangeDim)
     }
 
-    image.unlockFocus()
-    return image
 }
 
-func writePNG(_ image: NSImage, to path: String, pixels: Int) {
+func writePNG(to path: String, pixels: Int) {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
                                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
                                isPlanar: false, colorSpaceName: .deviceRGB,
                                bytesPerRow: 0, bitsPerPixel: 0)!
+    let context = NSGraphicsContext(bitmapImageRep: rep)!
     NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    image.draw(in: NSRect(x: 0, y: 0, width: pixels, height: pixels))
+    NSGraphicsContext.current = context
+    drawLogo(into: context.cgContext, size: CGFloat(pixels))
     NSGraphicsContext.restoreGraphicsState()
     try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
 }
 
 let out = CommandLine.arguments[1]
 for px in [16, 32, 64, 128, 256, 512, 1024] {
-    writePNG(drawLogo(size: CGFloat(px)), to: "\(out)/icon_\(px).png", pixels: px)
+    writePNG(to: "\(out)/icon_\(px).png", pixels: px)
 }
 print("done")
