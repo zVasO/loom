@@ -12,17 +12,36 @@ public enum KeyTranslator {
         switch keyCode {
         case 36, 76: return option ? "\u{1b}\r" : "\r"   // Return (+ numeric keypad)
         case 48: return "\t"
-        case 51: return "\u{7f}"                          // backspace → DEL
+        case 51: return option ? "\u{17}" : "\u{7f}"      // ⌥⌫ deletes a word (Ctrl+W); backspace → DEL
         case 53: return "\u{1b}"
         case 117: return "\u{1b}[3~"                      // forward delete
         case 115: return "\u{1b}[H"
         case 119: return "\u{1b}[F"
         case 116: return "\u{1b}[5~"
         case 121: return "\u{1b}[6~"
-        case 123: return "\u{1b}[D"
-        case 124: return "\u{1b}[C"
+        case 123: return option ? "\u{1b}b" : "\u{1b}[D"  // ⌥← jumps a word back
+        case 124: return option ? "\u{1b}f" : "\u{1b}[C"  // ⌥→ jumps a word forward
         case 125: return "\u{1b}[B"
         case 126: return "\u{1b}[A"
+        default: return nil
+        }
+    }
+
+    /// Mac editing shortcuts (⌘) → the sequences claude's input understands.
+    /// Letters match on the TYPED character (AZERTY-safe), arrows/backspace on
+    /// the key code. nil = not an edit shortcut: the app keeps it (⌘K, ⌘N…).
+    public static func command(characters: String, keyCode: UInt16) -> String? {
+        switch keyCode {
+        case 123: return "\u{01}"        // ⌘← — line start (Ctrl+A)
+        case 124: return "\u{05}"        // ⌘→ — line end (Ctrl+E)
+        case 51: return "\u{15}"         // ⌘⌫ — kill to line start (Ctrl+U)
+        default: break
+        }
+        switch characters {
+        // ⌘A — select the whole input: home, then shift-End extends the
+        // selection to the end (degrades to end-of-line on old claude builds).
+        case "a": return "\u{01}\u{1b}[1;2F"
+        case "z": return "\u{1f}"        // ⌘Z — readline undo
         default: return nil
         }
     }
@@ -173,11 +192,20 @@ public struct KeyCaptureView: NSViewRepresentable {
         }
 
         public override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            guard event.modifierFlags.contains(.command),
+                  !event.modifierFlags.contains(.control) else {
+                return super.performKeyEquivalent(with: event)
+            }
+            let characters = event.charactersIgnoringModifiers ?? ""
             // ⌘V: paste directly into the agent's field.
-            if event.modifierFlags.contains(.command),
-               event.charactersIgnoringModifiers == "v",
-               let text = NSPasteboard.general.string(forType: .string) {
+            if characters == "v", let text = NSPasteboard.general.string(forType: .string) {
                 onText?(text)
+                return true
+            }
+            // Mac editing shortcuts (⌘A, ⌘Z, ⌘←/→, ⌘⌫) — everything else
+            // (⌘K, ⌘N, ⌘T…) falls through to the app's own commands.
+            if let bytes = KeyTranslator.command(characters: characters, keyCode: event.keyCode) {
+                onText?(bytes)
                 return true
             }
             return super.performKeyEquivalent(with: event)

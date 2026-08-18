@@ -56,5 +56,43 @@ struct GitHubServiceTests {
         #expect(prs.first?.checksPassing == true)
         #expect(prs.first?.isDraft == true)
     }
+
+    // Line-anchored review comments: GitHub renders a ```suggestion block as
+    // a one-click "Apply", so the body must be built exactly.
+    @Test("a plain line comment keeps the author's text untouched")
+    func plainLineComment() {
+        #expect(GitHubService.lineCommentBody("Rename this for clarity.",
+                                              suggestion: nil) == "Rename this for clarity.")
+    }
+
+    @Test("a suggestion is wrapped in a ```suggestion fence")
+    func suggestionBody() {
+        let body = GitHubService.lineCommentBody("", suggestion: "let total = a + b")
+        #expect(body == "```suggestion\nlet total = a + b\n```")
+    }
+
+    @Test("a suggestion with a note keeps the note above the fence")
+    func suggestionWithNote() {
+        let body = GitHubService.lineCommentBody("Simpler:", suggestion: "a + b")
+        #expect(body == "Simpler:\n\n```suggestion\na + b\n```")
+    }
+
+    @Test("a multi-line selection asks GitHub for a spanning comment")
+    func spanningRange() {
+        let payload = GitHubService.lineCommentPayload(path: "src/a.swift", firstLine: 10,
+                                                       lastLine: 14, sha: "abc", body: "x")
+        #expect(payload["start_line"] as? Int == 10)
+        #expect(payload["line"] as? Int == 14)
+        #expect(payload["side"] as? String == "RIGHT")
+        #expect(payload["commit_id"] as? String == "abc")
+    }
+
+    @Test("a single-line selection omits start_line — GitHub rejects a 1-line span")
+    func singleLine() {
+        let payload = GitHubService.lineCommentPayload(path: "src/a.swift", firstLine: 7,
+                                                       lastLine: 7, sha: "abc", body: "x")
+        #expect(payload["start_line"] == nil)
+        #expect(payload["line"] as? Int == 7)
+    }
 }
 

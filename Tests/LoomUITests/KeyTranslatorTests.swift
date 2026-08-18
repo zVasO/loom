@@ -50,4 +50,41 @@ struct KeyTranslatorTests {
     func toucheMuette() {
         #expect(KeyTranslator.bytes(keyCode: 63, characters: "", option: false) == nil)
     }
+
+    @Test("Option+arrows jump by word, Option+backspace deletes a word")
+    func optionEdition() {
+        #expect(KeyTranslator.bytes(keyCode: 123, characters: "", option: true) == "\u{1b}b")
+        #expect(KeyTranslator.bytes(keyCode: 124, characters: "", option: true) == "\u{1b}f")
+        #expect(KeyTranslator.bytes(keyCode: 51, characters: "", option: true) == "\u{17}")
+    }
+
+    // Mac editing shortcuts, translated to the sequences claude's input
+    // understands — matched on the typed character (AZERTY-safe), arrows and
+    // backspace on the hardware key code.
+    @Test("⌘A selects the whole input: home, then shift-select to the end")
+    func commandeToutSelectionner() {
+        #expect(KeyTranslator.command(characters: "a", keyCode: 0) == "\u{01}\u{1b}[1;2F")
+    }
+
+    @Test("⌘Z undoes (readline undo)")
+    func commandeAnnuler() {
+        #expect(KeyTranslator.command(characters: "z", keyCode: 6) == "\u{1f}")
+    }
+
+    @Test("⌘← / ⌘→ jump to line start / end")
+    func commandeDebutFinDeLigne() {
+        #expect(KeyTranslator.command(characters: "", keyCode: 123) == "\u{01}")
+        #expect(KeyTranslator.command(characters: "", keyCode: 124) == "\u{05}")
+    }
+
+    @Test("⌘backspace kills to the line start")
+    func commandeEffacerLigne() {
+        #expect(KeyTranslator.command(characters: "", keyCode: 51) == "\u{15}")
+    }
+
+    @Test("app-level shortcuts are NOT edit shortcuts: nil lets them through")
+    func commandeInconnue() {
+        #expect(KeyTranslator.command(characters: "k", keyCode: 40) == nil)
+        #expect(KeyTranslator.command(characters: "n", keyCode: 45) == nil)
+    }
 }

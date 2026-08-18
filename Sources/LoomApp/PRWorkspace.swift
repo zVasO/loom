@@ -79,7 +79,7 @@ struct PRWorkspaceView: View {
     /// ("Explain these lines…", "Ask about…"). nil = quick actions still work
     /// through a session opened in the Sessions tab.
     var sendToSession: ((String) -> Void)?
-    /// Review pane open: releasing a drag selection types the lines into the
+    /// Review pane open: "Add to claude session" types the lines into the
     /// session's input (no submit — the user adds their question).
     var transcribeToSession: ((DiffSnippet) -> Void)?
 
@@ -270,7 +270,11 @@ struct PRWorkspaceView: View {
                                       ```
                                       """)
                                   },
-                                  onSelectionRelease: transcribeToSession)
+                                  onAddToSession: transcribeToSession,
+                                  onComment: { snippet, text, isSuggestion in
+                                      postLineComment(snippet, text: text,
+                                                      isSuggestion: isSuggestion)
+                                  })
                 }
             }
 
@@ -321,6 +325,22 @@ struct PRWorkspaceView: View {
                 reviewBody = ""
                 loadPRDetail(pr, project: project)
             }
+            prActionBusy = false
+        }
+    }
+
+    /// Posts the selection's comment on GitHub, anchored to its real lines.
+    private func postLineComment(_ snippet: DiffSnippet, text: String, isSuggestion: Bool) {
+        prActionBusy = true
+        Task {
+            let error = await model.commentOnLines(
+                pr.number, path: snippet.file,
+                firstLine: snippet.firstLine, lastLine: snippet.lastLine,
+                note: isSuggestion ? "" : text,
+                suggestion: isSuggestion ? text : nil,
+                in: project.id)
+            prActionOutput = error ?? (isSuggestion ? "Suggestion posted ✓" : "Comment posted ✓")
+            if error == nil { await load(refresh: true) }
             prActionBusy = false
         }
     }

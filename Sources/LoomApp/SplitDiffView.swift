@@ -33,17 +33,20 @@ struct SplitDiffView: View {
     /// session actions (Copy always works).
     var onExplain: ((DiffSnippet) -> Void)?
     var onAsk: ((DiffSnippet, String) -> Void)?
-    /// When set (review session pane open), releasing a drag selection
-    /// transcribes the lines straight into the session — and replaces the
-    /// floating bar, which would duplicate it.
-    var onSelectionRelease: ((DiffSnippet) -> Void)?
+    /// Adds the lines to the review session's input WITHOUT submitting —
+    /// nil when no session pane is open.
+    var onAddToSession: ((DiffSnippet) -> Void)?
+    /// Posts a review comment on the PR; the Bool asks for a ```suggestion
+    /// block (GitHub renders it as a one-click apply).
+    var onComment: ((DiffSnippet, String, Bool) -> Void)?
 
     @State private var collapsed: Set<String> = []
     /// Selection: click anchors, shift-click extends — one hunk at a time.
     @State private var anchor: SelectionPoint?
     @State private var range: SelectionRange?
-    @State private var askText = ""
-    @State private var asking = false
+    /// What the action bar is composing, and its text.
+    @State private var composer: Composer = .none
+    @State private var draft = ""
     /// Measured height of one diff row — turns a drag's y position into a
     /// row index (all rows share the same single-line height).
     @State private var rowHeight: CGFloat = 0
@@ -60,9 +63,7 @@ struct SplitDiffView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            // With a session pane open the release already transcribed the
-            // lines — the floating bar would only duplicate them.
-            if range != nil, onSelectionRelease == nil { quickActionBar }
+            if range != nil { quickActionBar }
         }
         .onExitCommand { clearSelection() }
     }
@@ -70,8 +71,8 @@ struct SplitDiffView: View {
     private func clearSelection() {
         anchor = nil
         range = nil
-        asking = false
-        askText = ""
+        composer = .none
+        draft = ""
     }
 
     private func isSelected(file: String, hunk: Int, row: Int) -> Bool {
@@ -108,54 +109,126 @@ struct SplitDiffView: View {
                            code: lines.joined(separator: "\n"))
     }
 
+    /// What the composer field is currently writing.
+    enum Composer: Equatable { case none, ask, comment, suggestion }
+
     /// Floating bar over the diff: what is selected + what to do with it.
+    /// Nothing leaves this bar without an explicit click.
     private var quickActionBar: some View {
-        HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             if let snippet {
-                Text("\(snippet.file) L\(snippet.firstLine)–\(snippet.lastLine)")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                    .lineLimit(1)
-                if asking {
-                    TextField("Ask about these lines…", text: $askText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .frame(width: 240)
-                        .padding(.horizontal, 8).padding(.vertical, 5)
-                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
-                        .onSubmit {
-                            let question = askText.trimmingCharacters(in: .whitespaces)
-                            guard !question.isEmpty else { return }
-                            onAsk?(snippet, question)
-                            clearSelection()
-                        }
-                } else {
-                    if onExplain != nil {
-                        AccentButton("Explain these lines") {
-                            onExplain?(snippet)
-                            clearSelection()
-                        }
-                    }
-                    if onAsk != nil {
-                        GhostButton("Ask…", systemImage: "bubble.left") { asking = true }
-                    }
-                    GhostButton("Copy", systemImage: "doc.on.doc") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(snippet.code, forType: .string)
+                HStack(spacing: 10) {
+                    Text("\(snippet.file) L\(snippet.firstLine)–\(snippet.lastLine)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .lineLimit(1)
+                    Text("\(snippet.lastLine - snippet.firstLine + 1) lines")
+                        .font(.system(size: 10))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                    Spacer(minLength: 8)
+                    HoverIconButton(systemImage: "xmark", help: "Clear selection (esc)") {
                         clearSelection()
                     }
                 }
-                HoverIconButton(systemImage: "xmark", help: "Clear selection (esc)") {
-                    clearSelection()
+                if composer == .none {
+                    HStack(spacing: 8) {
+                        if onAddToSession != nil {
+                            AccentButton("Add to claude session", systemImage: "sparkles") {
+                                onAddToSession?(snippet)
+                                clearSelection()
+                            }
+                        } else if onExplain != nil {
+                            AccentButton("Explain these lines") {
+                                onExplain?(snippet)
+                                clearSelection()
+                            }
+                        }
+                        if onAsk != nil {
+                            GhostButton("Ask claude…", systemImage: "bubble.left") {
+                                composer = .ask
+                            }
+                        }
+                        if onComment != nil {
+                            GhostButton("Comment", systemImage: "text.bubble") {
+                                composer = .comment
+                            }
+                            GhostButton("Suggest", systemImage: "plus.forwardslash.minus") {
+                                // A suggestion EDITS these lines: start from them.
+                                draft = strippedCode(snippet)
+                                composer = .suggestion
+                            }
+                        }
+                        GhostButton("Copy", systemImage: "doc.on.doc") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(snippet.code, forType: .string)
+                            clearSelection()
+                        }
+                    }
+                } else {
+                    composerField(snippet)
                 }
             }
         }
+        .frame(maxWidth: 620)
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10)
             .stroke(DefaultTheme.accent.opacity(0.5), lineWidth: 1))
         .shadow(color: .black.opacity(0.5), radius: 14, y: 4)
         .padding(.bottom, 10)
+    }
+
+    /// The composer: one field, three destinations. Return submits, esc cancels.
+    @ViewBuilder
+    private func composerField(_ snippet: DiffSnippet) -> some View {
+        let placeholder = switch composer {
+        case .ask: "Ask claude about these lines…"
+        case .comment: "Leave a review comment on these lines…"
+        case .suggestion: "Your suggested replacement for these lines…"
+        case .none: ""
+        }
+        VStack(alignment: .leading, spacing: 6) {
+            TextField(placeholder, text: $draft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12,
+                              design: composer == .suggestion ? .monospaced : .default))
+                .lineLimit(composer == .suggestion ? 3...10 : 1...5)
+                .padding(8)
+                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
+                .onSubmit { submitComposer(snippet) }
+            HStack(spacing: 8) {
+                if composer == .suggestion {
+                    Text("Posted as a GitHub suggestion — one click to apply.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                }
+                Spacer()
+                GhostButton("Cancel") { composer = .none; draft = "" }
+                AccentButton(composer == .ask ? "Send" : "Post") { submitComposer(snippet) }
+            }
+        }
+    }
+
+    private func submitComposer(_ snippet: DiffSnippet) {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        switch composer {
+        case .ask: onAsk?(snippet, text)
+        case .comment: onComment?(snippet, text, false)
+        case .suggestion: onComment?(snippet, draft, true)
+        case .none: break
+        }
+        clearSelection()
+    }
+
+    /// The selected lines without diff markers — what a suggestion edits
+    /// (deletions dropped: they are gone in the new version).
+    private func strippedCode(_ snippet: DiffSnippet) -> String {
+        snippet.code
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.hasPrefix("- ") }
+            .map { $0.hasPrefix("+ ") || $0.hasPrefix("  ") ? String($0.dropFirst(2)) : String($0) }
+            .joined(separator: "\n")
     }
 
     private func fileSection(_ entry: DiffFileRows) -> some View {
@@ -261,11 +334,9 @@ struct SplitDiffView: View {
                                                rows: min(start, row)...max(start, row))
                     }
                 }
-                .onEnded { _ in
-                    if let onSelectionRelease, let snippet {
-                        onSelectionRelease(snippet)
-                    }
-                })
+                // Releasing only ARMS the action bar — the selection is never
+                // sent anywhere on its own.
+                .onEnded { _ in })
         }
         .onPreferenceChange(DiffRowHeightKey.self) { height in
             if height > 0, rowHeight != height { rowHeight = height }

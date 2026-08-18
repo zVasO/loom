@@ -95,6 +95,29 @@ public struct GitHubService: Sendable {
                         comments: comments, reviews: reviews)
     }
 
+    /// A review comment's body. GitHub turns a ```suggestion fence into a
+    /// one-click "Apply suggestion" — the note, when present, sits above it.
+    public static func lineCommentBody(_ note: String, suggestion: String?) -> String {
+        let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let suggestion else { return trimmedNote }
+        let fence = "```suggestion\n"
+            + suggestion.trimmingCharacters(in: .newlines) + "\n```"
+        return trimmedNote.isEmpty ? fence : trimmedNote + "\n\n" + fence
+    }
+
+    /// The `pulls/{n}/comments` payload. A single-line comment must NOT carry
+    /// start_line (GitHub rejects a one-line span).
+    public static func lineCommentPayload(path: String, firstLine: Int, lastLine: Int,
+                                          sha: String, body: String) -> [String: Any] {
+        var payload: [String: Any] = ["path": path, "line": lastLine, "side": "RIGHT",
+                                      "commit_id": sha, "body": body]
+        if firstLine < lastLine {
+            payload["start_line"] = firstLine
+            payload["start_side"] = "RIGHT"
+        }
+        return payload
+    }
+
     // MARK: - gh execution
 
     public func listPRs(in repo: URL) async throws -> [PullRequest] {
@@ -123,6 +146,27 @@ public struct GitHubService: Sendable {
 
     public func comment(_ number: Int, body: String, in repo: URL) async throws {
         _ = try await run(["pr", "comment", "\(number)", "--body", body], in: repo)
+    }
+
+    /// Posts a review comment anchored to real diff lines (what GitHub's own
+    /// "comment on this line" does) — `suggestion` makes it appliable.
+    public func commentOnLines(_ number: Int, path: String, firstLine: Int, lastLine: Int,
+                               note: String, suggestion: String?, in repo: URL) async throws {
+        let head = try await run(["pr", "view", "\(number)", "--json", "headRefOid",
+                                  "--jq", ".headRefOid"], in: repo)
+        let sha = String(decoding: head, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let payload = Self.lineCommentPayload(
+            path: path, firstLine: firstLine, lastLine: lastLine, sha: sha,
+            body: Self.lineCommentBody(note, suggestion: suggestion))
+        let json = try JSONSerialization.data(withJSONObject: payload)
+        // --input - : the body travels as JSON on stdin, so newlines and
+        // backticks survive intact.
+        _ = try await execute(Self.ghPath ?? URL(fileURLWithPath: "/usr/bin/false"),
+                              arguments: ["api", "--method", "POST",
+                                          "repos/{owner}/{repo}/pulls/\(number)/comments",
+                                          "--input", "-"],
+                              in: repo, stdin: json)
     }
 
     /// Checks the PR branch out into a dedicated worktree (`<repo>-worktrees/pr-N`)
@@ -208,11 +252,18 @@ public struct GitHubService: Sendable {
         try await execute(URL(fileURLWithPath: "/usr/bin/git"), arguments: arguments, in: directory)
     }
 
-    private func execute(_ executable: URL, arguments: [String], in directory: URL) async throws -> Data {
+    private func execute(_ executable: URL, arguments: [String], in directory: URL,
+                         stdin: Data? = nil) async throws -> Data {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
         process.currentDirectoryURL = directory
+        if let stdin {
+            let input = Pipe()
+            process.standardInput = input
+            input.fileHandleForWriting.write(stdin)
+            try? input.fileHandleForWriting.close()
+        }
         var environment = ProcessInfo.processInfo.environment
         environment["GH_PROMPT_DISABLED"] = "1"
         environment["GIT_TERMINAL_PROMPT"] = "0"
