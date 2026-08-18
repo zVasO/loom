@@ -368,14 +368,24 @@ public final class AppModel {
         return (try? await GitHubService().listPRs(in: repo)) ?? []
     }
 
-    public func prDetail(_ number: Int, in projectID: ProjectID) async -> GitHubService.PRDetail? {
+    public func prDetail(_ number: Int, in projectID: ProjectID,
+                         refresh: Bool = false) async -> GitHubService.PRDetail? {
         guard let repo = projectRepo(projectID) else { return nil }
-        return try? await GitHubService().prDetail(number, in: repo)
+        let key = prKey(number, projectID)
+        if !refresh, let cached = prDetailCache[key] { return cached }
+        let detail = try? await GitHubService().prDetail(number, in: repo)
+        if let detail { prDetailCache[key] = detail }
+        return detail
     }
 
-    public func prDiff(_ number: Int, in projectID: ProjectID) async -> String {
+    public func prDiff(_ number: Int, in projectID: ProjectID,
+                       refresh: Bool = false) async -> String {
         guard let repo = projectRepo(projectID) else { return "" }
-        return (try? await GitHubService().prDiff(number, in: repo)) ?? ""
+        let key = prKey(number, projectID)
+        if !refresh, let cached = prDiffCache[key] { return cached }
+        let diff = (try? await GitHubService().prDiff(number, in: repo)) ?? ""
+        if !diff.isEmpty { prDiffCache[key] = diff }
+        return diff
     }
 
     /// nil on success, error text otherwise — the panel reports the truth.
@@ -411,23 +421,44 @@ public final class AppModel {
 
     public private(set) var prCache: [ProjectID: [GitHubService.PullRequest]] = [:]
     public private(set) var prLoading: Set<ProjectID> = []
+    /// PRs whose review session is being prepared (worktree fetch + launch) —
+    /// the UI shows progress instead of feeling frozen during the network fetch.
+    public private(set) var prReviewLaunching: Set<String> = []
+    /// PR content caches: selecting an already-seen PR paints instantly instead
+    /// of re-running two gh processes. Invalidated by refreshPRs / submissions.
+    private var prDetailCache: [String: GitHubService.PRDetail] = [:]
+    private var prDiffCache: [String: String] = [:]
 
     public func refreshPRs(for projectID: ProjectID) async {
         guard !prLoading.contains(projectID) else { return }
         prLoading.insert(projectID)
+        let prefix = "\(projectID.rawValue.uuidString)#"
+        prDetailCache = prDetailCache.filter { !$0.key.hasPrefix(prefix) }
+        prDiffCache = prDiffCache.filter { !$0.key.hasPrefix(prefix) }
         prCache[projectID] = await listPRs(for: projectID)
         prLoading.remove(projectID)
+    }
+
+    public func isLaunchingReview(forPR number: Int, in projectID: ProjectID) -> Bool {
+        prReviewLaunching.contains(prKey(number, projectID))
     }
 
     private func prKey(_ number: Int, _ projectID: ProjectID) -> String {
         "\(projectID.rawValue.uuidString)#\(number)"
     }
 
+    /// In-memory mirror of loom.pr.sessions: reviewSession(forPR:) runs per
+    /// sidebar row per frame — deserializing UserDefaults there is waste.
+    private var prSessionMap: [String: String]?
+
     /// The review session attached to a PR, when it still exists somewhere
     /// (live or resumable). Mapping persisted across launches.
     public func reviewSession(forPR number: Int, in projectID: ProjectID) -> SessionID? {
-        let map = UserDefaults.standard.dictionary(forKey: "loom.pr.sessions") as? [String: String]
-        guard let raw = map?[prKey(number, projectID)], let uuid = UUID(uuidString: raw)
+        if prSessionMap == nil {
+            prSessionMap = (UserDefaults.standard.dictionary(forKey: "loom.pr.sessions")
+                            as? [String: String]) ?? [:]
+        }
+        guard let raw = prSessionMap?[prKey(number, projectID)], let uuid = UUID(uuidString: raw)
         else { return nil }
         let id = SessionID(uuid)
         let known = sessions.contains { $0.id == id } || allRecords.contains { $0.id == id }
@@ -439,11 +470,12 @@ public final class AppModel {
                    as? [String: String]) ?? [:]
         map[prKey(number, projectID)] = id.rawValue.uuidString
         UserDefaults.standard.set(map, forKey: "loom.pr.sessions")
+        prSessionMap = map
     }
 
     /// The PR tab's quick action: ONE review session per PR — reattached when
     /// it exists (resumed if dormant), created otherwise: PR checked out in a
-    /// dedicated worktree, claude primed as reviewer, badge "PR #n".
+    /// dedicated worktree, claude launched bare, badge "PR #n".
     public func launchPRReviewSession(_ pr: GitHubService.PullRequest,
                                       in projectID: ProjectID) async -> SessionID? {
         if let existing = reviewSession(forPR: pr.number, in: projectID) {
@@ -452,6 +484,9 @@ public final class AppModel {
             return existing
         }
         guard let manager, let repo = projectRepo(projectID) else { return nil }
+        let key = prKey(pr.number, projectID)
+        prReviewLaunching.insert(key)
+        defer { prReviewLaunching.remove(key) }
         let worktree: URL
         do {
             worktree = try await GitHubService().checkoutPR(pr.number, repo: repo,
@@ -460,19 +495,14 @@ public final class AppModel {
             startupError = "Could not check out PR #\(pr.number): \(Self.ghErrorText(error))"
             return nil
         }
-        let prompt = """
-        You are reviewing PR #\(pr.number) ("\(pr.title)"), checked out in this worktree. \
-        Read the diff (gh pr diff \(pr.number)) and the touched files. Report findings in \
-        order: correctness first, then design, then nitpicks — quote file:line for each. \
-        End with a verdict: ship / fix first. The user may then ask about specific lines.\
-        \(reviewWorktreesReadOnly
-          ? " This worktree is READ-ONLY for review: never commit, push or amend here." : "")
-        """
         do {
             let sessionID = SessionID()
             let token = UUID().uuidString
+            // claude boots BARE — no predefined prompt: the user decides what
+            // the session does (and claude is not burning an agent run on a
+            // review nobody asked for yet).
             var spec = SessionManager.SessionSpec(
-                command: adapter.launchCommand(session: sessionID, initialPrompt: prompt,
+                command: adapter.launchCommand(session: sessionID, initialPrompt: nil,
                                                hookToken: token),
                 workingDirectory: worktree,
                 geometry: preferredGrid,

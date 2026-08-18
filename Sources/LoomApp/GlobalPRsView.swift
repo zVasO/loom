@@ -142,6 +142,8 @@ struct GlobalPRsView: View {
                                      && selectedProjectID == project.id,
                                  hasSession: model.reviewSession(forPR: pr.number,
                                                                  in: project.id) != nil,
+                                 launching: model.isLaunchingReview(forPR: pr.number,
+                                                                    in: project.id),
                                  onSelect: {
                                      selectedProjectID = project.id
                                      selectedPR = pr
@@ -153,6 +155,7 @@ struct GlobalPRsView: View {
     }
 
     private func startReview(_ pr: GitHubService.PullRequest, project: ProjectRecord) {
+        guard !model.isLaunchingReview(forPR: pr.number, in: project.id) else { return }
         selectedProjectID = project.id
         selectedPR = pr
         Task {
@@ -192,10 +195,21 @@ struct GlobalPRsView: View {
                             }
                         }
                     }
-                    AccentButton(model.reviewSession(forPR: pr.number, in: project.id) != nil
-                                 ? "Review session" : "Start review",
-                                 systemImage: "sparkles") {
-                        startReview(pr, project: project)
+                    if model.isLaunchingReview(forPR: pr.number, in: project.id) {
+                        // The checkout fetches from the network: without this
+                        // the click felt like a frozen app.
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Preparing the review worktree…")
+                                .font(.system(size: 11))
+                                .foregroundStyle(DefaultTheme.secondaryText)
+                        }
+                    } else {
+                        AccentButton(model.reviewSession(forPR: pr.number, in: project.id) != nil
+                                     ? "Review session" : "Start review",
+                                     systemImage: "sparkles") {
+                            startReview(pr, project: project)
+                        }
                     }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 8)
@@ -282,6 +296,7 @@ private struct PRSidebarRow: View {
     let pr: GitHubService.PullRequest
     let isSelected: Bool
     let hasSession: Bool
+    let launching: Bool
     let onSelect: () -> Void
     let onStartReview: () -> Void
     @State private var hovered = false
@@ -319,7 +334,10 @@ private struct PRSidebarRow: View {
                 }
             }
             Spacer()
-            if hovered {
+            if launching {
+                ProgressView().controlSize(.mini)
+                    .help("Preparing the review worktree…")
+            } else if hovered {
                 HoverIconButton(systemImage: "sparkles",
                                 help: hasSession ? "Open the review session"
                                                  : "Start a review session",

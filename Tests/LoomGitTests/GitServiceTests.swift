@@ -169,6 +169,39 @@ struct GitShipTests {
 @Suite("Read-only review worktrees", .serialized)
 struct ReadOnlyWorktreeTests {
 
+    @Test("checkoutPR materializes the PR head in a reusable worktree")
+    func checkoutPRWorktree() async throws {
+        let repo = try await makeFixtureRepo()
+        // A bare origin exposing the PR the way GitHub does: refs/pull/N/head.
+        let bare = repo.deletingLastPathComponent()
+            .appendingPathComponent("origin-\(UUID().uuidString.prefix(6)).git")
+        _ = try await git(["init", "--bare", bare.path], in: repo)
+        _ = try await git(["remote", "add", "origin", bare.path], in: repo)
+        _ = try await git(["push", "origin", "main"], in: repo)
+        try "pr work".write(to: repo.appendingPathComponent("pr.txt"),
+                            atomically: true, encoding: .utf8)
+        _ = try await git(["add", "."], in: repo)
+        _ = try await git(["-c", "user.email=t@t", "-c", "user.name=T",
+                           "commit", "-m", "pr head"], in: repo)
+        let prHead = try await git(["rev-parse", "HEAD"], in: repo)
+        _ = try await git(["push", "origin", "HEAD:refs/pull/7/head"], in: repo)
+        _ = try await git(["reset", "--hard", "HEAD~1"], in: repo)
+
+        let worktree = try await GitHubService().checkoutPR(7, repo: repo, readOnly: false)
+
+        #expect(try await git(["rev-parse", "HEAD"], in: worktree) == prHead,
+                "the worktree sits exactly on the PR head")
+        #expect(FileManager.default.fileExists(
+            atPath: worktree.appendingPathComponent("pr.txt").path),
+                "the PR's files are materialized")
+
+        // Reuse: a second checkout of the same PR lands on the same worktree,
+        // still on the PR head, without erroring.
+        let again = try await GitHubService().checkoutPR(7, repo: repo, readOnly: false)
+        #expect(again.standardizedFileURL.path == worktree.standardizedFileURL.path)
+        #expect(try await git(["rev-parse", "HEAD"], in: again) == prHead)
+    }
+
     @Test("a protected worktree refuses commits")
     func commitBlocked() async throws {
         let repo = try await makeFixtureRepo()

@@ -13,8 +13,22 @@ struct DiffSnippet {
     let code: String
 }
 
+/// Precomputed display model: parsing and row pairing happen ONCE, off the
+/// main thread, when the diff loads — the view was re-running both on every
+/// render (every hover, every keystroke), which crawled on large PRs.
+struct DiffFileRows: Identifiable, Equatable, Sendable {
+    let file: DiffParser.File
+    /// splitRows for each hunk, same order as file.hunks.
+    let hunkRows: [[DiffParser.SplitRow]]
+    var id: String { file.path }
+
+    static func compute(_ files: [DiffParser.File]) -> [DiffFileRows] {
+        files.map { DiffFileRows(file: $0, hunkRows: $0.hunks.map(DiffParser.splitRows)) }
+    }
+}
+
 struct SplitDiffView: View {
-    let files: [DiffParser.File]
+    let files: [DiffFileRows]
     /// Phase 4 — quick actions on a line selection. nil hides the bar's
     /// session actions (Copy always works).
     var onExplain: ((DiffSnippet) -> Void)?
@@ -31,7 +45,9 @@ struct SplitDiffView: View {
     struct SelectionRange: Equatable { let file: String; let hunk: Int; let rows: ClosedRange<Int> }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        // Lazy: a large PR materializes thousands of rows — only what is
+        // visible gets built.
+        LazyVStack(alignment: .leading, spacing: 10) {
             ForEach(files) { file in
                 fileSection(file)
             }
@@ -69,9 +85,9 @@ struct SplitDiffView: View {
     /// old — with +/− markers so the agent sees what changed.
     private var snippet: DiffSnippet? {
         guard let range,
-              let file = files.first(where: { $0.path == range.file }),
-              range.hunk < file.hunks.count else { return nil }
-        let rows = DiffParser.splitRows(file.hunks[range.hunk])
+              let file = files.first(where: { $0.id == range.file }),
+              range.hunk < file.hunkRows.count else { return nil }
+        let rows = file.hunkRows[range.hunk]
         let picked = range.rows.clamped(to: 0...(rows.count - 1))
         var lines: [String] = []
         var numbers: [Int] = []
@@ -144,8 +160,9 @@ struct SplitDiffView: View {
         .padding(.bottom, 10)
     }
 
-    private func fileSection(_ file: DiffParser.File) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+    private func fileSection(_ entry: DiffFileRows) -> some View {
+        let file = entry.file
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: collapsed.contains(file.path) ? "chevron.right" : "chevron.down")
                     .font(.system(size: 9, weight: .bold))
@@ -175,7 +192,8 @@ struct SplitDiffView: View {
 
             if !collapsed.contains(file.path) {
                 ForEach(Array(file.hunks.enumerated()), id: \.offset) { hunkIndex, hunk in
-                    hunkView(hunk, file: file.path, hunkIndex: hunkIndex)
+                    hunkView(hunk, rows: entry.hunkRows[hunkIndex],
+                             file: file.path, hunkIndex: hunkIndex)
                 }
             }
         }
@@ -184,7 +202,8 @@ struct SplitDiffView: View {
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
-    private func hunkView(_ hunk: DiffParser.Hunk, file: String, hunkIndex: Int) -> some View {
+    private func hunkView(_ hunk: DiffParser.Hunk, rows: [DiffParser.SplitRow],
+                          file: String, hunkIndex: Int) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(hunk.header)
                 .font(.system(size: 10, design: .monospaced))
@@ -196,8 +215,8 @@ struct SplitDiffView: View {
             // horizontal ScrollView proposed infinite widths and the rows
             // rendered blank; long lines truncate with a tail, like GitHub's
             // collapsed view.
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(DiffParser.splitRows(hunk).enumerated()), id: \.offset) { rowIndex, row in
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
                     HStack(alignment: .top, spacing: 0) {
                         side(row.left, isOld: true)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -227,20 +246,26 @@ struct SplitDiffView: View {
         case .deletion: DefaultTheme.danger.opacity(0.12)
         case .context, nil: .clear
         }
+        let text = Text(line.map { marker($0) + $0.text } ?? "")
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(line?.kind == .context || line == nil
+                             ? DefaultTheme.primaryText.opacity(0.75)
+                             : DefaultTheme.primaryText)
+            .textSelection(.enabled)
+            .lineLimit(1)
+            .truncationMode(.tail)
         HStack(alignment: .top, spacing: 8) {
             Text(line.flatMap { isOld ? $0.oldNumber : $0.newNumber }.map(String.init) ?? "")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(width: 34, alignment: .trailing)
-            Text(line.map { marker($0) + $0.text } ?? "")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(line?.kind == .context || line == nil
-                                 ? DefaultTheme.primaryText.opacity(0.75)
-                                 : DefaultTheme.primaryText)
-                .textSelection(.enabled)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .help(line?.text ?? "")
+            // A tooltip means a tracking area PER LINE — thousands on a big
+            // PR. Only lines long enough to plausibly truncate get one.
+            if let full = line?.text, full.count > 110 {
+                text.help(full)
+            } else {
+                text
+            }
         }
         .padding(.horizontal, 8).padding(.vertical, 1.5)
         .frame(maxWidth: .infinity, alignment: .leading)

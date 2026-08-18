@@ -132,15 +132,24 @@ public struct GitHubService: Sendable {
         let root = repo.deletingLastPathComponent()
             .appendingPathComponent(repo.lastPathComponent + "-worktrees")
         let path = root.appendingPathComponent("pr-\(number)")
-        if !FileManager.default.fileExists(atPath: path.path) {
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            _ = try await runGit(["worktree", "add", "--detach", path.path], in: repo)
-        }
         // Detached fetch of the PR head: never fights over branch names —
         // `gh pr checkout` refuses when the branch is checked out elsewhere
         // (reviewing your OWN pr from the same repo, the common case).
-        _ = try await runGit(["fetch", "origin", "pull/\(number)/head"], in: path)
-        _ = try await runGit(["checkout", "--detach", "FETCH_HEAD"], in: path)
+        if !FileManager.default.fileExists(atPath: path.path) {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            // Fetch FIRST, then materialize the worktree directly on the PR
+            // head: one working-tree write instead of checkout-then-rewrite,
+            // which doubled the cost on large repos.
+            _ = try await runGit(["fetch", "origin", "pull/\(number)/head"], in: repo)
+            _ = try await runGit(["worktree", "add", "--detach", path.path, "FETCH_HEAD"], in: repo)
+        } else {
+            _ = try await runGit(["fetch", "origin", "pull/\(number)/head"], in: path)
+            let head = try await revParse("HEAD", in: path)
+            // Only rewrite the tree when the PR actually moved.
+            if head != (try await revParse("FETCH_HEAD", in: path)) {
+                _ = try await runGit(["checkout", "--detach", "FETCH_HEAD"], in: path)
+            }
+        }
         // Read-only is a user setting: protect or UNprotect — the worktree is
         // reused across checkouts, so a change of mind must apply to it.
         if readOnly {
@@ -188,6 +197,11 @@ public struct GitHubService: Sendable {
     private func run(_ arguments: [String], in directory: URL) async throws -> Data {
         guard let gh = Self.ghPath else { throw GitHubError.ghNotInstalled }
         return try await execute(gh, arguments: arguments, in: directory)
+    }
+
+    private func revParse(_ ref: String, in directory: URL) async throws -> String {
+        String(decoding: try await runGit(["rev-parse", ref], in: directory), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func runGit(_ arguments: [String], in directory: URL) async throws -> Data {

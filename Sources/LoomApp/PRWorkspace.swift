@@ -74,7 +74,9 @@ struct PRWorkspaceView: View {
     var sendToSession: ((String) -> Void)?
 
     @State private var prDetail: GitHubService.PRDetail?
-    @State private var prDiff = ""
+    /// Parsed + row-paired ONCE when the diff arrives (off the main thread) —
+    /// parsing in `body` re-ran on every render and crawled on large PRs.
+    @State private var diffFiles: [DiffFileRows] = []
     @State private var prTour: PRTour?
     @State private var tourLoading = false
     @State private var reviewBody = ""
@@ -90,9 +92,20 @@ struct PRWorkspaceView: View {
         }
         .background(DefaultTheme.background)
         .task(id: pr.number) {
-            prDetail = await model.prDetail(pr.number, in: project.id)
-            prDiff = await model.prDiff(pr.number, in: project.id)
+            prDetail = nil
+            diffFiles = []
+            await load(refresh: false)
         }
+    }
+
+    /// Detail + diff (cached in the model unless refresh), then the heavy
+    /// parse/pair work off the main thread.
+    private func load(refresh: Bool) async {
+        prDetail = await model.prDetail(pr.number, in: project.id, refresh: refresh)
+        let diff = await model.prDiff(pr.number, in: project.id, refresh: refresh)
+        diffFiles = await Task.detached(priority: .userInitiated) {
+            DiffFileRows.compute(DiffParser.parse(diff))
+        }.value
     }
 
     /// Light markdown (bold, code, links) with line breaks preserved — a full
@@ -117,10 +130,8 @@ struct PRWorkspaceView: View {
     }
 
     private func loadPRDetail(_ pr: GitHubService.PullRequest, project: ProjectRecord) {
-        Task {
-            prDetail = await model.prDetail(pr.number, in: project.id)
-            prDiff = await model.prDiff(pr.number, in: project.id)
-        }
+        // After a submission the cached conversation is stale: force a refetch.
+        Task { await load(refresh: true) }
     }
 
     private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {
@@ -224,14 +235,13 @@ struct PRWorkspaceView: View {
                 ProgressView().controlSize(.small)
             }
 
-            if !prDiff.isEmpty {
-                let files = DiffParser.parse(prDiff)
+            if !diffFiles.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    sectionHeader("DIFF", count: files.count,
+                    sectionHeader("DIFF", count: diffFiles.count,
                                   color: DefaultTheme.secondaryText)
                     // GitHub-style side-by-side: old on the left, new on the
                     // right, aligned and tinted, per-file collapsible sections.
-                    SplitDiffView(files: files,
+                    SplitDiffView(files: diffFiles,
                                   onExplain: { snippet in
                                       deliver("""
                                       Explain these lines from \(snippet.file) \
