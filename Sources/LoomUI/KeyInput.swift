@@ -83,6 +83,18 @@ public struct KeyCaptureView: NSViewRepresentable {
             teardownFocusWatchers()
             guard let window else { return }
             window.makeFirstResponder(self)
+            // Opening a terminal from an icon inserts this view mid-event: the
+            // first grab can be refused while layout settles. Retry shortly —
+            // idempotent, and never steals from a field the user focused since
+            // (the KVO path already guards that case).
+            for delay in [0.05, 0.25] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self, let window = self.window,
+                          window.firstResponder === window || window.firstResponder == nil
+                    else { return }
+                    window.makeFirstResponder(self)
+                }
+            }
             // FOCUS BUG FIX — two ways typing used to die, both independent of
             // SwiftUI updates (an idle session produces none, so updateNSView
             // could stay silent forever):

@@ -1045,20 +1045,13 @@ struct ProjectsView: View {
             }
 
             if !prDiff.isEmpty {
+                let files = DiffParser.parse(prDiff)
                 VStack(alignment: .leading, spacing: 6) {
-                    sectionHeader("DIFF", count: prDiff.split(separator: "\n").count,
+                    sectionHeader("DIFF", count: files.count,
                                   color: DefaultTheme.secondaryText)
-                    ScrollView {
-                        Text(prDiff)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(DefaultTheme.primaryText.opacity(0.9))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                    }
-                    .frame(maxHeight: 320)
-                    .background(DefaultTheme.contentBackground,
-                                in: RoundedRectangle(cornerRadius: 10))
+                    // GitHub-style side-by-side: old on the left, new on the
+                    // right, aligned and tinted, per-file collapsible sections.
+                    SplitDiffView(files: files)
                 }
             }
 
