@@ -106,6 +106,9 @@ struct ContentView: View {
             }, onOpenSession: { id in
                 selected = .session(id)
                 tab = .sessions
+            }, onOpenPR: { projectID, pr in
+                model.pendingPR = .init(projectID: projectID, pr: pr)
+                tab = .prs
             })
             case .overview: MissionControlView(model: model, onOpen: { id in
                 selected = .session(id)
@@ -453,6 +456,8 @@ struct ProjectsView: View {
     let onOpenSessions: (ProjectID) -> Void
     let onNewSession: (ProjectID) -> Void
     let onOpenSession: (SessionID) -> Void
+    /// Clicking a PR in the project tab opens it in the global PRs tab.
+    let onOpenPR: (ProjectID, GitHubService.PullRequest) -> Void
     @State private var goal = ""
     @FocusState private var goalFocused: Bool
     @State private var draggedProject: ProjectID?
@@ -1016,10 +1021,6 @@ struct ProjectsView: View {
             Text("Install the GitHub CLI (brew install gh) and authenticate (gh auth login) to review pull requests here.")
                 .font(.system(size: 12))
                 .foregroundStyle(DefaultTheme.secondaryText)
-        } else if let pr = selectedPR {
-            PRWorkspaceView(model: model, project: project, pr: pr,
-                            onBack: { selectedPR = nil },
-                            onOpenSession: onOpenSession)
         } else {
             prListView(project)
         }
@@ -1042,7 +1043,7 @@ struct ProjectsView: View {
             VStack(spacing: 6) {
                 ForEach(prs) { pr in
                     PRRow(pr: pr) {
-                        selectedPR = pr
+                        onOpenPR(project.id, pr)
                     }
                 }
             }

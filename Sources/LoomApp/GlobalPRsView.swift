@@ -47,7 +47,22 @@ struct GlobalPRsView: View {
                 detail
             }
             .background(DefaultTheme.background)
+            .onAppear { consumePendingPR() }
+            .onChange(of: model.pendingPR) { consumePendingPR() }
         }
+    }
+
+    /// A PR clicked in the project tab lands here: select it, expand its
+    /// project, warm the cache, clear the channel.
+    private func consumePendingPR() {
+        guard let pending = model.pendingPR else { return }
+        selectedProjectID = pending.projectID
+        selectedPR = pending.pr
+        expandedProjects.insert(pending.projectID)
+        if model.prCache[pending.projectID] == nil {
+            Task { await model.refreshPRs(for: pending.projectID) }
+        }
+        model.pendingPR = nil
     }
 
     // MARK: Sidebar — projects and their PRs
@@ -261,30 +276,60 @@ private struct PRSidebarRow: View {
     let onStartReview: () -> Void
     @State private var hovered = false
 
+    private func chip(_ label: String, color: Color) -> some View {
+        Text(label)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(DefaultTheme.surfaceRaised, in: Capsule())
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             Circle()
                 .fill(pr.checksPassing ? DefaultTheme.groupHeader : DefaultTheme.danger)
                 .frame(width: 6, height: 6)
+                .padding(.top, 4)
             Text("#\(pr.number)")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(DefaultTheme.accent)
-            Text(pr.title)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(DefaultTheme.primaryText)
-                .lineLimit(1)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(pr.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .lineLimit(1)
+                HStack(spacing: 7) {
+                    Text("@" + pr.author)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                        .lineLimit(1)
+                    MonoTag(pr.branch, systemImage: "arrow.triangle.branch",
+                            color: DefaultTheme.mutedText)
+                }
+            }
             Spacer()
             if hovered {
                 HoverIconButton(systemImage: "sparkles",
                                 help: hasSession ? "Open the review session"
                                                  : "Start a review session",
                                 action: onStartReview)
-            } else if hasSession {
-                Circle().fill(AppModel.color(hex: "#A78BFA")).frame(width: 5, height: 5)
-                    .help("A review session exists for this PR")
+            } else {
+                VStack(alignment: .trailing, spacing: 3) {
+                    if pr.isDraft { chip("draft", color: DefaultTheme.secondaryText) }
+                    if !pr.reviewDecision.isEmpty {
+                        chip(pr.reviewDecision.replacingOccurrences(of: "_", with: " ").lowercased(),
+                             color: pr.reviewDecision == "APPROVED" ? DefaultTheme.groupHeader
+                                                                    : DefaultTheme.secondaryText)
+                    }
+                    if hasSession {
+                        Circle().fill(AppModel.color(hex: "#A78BFA")).frame(width: 5, height: 5)
+                            .help("A review session exists for this PR")
+                    }
+                }
             }
         }
-        .padding(.horizontal, 9).padding(.vertical, 7)
+        .padding(.horizontal, 9).padding(.vertical, 8)
         .background(isSelected ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : DefaultTheme.surface,
                     in: RoundedRectangle(cornerRadius: 8))

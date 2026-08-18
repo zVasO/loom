@@ -401,6 +401,14 @@ public final class AppModel {
 
     // MARK: - Global PRs tab: cache + PR ↔ review session mapping
 
+    /// Cross-tab navigation: "open this PR in the PRs tab" — consumed by the
+    /// global view on appearance/change.
+    public struct PendingPR: Equatable {
+        public let projectID: ProjectID
+        public let pr: GitHubService.PullRequest
+    }
+    public var pendingPR: PendingPR?
+
     public private(set) var prCache: [ProjectID: [GitHubService.PullRequest]] = [:]
     public private(set) var prLoading: Set<ProjectID> = []
 
