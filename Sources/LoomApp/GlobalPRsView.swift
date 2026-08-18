@@ -22,6 +22,8 @@ struct GlobalPRsView: View {
     /// Collapsed by default: gh is only queried when a project is EXPANDED —
     /// opening the tab with many projects fires zero requests.
     @State private var expandedProjects: Set<ProjectID> = []
+    /// The PR list steps aside when a review starts — toggle to bring it back.
+    @State private var sidebarHidden = false
 
     private var gitProjects: [ProjectRecord] { model.projects }
 
@@ -42,8 +44,10 @@ struct GlobalPRsView: View {
             .background(DefaultTheme.background)
         } else {
             HStack(spacing: 0) {
-                sidebar
-                Divider().overlay(DefaultTheme.cardBorder)
+                if !sidebarHidden {
+                    sidebar
+                    Divider().overlay(DefaultTheme.cardBorder)
+                }
                 detail
             }
             .background(DefaultTheme.background)
@@ -153,9 +157,11 @@ struct GlobalPRsView: View {
         selectedPR = pr
         Task {
             if let id = await model.launchPRReviewSession(pr, in: project.id) {
-                // Stay in the PR tab: the session opens in the embedded pane.
+                // Stay in the PR tab: the session opens in the embedded pane,
+                // and the PR list steps aside to give the diff room.
                 paneSessionID = id
                 paneOpen = true
+                withAnimation(.hover) { sidebarHidden = true }
             }
         }
     }
@@ -168,6 +174,10 @@ struct GlobalPRsView: View {
            let project = gitProjects.first(where: { $0.id == selectedProjectID }) {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
+                    HoverIconButton(systemImage: "sidebar.leading",
+                                    help: sidebarHidden ? "Show the PR list" : "Hide the PR list") {
+                        withAnimation(.hover) { sidebarHidden.toggle() }
+                    }
                     Spacer()
                     if paneOpen {
                         GhostButton("Hide session", systemImage: "sidebar.trailing") {

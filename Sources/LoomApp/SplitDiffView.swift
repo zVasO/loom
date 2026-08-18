@@ -192,23 +192,27 @@ struct SplitDiffView: View {
                 .padding(.horizontal, 12).padding(.vertical, 5)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(DefaultTheme.surface)
-            ScrollView(.horizontal, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(DiffParser.splitRows(hunk).enumerated()), id: \.offset) { rowIndex, row in
-                        HStack(alignment: .top, spacing: 0) {
-                            side(row.left, isOld: true)
-                            Rectangle()
-                                .fill(DefaultTheme.cardBorder)
-                                .frame(width: 1)
-                            side(row.right, isOld: false)
-                        }
-                        .fixedSize(horizontal: false, vertical: true)
-                        // Line selection: click anchors, shift-click extends.
-                        .overlay(Rectangle().fill(DefaultTheme.accent.opacity(
-                            isSelected(file: file, hunk: hunkIndex, row: rowIndex) ? 0.10 : 0)))
-                        .contentShape(Rectangle())
-                        .onTapGesture { handleTap(file: file, hunk: hunkIndex, row: rowIndex) }
+            // Two EQUAL columns filling the available width — a nested
+            // horizontal ScrollView proposed infinite widths and the rows
+            // rendered blank; long lines truncate with a tail, like GitHub's
+            // collapsed view.
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(DiffParser.splitRows(hunk).enumerated()), id: \.offset) { rowIndex, row in
+                    HStack(alignment: .top, spacing: 0) {
+                        side(row.left, isOld: true)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                        Rectangle()
+                            .fill(DefaultTheme.cardBorder)
+                            .frame(width: 1)
+                        side(row.right, isOld: false)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
                     }
+                    .fixedSize(horizontal: false, vertical: true)
+                    // Line selection: click anchors, shift-click extends.
+                    .overlay(Rectangle().fill(DefaultTheme.accent.opacity(
+                        isSelected(file: file, hunk: hunkIndex, row: rowIndex) ? 0.10 : 0)))
+                    .contentShape(Rectangle())
+                    .onTapGesture { handleTap(file: file, hunk: hunkIndex, row: rowIndex) }
                 }
             }
         }
@@ -235,9 +239,11 @@ struct SplitDiffView: View {
                                  : DefaultTheme.primaryText)
                 .textSelection(.enabled)
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .help(line?.text ?? "")
         }
         .padding(.horizontal, 8).padding(.vertical, 1.5)
-        .frame(minWidth: 320, maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(line == nil ? DefaultTheme.surface.opacity(0.4) : background)
     }
 

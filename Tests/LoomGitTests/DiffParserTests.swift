@@ -58,3 +58,26 @@ struct DiffParserTests {
         #expect(rows[3].left?.kind == .context)
     }
 }
+
+extension DiffParserTests {
+    @Test("a brand-new file (@@ -0,0 +N @@) parses into addition rows")
+    func newFileParses() {
+        let diff = """
+        diff --git a/new.php b/new.php
+        new file mode 100644
+        index 000..111
+        --- /dev/null
+        +++ b/new.php
+        @@ -0,0 +1,3 @@
+        +<?php
+        +class Foo {}
+        +// done
+        """
+        let files = DiffParser.parse(diff)
+        #expect(files.first?.hunks.first?.lines.count == 3)
+        #expect(files.first?.additions == 3)
+        let rows = DiffParser.splitRows(files.first!.hunks.first!)
+        #expect(rows.count == 3)
+        #expect(rows.allSatisfy { $0.left == nil && $0.right?.kind == .addition })
+    }
+}
