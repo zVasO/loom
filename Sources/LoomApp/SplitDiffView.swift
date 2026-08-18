@@ -54,6 +54,9 @@ struct SplitDiffView: View {
     /// Row index → its y span in the hunk: comment threads break the uniform
     /// row height, so a drag's position is looked up, not divided.
     @State private var rowSpans: [Int: ClosedRange<CGFloat>] = [:]
+    /// The mouse is up: only then do the actions appear — a bar following the
+    /// cursor mid-drag is in the way of the very lines being picked.
+    @State private var selectionSettled = false
 
     struct SelectionPoint: Equatable { let file: String; let hunk: Int; let row: Int }
     struct SelectionRange: Equatable { let file: String; let hunk: Int; let rows: ClosedRange<Int> }
@@ -67,8 +70,11 @@ struct SplitDiffView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if range != nil { quickActionBar }
+            if range != nil, selectionSettled {
+                quickActionBar.transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
+        .animation(.hover, value: selectionSettled)
         .onExitCommand { clearSelection() }
     }
 
@@ -77,6 +83,7 @@ struct SplitDiffView: View {
         range = nil
         composer = .none
         draft = ""
+        selectionSettled = false
     }
 
     private func isSelected(file: String, hunk: Int, row: Int) -> Bool {
@@ -329,6 +336,7 @@ struct SplitDiffView: View {
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { value in
                     guard !rowSpans.isEmpty else { return }
+                    selectionSettled = false
                     let row = rowAt(value.location.y, count: rows.count)
                     let start = rowAt(value.startLocation.y, count: rows.count)
                     let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
@@ -346,7 +354,9 @@ struct SplitDiffView: View {
                 }
                 // Releasing only ARMS the action bar — the selection is never
                 // sent anywhere on its own.
-                .onEnded { _ in })
+                .onEnded { _ in
+                    if range != nil { selectionSettled = true }
+                })
         }
         .onPreferenceChange(DiffRowSpansKey.self) { spans in
             if !spans.isEmpty { rowSpans = spans }
