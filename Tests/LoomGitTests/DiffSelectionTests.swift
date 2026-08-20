@@ -89,6 +89,42 @@ struct DiffSelectionTests {
                 < DiffSelection.RowID(file: 0, hunk: 1, row: 0))
     }
 
+    @Test("a hunk lying entirely between the two ends is taken whole")
+    func middleHunkTakenWhole() {
+        let multi = DiffFileRows.compute(DiffParser.parse("""
+        diff --git a/m.swift b/m.swift
+        --- a/m.swift
+        +++ b/m.swift
+        @@ -1,1 +1,2 @@
+         one
+        +two
+        @@ -10,1 +11,2 @@
+         middleA
+        +middleB
+        @@ -20,1 +22,2 @@
+         lastA
+        +lastB
+        """))
+        #expect(multi[0].hunkRows.count == 3, "fixture has three hunks")
+        let spans = DiffSelection.spans(in: multi,
+                                        from: DiffSelection.RowID(file: 0, hunk: 0, row: 1),
+                                        to: DiffSelection.RowID(file: 0, hunk: 2, row: 0))
+        #expect(spans.count == 3, "one span per hunk touched")
+        #expect(spans[1].code.contains("middleA") && spans[1].code.contains("middleB"),
+                "the middle hunk is fully inside the range")
+        #expect(!spans[0].code.contains("one"), "the first hunk is clipped at the anchor")
+        #expect(!spans[2].code.contains("lastB"), "the last hunk is clipped at the head")
+    }
+
+    @Test("a selection of one single row yields that row alone")
+    func singleRow() {
+        let spans = DiffSelection.spans(in: files,
+                                        from: DiffSelection.RowID(file: 0, hunk: 0, row: 0),
+                                        to: DiffSelection.RowID(file: 0, hunk: 0, row: 0))
+        #expect(spans.count == 1)
+        #expect(spans[0].code == "  let a = 1")
+    }
+
     @Test("an out-of-bounds identifier yields nothing instead of crashing")
     func outOfBounds() {
         let spans = DiffSelection.spans(in: files,

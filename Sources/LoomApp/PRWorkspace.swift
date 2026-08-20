@@ -288,6 +288,10 @@ struct PRWorkspaceView: View {
                                           prActionBusy = false
                                       }
                                   })
+                        // Identity tied to the PR: SwiftUI would otherwise
+                        // reuse the view and carry a selection (and collapsed
+                        // files, and the bar's position) over to the next PR.
+                        .id(pr.number)
                 }
             }
 
