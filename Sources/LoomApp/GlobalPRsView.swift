@@ -24,6 +24,9 @@ struct GlobalPRsView: View {
     @State private var expandedProjects: Set<ProjectID> = []
     /// The PR list steps aside when a review starts — toggle to bring it back.
     @State private var sidebarHidden = false
+    /// Diff above, session below (full-width lines) — or side by side.
+    /// Persisted: a layout choice is a habit, not a whim.
+    @State private var stackedLayout = UserDefaults.standard.bool(forKey: "loom.review.stacked")
 
     private var gitProjects: [ProjectRecord] { model.projects }
 
@@ -183,6 +186,14 @@ struct GlobalPRsView: View {
                     }
                     Spacer()
                     if paneOpen {
+                        HoverIconButton(systemImage: stackedLayout
+                                            ? "rectangle.split.2x1" : "rectangle.split.1x2",
+                                        help: stackedLayout
+                                            ? "Side by side (diff | session)"
+                                            : "Stacked (diff above, session below)") {
+                            withAnimation(.hover) { stackedLayout.toggle() }
+                            UserDefaults.standard.set(stackedLayout, forKey: "loom.review.stacked")
+                        }
                         GhostButton("Hide session", systemImage: "sidebar.trailing") {
                             paneOpen = false
                         }
@@ -215,35 +226,28 @@ struct GlobalPRsView: View {
                 .padding(.horizontal, 14).padding(.vertical, 8)
                 .background(DefaultTheme.background)
                 Divider().overlay(DefaultTheme.cardBorder)
-                HSplitView {
-                    PRWorkspaceView(model: model, project: project, pr: pr,
-                                    onBack: nil, onOpenSession: onOpenSession,
-                                    sendToSession: { message in
-                                        Task {
-                                            if let id = await model.sendToPRReviewSession(
-                                                message, pr: pr, in: project.id) {
-                                                paneSessionID = id
-                                                paneOpen = true
-                                            }
-                                        }
-                                    },
-                                    transcribeToSession: paneOpen ? { snippet in
-                                        guard let id = paneSessionID else { return }
-                                        Task {
-                                            await model.typeIntoSession("""
-                                            \(snippet.label):
-                                            ```diff
-                                            \(snippet.code)
-                                            ```
-
-                                            """, id: id)
-                                        }
-                                    } : nil)
-                        .frame(minWidth: 420)
-                    if paneOpen, let sessionID = paneSessionID {
-                        embeddedSession(sessionID)
-                            .frame(minWidth: 380)
+                if paneOpen, let sessionID = paneSessionID {
+                    // Two arrangements for the same pair: side by side keeps
+                    // both tall; stacked gives the diff the full width.
+                    if stackedLayout {
+                        VSplitView {
+                            workspace(pr, project: project)
+                                .frame(minHeight: 240)
+                            // ≥ pane header (~35) + the terminal's own 200 pt
+                            // resize floor, or the grid would stop following.
+                            embeddedSession(sessionID)
+                                .frame(minHeight: 260)
+                        }
+                    } else {
+                        HSplitView {
+                            workspace(pr, project: project)
+                                .frame(minWidth: 420)
+                            embeddedSession(sessionID)
+                                .frame(minWidth: 380)
+                        }
                     }
+                } else {
+                    workspace(pr, project: project)
                 }
             }
             .onChange(of: pr.number) { syncPane(pr, project: project) }
@@ -273,6 +277,34 @@ extension GlobalPRsView {
             paneOpen = false
             paneSessionID = nil
         }
+    }
+
+    /// The shared PR workspace, wired once for both arrangements.
+    fileprivate func workspace(_ pr: GitHubService.PullRequest,
+                               project: ProjectRecord) -> some View {
+        PRWorkspaceView(model: model, project: project, pr: pr,
+                        onBack: nil, onOpenSession: onOpenSession,
+                        sendToSession: { message in
+                            Task {
+                                if let id = await model.sendToPRReviewSession(
+                                    message, pr: pr, in: project.id) {
+                                    paneSessionID = id
+                                    paneOpen = true
+                                }
+                            }
+                        },
+                        transcribeToSession: paneOpen ? { snippet in
+                            guard let id = paneSessionID else { return }
+                            Task {
+                                await model.typeIntoSession("""
+                                \(snippet.label):
+                                ```diff
+                                \(snippet.code)
+                                ```
+
+                                """, id: id)
+                            }
+                        } : nil)
     }
 
     fileprivate func embeddedSession(_ sessionID: SessionID) -> some View {
