@@ -378,14 +378,30 @@ public final class AppModel {
         return detail
     }
 
-    public func prDiff(_ number: Int, in projectID: ProjectID,
-                       refresh: Bool = false) async -> String {
-        guard let repo = projectRepo(projectID) else { return "" }
+    /// The PR's diff, or the error explaining why there is none — a silently
+    /// empty diff hid the entire file explorer.
+    public func prDiff(_ number: Int, baseBranch: String = "", in projectID: ProjectID,
+                       refresh: Bool = false) async -> (diff: String, error: String?) {
+        guard let repo = projectRepo(projectID) else { return ("", "No repo for this project") }
         let key = prKey(number, projectID)
-        if !refresh, let cached = prDiffCache[key] { return cached }
-        let diff = (try? await GitHubService().prDiff(number, in: repo)) ?? ""
-        if !diff.isEmpty { prDiffCache[key] = diff }
-        return diff
+        if !refresh, let cached = prDiffCache[key] { return (cached, nil) }
+        do {
+            let diff = try await GitHubService().prDiff(number, in: repo)
+            if !diff.isEmpty { prDiffCache[key] = diff }
+            return (diff, nil)
+        } catch {
+            // The API refuses oversized diffs (HTTP 406) — git has no limit:
+            // rebuild the diff locally from the fetched PR refs.
+            do {
+                let base = baseBranch.isEmpty ? "main" : baseBranch
+                let diff = try await GitHubService().localDiff(number, baseBranch: base, in: repo)
+                if !diff.isEmpty { prDiffCache[key] = diff }
+                return (diff, nil)
+            } catch let fallbackError {
+                return ("", Self.ghErrorText(error) + " — local fallback: "
+                        + Self.ghErrorText(fallbackError))
+            }
+        }
     }
 
     /// nil on success, error text otherwise — the panel reports the truth.

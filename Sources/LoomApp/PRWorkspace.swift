@@ -89,6 +89,10 @@ struct PRWorkspaceView: View {
     @State private var diffFiles: [DiffFileRows] = []
     /// Review comments anchored to code — rendered inside the diff.
     @State private var lineComments: [GitHubService.ReviewComment] = []
+    /// Why the diff is empty (API refusal, network…): shown instead of
+    /// silently hiding the whole file explorer.
+    @State private var diffError: String?
+    @State private var diffLoading = false
     @State private var prTour: PRTour?
     @State private var tourLoading = false
     @State private var reviewBody = ""
@@ -113,12 +117,17 @@ struct PRWorkspaceView: View {
     /// Detail + diff (cached in the model unless refresh), then the heavy
     /// parse/pair work off the main thread.
     private func load(refresh: Bool) async {
+        diffLoading = true
         prDetail = await model.prDetail(pr.number, in: project.id, refresh: refresh)
         lineComments = await model.reviewComments(pr.number, in: project.id, refresh: refresh)
-        let diff = await model.prDiff(pr.number, in: project.id, refresh: refresh)
+        let result = await model.prDiff(pr.number, baseBranch: pr.baseBranch,
+                                        in: project.id, refresh: refresh)
+        diffError = result.error
+        let diff = result.diff
         diffFiles = await Task.detached(priority: .userInitiated) {
             DiffFileRows.compute(DiffParser.parse(diff))
         }.value
+        diffLoading = false
     }
 
     /// Light markdown (bold, code, links) with line breaks preserved — a full
@@ -248,7 +257,35 @@ struct PRWorkspaceView: View {
                 ProgressView().controlSize(.small)
             }
 
-            if !diffFiles.isEmpty {
+            if diffFiles.isEmpty {
+                // The explorer never vanishes silently: loading shows a
+                // spinner, failure shows the reason and a way to retry.
+                VStack(alignment: .leading, spacing: 6) {
+                    sectionHeader("DIFF", count: 0, color: DefaultTheme.secondaryText)
+                    HStack(spacing: 8) {
+                        if diffLoading {
+                            ProgressView().controlSize(.small)
+                            Text("Loading the diff…")
+                                .font(.system(size: 11))
+                                .foregroundStyle(DefaultTheme.secondaryText)
+                        } else {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 11))
+                                .foregroundStyle(DefaultTheme.danger)
+                            Text(diffError ?? "This PR has no diff.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(DefaultTheme.secondaryText)
+                                .textSelection(.enabled)
+                            GhostButton("Retry", systemImage: "arrow.clockwise") {
+                                Task { await load(refresh: true) }
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                }
+            } else {
                 VStack(alignment: .leading, spacing: 6) {
                     sectionHeader("DIFF", count: diffFiles.count,
                                   color: DefaultTheme.secondaryText)

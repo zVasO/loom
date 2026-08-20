@@ -202,6 +202,29 @@ struct ReadOnlyWorktreeTests {
         #expect(try await git(["rev-parse", "HEAD"], in: again) == prHead)
     }
 
+    @Test("localDiff rebuilds the PR diff from fetched refs — no API size limit")
+    func localDiffFromRefs() async throws {
+        let repo = try await makeFixtureRepo()
+        let bare = repo.deletingLastPathComponent()
+            .appendingPathComponent("origin-\(UUID().uuidString.prefix(6)).git")
+        _ = try await git(["init", "--bare", bare.path], in: repo)
+        _ = try await git(["remote", "add", "origin", bare.path], in: repo)
+        _ = try await git(["push", "origin", "main"], in: repo)
+        try "pr work".write(to: repo.appendingPathComponent("pr.txt"),
+                            atomically: true, encoding: .utf8)
+        _ = try await git(["add", "."], in: repo)
+        _ = try await git(["-c", "user.email=t@t", "-c", "user.name=T",
+                           "commit", "-m", "pr head"], in: repo)
+        _ = try await git(["push", "origin", "HEAD:refs/pull/7/head"], in: repo)
+        _ = try await git(["reset", "--hard", "HEAD~1"], in: repo)
+
+        let diff = try await GitHubService().localDiff(7, baseBranch: "main", in: repo)
+
+        #expect(diff.contains("pr.txt"), "the PR's file is in the diff")
+        #expect(diff.contains("+pr work"), "with its added content")
+        #expect(!diff.contains("README"), "and nothing outside the PR")
+    }
+
     @Test("a protected worktree refuses commits")
     func commitBlocked() async throws {
         let repo = try await makeFixtureRepo()

@@ -189,6 +189,18 @@ public struct GitHubService: Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
+    /// The PR's diff rebuilt locally from fetched refs — the API refuses
+    /// oversized diffs (HTTP 406), git itself has no such limit. Three-dot
+    /// (merge-base) semantics, same as GitHub's own view.
+    public func localDiff(_ number: Int, baseBranch: String, in repo: URL) async throws -> String {
+        _ = try await runGit(["fetch", "origin", "pull/\(number)/head"], in: repo)
+        let head = try await revParse("FETCH_HEAD", in: repo)
+        _ = try await runGit(["fetch", "origin", baseBranch], in: repo)
+        let base = try await revParse("FETCH_HEAD", in: repo)
+        let data = try await runGit(["diff", "\(base)...\(head)"], in: repo)
+        return String(decoding: data, as: UTF8.self)
+    }
+
     public func submitReview(_ number: Int, verdict: Verdict, body: String, in repo: URL) async throws {
         var arguments = ["pr", "review", "\(number)", verdict.rawValue]
         if !body.isEmpty { arguments += ["--body", body] }
