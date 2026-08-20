@@ -57,6 +57,9 @@ struct SplitDiffView: View {
     var comments: [GitHubService.ReviewComment] = []
     /// Replies inside a thread (thread's root comment id, text).
     var onReply: ((Int, String) -> Void)?
+    /// Unified layout: one full-width column (deletions then additions) —
+    /// whole lines stay readable; split keeps old/new aligned side by side.
+    var unified = false
 
     @State private var collapsed: Set<String> = []
     /// The selection's two ends, addressed globally — an interval between two
@@ -103,13 +106,16 @@ struct SplitDiffView: View {
             if !spans.isEmpty { rowSpans = spans }
         }
         .gesture(selectionDrag)
-        .overlay(alignment: .bottom) {
-            // snippet, not just "a range exists": a selection covering only
-            // collapsed files has nothing to act on.
-            if selectionSettled, snippet != nil {
+        .overlay(alignment: .topLeading) {
+            // Anchored right under the SELECTION — an overlay at the content's
+            // bottom floated next to the last file, screens away from the
+            // lines being acted on. snippet, not just "a range exists": a
+            // selection covering only collapsed files has nothing to act on.
+            if selectionSettled, snippet != nil, let anchorY = selectionBottomY {
                 quickActionBar
-                    .offset(barOffset)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.leading, 44)
+                    .offset(x: barOffset.width, y: anchorY + 8 + barOffset.height)
+                    .transition(.opacity)
             }
         }
         .animation(.hover, value: selectionSettled)
@@ -181,6 +187,16 @@ struct SplitDiffView: View {
     /// cursor is between rows rather than on one.
     private func rowAt(_ y: CGFloat) -> DiffSelection.RowID? {
         rowSpans.first { $0.value.contains(y) }?.key
+    }
+
+    /// Bottom edge of the lowest visible selected row — where the action bar
+    /// belongs. Selected rows are on screen (the user just dragged them).
+    private var selectionBottomY: CGFloat? {
+        guard let selection else { return nil }
+        return rowSpans
+            .filter { $0.key >= selection.from && $0.key <= selection.to }
+            .map(\.value.upperBound)
+            .max()
     }
 
     /// The selected rows as a snippet — grouping, clamping and markers all
@@ -291,7 +307,6 @@ struct SplitDiffView: View {
         .overlay(RoundedRectangle(cornerRadius: 10)
             .stroke(DefaultTheme.accent.opacity(0.5), lineWidth: 1))
         .shadow(color: .black.opacity(0.5), radius: 14, y: 4)
-        .padding(.bottom, 10)
     }
 
     /// The composer: one field, three destinations. Return submits, esc cancels.
@@ -418,14 +433,29 @@ struct SplitDiffView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
                     let id = DiffSelection.RowID(file: fileIndex, hunk: hunkIndex, row: rowIndex)
-                    HStack(alignment: .top, spacing: 0) {
-                        side(row.left, isOld: true)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                        Rectangle()
-                            .fill(DefaultTheme.cardBorder)
-                            .frame(width: 1)
-                        side(row.right, isOld: false)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    Group {
+                        if unified {
+                            // Full width: the deletion (when any) stacked over
+                            // the addition/context line, both with dual gutters.
+                            VStack(alignment: .leading, spacing: 0) {
+                                if let left = row.left, left.kind == .deletion {
+                                    unifiedLine(left, isOld: true)
+                                }
+                                if let right = row.right {
+                                    unifiedLine(right, isOld: false)
+                                }
+                            }
+                        } else {
+                            HStack(alignment: .top, spacing: 0) {
+                                side(row.left, isOld: true)
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                                Rectangle()
+                                    .fill(DefaultTheme.cardBorder)
+                                    .frame(width: 1)
+                                side(row.right, isOld: false)
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                            }
+                        }
                     }
                     .fixedSize(horizontal: false, vertical: true)
                     .overlay(Rectangle().fill(DefaultTheme.accent.opacity(
@@ -514,14 +544,13 @@ struct SplitDiffView: View {
         .background(line == nil ? DefaultTheme.surface.opacity(0.4) : background)
     }
 
-    /// Keeps the bar overlapping the diff: it starts centred at the bottom,
-    /// so it may travel up to the top edge and half a width sideways.
+    /// Keeps the bar inside the diff, whichever selection it hangs under.
     private func clampedOffset(_ offset: CGSize) -> CGSize {
         guard diffSize.width > 0, diffSize.height > 0 else { return offset }
-        let horizontal = max(diffSize.width / 2 - 60, 0)
-        let vertical = max(diffSize.height - 80, 0)
-        return CGSize(width: min(max(offset.width, -horizontal), horizontal),
-                      height: min(max(offset.height, -vertical), 0))
+        let anchor = selectionBottomY ?? 0
+        let horizontal = max(diffSize.width - 660, 0)
+        return CGSize(width: min(max(offset.width, -20), horizontal),
+                      height: min(max(offset.height, -anchor), diffSize.height - anchor - 80))
     }
 
     private struct DiffSizeKey: PreferenceKey {
@@ -543,6 +572,36 @@ struct SplitDiffView: View {
     struct CommentThread {
         let root: GitHubService.ReviewComment
         let replies: [GitHubService.ReviewComment]
+    }
+
+    /// One full-width unified line: old + new number gutters, then the text.
+    @ViewBuilder
+    private func unifiedLine(_ line: DiffParser.Line, isOld: Bool) -> some View {
+        let background: Color = switch line.kind {
+        case .addition: DefaultTheme.groupHeader.opacity(0.12)
+        case .deletion: DefaultTheme.danger.opacity(0.12)
+        case .context: .clear
+        }
+        HStack(alignment: .top, spacing: 8) {
+            Text(line.oldNumber.map(String.init) ?? "")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(DefaultTheme.mutedText)
+                .frame(width: 34, alignment: .trailing)
+            Text(line.newNumber.map(String.init) ?? "")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(DefaultTheme.mutedText)
+                .frame(width: 34, alignment: .trailing)
+            Text(marker(line) + line.text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(line.kind == .context
+                                 ? DefaultTheme.primaryText.opacity(0.75)
+                                 : DefaultTheme.primaryText)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 1.5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(background)
     }
 
     private func marker(_ line: DiffParser.Line) -> String {

@@ -302,6 +302,13 @@ struct ContentView: View {
         .padding(.horizontal, 14)
         .frame(height: 52)
         .background(DefaultTheme.background)
+        .contentShape(Rectangle())
+        // The navbar IS the title bar (native one hidden): double-clicking it
+        // toggles full screen, like a browser's tab strip. Buttons win over
+        // the tap, and a double-click on empty navbar space is safe.
+        .onTapGesture(count: 2) {
+            NSApp.keyWindow?.toggleFullScreen(nil)
+        }
     }
 
     // MARK: - ⌘K action palette (Raycast-style)

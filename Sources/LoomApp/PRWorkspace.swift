@@ -98,6 +98,9 @@ struct PRWorkspaceView: View {
     @State private var reviewBody = ""
     @State private var prActionOutput: String?
     @State private var prActionBusy = false
+    /// Diff layout, persisted: split (aligned old/new) or unified (full-width
+    /// lines — the whole line stays readable).
+    @State private var unifiedDiff = UserDefaults.standard.bool(forKey: "loom.diff.unified")
 
     var body: some View {
         ScrollView {
@@ -287,8 +290,20 @@ struct PRWorkspaceView: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 6) {
-                    sectionHeader("DIFF", count: diffFiles.count,
-                                  color: DefaultTheme.secondaryText)
+                    HStack(spacing: 10) {
+                        sectionHeader("DIFF", count: diffFiles.count,
+                                      color: DefaultTheme.secondaryText)
+                        Spacer()
+                        // Split keeps old/new aligned; unified gives every
+                        // line the full width.
+                        HoverIconButton(systemImage: unifiedDiff
+                                            ? "rectangle.split.2x1" : "list.bullet.rectangle",
+                                        help: unifiedDiff ? "Split view (old | new)"
+                                                          : "Unified view (full-width lines)") {
+                            unifiedDiff.toggle()
+                            UserDefaults.standard.set(unifiedDiff, forKey: "loom.diff.unified")
+                        }
+                    }
                     // GitHub-style side-by-side: old on the left, new on the
                     // right, aligned and tinted, per-file collapsible sections.
                     SplitDiffView(files: diffFiles,
@@ -335,7 +350,8 @@ struct PRWorkspaceView: View {
                                           if error == nil { await load(refresh: true) }
                                           prActionBusy = false
                                       }
-                                  })
+                                  },
+                                  unified: unifiedDiff)
                         // Identity tied to the PR: SwiftUI would otherwise
                         // reuse the view and carry a selection (and collapsed
                         // files, and the bar's position) over to the next PR.
