@@ -66,6 +66,9 @@ public struct GitHubService: Sendable {
         public let replyToID: Int?
         /// The lines it referred to no longer exist in the diff.
         public let isOutdated: Bool
+        /// A comment on the file itself (subject_type file): no line anchor,
+        /// shown under the file header.
+        public let isFileLevel: Bool
     }
 
     public enum Verdict: String, Sendable {
@@ -121,10 +124,13 @@ public struct GitHubService: Sendable {
         }
         return rows.compactMap { row in
             guard let id = row["id"] as? Int, let path = row["path"] as? String else { return nil }
-            // `line` goes null once the code moved: GitHub keeps original_line
-            // so the comment can still be shown, flagged as outdated.
+            // Three shapes: line comments carry `line`; outdated ones only
+            // `original_line`; file-level ones (subject_type file) neither —
+            // each is kept, the view anchors them differently.
+            let isFileLevel = row["subject_type"] as? String == "file"
             let live = row["line"] as? Int
-            guard let line = live ?? (row["original_line"] as? Int) else { return nil }
+            let anchor = live ?? (row["original_line"] as? Int)
+            guard let line = anchor ?? (isFileLevel ? 0 : nil) else { return nil }
             return ReviewComment(
                 id: id,
                 path: path,
@@ -135,7 +141,8 @@ public struct GitHubService: Sendable {
                 body: row["body"] as? String ?? "",
                 createdAt: row["created_at"] as? String ?? "",
                 replyToID: row["in_reply_to_id"] as? Int,
-                isOutdated: live == nil)
+                isOutdated: !isFileLevel && live == nil,
+                isFileLevel: isFileLevel)
         }
     }
 
@@ -205,6 +212,28 @@ public struct GitHubService: Sendable {
         let json = try JSONSerialization.data(withJSONObject: ["body": body])
         _ = try await run(["api", "--method", "POST",
                            "repos/{owner}/{repo}/pulls/\(number)/comments/\(commentID)/replies",
+                           "--input", "-"], in: repo, stdin: json)
+    }
+
+    /// The payload for a comment on the FILE itself (GitHub's "comment on
+    /// this file"): subject_type file, no line anchor.
+    public static func fileCommentPayload(path: String, sha: String,
+                                          body: String) -> [String: Any] {
+        ["path": path, "commit_id": sha, "body": body, "subject_type": "file"]
+    }
+
+    /// Posts a review comment on a whole file — used when a selection spans
+    /// several hunks and no single line range can carry it.
+    public func commentOnFile(_ number: Int, path: String, note: String,
+                              in repo: URL) async throws {
+        let head = try await run(["pr", "view", "\(number)", "--json", "headRefOid",
+                                  "--jq", ".headRefOid"], in: repo)
+        let sha = String(decoding: head, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let json = try JSONSerialization.data(
+            withJSONObject: Self.fileCommentPayload(path: path, sha: sha, body: note))
+        _ = try await run(["api", "--method", "POST",
+                           "repos/{owner}/{repo}/pulls/\(number)/comments",
                            "--input", "-"], in: repo, stdin: json)
     }
 

@@ -418,6 +418,17 @@ public final class AppModel {
         } catch { return Self.ghErrorText(error) }
     }
 
+    /// Whole-file review comment (selection spanning several hunks).
+    /// nil on success, error text otherwise.
+    public func commentOnFile(_ number: Int, path: String, note: String,
+                              in projectID: ProjectID) async -> String? {
+        guard let repo = projectRepo(projectID) else { return "No repo for this project" }
+        do {
+            try await GitHubService().commentOnFile(number, path: path, note: note, in: repo)
+            return nil
+        } catch { return Self.ghErrorText(error) }
+    }
+
     /// Line-anchored review comment (optionally an appliable suggestion).
     /// nil on success, error text otherwise.
     public func commentOnLines(_ number: Int, path: String, firstLine: Int, lastLine: Int,

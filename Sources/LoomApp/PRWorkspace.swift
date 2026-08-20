@@ -276,6 +276,17 @@ struct PRWorkspaceView: View {
                                       postLineComment(snippet, text: text,
                                                       isSuggestion: isSuggestion)
                                   },
+                                  onFileComment: { path, text in
+                                      prActionBusy = true
+                                      Task {
+                                          let error = await model.commentOnFile(
+                                              pr.number, path: path, note: text,
+                                              in: project.id)
+                                          prActionOutput = error ?? "Comment posted ✓"
+                                          if error == nil { await load(refresh: true) }
+                                          prActionBusy = false
+                                      }
+                                  },
                                   comments: lineComments,
                                   onReply: { commentID, text in
                                       prActionBusy = true

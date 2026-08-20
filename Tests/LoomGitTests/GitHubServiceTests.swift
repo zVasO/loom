@@ -95,6 +95,17 @@ struct GitHubServiceTests {
         #expect(payload["line"] as? Int == 7)
     }
 
+    @Test("a file-level comment targets the whole file, not a line")
+    func fileCommentPayload() {
+        let payload = GitHubService.fileCommentPayload(path: "src/a.swift",
+                                                       sha: "abc", body: "Split this file.")
+        #expect(payload["subject_type"] as? String == "file")
+        #expect(payload["path"] as? String == "src/a.swift")
+        #expect(payload["commit_id"] as? String == "abc")
+        #expect(payload["body"] as? String == "Split this file.")
+        #expect(payload["line"] == nil, "a file comment must not carry a line")
+    }
+
     // Review comments anchored to code: shown INSIDE the diff, under the line
     // they talk about (what GitHub's own file view does).
     @Test("review comments carry their file, line span, author and body")
@@ -115,6 +126,19 @@ struct GitHubServiceTests {
         #expect(comments[0].author == "zVasO")
         #expect(comments[0].body == "Rename this.")
         #expect(comments[1].replyToID == 1, "replies stay attached to their thread")
+    }
+
+    @Test("a file-level comment (no line at all) is kept and flagged as such")
+    func fileLevelComment() throws {
+        let json = """
+        [{"id": 4, "path": "src/c.swift", "line": null, "original_line": null,
+          "subject_type": "file", "side": "RIGHT", "body": "Split this file.",
+          "user": {"login": "a"}, "created_at": "2026-08-20T10:00:00Z"}]
+        """
+        let comments = try GitHubService.parseReviewComments(Data(json.utf8))
+        #expect(comments.count == 1, "no line is not a reason to drop it")
+        #expect(comments.first?.isFileLevel == true)
+        #expect(comments.first?.isOutdated == false, "file comments are never outdated")
     }
 
     @Test("an outdated comment (its line vanished from the diff) is kept, flagged")

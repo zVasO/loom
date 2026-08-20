@@ -13,6 +13,8 @@ struct DiffSnippet {
     /// A GitHub comment anchors to ONE place: only a single-span selection
     /// can be commented or suggested on.
     var isAnchorable: Bool { spans.count == 1 }
+    /// All spans in one file: a file-level GitHub comment can still carry it.
+    var isSingleFile: Bool { Set(spans.map(\.file)).count == 1 }
     var file: String { spans.first?.file ?? "" }
     var firstLine: Int { spans.first?.firstLine ?? 0 }
     var lastLine: Int { spans.last?.lastLine ?? 0 }
@@ -49,6 +51,8 @@ struct SplitDiffView: View {
     /// Posts a review comment on the PR; the Bool asks for a ```suggestion
     /// block (GitHub renders it as a one-click apply).
     var onComment: ((DiffSnippet, String, Bool) -> Void)?
+    /// Posts a comment on a whole FILE (multi-hunk selections, "Select file").
+    var onFileComment: ((String, String) -> Void)?
     /// Existing review comments, shown under the line they talk about.
     var comments: [GitHubService.ReviewComment] = []
     /// Replies inside a thread (thread's root comment id, text).
@@ -146,6 +150,19 @@ struct SplitDiffView: View {
         return (min(anchor, head), max(anchor, head))
     }
 
+    /// Selects every row of a file — the header button's action. Expands a
+    /// collapsed file first: an invisible selection helps nobody.
+    private func selectFile(_ index: Int, entry: DiffFileRows) {
+        collapsed.remove(entry.file.path)
+        guard let lastHunk = entry.hunkRows.indices.last,
+              let lastRow = entry.hunkRows[lastHunk].indices.last else { return }
+        anchor = DiffSelection.RowID(file: index, hunk: 0, row: 0)
+        head = DiffSelection.RowID(file: index, hunk: lastHunk, row: lastRow)
+        composer = .none
+        draft = ""
+        selectionSettled = true
+    }
+
     private func clearSelection() {
         anchor = nil
         head = nil
@@ -176,7 +193,7 @@ struct SplitDiffView: View {
     }
 
     /// What the composer field is currently writing.
-    enum Composer: Equatable { case none, ask, comment, suggestion }
+    enum Composer: Equatable { case none, ask, comment, suggestion, fileComment }
 
     /// Floating bar over the diff: what is selected + what to do with it.
     /// Nothing leaves this bar without an explicit click.
@@ -246,6 +263,12 @@ struct SplitDiffView: View {
                                 draft = strippedCode(snippet)
                                 composer = .suggestion
                             }
+                        } else if onFileComment != nil, snippet.isSingleFile {
+                            // Several hunks of one file: GitHub still takes a
+                            // comment on the file itself.
+                            GhostButton("Comment on file", systemImage: "text.bubble") {
+                                composer = .fileComment
+                            }
                         }
                         GhostButton("Copy", systemImage: "doc.on.doc") {
                             NSPasteboard.general.clearContents()
@@ -278,6 +301,7 @@ struct SplitDiffView: View {
         case .ask: "Ask claude about these lines…"
         case .comment: "Leave a review comment on these lines…"
         case .suggestion: "Your suggested replacement for these lines…"
+        case .fileComment: "Leave a review comment on \(snippet.file)…"
         case .none: ""
         }
         VStack(alignment: .leading, spacing: 6) {
@@ -309,6 +333,7 @@ struct SplitDiffView: View {
         case .ask: onAsk?(snippet, text)
         case .comment: onComment?(snippet, text, false)
         case .suggestion: onComment?(snippet, draft, true)
+        case .fileComment: onFileComment?(snippet.file, text)
         case .none: break
         }
         clearSelection()
@@ -336,6 +361,12 @@ struct SplitDiffView: View {
                     .foregroundStyle(DefaultTheme.primaryText)
                     .lineLimit(1)
                 Spacer()
+                // The file-wide entry point to the same actions as a line
+                // selection: select every row, the action bar takes over.
+                HoverIconButton(systemImage: "selection.pin.in.out",
+                                help: "Select the whole file") {
+                    selectFile(fileIndex, entry: entry)
+                }
                 Text("+\(file.additions)")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(DefaultTheme.groupHeader)
@@ -355,6 +386,11 @@ struct SplitDiffView: View {
             }
 
             if !collapsed.contains(file.path) {
+                // Comments on the file itself (no line anchor) sit right
+                // under the header, before the code.
+                ForEach(fileThreads(file.path), id: \.root.id) { thread in
+                    CommentThreadView(thread: thread, onReply: onReply)
+                }
                 ForEach(Array(file.hunks.enumerated()), id: \.offset) { hunkIndex, hunk in
                     hunkView(hunk, rows: entry.hunkRows[hunkIndex],
                              file: file.path, fileIndex: fileIndex, hunkIndex: hunkIndex)
@@ -414,12 +450,23 @@ struct SplitDiffView: View {
         }
     }
 
+    /// Threads on the file itself — rendered under its header.
+    private func fileThreads(_ file: String) -> [CommentThread] {
+        comments
+            .filter { $0.path == file && $0.isFileLevel && $0.replyToID == nil }
+            .map { root in
+                CommentThread(root: root,
+                              replies: comments.filter { $0.replyToID == root.id })
+            }
+    }
+
     /// The comment threads anchored to a diff row: matched on the new-side
     /// line for additions/context, the old side for deletions.
     private func threads(file: String, row: DiffParser.SplitRow) -> [CommentThread] {
         guard !comments.isEmpty else { return [] }
         let roots = comments.filter { comment in
-            guard comment.path == file, comment.replyToID == nil else { return false }
+            guard comment.path == file, comment.replyToID == nil,
+                  !comment.isFileLevel else { return false }
             let number = comment.side == "LEFT" ? row.left?.oldNumber : row.right?.newNumber
             guard let number else { return false }
             // A multi-line comment hangs under its LAST line, like GitHub.
