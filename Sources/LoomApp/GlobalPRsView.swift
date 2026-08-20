@@ -231,7 +231,7 @@ struct GlobalPRsView: View {
                                         guard let id = paneSessionID else { return }
                                         Task {
                                             await model.typeIntoSession("""
-                                            \(snippet.file) L\(snippet.firstLine)–L\(snippet.lastLine):
+                                            \(snippet.label):
                                             ```diff
                                             \(snippet.code)
                                             ```

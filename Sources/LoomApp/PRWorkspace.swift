@@ -257,8 +257,7 @@ struct PRWorkspaceView: View {
                     SplitDiffView(files: diffFiles,
                                   onExplain: { snippet in
                                       deliver("""
-                                      Explain these lines from \(snippet.file) \
-                                      (L\(snippet.firstLine)–L\(snippet.lastLine)):
+                                      Explain these lines (\(snippet.label)):
                                       ```diff
                                       \(snippet.code)
                                       ```
@@ -266,8 +265,7 @@ struct PRWorkspaceView: View {
                                   },
                                   onAsk: { snippet, question in
                                       deliver("""
-                                      About these lines from \(snippet.file) \
-                                      (L\(snippet.firstLine)–L\(snippet.lastLine)): \(question)
+                                      About these lines (\(snippet.label)): \(question)
                                       ```diff
                                       \(snippet.code)
                                       ```

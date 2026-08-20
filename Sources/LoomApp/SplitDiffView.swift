@@ -5,25 +5,35 @@ import SwiftUI
 /// GitHub-style side-by-side diff: per-file sections (path, +/- counts,
 /// collapsible), aligned old/new columns with line-number gutters and
 /// red/green tinted backgrounds.
-/// A selected span of diff lines, ready to be sent to the review session.
+/// A selection, ready to be sent to the review session — possibly spanning
+/// several files, in which case the code carries per-file headers.
 struct DiffSnippet {
-    let file: String
-    let firstLine: Int
-    let lastLine: Int
-    let code: String
-}
+    let spans: [DiffSelection.FileSpan]
 
-/// Precomputed display model: parsing and row pairing happen ONCE, off the
-/// main thread, when the diff loads — the view was re-running both on every
-/// render (every hover, every keystroke), which crawled on large PRs.
-struct DiffFileRows: Identifiable, Equatable, Sendable {
-    let file: DiffParser.File
-    /// splitRows for each hunk, same order as file.hunks.
-    let hunkRows: [[DiffParser.SplitRow]]
-    var id: String { file.path }
+    /// A GitHub comment anchors to ONE place: only a single-span selection
+    /// can be commented or suggested on.
+    var isAnchorable: Bool { spans.count == 1 }
+    var file: String { spans.first?.file ?? "" }
+    var firstLine: Int { spans.first?.firstLine ?? 0 }
+    var lastLine: Int { spans.last?.lastLine ?? 0 }
+    var lineCount: Int {
+        spans.reduce(0) { $0 + $1.code.split(separator: "\n", omittingEmptySubsequences: false).count }
+    }
 
-    static func compute(_ files: [DiffParser.File]) -> [DiffFileRows] {
-        files.map { DiffFileRows(file: $0, hunkRows: $0.hunks.map(DiffParser.splitRows)) }
+    /// One file: just the code. Several: each block titled by its file, so
+    /// the reader never has to guess where a line came from.
+    var code: String {
+        guard spans.count > 1 else { return spans.first?.code ?? "" }
+        return spans
+            .map { "// \($0.file) L\($0.firstLine)–L\($0.lastLine)\n\($0.code)" }
+            .joined(separator: "\n\n")
+    }
+
+    /// What the bar shows: one file's range, or how many files are covered.
+    var label: String {
+        guard let first = spans.first else { return "" }
+        if spans.count == 1 { return "\(first.file) L\(first.firstLine)–L\(first.lastLine)" }
+        return "\(spans.count) blocks across \(Set(spans.map(\.file)).count) files"
     }
 }
 
@@ -45,79 +55,124 @@ struct SplitDiffView: View {
     var onReply: ((Int, String) -> Void)?
 
     @State private var collapsed: Set<String> = []
-    /// Selection: click anchors, shift-click extends — one hunk at a time.
-    @State private var anchor: SelectionPoint?
-    @State private var range: SelectionRange?
+    /// The selection's two ends, addressed globally — an interval between two
+    /// row identifiers naturally spans hunks AND files.
+    @State private var anchor: DiffSelection.RowID?
+    @State private var head: DiffSelection.RowID?
+    /// Set while a drag is in flight (nil between drags).
+    @State private var dragging = false
     /// What the action bar is composing, and its text.
     @State private var composer: Composer = .none
     @State private var draft = ""
-    /// Row index → its y span in the hunk: comment threads break the uniform
-    /// row height, so a drag's position is looked up, not divided.
-    @State private var rowSpans: [Int: ClosedRange<CGFloat>] = [:]
+    /// EVERY row's y span, in ONE coordinate space keyed by global row id.
+    /// (A per-hunk dictionary meant each hunk overwrote the others' entries,
+    /// so a drag in one file was resolved against another file's geometry —
+    /// that is what selected lines nowhere near the cursor.)
+    @State private var rowSpans: [DiffSelection.RowID: ClosedRange<CGFloat>] = [:]
     /// The mouse is up: only then do the actions appear — a bar following the
     /// cursor mid-drag is in the way of the very lines being picked.
     @State private var selectionSettled = false
-
-    struct SelectionPoint: Equatable { let file: String; let hunk: Int; let row: Int }
-    struct SelectionRange: Equatable { let file: String; let hunk: Int; let rows: ClosedRange<Int> }
+    /// The action bar is draggable: it must never be the thing hiding the
+    /// code being discussed.
+    @State private var barOffset: CGSize = .zero
+    @State private var barOffsetAtDragStart: CGSize = .zero
+    /// The diff's own size, so the bar can never be dragged out of reach
+    /// (the button that brings it back lives inside it).
+    @State private var diffSize: CGSize = .zero
 
     var body: some View {
         // Lazy: a large PR materializes thousands of rows — only what is
         // visible gets built.
         LazyVStack(alignment: .leading, spacing: 10) {
-            ForEach(files) { file in
-                fileSection(file)
+            ForEach(Array(files.enumerated()), id: \.element.id) { fileIndex, file in
+                fileSection(file, fileIndex: fileIndex)
             }
         }
+        // ONE space for the whole diff: row positions and the drag's position
+        // are then measured against the same origin, whatever file they are in.
+        .coordinateSpace(name: Self.diffSpace)
+        .background(GeometryReader { geometry in
+            Color.clear.preference(key: DiffSizeKey.self, value: geometry.size)
+        })
+        .onPreferenceChange(DiffSizeKey.self) { diffSize = $0 }
+        .onPreferenceChange(DiffRowSpansKey.self) { spans in
+            if !spans.isEmpty { rowSpans = spans }
+        }
+        .gesture(selectionDrag)
         .overlay(alignment: .bottom) {
-            if range != nil, selectionSettled {
-                quickActionBar.transition(.move(edge: .bottom).combined(with: .opacity))
+            // snippet, not just "a range exists": a selection covering only
+            // collapsed files has nothing to act on.
+            if selectionSettled, snippet != nil {
+                quickActionBar
+                    .offset(barOffset)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.hover, value: selectionSettled)
         .onExitCommand { clearSelection() }
     }
 
+    /// One drag for the entire diff — dragging past a file's last line simply
+    /// continues into the next file's rows.
+    private var selectionDrag: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.diffSpace))
+            .onChanged { value in
+                // Outside every row (a file header, a comment thread, the gap
+                // between cards): keep what we have rather than inventing a
+                // nearest row — that guesswork is what selected stray lines.
+                guard let current = rowAt(value.location.y) else { return }
+                selectionSettled = false
+                if !dragging {
+                    dragging = true
+                    let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
+                    // Shift keeps the previous anchor: extend, don't restart.
+                    if !shift || anchor == nil {
+                        anchor = rowAt(value.startLocation.y) ?? current
+                    }
+                }
+                head = current
+            }
+            .onEnded { _ in
+                dragging = false
+                if selection != nil { selectionSettled = true }
+            }
+    }
+
+    private static let diffSpace = "loom.diff"
+
+    /// The selection's ordered ends, once both exist.
+    private var selection: (from: DiffSelection.RowID, to: DiffSelection.RowID)? {
+        guard let anchor, let head else { return nil }
+        return (min(anchor, head), max(anchor, head))
+    }
+
     private func clearSelection() {
         anchor = nil
-        range = nil
+        head = nil
+        dragging = false
         composer = .none
         draft = ""
         selectionSettled = false
     }
 
-    private func isSelected(file: String, hunk: Int, row: Int) -> Bool {
-        guard let range else { return false }
-        return range.file == file && range.hunk == hunk && range.rows.contains(row)
+    private func isSelected(_ id: DiffSelection.RowID) -> Bool {
+        guard let selection else { return false }
+        return id >= selection.from && id <= selection.to
     }
 
-    /// The selected rows as a snippet: the NEW side when present, else the
-    /// old — with +/− markers so the agent sees what changed.
+    /// The row under a y position in the diff's own space — nil when the
+    /// cursor is between rows rather than on one.
+    private func rowAt(_ y: CGFloat) -> DiffSelection.RowID? {
+        rowSpans.first { $0.value.contains(y) }?.key
+    }
+
+    /// The selected rows as a snippet — grouping, clamping and markers all
+    /// live in the tested model.
     private var snippet: DiffSnippet? {
-        guard let range,
-              let file = files.first(where: { $0.id == range.file }),
-              range.hunk < file.hunkRows.count else { return nil }
-        let rows = file.hunkRows[range.hunk]
-        let picked = range.rows.clamped(to: 0...(rows.count - 1))
-        var lines: [String] = []
-        var numbers: [Int] = []
-        for index in picked {
-            let row = rows[index]
-            if let left = row.left, row.right == nil {
-                lines.append("- " + left.text)
-                left.oldNumber.map { numbers.append($0) }
-            }
-            if let right = row.right {
-                lines.append((row.left == nil && right.kind == .addition ? "+ " :
-                              right.kind == .addition ? "+ " : "  ") + right.text)
-                right.newNumber.map { numbers.append($0) }
-            }
-        }
-        guard !lines.isEmpty else { return nil }
-        return DiffSnippet(file: range.file,
-                           firstLine: numbers.min() ?? 0,
-                           lastLine: numbers.max() ?? 0,
-                           code: lines.joined(separator: "\n"))
+        guard let selection else { return nil }
+        let spans = DiffSelection.spans(in: files, from: selection.from, to: selection.to,
+                                        skipping: collapsed)
+        return spans.isEmpty ? nil : DiffSnippet(spans: spans)
     }
 
     /// What the composer field is currently writing.
@@ -129,18 +184,39 @@ struct SplitDiffView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let snippet {
                 HStack(spacing: 10) {
-                    Text("\(snippet.file) L\(snippet.firstLine)–\(snippet.lastLine)")
+                    // The grip: the bar must be movable off the very lines
+                    // being discussed.
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                        .help("Drag to move")
+                    Text(snippet.label)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(DefaultTheme.secondaryText)
                         .lineLimit(1)
-                    Text("\(snippet.lastLine - snippet.firstLine + 1) lines")
+                    Text("\(snippet.lineCount) lines")
                         .font(.system(size: 10))
                         .foregroundStyle(DefaultTheme.mutedText)
                     Spacer(minLength: 8)
+                    if barOffset != .zero {
+                        HoverIconButton(systemImage: "arrow.counterclockwise",
+                                        help: "Snap back to the bottom") {
+                            withAnimation(.hover) { barOffset = .zero }
+                            barOffsetAtDragStart = .zero
+                        }
+                    }
                     HoverIconButton(systemImage: "xmark", help: "Clear selection (esc)") {
                         clearSelection()
                     }
                 }
+                .contentShape(Rectangle())
+                .gesture(DragGesture()
+                    .onChanged { value in
+                        barOffset = clampedOffset(CGSize(
+                            width: barOffsetAtDragStart.width + value.translation.width,
+                            height: barOffsetAtDragStart.height + value.translation.height))
+                    }
+                    .onEnded { _ in barOffsetAtDragStart = barOffset })
                 if composer == .none {
                     HStack(spacing: 8) {
                         if onAddToSession != nil {
@@ -159,7 +235,9 @@ struct SplitDiffView: View {
                                 composer = .ask
                             }
                         }
-                        if onComment != nil {
+                        // GitHub anchors a comment to ONE range: a selection
+                        // spanning files can go to claude, not to a review.
+                        if onComment != nil, snippet.isAnchorable {
                             GhostButton("Comment", systemImage: "text.bubble") {
                                 composer = .comment
                             }
@@ -182,6 +260,10 @@ struct SplitDiffView: View {
         }
         .frame(maxWidth: 620)
         .padding(.horizontal, 12).padding(.vertical, 8)
+        .contentShape(Rectangle())
+        // The bar floats OVER the rows: without this absorber, a click on its
+        // padding would fall through and reselect the line underneath.
+        .gesture(DragGesture(minimumDistance: 0).onChanged { _ in }.onEnded { _ in })
         .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10)
             .stroke(DefaultTheme.accent.opacity(0.5), lineWidth: 1))
@@ -242,7 +324,7 @@ struct SplitDiffView: View {
             .joined(separator: "\n")
     }
 
-    private func fileSection(_ entry: DiffFileRows) -> some View {
+    private func fileSection(_ entry: DiffFileRows, fileIndex: Int) -> some View {
         let file = entry.file
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
@@ -275,7 +357,7 @@ struct SplitDiffView: View {
             if !collapsed.contains(file.path) {
                 ForEach(Array(file.hunks.enumerated()), id: \.offset) { hunkIndex, hunk in
                     hunkView(hunk, rows: entry.hunkRows[hunkIndex],
-                             file: file.path, hunkIndex: hunkIndex)
+                             file: file.path, fileIndex: fileIndex, hunkIndex: hunkIndex)
                 }
             }
         }
@@ -285,7 +367,7 @@ struct SplitDiffView: View {
     }
 
     private func hunkView(_ hunk: DiffParser.Hunk, rows: [DiffParser.SplitRow],
-                          file: String, hunkIndex: Int) -> some View {
+                          file: String, fileIndex: Int, hunkIndex: Int) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(hunk.header)
                 .font(.system(size: 10, design: .monospaced))
@@ -299,6 +381,7 @@ struct SplitDiffView: View {
             // collapsed view.
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
+                    let id = DiffSelection.RowID(file: fileIndex, hunk: hunkIndex, row: rowIndex)
                     HStack(alignment: .top, spacing: 0) {
                         side(row.left, isOld: true)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -310,15 +393,15 @@ struct SplitDiffView: View {
                     }
                     .fixedSize(horizontal: false, vertical: true)
                     .overlay(Rectangle().fill(DefaultTheme.accent.opacity(
-                        isSelected(file: file, hunk: hunkIndex, row: rowIndex) ? 0.10 : 0)))
+                        isSelected(id) ? 0.10 : 0)))
                     .background {
-                        // Each row publishes its y span: comment threads sit
-                        // between rows, so a drag's y can no longer be divided
-                        // by a uniform height — it is looked up.
+                        // Every row publishes its y span in the DIFF's space,
+                        // under its global id — comment threads sit between
+                        // rows, so positions are looked up, never computed.
                         GeometryReader { geometry in
-                            let frame = geometry.frame(in: .named("hunk"))
+                            let frame = geometry.frame(in: .named(Self.diffSpace))
                             Color.clear.preference(key: DiffRowSpansKey.self,
-                                                   value: [rowIndex: frame.minY...frame.maxY])
+                                                   value: [id: frame.minY...frame.maxY])
                         }
                     }
                     // GitHub-style: the threads anchored to this line sit
@@ -328,50 +411,7 @@ struct SplitDiffView: View {
                     }
                 }
             }
-            .coordinateSpace(name: "hunk")
-            .contentShape(Rectangle())
-            // Press-and-drag selection: press anchors, dragging extends row
-            // by row, releasing hands the snippet over (shift-press extends
-            // from the previous anchor instead).
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    guard !rowSpans.isEmpty else { return }
-                    selectionSettled = false
-                    let row = rowAt(value.location.y, count: rows.count)
-                    let start = rowAt(value.startLocation.y, count: rows.count)
-                    let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
-                    if shift, let anchor, anchor.file == file, anchor.hunk == hunkIndex {
-                        range = SelectionRange(file: file, hunk: hunkIndex,
-                                               rows: min(anchor.row, row)...max(anchor.row, row))
-                    } else {
-                        if anchor?.file != file || anchor?.hunk != hunkIndex
-                            || anchor?.row != start {
-                            anchor = SelectionPoint(file: file, hunk: hunkIndex, row: start)
-                        }
-                        range = SelectionRange(file: file, hunk: hunkIndex,
-                                               rows: min(start, row)...max(start, row))
-                    }
-                }
-                // Releasing only ARMS the action bar — the selection is never
-                // sent anywhere on its own.
-                .onEnded { _ in
-                    if range != nil { selectionSettled = true }
-                })
         }
-        .onPreferenceChange(DiffRowSpansKey.self) { spans in
-            if !spans.isEmpty { rowSpans = spans }
-        }
-    }
-
-    /// Which row a drag's y lands on: the span containing it, else the
-    /// nearest one (dragging past the last row selects to the end).
-    private func rowAt(_ y: CGFloat, count: Int) -> Int {
-        if let hit = rowSpans.first(where: { $0.value.contains(y) })?.key { return hit }
-        let nearest = rowSpans.min {
-            abs(($0.value.lowerBound + $0.value.upperBound) / 2 - y)
-                < abs(($1.value.lowerBound + $1.value.upperBound) / 2 - y)
-        }
-        return min(max(nearest?.key ?? 0, 0), max(count - 1, 0))
     }
 
     /// The comment threads anchored to a diff row: matched on the new-side
@@ -427,10 +467,28 @@ struct SplitDiffView: View {
         .background(line == nil ? DefaultTheme.surface.opacity(0.4) : background)
     }
 
+    /// Keeps the bar overlapping the diff: it starts centred at the bottom,
+    /// so it may travel up to the top edge and half a width sideways.
+    private func clampedOffset(_ offset: CGSize) -> CGSize {
+        guard diffSize.width > 0, diffSize.height > 0 else { return offset }
+        let horizontal = max(diffSize.width / 2 - 60, 0)
+        let vertical = max(diffSize.height - 80, 0)
+        return CGSize(width: min(max(offset.width, -horizontal), horizontal),
+                      height: min(max(offset.height, -vertical), 0))
+    }
+
+    private struct DiffSizeKey: PreferenceKey {
+        static let defaultValue: CGSize = .zero
+        static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+            let next = nextValue()
+            if next != .zero { value = next }
+        }
+    }
+
     private struct DiffRowSpansKey: PreferenceKey {
-        static let defaultValue: [Int: ClosedRange<CGFloat>] = [:]
-        static func reduce(value: inout [Int: ClosedRange<CGFloat>],
-                           nextValue: () -> [Int: ClosedRange<CGFloat>]) {
+        static let defaultValue: [DiffSelection.RowID: ClosedRange<CGFloat>] = [:]
+        static func reduce(value: inout [DiffSelection.RowID: ClosedRange<CGFloat>],
+                           nextValue: () -> [DiffSelection.RowID: ClosedRange<CGFloat>]) {
             value.merge(nextValue()) { _, new in new }
         }
     }
