@@ -202,6 +202,31 @@ struct ReadOnlyWorktreeTests {
         #expect(try await git(["rev-parse", "HEAD"], in: again) == prHead)
     }
 
+    @Test("a diff larger than the pipe buffer completes — no read-after-exit deadlock",
+          .timeLimit(.minutes(1)))
+    func hugeDiffDoesNotDeadlock() async throws {
+        let repo = try await makeFixtureRepo()
+        let bare = repo.deletingLastPathComponent()
+            .appendingPathComponent("origin-\(UUID().uuidString.prefix(6)).git")
+        _ = try await git(["init", "--bare", bare.path], in: repo)
+        _ = try await git(["remote", "add", "origin", bare.path], in: repo)
+        _ = try await git(["push", "origin", "main"], in: repo)
+        // ~2 MB of new content: far beyond the 64 KB pipe buffer. A process
+        // that is only read after exit blocks writing and never exits.
+        let bigLine = String(repeating: "x", count: 200) + "\n"
+        try String(repeating: bigLine, count: 10_000)
+            .write(to: repo.appendingPathComponent("big.txt"), atomically: true, encoding: .utf8)
+        _ = try await git(["add", "."], in: repo)
+        _ = try await git(["-c", "user.email=t@t", "-c", "user.name=T",
+                           "commit", "-m", "big"], in: repo)
+        _ = try await git(["push", "origin", "HEAD:refs/pull/9/head"], in: repo)
+        _ = try await git(["reset", "--hard", "HEAD~1"], in: repo)
+
+        let diff = try await GitHubService().localDiff(9, baseBranch: "main", in: repo)
+
+        #expect(diff.count > 1_000_000, "the whole diff arrives, not a truncated buffer")
+    }
+
     @Test("localDiff rebuilds the PR diff from fetched refs — no API size limit")
     func localDiffFromRefs() async throws {
         let repo = try await makeFixtureRepo()

@@ -635,16 +635,21 @@ public final class AppModel {
         process.executableURL = claude
         process.arguments = ["-p", prompt, "--output-format", "json"]
         process.currentDirectoryURL = repo
-        let stdout = Pipe()
+        let stdout = Pipe(), stderr = Pipe()
         process.standardOutput = stdout
-        process.standardError = Pipe()
-        do { try process.run() } catch { return nil }
-        let output: String = await withCheckedContinuation { continuation in
-            process.terminationHandler = { _ in
-                continuation.resume(returning: String(
-                    decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+        process.standardError = stderr
+        let output: String? = await withCheckedContinuation { continuation in
+            // ProcessDrain: drains pipes before exit and never touches
+            // waitUntilExit (both deadlock in their own way).
+            do {
+                try ProcessDrain.launch(process, stdout: stdout, stderr: stderr) { _, out, _ in
+                    continuation.resume(returning: String(decoding: out, as: UTF8.self))
+                }
+            } catch {
+                continuation.resume(returning: nil)
             }
         }
+        guard let output else { return nil }
         return PRTourParser.parse(claudeOutput: output)
     }
 
@@ -1321,15 +1326,18 @@ public final class AppModel {
         let stdout = Pipe(), stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
-        do { try process.run() } catch { return (false, String(describing: error)) }
         return await withCheckedContinuation { continuation in
-            process.terminationHandler = { finished in
-                let out = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(),
-                                 as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-                let err = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(),
-                                 as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-                continuation.resume(returning: finished.terminationStatus == 0
-                                    ? (true, out) : (false, err.isEmpty ? out : err))
+            do {
+                try ProcessDrain.launch(process, stdout: stdout, stderr: stderr) { status, outData, errData in
+                    let out = String(decoding: outData, as: UTF8.self)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let err = String(decoding: errData, as: UTF8.self)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    continuation.resume(returning: status == 0
+                                        ? (true, out) : (false, err.isEmpty ? out : err))
+                }
+            } catch {
+                continuation.resume(returning: (false, String(describing: error)))
             }
         }
     }

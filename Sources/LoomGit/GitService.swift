@@ -146,19 +146,18 @@ public struct GitService: Sendable {
         process.standardError = stderr
 
         return try await withCheckedThrowingContinuation { continuation in
-            process.terminationHandler = { finished in
-                let output = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                let errors = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                if successCodes.contains(finished.terminationStatus) {
-                    continuation.resume(returning: output.trimmingCharacters(in: .whitespacesAndNewlines))
-                } else {
-                    continuation.resume(throwing: GitError.commandFailed(
-                        arguments: arguments, code: finished.terminationStatus,
-                        stderr: errors.trimmingCharacters(in: .whitespacesAndNewlines)))
-                }
-            }
             do {
-                try process.run()
+                try ProcessDrain.launch(process, stdout: stdout, stderr: stderr) { status, out, err in
+                    let output = String(decoding: out, as: UTF8.self)
+                    let errors = String(decoding: err, as: UTF8.self)
+                    if successCodes.contains(status) {
+                        continuation.resume(returning: output.trimmingCharacters(in: .whitespacesAndNewlines))
+                    } else {
+                        continuation.resume(throwing: GitError.commandFailed(
+                            arguments: arguments, code: status,
+                            stderr: errors.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    }
+                }
             } catch {
                 continuation.resume(throwing: GitError.gitNotRunnable(gitPath, String(describing: error)))
             }

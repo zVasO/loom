@@ -374,19 +374,18 @@ public struct GitHubService: Sendable {
         process.standardOutput = stdout
         process.standardError = stderr
         return try await withCheckedThrowingContinuation { continuation in
-            process.terminationHandler = { finished in
-                let out = stdout.fileHandleForReading.readDataToEndOfFile()
-                let err = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(),
-                                 as: UTF8.self)
-                if finished.terminationStatus == 0 {
-                    continuation.resume(returning: out)
-                } else {
-                    continuation.resume(throwing: GitHubError.commandFailed(
-                        arguments: arguments,
-                        stderr: err.trimmingCharacters(in: .whitespacesAndNewlines)))
+            do {
+                try ProcessDrain.launch(process, stdout: stdout, stderr: stderr) { status, out, err in
+                    if status == 0 {
+                        continuation.resume(returning: out)
+                    } else {
+                        continuation.resume(throwing: GitHubError.commandFailed(
+                            arguments: arguments,
+                            stderr: String(decoding: err, as: UTF8.self)
+                                .trimmingCharacters(in: .whitespacesAndNewlines)))
+                    }
                 }
-            }
-            do { try process.run() } catch {
+            } catch {
                 continuation.resume(throwing: GitHubError.commandFailed(
                     arguments: arguments, stderr: String(describing: error)))
             }
