@@ -95,6 +95,15 @@ struct GitHubServiceTests {
         #expect(payload["line"] as? Int == 7)
     }
 
+    @Test("a pure-deletion comment anchors to the LEFT side")
+    func leftSidePayload() {
+        let payload = GitHubService.lineCommentPayload(path: "src/a.swift", firstLine: 6,
+                                                       lastLine: 7, sha: "abc", body: "x",
+                                                       side: "LEFT")
+        #expect(payload["side"] as? String == "LEFT")
+        #expect(payload["start_side"] as? String == "LEFT")
+    }
+
     @Test("a file-level comment targets the whole file, not a line")
     func fileCommentPayload() {
         let payload = GitHubService.fileCommentPayload(path: "src/a.swift",

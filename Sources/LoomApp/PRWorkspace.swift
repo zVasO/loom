@@ -403,6 +403,7 @@ struct PRWorkspaceView: View {
                 firstLine: snippet.firstLine, lastLine: snippet.lastLine,
                 note: isSuggestion ? "" : text,
                 suggestion: isSuggestion ? text : nil,
+                side: snippet.spans.first?.side ?? "RIGHT",
                 in: project.id)
             prActionOutput = error ?? (isSuggestion ? "Suggestion posted ✓" : "Comment posted ✓")
             if error == nil { await load(refresh: true) }

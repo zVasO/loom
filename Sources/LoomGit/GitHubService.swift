@@ -159,12 +159,13 @@ public struct GitHubService: Sendable {
     /// The `pulls/{n}/comments` payload. A single-line comment must NOT carry
     /// start_line (GitHub rejects a one-line span).
     public static func lineCommentPayload(path: String, firstLine: Int, lastLine: Int,
-                                          sha: String, body: String) -> [String: Any] {
-        var payload: [String: Any] = ["path": path, "line": lastLine, "side": "RIGHT",
+                                          sha: String, body: String,
+                                          side: String = "RIGHT") -> [String: Any] {
+        var payload: [String: Any] = ["path": path, "line": lastLine, "side": side,
                                       "commit_id": sha, "body": body]
         if firstLine < lastLine {
             payload["start_line"] = firstLine
-            payload["start_side"] = "RIGHT"
+            payload["start_side"] = side
         }
         return payload
     }
@@ -252,14 +253,15 @@ public struct GitHubService: Sendable {
     /// Posts a review comment anchored to real diff lines (what GitHub's own
     /// "comment on this line" does) — `suggestion` makes it appliable.
     public func commentOnLines(_ number: Int, path: String, firstLine: Int, lastLine: Int,
-                               note: String, suggestion: String?, in repo: URL) async throws {
+                               note: String, suggestion: String?, side: String = "RIGHT",
+                               in repo: URL) async throws {
         let head = try await run(["pr", "view", "\(number)", "--json", "headRefOid",
                                   "--jq", ".headRefOid"], in: repo)
         let sha = String(decoding: head, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let payload = Self.lineCommentPayload(
             path: path, firstLine: firstLine, lastLine: lastLine, sha: sha,
-            body: Self.lineCommentBody(note, suggestion: suggestion))
+            body: Self.lineCommentBody(note, suggestion: suggestion), side: side)
         let json = try JSONSerialization.data(withJSONObject: payload)
         // --input - : the body travels as JSON on stdin, so newlines and
         // backticks survive intact.

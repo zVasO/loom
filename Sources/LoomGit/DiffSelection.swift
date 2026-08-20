@@ -49,6 +49,9 @@ public enum DiffSelection {
         public let file: String
         public let firstLine: Int
         public let lastLine: Int
+        /// Which side of the diff the numbers belong to: "RIGHT" (new code)
+        /// whenever the selection touches it, "LEFT" for pure deletions.
+        public let side: String
         public let code: String
     }
 
@@ -95,7 +98,11 @@ public enum DiffSelection {
     private static func span(path: String, rows: [DiffParser.SplitRow],
                              picked: ClosedRange<Int>) -> FileSpan? {
         var lines: [String] = []
-        var numbers: [Int] = []
+        // Old-side and new-side numbers NEVER mix: min/max over both would
+        // fabricate a range spanning unrelated lines whenever insertions
+        // shifted the new side (old 11, new 14 → a bogus L11–L14 anchor).
+        var oldNumbers: [Int] = []
+        var newNumbers: [Int] = []
         for index in picked {
             let row = rows[index]
             // A modified line pairs a deletion with an addition: BOTH sides
@@ -103,17 +110,21 @@ public enum DiffSelection {
             // tell what it replaced.
             if let left = row.left, left.kind == .deletion {
                 lines.append("- " + left.text)
-                left.oldNumber.map { numbers.append($0) }
+                left.oldNumber.map { oldNumbers.append($0) }
             }
             if let right = row.right {
                 lines.append((right.kind == .addition ? "+ " : "  ") + right.text)
-                right.newNumber.map { numbers.append($0) }
+                right.newNumber.map { newNumbers.append($0) }
             }
         }
         guard !lines.isEmpty else { return nil }
+        // Anchor to the new side whenever the selection touches it; only a
+        // pure-deletion selection lives on the old side.
+        let anchors = newNumbers.isEmpty ? oldNumbers : newNumbers
         return FileSpan(file: path,
-                        firstLine: numbers.min() ?? 0,
-                        lastLine: numbers.max() ?? 0,
+                        firstLine: anchors.min() ?? 0,
+                        lastLine: anchors.max() ?? 0,
+                        side: newNumbers.isEmpty ? "LEFT" : "RIGHT",
                         code: lines.joined(separator: "\n"))
     }
 }

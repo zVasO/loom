@@ -125,6 +125,51 @@ struct DiffSelectionTests {
         #expect(spans[0].code == "  let a = 1")
     }
 
+    @Test("line numbers never mix sides: a modified line after insertions anchors to its NEW number")
+    func numbersStayOnOneSide() {
+        // Three insertions shift the new side: old 11 becomes new 14. Mixing
+        // sides would anchor a comment to L11–L14 — four unrelated lines.
+        let shifted = DiffFileRows.compute(DiffParser.parse("""
+        diff --git a/s.swift b/s.swift
+        --- a/s.swift
+        +++ b/s.swift
+        @@ -10,2 +10,5 @@
+         context
+        +added 1
+        +added 2
+        +added 3
+        -old code
+        +new code
+        """))
+        let rows = shifted[0].hunkRows[0]
+        let lastRow = rows.count - 1
+        let spans = DiffSelection.spans(in: shifted,
+                                        from: DiffSelection.RowID(file: 0, hunk: 0, row: lastRow),
+                                        to: DiffSelection.RowID(file: 0, hunk: 0, row: lastRow))
+        #expect(spans[0].firstLine == 14, "the modified line's NEW-side number")
+        #expect(spans[0].lastLine == 14)
+        #expect(spans[0].side == "RIGHT")
+    }
+
+    @Test("a pure-deletion selection anchors to the OLD side")
+    func pureDeletionAnchorsLeft() {
+        let deletions = DiffFileRows.compute(DiffParser.parse("""
+        diff --git a/d.swift b/d.swift
+        --- a/d.swift
+        +++ b/d.swift
+        @@ -5,3 +5,1 @@
+         kept
+        -gone one
+        -gone two
+        """))
+        let spans = DiffSelection.spans(in: deletions,
+                                        from: DiffSelection.RowID(file: 0, hunk: 0, row: 1),
+                                        to: DiffSelection.RowID(file: 0, hunk: 0, row: 2))
+        #expect(spans[0].firstLine == 6)
+        #expect(spans[0].lastLine == 7)
+        #expect(spans[0].side == "LEFT", "deleted lines only exist on the old side")
+    }
+
     @Test("an out-of-bounds identifier yields nothing instead of crashing")
     func outOfBounds() {
         let spans = DiffSelection.spans(in: files,

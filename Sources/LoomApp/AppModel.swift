@@ -448,13 +448,13 @@ public final class AppModel {
     /// Line-anchored review comment (optionally an appliable suggestion).
     /// nil on success, error text otherwise.
     public func commentOnLines(_ number: Int, path: String, firstLine: Int, lastLine: Int,
-                               note: String, suggestion: String?,
+                               note: String, suggestion: String?, side: String = "RIGHT",
                                in projectID: ProjectID) async -> String? {
         guard let repo = projectRepo(projectID) else { return "No repo for this project" }
         do {
             try await GitHubService().commentOnLines(number, path: path, firstLine: firstLine,
                                                      lastLine: lastLine, note: note,
-                                                     suggestion: suggestion, in: repo)
+                                                     suggestion: suggestion, side: side, in: repo)
             return nil
         } catch { return Self.ghErrorText(error) }
     }
