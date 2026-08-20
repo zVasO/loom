@@ -16,7 +16,7 @@ swift run -c release LoomApp    # IMPORTANT : release — le debug est 10-50× p
                                 # sur le rendu terminal (parse par cellule non optimisé)
 ```
 
-Tests : `swift test` (process réels, repos Git réels, sockets réels).
+Tests : `swift test` (process réels, repos Git réels, sockets réels — zéro mock).
 
 Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 étapes).
 
