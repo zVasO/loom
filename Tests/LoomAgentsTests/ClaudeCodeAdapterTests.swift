@@ -107,13 +107,20 @@ struct NativeUsageTests {
     func parseUsage() {
         let jsonl = """
         {"type":"mode","mode":"normal"}
-        {"type":"assistant","message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":100,"cache_read_input_tokens":50,"output_tokens":10}}}
+        {"type":"assistant","timestamp":"2026-09-02T10:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":2,"cache_creation_input_tokens":100,"cache_read_input_tokens":50,"output_tokens":10}}}
         {"type":"user","message":{"content":"hi"}}
-        {"type":"assistant","message":{"usage":{"input_tokens":5,"cache_creation_input_tokens":30,"cache_read_input_tokens":160,"output_tokens":25}}}
+        {"type":"assistant","timestamp":"2026-09-02T10:01:00Z","requestId":"r2","message":{"id":"m2","model":"claude-opus-5","usage":{"input_tokens":5,"cache_creation_input_tokens":30,"cache_read_input_tokens":160,"output_tokens":25}}}
         """
         let usage = ClaudeNativeSessions.usage(fromJSONL: jsonl)
         #expect(usage?.contextTokens == 195, "5 + 30 + 160 — the last turn's real window")
         #expect(usage?.outputTokens == 35, "10 + 25 accumulated")
+    }
+
+    @Test("one assistant line per content block: output is counted once per turn")
+    func usageDeduplicated() {
+        let line = #"{"type":"assistant","timestamp":"2026-09-02T10:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-opus-5","usage":{"input_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":25}}}"#
+        let usage = ClaudeNativeSessions.usage(fromJSONL: [line, line, line].joined(separator: "\n"))
+        #expect(usage?.outputTokens == 25, "not 75")
     }
 
     @Test("no assistant entry — no usage, never zeros passed off as truth")

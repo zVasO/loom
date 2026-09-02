@@ -46,23 +46,12 @@ public enum ClaudeNativeSessions {
     }
 
     /// Parses claude's native JSONL. Pure — the seam the tests contract against.
+    /// Built on `UsageLedger`: duplicates (one line per content block) count once.
     public static func usage(fromJSONL text: String) -> SessionUsage? {
-        var lastContext: Int?
-        var totalOutput = 0
-        for line in text.split(separator: "\n") {
-            guard let data = line.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  object["type"] as? String == "assistant",
-                  let message = object["message"] as? [String: Any],
-                  let usage = message["usage"] as? [String: Any] else { continue }
-            let input = usage["input_tokens"] as? Int ?? 0
-            let cacheRead = usage["cache_read_input_tokens"] as? Int ?? 0
-            let cacheCreation = usage["cache_creation_input_tokens"] as? Int ?? 0
-            lastContext = input + cacheRead + cacheCreation
-            totalOutput += usage["output_tokens"] as? Int ?? 0
-        }
-        guard let lastContext else { return nil }
-        return SessionUsage(contextTokens: lastContext, outputTokens: totalOutput)
+        let turns = UsageLedger.turns(fromJSONL: text)
+        guard let last = turns.last else { return nil }
+        return SessionUsage(contextTokens: last.contextTokens,
+                            outputTokens: turns.reduce(0) { $0 + $1.output })
     }
 
     /// Disk convenience: locate the native file and parse it. `tailBytes` reads
