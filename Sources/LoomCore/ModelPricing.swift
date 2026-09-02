@@ -47,7 +47,8 @@ public enum ModelPricing {
         for f in ["opus-5", "opus-4-8", "opus-4-7", "opus-4-6", "opus-4-5"] { t[f] = opus }
         for f in ["opus-4-1", "opus-4"] { t[f] = opusLegacy }
         t["sonnet-5"] = sonnet5
-        for f in ["sonnet-4-6", "sonnet-4-5", "sonnet-4"] { t[f] = sonnet }
+        // sonnet-3-7 / sonnet-3-5 are retired but share the $3/$15 tier — old sessions still carry them.
+        for f in ["sonnet-4-6", "sonnet-4-5", "sonnet-4", "sonnet-3-7", "sonnet-3-5"] { t[f] = sonnet }
         t["haiku-4-5"] = haiku45
         t["haiku-3-5"] = haiku35
         return t

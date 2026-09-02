@@ -178,7 +178,9 @@ autres panneaux. Contenu de haut en bas :
 3. Trois tuiles Today / Last 7 days / Last 30 days.
 4. Carte « Daily cost » : total sur la fenêtre, segmentés Cost | Tokens et
    7d | 30d | 90d, légende par famille, `Chart` à barres empilées (Swift Charts),
-   couleur par famille (fable = accent, opus = orange, sonnet = vert, haiku = gris).
+   couleur par famille (fable = accent, opus = orange, sonnet = bleu, haiku = gris ;
+   le vert prévu initialement se confondait avec l'accent lime du thème). Dans
+   une famille, la version la plus récente a la teinte pleine, les autres s'estompent.
 5. « Cost by model » : une ligne par famille, barre proportionnelle, coût, et
    dessous `in / out / cache-w / cache-r` en compact (866 / 326.8k / 2.8M / 171.1M).
    Les modèles non tarifés apparaissent en fin de liste avec « unpriced ».

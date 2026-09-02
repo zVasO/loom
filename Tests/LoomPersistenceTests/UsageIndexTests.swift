@@ -95,7 +95,8 @@ struct UsageIndexTests {
         try (line(id: "m1") + "\n").write(to: file, atomically: true, encoding: .utf8)
         let second = try index.refresh(projectsDirectory: projects, calendar: utc)
         #expect(second.turnsAdded == 0, "m1 est déjà connu : INSERT OR IGNORE")
-        #expect(try index.dailyTotals(fromDay: "2026-09-01").first?.output == 20)
+        #expect(try index.dailyTotals(fromDay: "2026-09-01").first?.output == 20,
+                "m2 reste : l'index n'efface jamais un tour (compromis accepté par la spec)")
     }
 
     @Test("dailyTotals agrège par jour du calendrier donné et par modèle")

@@ -56,8 +56,8 @@ struct UsageLedgerTests {
     func lignesIgnorees() {
         let jsonl = """
         {"type":"user","message":{"content":"hi"}}
-        {"type":"assistant","message":{"id":"x","model":"claude-opus-5"}}
-        {"type":"assistant","message":{"id":"y","usage":{"output_tokens":1}}}
+        {"type":"assistant","timestamp":"2026-09-02T18:13:08Z","requestId":"r","message":{"id":"x","model":"claude-opus-5"}}
+        {"type":"assistant","timestamp":"2026-09-02T18:13:08Z","requestId":"r","message":{"id":"y","usage":{"output_tokens":1}}}
         {"type":"assistant","timestamp":"2026-09-02T18:13:08Z","message":{"id":"z","model":"<synthetic>","usage":{"output_tokens":1}}}
         not json at all
         \(line(id: "ok"))

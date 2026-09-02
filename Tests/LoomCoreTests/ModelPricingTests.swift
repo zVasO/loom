@@ -41,6 +41,13 @@ struct ModelPricingTests {
         #expect(ModelPricing.family(for: "claude-unicorn-9") == "unicorn-9")
     }
 
+    @Test("les Sonnet 3.x retirés gardent le palier 3 $/15 $ — l'historique n'est pas « unpriced »")
+    func sonnetRetires() {
+        #expect(ModelPricing.rates(for: "claude-3-5-sonnet-20241022")?.input == Decimal(3))
+        #expect(ModelPricing.rates(for: "claude-3-7-sonnet-20250219")?.output == Decimal(15))
+        #expect(ModelPricing.family(for: "opus-5") == "opus-5", "un nom de famille nu passe tel quel")
+    }
+
     @Test("la table est datée")
     func datee() {
         #expect(ModelPricing.asOf == "2026-09-02")
