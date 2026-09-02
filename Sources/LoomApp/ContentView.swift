@@ -92,6 +92,7 @@ struct ContentView: View {
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
     @State private var selected: DetailSelection?
     @State private var paletteShown = false
+    @State private var usageShown = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -182,10 +183,34 @@ struct ContentView: View {
             model.applyFrameRate()
         }
         .sheet(isPresented: $paletteShown) { palette }
+        .sheet(isPresented: $usageShown) { UsageSheet(model: model) { usageShown = false } }
+        .onAppear {
+            // LOOM_DEBUG_OPEN_USAGE: end-to-end injection (like LOOM_SUPPORT_DIR) —
+            // opens the usage sheet at launch so a screenshot needs no click.
+            if ProcessInfo.processInfo.environment["LOOM_DEBUG_OPEN_USAGE"] != nil { usageShown = true }
+            if let path = ProcessInfo.processInfo.environment["LOOM_DEBUG_USAGE_SNAPSHOT"] {
+                Self.snapshotSheet(after: 30, to: path)
+            }
+        }
         .alert("Incomplete startup", isPresented: .constant(model.startupError != nil)) {
             Button("OK") { model.clearError() }
         } message: {
             Text(model.startupError ?? "")
+        }
+    }
+
+    /// Debug only: writes a PNG of the frontmost sheet — the app may capture its
+    /// own windows without the screen-recording permission a terminal lacks.
+    private static func snapshotSheet(after seconds: Double, to path: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+            guard let sheet = NSApp.windows.first(where: { $0.sheetParent != nil }),
+                  let parent = sheet.sheetParent else { return }
+            for (window, file) in [(sheet, path), (parent, path.replacingOccurrences(of: ".png", with: "-main.png"))] {
+                let id = CGWindowID(window.windowNumber)
+                guard let image = CGWindowListCreateImage(.null, .optionIncludingWindow, id, [.boundsIgnoreFraming]) else { continue }
+                let rep = NSBitmapImageRep(cgImage: image)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
+            }
         }
     }
 
@@ -277,6 +302,19 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut(KeyEquivalent(keyPalette.first ?? "k"), modifiers: .command)
+            // Usage & estimated costs: every claude session on this machine.
+            Button {
+                usageShown = true
+            } label: {
+                Image(systemName: "dollarsign")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .padding(.horizontal, 8).padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                    .hoverBrightness(0.1)
+            }
+            .buttonStyle(.plain)
+            .help("Usage & estimated costs")
             // Settings: the gear toggles the in-app page.
             Button {
                 if tab == .settings {

@@ -1259,6 +1259,11 @@ public final class AppModel {
 
     private var store: SessionStore?
 
+    /// Usage & costs: the incremental index shares loom.sqlite with the store.
+    public func usageIndex() -> UsageIndex? {
+        store.map { UsageIndex(store: $0) }
+    }
+
     /// Address bar history (WEB-01) — best-effort, never blocking.
     private var pendingStackSave: Task<Void, Never>?
 
