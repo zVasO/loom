@@ -7,7 +7,7 @@ import GRDB
 /// from v1 onward (DAT-02).
 public final class SessionStore: Sendable {
 
-    private let database: DatabaseQueue
+    let database: DatabaseQueue
 
     public init(path: String) throws {
         database = try DatabaseQueue(path: path)
@@ -67,6 +67,30 @@ public final class SessionStore: Sendable {
         migrator.registerMigration("v5-badge") { db in
             // Badges: a small label + color on a session (PR #42, review, wip…).
             try db.alter(table: "session") { $0.add(column: "badge", .text) }
+        }
+        migrator.registerMigration("v6-usage") { db in
+            // Usage & costs: an incremental index of claude's native .jsonl records.
+            // usageFile remembers how far each file has been consumed.
+            try db.create(table: "usageFile") { t in
+                t.primaryKey("path", .text)
+                t.column("bytesConsumed", .integer).notNull()
+                t.column("modifiedAt", .double).notNull()
+            }
+            try db.create(table: "usageTurn") { t in
+                t.column("messageID", .text).notNull()
+                t.column("requestID", .text).notNull()
+                t.column("at", .double).notNull()
+                t.column("day", .text).notNull().indexed()
+                t.column("model", .text).notNull()
+                t.column("sessionID", .text).notNull()
+                t.column("cwd", .text)
+                t.column("input", .integer).notNull()
+                t.column("cacheWrite5m", .integer).notNull()
+                t.column("cacheWrite1h", .integer).notNull()
+                t.column("cacheRead", .integer).notNull()
+                t.column("output", .integer).notNull()
+                t.primaryKey(["messageID", "requestID"])
+            }
         }
         try migrator.migrate(database)
     }
