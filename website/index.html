@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loom</title>
+<meta name="description" content="Loom orchestre vos sessions d'agents de codage CLI sur macOS : un terminal persistant et un worktree Git par session, détection d'état en temps réel, transcripts continus.">
+<meta property="og:title" content="Loom — vos agents, tissés ensemble">
+<meta property="og:description" content="Environnement de développement agentique natif macOS. Chaque session Claude Code sur son propre fil.">
+<meta name="theme-color" content="#0B0B0F">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'%3E%3Crect x='32' y='32' width='960' height='960' rx='232' fill='%230D0D0E'/%3E%3Cg fill='%23E8945C' fill-opacity='.82'%3E%3Crect x='296' y='232' width='96' height='560' rx='48'/%3E%3Crect x='464' y='232' width='96' height='560' rx='48'/%3E%3Crect x='632' y='232' width='96' height='560' rx='48'/%3E%3C/g%3E%3Crect x='232' y='368' width='560' height='96' rx='48' fill='%23E8945C'/%3E%3Crect x='232' y='560' width='560' height='96' rx='48' fill='%235CC8C2'/%3E%3Cg fill='%23E8945C' fill-opacity='.82'%3E%3Crect x='296' y='354' width='96' height='124' rx='48'/%3E%3Crect x='632' y='354' width='96' height='124' rx='48'/%3E%3Crect x='464' y='546' width='96' height='124' rx='48'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* ─────────────────────────────────────────────────────────────
+   Loom — landing. Palette héritée du thème « Dark » intégré à l'app
+   (Sources/LoomUI/Theme.swift) : la page est le produit, pas une brochure.
+   ───────────────────────────────────────────────────────────── */
+:root{
+  --bg:#0B0B0F; --bg-2:#0F0F14; --surface:#17171C; --raised:#1E1E25; --line:#26262E; --line-2:#33333D;
+  --text:#EBEBF0; --text-2:#A3A3B0; --muted:#6B6B7A;
+  --accent:#E8833A; --accent-2:#F2A462; --accent-ink:#1A0E05; --cyan:#5CC8C2;
+  --working:#4CC38A; --needs:#E5B455; --idle:#6AA2E8; --failed:#E5646C;
+  --display:"Syne",ui-sans-serif,system-ui,sans-serif;
+  --body:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --max:1180px; --gutter:clamp(20px,4vw,48px);
+  --r:14px; --r-sm:8px;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{
+  margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:17px;line-height:1.55;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;overflow-x:hidden;
+}
+body::before{ /* grain */
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.055;mix-blend-mode:screen;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+a{color:inherit;text-decoration:none}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:-.02em}
+p{margin:0}
+code,kbd,.mono{font-family:var(--mono);font-size:.86em}
+kbd{background:var(--raised);border:1px solid var(--line-2);border-bottom-width:2px;border-radius:5px;padding:.05em .4em;font-size:.78em}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 var(--gutter);position:relative;z-index:1}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);display:inline-flex;align-items:center;gap:10px}
+.eyebrow::before{content:"";width:22px;height:1px;background:var(--accent)}
+.lede{color:var(--text-2);max-width:60ch;font-size:clamp(17px,1.6vw,19px)}
+section{padding:clamp(72px,10vw,128px) 0;position:relative}
+.sec-head{display:grid;gap:18px;max-width:760px;margin-bottom:clamp(36px,5vw,56px)}
+.sec-head h2{font-size:clamp(30px,4.4vw,50px);line-height:1.04;font-weight:800}
+
+/* ── Nav ── */
+.nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(18px) saturate(1.3);-webkit-backdrop-filter:blur(18px) saturate(1.3);
+  background:color-mix(in srgb,var(--bg) 72%,transparent);border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
+.nav .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+.brand{display:flex;align-items:center;gap:11px;font-family:var(--display);font-weight:800;font-size:19px;letter-spacing:-.01em}
+.brand svg{width:28px;height:28px;border-radius:7px}
+.nav-links{display:flex;gap:28px;font-size:15px;color:var(--text-2);font-weight:500}
+.nav-links a:hover{color:var(--text)}
+@media (max-width:820px){.nav-links{display:none}}
+.btn{display:inline-flex;align-items:center;gap:10px;font-weight:600;font-size:15px;padding:11px 18px;border-radius:10px;
+  border:1px solid transparent;transition:transform .15s ease,background .15s ease,border-color .15s ease;cursor:pointer;font-family:var(--body);line-height:1}
+.btn:hover{transform:translateY(-1px)}
+.btn-primary{background:var(--accent);color:var(--accent-ink)}
+.btn-primary:hover{background:var(--accent-2)}
+.btn-ghost{background:transparent;color:var(--text);border-color:var(--line-2)}
+.btn-ghost:hover{border-color:var(--text-2)}
+.btn svg{width:16px;height:16px}
+.btn-sm{padding:9px 14px;font-size:14px}
+
+/* ── Hero ── */
+.hero{padding:clamp(56px,8vw,104px) 0 clamp(48px,6vw,80px);overflow:visible}
+.hero canvas{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;
+  mask-image:radial-gradient(ellipse 70% 70% at 60% 40%,#000 30%,transparent 100%);-webkit-mask-image:radial-gradient(ellipse 70% 70% at 60% 40%,#000 30%,transparent 100%)}
+.hero-grid{display:grid;grid-template-columns:minmax(0,9fr) minmax(0,11fr);gap:clamp(32px,5vw,72px);align-items:center}
+@media (max-width:980px){.hero-grid{grid-template-columns:1fr}}
+.hero h1{font-size:clamp(44px,6.6vw,84px);line-height:.98;font-weight:800;letter-spacing:-.035em}
+.hero h1 em{font-style:normal;color:var(--accent);position:relative;white-space:nowrap}
+.hero h1 em::after{content:"";position:absolute;left:0;right:0;bottom:.04em;height:.08em;background:var(--cyan);border-radius:2px;
+  transform:scaleX(0);transform-origin:left;animation:draw .9s cubic-bezier(.2,.7,.2,1) .5s forwards}
+@keyframes draw{to{transform:scaleX(1)}}
+.hero-copy{display:grid;gap:26px}
+.hero-cta{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.hero-meta{display:flex;gap:8px 18px;flex-wrap:wrap;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.hero-meta span{display:inline-flex;align-items:center;gap:7px}
+.hero-meta i{width:6px;height:6px;border-radius:50%;background:var(--muted);display:inline-block}
+
+/* ── App mock ── */
+.mock{position:relative;z-index:1;border:1px solid var(--line-2);border-radius:16px;background:var(--bg-2);
+  box-shadow:0 40px 120px -30px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.02) inset;overflow:hidden;
+  font-size:12.5px;display:grid;grid-template-rows:38px 1fr}
+
+.titlebar{display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--surface)}
+.lights{display:flex;gap:7px}
+.lights i{width:11px;height:11px;border-radius:50%;background:#3A3A44;display:block}
+.lights i:nth-child(1){background:#FF5F57}.lights i:nth-child(2){background:#FEBC2E}.lights i:nth-child(3){background:#28C840}
+.titlebar .crumbs{margin-left:10px;color:var(--muted);font-family:var(--mono);font-size:11.5px;display:flex;gap:6px;align-items:center}
+.titlebar .crumbs b{color:var(--text-2);font-weight:500}
+.titlebar .search{margin-left:auto;display:flex;gap:8px;align-items:center;color:var(--muted);font-size:11.5px;padding:4px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.app-body{display:grid;grid-template-columns:150px 1fr;min-height:0}
+.sidebar{border-right:1px solid var(--line);padding:12px 8px;display:grid;align-content:start;gap:4px;background:var(--surface)}
+@media (max-width:560px){.app-body{grid-template-columns:1fr}.app-body .sidebar{display:none}.cards{grid-template-columns:1fr}}
+.sidebar .h{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:6px 8px 4px}
+.proj{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;color:var(--text-2)}
+.proj.on{background:var(--raised);color:var(--text)}
+.proj i{width:8px;height:8px;border-radius:2px;display:block;flex:none}
+.proj .n{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--muted);background:var(--bg);padding:1px 6px;border-radius:4px}
+.main{padding:14px;overflow:hidden;display:grid;align-content:start;gap:14px;min-width:0}
+.group{display:grid;gap:8px}
+.group .gh{display:flex;align-items:center;gap:8px;color:var(--muted);font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase}
+.group .gh i{width:8px;height:8px;border-radius:2px;display:block}
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.card{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:11px 12px;display:grid;gap:7px;min-width:0;
+  transition:border-color .4s ease,box-shadow .4s ease;position:relative}
+.card.needs{border-color:color-mix(in srgb,var(--needs) 55%,var(--line));box-shadow:0 0 0 3px color-mix(in srgb,var(--needs) 14%,transparent)}
+.card .t{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.card .title{font-weight:600;font-size:13px;color:var(--text);line-height:1.3;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.badge{flex:none;display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;padding:2px 7px 2px 6px;border-radius:999px;
+  background:var(--bg);border:1px solid var(--line);color:var(--text-2);transition:all .35s ease}
+.badge i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
+.badge[data-s="working"]{color:var(--working)}
+.badge[data-s="working"] i{animation:pulse 1.6s ease-in-out infinite}
+.badge[data-s="needs_input"]{color:var(--needs);background:color-mix(in srgb,var(--needs) 10%,var(--bg));border-color:color-mix(in srgb,var(--needs) 40%,var(--line))}
+.badge[data-s="idle"]{color:var(--idle)}
+.badge[data-s="inactive"]{color:var(--muted)}
+.badge[data-s="failed"]{color:var(--failed)}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.75)}}
+.card .meta{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .meta span+span{margin-left:10px}
+.card .meta .br{color:var(--cyan)}
+.card .out{font-family:var(--mono);font-size:10.5px;color:var(--text-2);background:var(--bg);border-radius:6px;padding:6px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--line)}
+.card .out .cur{display:inline-block;width:6px;height:11px;background:var(--accent);vertical-align:-2px;margin-left:2px;animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.toast{position:absolute;right:14px;top:48px;z-index:3;display:flex;gap:10px;align-items:flex-start;max-width:290px;padding:10px 12px;border-radius:12px;
+  background:color-mix(in srgb,var(--raised) 88%,transparent);backdrop-filter:blur(14px);border:1px solid var(--line-2);box-shadow:0 20px 50px -20px rgba(0,0,0,.9);
+  opacity:0;transform:translateY(-8px);transition:opacity .35s ease,transform .35s ease;pointer-events:none}
+.toast.show{opacity:1;transform:none}
+.toast svg{width:22px;height:22px;flex:none;border-radius:6px}
+.toast b{display:block;font-size:12px;color:var(--text)}
+.toast span{font-size:11.5px;color:var(--text-2);line-height:1.35;display:block}
+@media (prefers-reduced-motion:reduce){.badge i,.card .out .cur,.hero h1 em::after{animation:none}.hero h1 em::after{transform:none}.toast{transition:none}}
+
+/* ── Problem strip ── */
+.strip{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--bg-2);padding:26px 0}
+.strip .wrap{display:grid;grid-template-columns:repeat(4,1fr);gap:24px}
+@media (max-width:900px){.strip .wrap{grid-template-columns:repeat(2,1fr)}}
+.stat{display:grid;gap:4px}
+.stat b{font-family:var(--display);font-size:clamp(22px,2.6vw,30px);font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.stat b small{font-size:.55em;color:var(--text-2);font-family:var(--mono);font-weight:400;margin-left:4px;letter-spacing:0}
+.stat span{color:var(--muted);font-size:14px}
+
+/* ── State detection ── */
+.state{background:linear-gradient(180deg,var(--bg) 0%,var(--bg-2) 100%)}
+.state-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(32px,5vw,72px);align-items:center}
+@media (max-width:900px){.state-grid{grid-template-columns:1fr}}
+.diagram{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:22px;overflow-x:auto}
+.diagram svg{display:block;width:100%;height:auto;min-width:420px;font-family:var(--mono)}
+.timing{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-top:18px}
+.timing div{background:var(--surface);padding:14px 16px;display:grid;gap:2px}
+.timing b{font-family:var(--mono);font-size:22px;font-weight:500;color:var(--text);font-variant-numeric:tabular-nums}
+.timing span{font-size:12.5px;color:var(--muted)}
+.channels{display:grid;gap:14px;margin-top:8px}
+.chan{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start;padding:16px 18px;border:1px solid var(--line);border-radius:var(--r);background:color-mix(in srgb,var(--surface) 60%,transparent)}
+.chan .k{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;padding:4px 8px;border-radius:6px;margin-top:2px}
+.chan.hooks .k{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.chan.heur .k{color:var(--cyan);background:color-mix(in srgb,var(--cyan) 12%,transparent)}
+.chan h3{font-family:var(--body);font-size:16px;font-weight:600;letter-spacing:0;margin-bottom:4px}
+.chan p{color:var(--text-2);font-size:15px}
+.states{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+.states .badge{font-size:11.5px;padding:4px 10px 4px 8px}
+
+/* ── Bento ── */
+.bento{display:grid;grid-template-columns:repeat(6,1fr);gap:14px}
+.cell{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:24px;display:grid;gap:12px;align-content:start;min-width:0;position:relative;overflow:hidden;
+  transition:border-color .2s ease}
+.cell:hover{border-color:var(--line-2)}
+.cell h3{font-size:19px;font-weight:700;line-height:1.2}
+.cell p{color:var(--text-2);font-size:15px}
+.cell .ic{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:var(--raised);color:var(--accent);border:1px solid var(--line-2)}
+.cell .ic svg{width:18px;height:18px}
+.c-3{grid-column:span 3}.c-2{grid-column:span 2}.c-4{grid-column:span 4}.c-6{grid-column:span 6}
+@media (max-width:900px){.c-3,.c-2,.c-4{grid-column:span 3}}
+@media (max-width:600px){.c-3,.c-2,.c-4,.c-6{grid-column:span 6}}
+.term{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;color:var(--text-2);overflow-x:auto;white-space:pre;margin-top:6px}
+.term .p{color:var(--accent)}.term .g{color:var(--working)}.term .c{color:var(--cyan)}.term .d{color:var(--muted)}.term .y{color:var(--needs)}
+.ladder{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-family:var(--mono);font-size:12px;margin-top:6px}
+.ladder span{padding:5px 10px;border-radius:6px;background:var(--bg);border:1px solid var(--line);color:var(--text-2)}
+.ladder em{color:var(--muted);font-style:normal}
+.ladder span:last-child{color:var(--failed);border-color:color-mix(in srgb,var(--failed) 40%,var(--line))}
+.themes{display:flex;gap:8px;margin-top:6px}
+.themes i{flex:1;height:44px;border-radius:8px;border:1px solid var(--line-2);display:block;position:relative;overflow:hidden}
+.themes i::after{content:"";position:absolute;left:8px;bottom:8px;width:34%;height:6px;border-radius:3px;background:var(--sw)}
+.kbd-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+
+/* ── Timeline ── */
+.life{border-top:1px solid var(--line)}
+.tl{display:grid;grid-template-columns:repeat(6,1fr);gap:0;margin-top:8px;overflow-x:auto;padding-bottom:6px}
+.tl > div{position:relative;padding:22px 16px 0 0;min-width:150px;display:grid;gap:8px;align-content:start}
+.tl > div::before{content:"";position:absolute;left:0;top:0;right:0;height:2px;background:var(--line)}
+.tl > div::after{content:"";position:absolute;left:0;top:-4px;width:10px;height:10px;border-radius:50%;background:var(--bg);border:2px solid var(--c,var(--muted))}
+.tl b{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--c,var(--text))}
+.tl span{font-size:14px;color:var(--text-2);line-height:1.45}
+.tl small{font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+/* ── Architecture ── */
+.arch{background:var(--bg-2);border-top:1px solid var(--line)}
+.pkgs{display:flex;flex-wrap:wrap;gap:10px;font-family:var(--mono);font-size:13px;margin-top:8px}
+.pkg{padding:10px 14px;border:1px solid var(--line-2);border-radius:8px;background:var(--surface);color:var(--text);display:grid;gap:2px}
+.pkg small{color:var(--muted);font-size:11px}
+.pkg.core{border-color:color-mix(in srgb,var(--accent) 50%,var(--line))}
+.pkg.app{border-color:color-mix(in srgb,var(--cyan) 50%,var(--line))}
+.arrow{align-self:center;color:var(--muted)}
+.arch-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:clamp(32px,5vw,72px);align-items:start}
+@media (max-width:900px){.arch-grid{grid-template-columns:1fr}}
+.rules{display:grid;gap:14px;margin-top:8px}
+.rule{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start;font-size:15.5px;color:var(--text-2)}
+.rule i{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;background:var(--raised);border:1px solid var(--line-2);color:var(--working);flex:none}
+.rule i svg{width:12px;height:12px}
+.rule b{color:var(--text);font-weight:600}
+
+/* ── CTA ── */
+.cta{padding:clamp(80px,12vw,150px) 0;text-align:center;position:relative;overflow:hidden}
+.cta::before{content:"";position:absolute;inset:auto 0 -40% 0;height:80%;background:radial-gradient(ellipse 50% 60% at 50% 100%,color-mix(in srgb,var(--accent) 22%,transparent),transparent 70%);pointer-events:none}
+.cta .wrap{display:grid;justify-items:center;gap:26px}
+.cta h2{font-size:clamp(36px,5.6vw,68px);line-height:1;font-weight:800;letter-spacing:-.035em}
+.cta .lede{text-align:center}
+.cta .sub{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+footer{border-top:1px solid var(--line);padding:28px 0;font-size:13.5px;color:var(--muted)}
+footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center}
+footer nav{display:flex;gap:20px}
+footer a:hover{color:var(--text-2)}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#" aria-label="Loom — accueil">
+      <svg viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" fill="#0D0D0E"/><g fill="#E8945C" fill-opacity=".82"><rect x="296" y="232" width="96" height="560" rx="48"/><rect x="464" y="232" width="96" height="560" rx="48"/><rect x="632" y="232" width="96" height="560" rx="48"/></g><rect x="232" y="368" width="560" height="96" rx="48" fill="#E8945C"/><rect x="232" y="560" width="560" height="96" rx="48" fill="#5CC8C2"/><g fill="#E8945C" fill-opacity=".82"><rect x="296" y="354" width="96" height="124" rx="48"/><rect x="632" y="354" width="96" height="124" rx="48"/><rect x="464" y="546" width="96" height="124" rx="48"/></g></svg>
+      Loom
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#etat">Détection d'état</a>
+      <a href="#fonctions">Fonctions</a>
+      <a href="#cycle">Cycle de vie</a>
+      <a href="#archi">Architecture</a>
+    </nav>
+    <a class="btn btn-primary btn-sm" href="https://github.com/zVasO/loom/releases">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9C5.9 6.8 4.2 7.8 3.3 9.4c-1.9 3.3-.5 8.2 1.4 10.9.9 1.3 2 2.8 3.4 2.7 1.4-.1 1.9-.9 3.5-.9s2.1.9 3.5.9c1.5 0 2.4-1.3 3.3-2.6 1-1.5 1.5-3 1.5-3.1-.1 0-3-1.1-3-4.7zM13.9 5c.7-.9 1.2-2.1 1.1-3.3-1 0-2.3.7-3 1.5-.7.8-1.3 2-1.1 3.2 1.1.1 2.3-.6 3-1.4z"/></svg>
+      Télécharger
+    </a>
+  </div>
+</header>
+
+<main>
+
+<!-- ───────────── HERO ───────────── -->
+<section class="hero" aria-labelledby="h1">
+  <canvas id="weave" aria-hidden="true"></canvas>
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <span class="eyebrow">macOS 14+ · Apple Silicon · aucun backend</span>
+      <h1 id="h1">Vos agents, <em>tissés</em> ensemble.</h1>
+      <p class="lede">Loom héberge chaque session Claude Code dans un terminal persistant, sur son propre worktree Git, et sait à tout instant laquelle travaille, laquelle vous attend, laquelle a fini. Fini les six onglets de terminal sans vue d'ensemble.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="https://github.com/zVasO/loom/releases">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9C5.9 6.8 4.2 7.8 3.3 9.4c-1.9 3.3-.5 8.2 1.4 10.9.9 1.3 2 2.8 3.4 2.7 1.4-.1 1.9-.9 3.5-.9s2.1.9 3.5.9c1.5 0 2.4-1.3 3.3-2.6 1-1.5 1.5-3 1.5-3.1-.1 0-3-1.1-3-4.7zM13.9 5c.7-.9 1.2-2.1 1.1-3.3-1 0-2.3.7-3 1.5-.7.8-1.3 2-1.1 3.2 1.1.1 2.3-.6 3-1.4z"/></svg>
+          Télécharger pour macOS
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/zVasO/loom">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.4-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>
+          Code source
+        </a>
+      </div>
+      <div class="hero-meta">
+        <span><i></i>Swift · SwiftUI + AppKit</span>
+        <span><i></i>Distribué hors App Store, notarié</span>
+        <span><i></i>Mono-utilisateur, 100 % local</span>
+      </div>
+    </div>
+
+    <div class="mock" role="img" aria-label="Maquette de la vue Sessions de Loom : cartes de sessions groupées par projet avec badge d'état en temps réel">
+      <div class="titlebar">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="crumbs"><b>Sessions</b><span>·</span><span>4 actives</span></div>
+        <div class="search"><span>Rechercher…</span><kbd>⌘K</kbd></div>
+      </div>
+      <div class="app-body">
+        <aside class="sidebar">
+          <div class="h">Projets</div>
+          <div class="proj on"><i style="background:var(--accent)"></i>loom<span class="n">3</span></div>
+          <div class="proj"><i style="background:var(--cyan)"></i>atelier-api<span class="n">1</span></div>
+          <div class="proj"><i style="background:#B07CE0"></i>docs-site<span class="n">0</span></div>
+          <div class="h" style="margin-top:10px">Vues</div>
+          <div class="proj">Actives</div>
+          <div class="proj">Historique</div>
+          <div class="proj">Archivées</div>
+        </aside>
+        <div class="main">
+          <div class="group">
+            <div class="gh"><i style="background:var(--accent)"></i>loom · main</div>
+            <div class="cards">
+              <article class="card" data-card="a">
+                <div class="t"><span class="title">Migration GRDB v5 : journal des transitions</span><span class="badge" data-s="working"><i></i>working</span></div>
+                <div class="meta"><span class="br">loom/grdb-v5-journal</span><span class="dur">12 min</span><span>Claude Code</span></div>
+                <div class="out">Writing Migrations/v5.swift · 3 fichiers<span class="cur"></span></div>
+              </article>
+              <article class="card" data-card="b">
+                <div class="t"><span class="title">Diff : sélection par lignes sans mélanger les côtés</span><span class="badge" data-s="working"><i></i>working</span></div>
+                <div class="meta"><span class="br">loom/diff-line-selection</span><span class="dur">41 min</span><span>Claude Code</span></div>
+                <div class="out">Running swift test --filter DiffSelectionTests<span class="cur"></span></div>
+              </article>
+              <article class="card" data-card="c">
+                <div class="t"><span class="title">Import de thèmes iTerm / Ghostty</span><span class="badge" data-s="idle"><i></i>idle</span></div>
+                <div class="meta"><span class="br">loom/theme-import</span><span class="dur">1 h 03</span><span>Claude Code</span></div>
+                <div class="out">Tour terminé · 14 tests verts, prêt pour un nouveau prompt</div>
+              </article>
+              <article class="card" data-card="d">
+                <div class="t"><span class="title">Banc de rendu 120 Hz (ADR-0008)</span><span class="badge" data-s="inactive"><i></i>inactive</span></div>
+                <div class="meta"><span class="br">loom/render-bench</span><span class="dur">hier</span><span>Claude Code</span></div>
+                <div class="out">exit 0 · transcript 2,4 Mo · reprise possible</div>
+              </article>
+            </div>
+          </div>
+          <div class="group">
+            <div class="gh"><i style="background:var(--cyan)"></i>atelier-api · develop</div>
+            <div class="cards">
+              <article class="card" data-card="e">
+                <div class="t"><span class="title">Rate limiting par clé d'API</span><span class="badge" data-s="working"><i></i>working</span></div>
+                <div class="meta"><span class="br">loom/rate-limit</span><span class="dur">6 min</span><span>Claude Code</span></div>
+                <div class="out">Editing middleware/ratelimit.go<span class="cur"></span></div>
+              </article>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="toast" id="toast" aria-live="polite">
+        <svg viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" fill="#0D0D0E"/><g fill="#E8945C" fill-opacity=".82"><rect x="296" y="232" width="96" height="560" rx="48"/><rect x="464" y="232" width="96" height="560" rx="48"/><rect x="632" y="232" width="96" height="560" rx="48"/></g><rect x="232" y="368" width="560" height="96" rx="48" fill="#E8945C"/><rect x="232" y="560" width="560" height="96" rx="48" fill="#5CC8C2"/></svg>
+        <div><b>Migration GRDB v5 attend une réponse</b><span>« Conserver la colonne <code>legacy_state</code> ou la supprimer dans v5 ? »</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── STRIP ───────────── -->
+<div class="strip" aria-label="Chiffres clés">
+  <div class="wrap">
+    <div class="stat"><b>1<small>worktree / session</small></b><span>Branche <code>loom/&lt;slug&gt;</code>, jamais deux agents sur le même checkout.</span></div>
+    <div class="stat"><b>2<small>canaux d'état</small></b><span>Hooks du CLI en priorité, heuristiques en repli.</span></div>
+    <div class="stat"><b>0<small>backend</small></b><span>Aucun compte, aucun cloud, aucune télémétrie.</span></div>
+    <div class="stat"><b>100 %<small>des transcripts</small></b><span>Conservés après la fin de session, indexés FTS5.</span></div>
+  </div>
+</div>
+
+<!-- ───────────── STATE DETECTION ───────────── -->
+<section class="state" id="etat" aria-labelledby="h-etat">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Le différenciateur</span>
+      <h2 id="h-etat">Savoir qui travaille et qui vous attend, sans ouvrir un seul terminal.</h2>
+      <p class="lede">Deux sources d'information sont fusionnées par une machine à états pure. Quand l'agent le dit lui-même, Loom le croit. Quand il se tait, Loom observe.</p>
+    </div>
+    <div class="state-grid">
+      <div>
+        <div class="diagram">
+          <svg viewBox="0 0 600 300" role="img" aria-label="Schéma : le canal hooks et le canal heuristique alimentent un réducteur pur qui produit l'état de la session">
+            <defs>
+              <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#6B6B7A"/></marker>
+            </defs>
+            <g font-size="10.5" fill="#A3A3B0">
+              <rect x="10" y="30" width="236" height="88" rx="10" fill="#0B0B0F" stroke="#3A2A1D"/>
+              <text x="24" y="52" fill="#E8833A" font-size="10" letter-spacing="1.5">CANAL HOOKS</text>
+              <text x="24" y="74">claude --settings ⟶ loom-hook</text>
+              <text x="24" y="92">socket Unix 0600 · token / session</text>
+              <text x="24" y="110" fill="#6B6B7A" font-size="9.5">PermissionRequest · Notification · Stop</text>
+            </g>
+            <g font-size="10.5" fill="#A3A3B0">
+              <rect x="10" y="180" width="236" height="88" rx="10" fill="#0B0B0F" stroke="#1F3A39"/>
+              <text x="24" y="202" fill="#5CC8C2" font-size="10" letter-spacing="1.5">CANAL HEURISTIQUE</text>
+              <text x="24" y="224">silence du flux · octets / s</text>
+              <text x="24" y="242">motifs d'invite · CPU du process</text>
+              <text x="24" y="260" fill="#6B6B7A" font-size="9.5">agents sans hooks (Codex, Gemini CLI)</text>
+            </g>
+            <g font-size="10.5" fill="#A3A3B0">
+              <rect x="300" y="98" width="150" height="104" rx="10" fill="#17171C" stroke="#33333D"/>
+              <text x="375" y="122" text-anchor="middle" fill="#EBEBF0" font-size="12">Réducteur pur</text>
+              <text x="375" y="142" text-anchor="middle" fill="#6B6B7A">(état, événement)</text>
+              <text x="375" y="158" text-anchor="middle" fill="#6B6B7A">⟶ état</text>
+              <text x="375" y="186" text-anchor="middle" fill="#6B6B7A" font-size="9">journal des transitions + source</text>
+            </g>
+            <g font-size="10.5">
+              <rect x="492" y="86" width="98" height="26" rx="13" fill="#0B0B0F" stroke="#2A4A3A"/><circle cx="508" cy="99" r="3" fill="#4CC38A"/><text x="518" y="103" fill="#4CC38A">working</text>
+              <rect x="492" y="122" width="98" height="26" rx="13" fill="#0B0B0F" stroke="#4A3F22"/><circle cx="508" cy="135" r="3" fill="#E5B455"/><text x="518" y="139" fill="#E5B455">needs_input</text>
+              <rect x="492" y="158" width="98" height="26" rx="13" fill="#0B0B0F" stroke="#2A3A4A"/><circle cx="508" cy="171" r="3" fill="#6AA2E8"/><text x="518" y="175" fill="#6AA2E8">idle</text>
+              <rect x="492" y="194" width="98" height="26" rx="13" fill="#0B0B0F" stroke="#4A2A2E"/><circle cx="508" cy="207" r="3" fill="#E5646C"/><text x="518" y="211" fill="#E5646C">failed</text>
+            </g>
+            <g fill="none" stroke="#6B6B7A" stroke-width="1.5" marker-end="url(#ar)">
+              <path d="M246 74 C 275 74, 268 130, 298 130"/>
+              <path d="M246 224 C 275 224, 268 170, 298 170"/>
+              <path d="M450 150 L 490 150"/>
+            </g>
+            <text x="256" y="58" fill="#E8833A" font-size="9.5">prioritaire 10 s</text>
+            <text x="258" y="246" fill="#5CC8C2" font-size="9.5">repli</text>
+          </svg>
+        </div>
+        <div class="timing" aria-label="Constantes de la machine à états">
+          <div><b>10 s</b><span>fenêtre de priorité d'un hook sur l'heuristique</span></div>
+          <div><b>2 s</b><span>hystérésis avant de changer d'état</span></div>
+          <div><b>4 s</b><span>péremption d'un signal non renouvelé</span></div>
+        </div>
+      </div>
+      <div class="channels">
+        <div class="chan hooks">
+          <span class="k">Hooks</span>
+          <div><h3>L'agent parle, Loom écoute.</h3><p>Loom injecte une configuration <code>--settings</code> par session. Les hooks de Claude Code appellent le binaire compagnon <code>loom-hook</code>, qui pousse l'événement sur un socket Unix protégé (0600) avec un token propre à la session. Une demande de permission ou une question de fin de tour devient <code>needs_input</code> sans délai.</p></div>
+        </div>
+        <div class="chan heur">
+          <span class="k">Heuristique</span>
+          <div><h3>L'agent se tait, Loom observe.</h3><p>Pour les agents sans hooks, Loom regarde le flux : silence, débit d'octets, motifs d'invite, charge CPU du process. Jamais prioritaire sur un hook récent, mais toujours là.</p></div>
+        </div>
+        <div class="chan" style="border-style:dashed">
+          <span class="k" style="color:var(--text-2);background:var(--raised)">Frontière</span>
+          <div><h3>Un tour qui finit par une question n'est pas <em>idle</em>.</h3><p>Le message de fin de tour est classifié. Un agent qui demande « je continue ? » est <code>needs_input</code> : badge sur la carte, notification système. Un agent qui a simplement terminé est <code>idle</code> et attend en silence.</p>
+          <div class="states"><span class="badge" data-s="working"><i></i>working</span><span class="badge" data-s="needs_input"><i></i>needs_input</span><span class="badge" data-s="idle"><i></i>idle</span><span class="badge" data-s="inactive"><i></i>inactive</span><span class="badge" data-s="failed"><i></i>failed</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── BENTO ───────────── -->
+<section id="fonctions" aria-labelledby="h-fn">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Ce que la v1 sait faire</span>
+      <h2 id="h-fn">Un métier à tisser, pas un énième multiplexeur de terminaux.</h2>
+      <p class="lede">Loom ne remplace pas vos agents CLI. Il les héberge, les isole, les observe et garde tout.</p>
+    </div>
+    <div class="bento">
+      <div class="cell c-3">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="9" r="2.2"/><path d="M6 7.2v9.6M18 11.2c0 3.5-3 4.3-6.5 4.6C9 16 7.5 16.5 6.6 17"/></svg></div>
+        <h3>Un worktree par session, tissé sur sa propre branche</h3>
+        <p>Chaque session part d'une branche de base, obtient son checkout <code>loom/&lt;slug&gt;</code>, et ne marche jamais sur les pieds d'une autre. Collisions de noms départagées, suppression refusée s'il reste du travail non commité.</p>
+        <div class="term"><span class="p">$</span> git worktree list
+<span class="d">/Users/you/loom</span>                       8e0cd4e  <span class="c">[main]</span>
+<span class="d">~/.loom/worktrees/grdb-v5-journal</span>     a1f3c09  <span class="c">[loom/grdb-v5-journal]</span>
+<span class="d">~/.loom/worktrees/diff-line-selection</span> 7b22e40  <span class="c">[loom/diff-line-selection]</span></div>
+      </div>
+      <div class="cell c-3">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></div>
+        <h3>Terminal persistant, transcript continu</h3>
+        <p>Le terminal vit tant que l'app vit. Vous ouvrez la carte en plein écran, répondez à l'agent, revenez à la vue d'ensemble : la session continue en arrière-plan. La sortie est enregistrée brute et dé-ANSI-isée, avec rotation à 10 Mo.</p>
+        <div class="term"><span class="d">transcripts/</span>
+├── 2026-09-07T14-02_grdb-v5-journal.raw   <span class="d">2,4 Mo</span>
+├── 2026-09-07T14-02_grdb-v5-journal.txt   <span class="g">indexé FTS5</span>
+└── …</div>
+      </div>
+      <div class="cell c-2">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></div>
+        <h3>Reprise après crash</h3>
+        <p>Au relancement, les sessions vivantes sont marquées <code>interrupted</code> et proposées à la reprise sous le même identifiant natif : <code>claude --resume</code>, UUID imposé au lancement. La conversation reprend, pas seulement le process.</p>
+      </div>
+      <div class="cell c-2">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></div>
+        <h3>Arrêt escaladé, jamais brutal</h3>
+        <p>Un arrêt commence poliment et finit fermement. Confirmation demandée si l'agent est en train de travailler.</p>
+        <div class="ladder"><span>SIGINT</span><em>5 s</em><span>SIGTERM</span><em>→</em><span>SIGKILL</span></div>
+      </div>
+      <div class="cell c-2">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg></div>
+        <h3>Navigateur intégré, déjà connecté</h3>
+        <p>WKWebView à data store persistant : vos cookies GitHub survivent aux relancements. Onglets en LRU, historique avec suggestions, agent utilisateur Safari.</p>
+      </div>
+      <div class="cell c-2">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h10M4 17h13"/></svg></div>
+        <h3>Diff et statut Git par session</h3>
+        <p>Status porcelain v2, diff fichiers non suivis compris, log des commits du worktree. Loom affiche, il n'édite pas.</p>
+      </div>
+      <div class="cell c-2">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg></div>
+        <h3>Palette et recherche plein texte</h3>
+        <p>Titres et transcripts indexés dans SQLite FTS5. Retrouvez la session où l'agent a mentionné ce deadlock, il y a trois semaines.</p>
+        <div class="kbd-row"><kbd>⌘K</kbd><kbd>⌘F</kbd><kbd>⌘↩</kbd></div>
+      </div>
+      <div class="cell c-2">
+        <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg></div>
+        <h3>Thèmes en cascade</h3>
+        <p>JSON à deux espaces, UI et terminal. Résolution app → projet → session, accent par projet, sémantique des badges invariante.</p>
+        <div class="themes" aria-hidden="true"><i style="background:#0B0B0F;--sw:#E8833A"></i><i style="background:#141110;--sw:#E8A03A"></i><i style="background:#F5F5F7;--sw:#D96C1E"></i><i style="background:#000;--sw:#FFB000"></i></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── LIFECYCLE ───────────── -->
+<section class="life" id="cycle" aria-labelledby="h-cycle">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Cycle de vie</span>
+      <h2 id="h-cycle">Chaque transition est horodatée, journalisée, et signée par sa source.</h2>
+      <p class="lede">Hook, heuristique, sortie du process ou action de l'utilisateur : Loom sait toujours pourquoi une session a changé d'état.</p>
+    </div>
+    <div class="tl">
+      <div style="--c:var(--muted)"><b>draft</b><span>Objectif saisi, agent et branche de base choisis.</span><small>source : utilisateur</small></div>
+      <div style="--c:var(--idle)"><b>starting</b><span>Worktree créé, PTY ouvert, <code>--settings</code> injecté.</span><small>source : process</small></div>
+      <div style="--c:var(--working)"><b>working</b><span>L'agent génère ou exécute des outils.</span><small>source : hook / heuristique</small></div>
+      <div style="--c:var(--needs)"><b>needs_input</b><span>Question ou permission. Badge, notification.</span><small>source : hook</small></div>
+      <div style="--c:var(--idle)"><b>idle</b><span>Tour terminé, process vivant, prompt attendu.</span><small>source : hook Stop</small></div>
+      <div style="--c:var(--text-2)"><b>completed</b><span>Exit 0. La session reste consultable, puis archivable.</span><small>source : process</small></div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── ARCHITECTURE ───────────── -->
+<section class="arch" id="archi" aria-labelledby="h-archi">
+  <div class="wrap arch-grid">
+    <div>
+      <div class="sec-head" style="margin-bottom:28px">
+        <span class="eyebrow">Sous le capot</span>
+        <h2 id="h-archi">Natif jusqu'au bout.</h2>
+        <p class="lede">Swift, packages SPM aux frontières imposées. Aucun service ne dépend de l'interface ; l'interface ne voit que des valeurs, jamais le moteur.</p>
+      </div>
+      <div class="pkgs" aria-label="Packages">
+        <div class="pkg core">LoomCore<small>états, réducteur</small></div><span class="arrow">←</span>
+        <div class="pkg">LoomTerminal<small>PTY, moteur, runtime</small></div>
+        <div class="pkg">LoomAgents<small>adapter Claude Code</small></div>
+        <div class="pkg">LoomGit<small>worktrees, diff</small></div>
+        <div class="pkg">LoomWeb<small>WKWebView</small></div>
+        <div class="pkg">LoomPersistence<small>GRDB, transcripts</small></div>
+        <div class="pkg">LoomIPC<small>socket hooks</small></div><span class="arrow">←</span>
+        <div class="pkg">LoomSessions<small>orchestration</small></div><span class="arrow">←</span>
+        <div class="pkg app">LoomApp<small>SwiftUI</small></div>
+        <div class="pkg" style="border-style:dashed">loom-hook<small>exécutable compagnon</small></div>
+      </div>
+    </div>
+    <div class="rules">
+      <div class="rule"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg></i><p><b>Terminal confiné.</b> Tout accès au moteur SwiftTerm passe par la queue sérielle de sa session. La vue reçoit un <code>TerminalScreen</code> immuable dont l'écran n'est jamais vide.</p></div>
+      <div class="rule"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg></i><p><b>Persistance versionnée.</b> GRDB, migrations v1 → v4, journal des transitions avec source, marquage <code>interrupted</code> au relancement.</p></div>
+      <div class="rule"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg></i><p><b>Git par le CLI.</b> Pas de libgit2 : Loom parle au même <code>git</code> que vous, avec porcelain v2.</p></div>
+      <div class="rule"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg></i><p><b>Tests réels.</b> Process réels, repos Git réels, sockets réels. Neuf ADR documentent chaque choix qui a coûté.</p></div>
+      <div class="rule"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg></i><p><b>Non sandboxée, notariée.</b> Developer ID hors App Store, pour garder la main sur les process enfants et le système de fichiers.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── CTA ───────────── -->
+<section class="cta" aria-labelledby="h-cta">
+  <div class="wrap">
+    <span class="eyebrow" style="justify-content:center">Prêt à tisser</span>
+    <h2 id="h-cta">Deux à dix sessions en parallèle.<br>Une seule vue.</h2>
+    <p class="lede">Zéro configuration pour démarrer : pointez un dossier, décrivez un objectif, Loom crée le worktree et lance l'agent.</p>
+    <div class="hero-cta" style="justify-content:center">
+      <a class="btn btn-primary" href="https://github.com/zVasO/loom/releases">Télécharger pour macOS</a>
+      <a class="btn btn-ghost" href="https://github.com/zVasO/loom">Lire le code</a>
+    </div>
+    <p class="sub">swift build -c release · macOS 14 Sonoma minimum · Apple Silicon</p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Loom. Application locale, mono-utilisateur, sans télémétrie.</span>
+    <nav aria-label="Liens"><a href="https://github.com/zVasO/loom">GitHub</a><a href="https://github.com/zVasO/loom/tree/main/docs/adr">ADR</a><a href="https://github.com/zVasO/loom/blob/main/CONTEXT.md">Vocabulaire</a></nav>
+  </div>
+</footer>
+
+<script>
+(function(){
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ── Weave canvas: warp (vertical, orange) & weft (horizontal, cyan) threads ── */
+  const cv = document.getElementById('weave');
+  const hero = cv.parentElement;
+  const ctx = cv.getContext('2d');
+  let W=0,H=0,dpr=1,t=0,raf=0;
+  function size(){
+    dpr = Math.min(devicePixelRatio||1,2);
+    W = hero.clientWidth; H = hero.clientHeight;
+    cv.width = W*dpr; cv.height = H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+    draw();
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    const gap = 56;
+    ctx.lineWidth = 1;
+    // warp
+    for(let x = (W%gap)/2; x < W; x += gap){
+      ctx.beginPath();
+      for(let y=0;y<=H;y+=8){
+        const dx = Math.sin((y*0.012)+t*0.6+x*0.01)*3;
+        y===0?ctx.moveTo(x+dx,y):ctx.lineTo(x+dx,y);
+      }
+      ctx.strokeStyle = 'rgba(232,131,58,0.16)'; ctx.stroke();
+    }
+    // weft
+    for(let y = (H%gap)/2; y < H; y += gap){
+      ctx.beginPath();
+      for(let x=0;x<=W;x+=8){
+        const dy = Math.sin((x*0.012)-t*0.5+y*0.01)*3;
+        x===0?ctx.moveTo(x,y+dy):ctx.lineTo(x,y+dy);
+      }
+      ctx.strokeStyle = 'rgba(92,200,194,0.10)'; ctx.stroke();
+    }
+    // crossings: a few glowing knots drifting along the weave
+    for(let i=0;i<7;i++){
+      const px = ((i*173 + t*18) % (W+gap)) - gap/2;
+      const py = ((i*97 + t*11) % (H+gap)) - gap/2;
+      const gx = Math.round(px/gap)*gap + (W%gap)/2, gy = Math.round(py/gap)*gap + (H%gap)/2;
+      ctx.beginPath(); ctx.arc(gx,gy,2.2,0,Math.PI*2);
+      ctx.fillStyle = i%3===0 ? 'rgba(92,200,194,0.55)' : 'rgba(232,131,58,0.55)'; ctx.fill();
+    }
+  }
+  function loop(){ t += 0.016; draw(); raf = requestAnimationFrame(loop); }
+  addEventListener('resize', size, {passive:true});
+  new ResizeObserver(size).observe(hero);
+  size();
+  if(!reduce){
+    const io = new IntersectionObserver(([e])=>{ if(e.isIntersecting){ if(!raf) loop(); } else { cancelAnimationFrame(raf); raf=0; } });
+    io.observe(hero);
+  }
+
+  /* ── Live session cards: a scripted day in the Sessions view ── */
+  const badge = id => document.querySelector(`[data-card="${id}"] .badge`);
+  const card  = id => document.querySelector(`[data-card="${id}"]`);
+  const out   = id => document.querySelector(`[data-card="${id}"] .out`);
+  const toast = document.getElementById('toast');
+  const label = {working:'working',needs_input:'needs input',idle:'idle',inactive:'inactive',failed:'failed'};
+  function set(id, s, text){
+    const b = badge(id); b.dataset.s = s; b.innerHTML = '<i></i>'+label[s];
+    card(id).classList.toggle('needs', s==='needs_input');
+    if(text!==undefined) out(id).innerHTML = text + (s==='working' ? '<span class="cur"></span>' : '');
+  }
+  const cur = '<span class="cur"></span>';
+  const script = [
+    [2600, ()=>{ set('a','needs_input','Faut-il conserver la colonne legacy_state dans v5 ?'); toast.classList.add('show'); }],
+    [6200, ()=>{ toast.classList.remove('show'); }],
+    [7400, ()=>{ set('a','working','Dropping legacy_state · rewriting Migrations/v5.swift'); }],
+    [9000, ()=>{ set('b','idle','swift test · 61 tests, 0 échec · tour terminé'); }],
+    [11000,()=>{ set('e','needs_input','Autoriser go test ./... (network) ?'); }],
+    [13500,()=>{ set('e','working','Running go test ./middleware/…'); }],
+    [15500,()=>{ set('c','working','Parsing ~/.config/ghostty/themes/catppuccin'); }],
+    [18000,()=>{ set('a','idle','Migration v5 appliquée · journal ok · prêt'); }],
+    [20500,()=>{ set('b','working','Refactoring DiffSelection.swift (review finding)'); }],
+    [23000,()=>{ set('c','idle','Import terminé · 3 thèmes ajoutés'); }],
+  ];
+  if(!reduce){
+    const run = () => { script.forEach(([d,f]) => setTimeout(f, d)); };
+    run(); setInterval(run, 25000);
+  } else {
+    set('a','needs_input','Faut-il conserver la colonne legacy_state dans v5 ?'); toast.classList.add('show');
+  }
+})();
+</script>
+</body>
+</html>

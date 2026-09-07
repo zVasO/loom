@@ -20,6 +20,8 @@ Tests : `swift test` (process réels, repos Git réels, sockets réels).
 
 Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 étapes).
 
+Site vitrine : [`website/index.html`](website/index.html) (page statique, sans build).
+
 ## Ce que la v1 sait faire
 
 - **Sessions** : lancement depuis un objectif (UC-1), worktree isolé `loom/<slug>`
