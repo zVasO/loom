@@ -16,6 +16,68 @@ struct SwiftTermEngineTests {
         SwiftTermEngine(geometry: TerminalGeometry(cols: cols, rows: rows), scrollback: 100)
     }
 
+    // TRM-06 — why the session pane stopped scrolling under claude 2.x. A
+    // full-screen agent REPAINTS its viewport (alternate screen, absolute cursor
+    // moves) where a command-line program scrolls it. Nothing is ever pushed off
+    // the top, so the scrollback the view offers stays empty however long the
+    // session runs — and that is why the agent asks for the wheel itself.
+    // Shape replayed from a real claude 2.1 transcript.
+    @Test("a full-screen agent leaves no history behind, and takes the mouse")
+    func agentPleinEcranSansHistorique() {
+        let engine = makeEngine(rows: 4)
+        queue.sync {
+            engine.feed(ArraySlice("\u{1B}[?1049h\u{1B}[2J\u{1B}[?1000h\u{1B}[?1006h".utf8))
+            for frame in 0..<20 {
+                for row in 1...4 {
+                    engine.feed(ArraySlice("\u{1B}[\(row);1Hframe \(frame) row \(row)".utf8))
+                }
+            }
+            #expect(engine.snapshot().lines[0].text.hasPrefix("frame 19"), "the agent did draw")
+            #expect(engine.historyTail(400).isEmpty,
+                    "repainting is not scrolling: nothing ever reaches the scrollback")
+            #expect(engine.mouseReporting,
+                    "so the agent took the wheel, to scroll the viewport it owns")
+        }
+    }
+
+    @Test("mouse tracking is off until the program asks for it")
+    func suiviSourisEteintParDefaut() {
+        let engine = makeEngine()
+        queue.sync {
+            #expect(engine.mouseReporting == false)
+            engine.feed(ArraySlice("\u{1B}[?1000h".utf8))
+            #expect(engine.mouseReporting, "DECSET 1000 — the program takes the mouse")
+            engine.feed(ArraySlice("\u{1B}[?1000l".utf8))
+            #expect(engine.mouseReporting == false, "and hands it back")
+        }
+    }
+
+    @Test("a wheel notch becomes an SGR mouse report for the program")
+    func moletteEncodeeEnRapportSGR() {
+        let engine = makeEngine()
+        var upstream: [UInt8] = []
+        engine.onUpstream = { upstream.append(contentsOf: $0) }
+        queue.sync {
+            // What claude emits at startup: tracking on, SGR encoding.
+            engine.feed(ArraySlice("\u{1B}[?1000h\u{1B}[?1006h".utf8))
+            engine.sendWheel(.up, atCol: 3, row: 5)
+            engine.sendWheel(.down, atCol: 3, row: 5)
+        }
+        // Buttons 4 and 5, coordinates 1-based on the wire.
+        #expect(String(decoding: upstream, as: UTF8.self) == "\u{1B}[<64;4;6M\u{1B}[<65;4;6M")
+    }
+
+    @Test("without mouse tracking the wheel sends nothing at all")
+    func moletteMuetteSansSuivi() {
+        let engine = makeEngine()
+        var upstream: [UInt8] = []
+        engine.onUpstream = { upstream.append(contentsOf: $0) }
+        queue.sync {
+            engine.sendWheel(.up, atCol: 0, row: 0)
+        }
+        #expect(upstream.isEmpty, "a program that did not ask for the mouse must not be fed bytes")
+    }
+
     @Test("plain text with carriage returns becomes screen lines")
     func texteSimple() {
         let engine = makeEngine()

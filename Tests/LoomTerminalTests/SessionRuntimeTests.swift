@@ -10,6 +10,29 @@ import Foundation
 @Suite("SessionRuntime — lifecycle")
 struct SessionRuntimeTests {
 
+    // The engine's own voice: a program queries the terminal (DA, DSR, and the
+    // mouse reports that carry scrolling) and expects an answer on the PTY.
+    // Unplugged, that channel makes a full-screen agent unscrollable.
+    @Test("what the terminal answers on its own reaches the PTY")
+    func reponsesDuTerminalRemontentAuPTY() async throws {
+        let pty = ScriptedPTYHost()
+        _ = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree"),
+                              geometry: TerminalGeometry(cols: 40, rows: 6)),
+            using: SessionRuntime.Dependencies(
+                ptyHost: pty,
+                transcript: MemoryTranscriptSink(),
+                makeEngine: { geometry, _ in
+                    SwiftTermEngine(geometry: geometry, scrollback: 100)
+                })
+        )
+        pty.emit("\u{1B}[6n")   // DSR — "where is your cursor?"
+        #expect(await pollUntil {
+            String(decoding: pty.writtenBytes, as: UTF8.self).contains("\u{1B}[1;1R")
+        }, "no answer means the program talks to a wall")
+    }
+
     @Test("launch starts the agent and emits .started first")
     func launchEmetStarted() async throws {
         let pty = ScriptedPTYHost()
@@ -269,4 +292,13 @@ struct SessionRuntimeTests {
         #expect(pty.openedEnvironment["LANG"] == "fr_FR.UTF-8", "the overlay wins over the base on collision")
         #expect(pty.openedEnvironment["TERM"] == "xterm-256color", "the terminal base is set")
     }
+    /// Bounded active wait (2 s) — the PTY → queue → PTY path is asynchronous by nature.
+    private func pollUntil(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<200 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
 }

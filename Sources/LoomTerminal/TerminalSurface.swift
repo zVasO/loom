@@ -20,6 +20,8 @@ public final class TerminalSurface {
     /// Absolute scrollback index of history[0]: stable identity for the view diff.
     public private(set) var historyBase = 0
     public private(set) var isAttached = false
+    /// The agent tracks the mouse: the wheel belongs to IT, not to our ScrollView.
+    public private(set) var mouseReporting = false
 
     private weak var runtime: SessionRuntime?
 
@@ -70,6 +72,12 @@ public final class TerminalSurface {
         runtime?.write(text, to: terminal)
     }
 
+    /// One wheel notch at the cell under the pointer (0-based). Only a tracking
+    /// agent hears it; for everyone else the view scrolls the scrollback itself.
+    public func sendWheel(_ direction: WheelDirection, atCol col: Int, row: Int) {
+        runtime?.sendWheel(direction, atCol: col, row: row)
+    }
+
     /// TRM-02: the view announces its grid; engine and PTY follow (SIGWINCH on the
     /// agent side). Coalesced at the call site: only a genuinely new geometry gets through.
     public func resize(cols: Int, rows: Int) {
@@ -82,11 +90,15 @@ public final class TerminalSurface {
 
     private var lastRequestedGeometry: TerminalGeometry?
 
-    func receive(_ screen: TerminalScreen, history: [TerminalLine], base: Int = 0) {
+    func receive(_ screen: TerminalScreen, history: [TerminalLine], base: Int = 0,
+                 mouseReporting: Bool = false) {
         guard isAttached else { return }
         self.screen = screen
         self.history = history
         self.historyBase = base
+        // @Observable notifies on assignment, not on change: a mode that flips once
+        // per session must not invalidate the view at frame rate.
+        if self.mouseReporting != mouseReporting { self.mouseReporting = mouseReporting }
     }
 
     private var lifecycleContinuation: CheckedContinuation<Void, Never>?

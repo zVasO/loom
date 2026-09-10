@@ -1,4 +1,5 @@
 import AppKit
+import LoomTerminal
 import SwiftUI
 
 /// SES-05bis: typing happens IN the agent's field, not in a bar of our
@@ -62,21 +63,34 @@ public struct KeyCaptureView: NSViewRepresentable {
     /// Incremented by the host view when the user clicks the terminal:
     /// explicit signal to reclaim focus, even if a TextField had it.
     let focusTick: Int
+    /// The agent tracks the mouse: the wheel is its input, not our scrolling.
+    let mouseReporting: Bool
+    let onWheel: ((WheelDirection, Int, Int) -> Void)?
     let onText: (String) -> Void
 
-    public init(focusTick: Int = 0, onText: @escaping (String) -> Void) {
+    /// `onText` comes last so the trailing-closure form still means "the keystrokes".
+    public init(focusTick: Int = 0,
+                mouseReporting: Bool = false,
+                onWheel: ((WheelDirection, Int, Int) -> Void)? = nil,
+                onText: @escaping (String) -> Void) {
         self.focusTick = focusTick
+        self.mouseReporting = mouseReporting
+        self.onWheel = onWheel
         self.onText = onText
     }
 
     public func makeNSView(context: Context) -> CaptureNSView {
         let view = CaptureNSView()
         view.onText = onText
+        view.onWheel = onWheel
+        view.mouseReporting = mouseReporting
         return view
     }
 
     public func updateNSView(_ view: CaptureNSView, context: Context) {
         view.onText = onText
+        view.onWheel = onWheel
+        view.mouseReporting = mouseReporting
         guard let window = view.window else { return }
         let clicked = view.lastFocusTick != focusTick
         view.lastFocusTick = focusTick
@@ -91,9 +105,17 @@ public struct KeyCaptureView: NSViewRepresentable {
 
     public final class CaptureNSView: NSView {
         var onText: ((String) -> Void)?
+        var onWheel: ((WheelDirection, Int, Int) -> Void)?
+        var mouseReporting = false
         var lastFocusTick = 0
         private var clickMonitor: Any?
+        private var wheelMonitor: Any?
         private var responderObservation: NSKeyValueObservation?
+        /// Sub-notch trackpad pixels, kept between events.
+        private var wheelResidual: CGFloat = 0
+        /// A flick of the trackpad must not become a burst the agent has to
+        /// throttle: past this, the extra notches buy nothing but PTY traffic.
+        private static let maxNotchesPerEvent = 8
 
         public override var acceptsFirstResponder: Bool { true }
 
@@ -141,6 +163,54 @@ public struct KeyCaptureView: NSViewRepresentable {
                 }
                 return event
             }
+            // 3. A full-screen agent REPAINTS its viewport instead of scrolling
+            //    it: our scrollback stays empty, our ScrollView has nothing to
+            //    move, and the agent asked for the wheel to scroll itself. A
+            //    monitor sees the event before the ScrollView does — going
+            //    through the responder chain would already be too late.
+            wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self, self.mouseReporting, let onWheel = self.onWheel,
+                      event.window === self.window
+                else { return event }
+                let point = self.convert(event.locationInWindow, from: nil)
+                guard self.bounds.contains(point) else { return event }
+                let notches = self.notches(from: event)
+                if notches != 0 {
+                    let cell = self.gridPosition(of: point)
+                    let direction: WheelDirection = notches > 0 ? .up : .down
+                    for _ in 0..<min(abs(notches), Self.maxNotchesPerEvent) {
+                        onWheel(direction, cell.col, cell.row)
+                    }
+                }
+                return nil
+            }
+        }
+
+        /// Trackpads deliver pixels, mice deliver lines: both become NOTCHES, the
+        /// unit a tracking program counts — one cell of travel per notch, so the
+        /// pane scrolls at the speed the text is drawn.
+        private func notches(from event: NSEvent) -> Int {
+            guard event.hasPreciseScrollingDeltas else {
+                return Int(event.scrollingDeltaY.rounded())
+            }
+            if event.phase == .began { wheelResidual = 0 }
+            wheelResidual += event.scrollingDeltaY
+            let step = TerminalMetrics.cellSize.height
+            let whole = (wheelResidual / step).rounded(.towardZero)
+            wheelResidual -= whole * step
+            return Int(whole)
+        }
+
+        /// View point → terminal cell (0-based). The grid starts inside the
+        /// padding the screen view draws, the same one `TerminalMetrics.grid` deducts.
+        private func gridPosition(of point: NSPoint) -> (col: Int, row: Int) {
+            let cell = TerminalMetrics.cellSize
+            let inset = TerminalMetrics.gridInset
+            let grid = TerminalMetrics.grid(fitting: bounds.size)
+            let column = Int((point.x - inset) / cell.width)
+            let row = Int((bounds.height - point.y - inset) / cell.height)
+            return (col: min(max(0, column), grid.cols - 1),
+                    row: min(max(0, row), grid.rows - 1))
         }
 
         private func teardownFocusWatchers() {
@@ -148,11 +218,14 @@ public struct KeyCaptureView: NSViewRepresentable {
             responderObservation = nil
             if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
             clickMonitor = nil
+            if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
+            wheelMonitor = nil
         }
 
         deinit {
             responderObservation?.invalidate()
             if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+            if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
         }
 
         public override func mouseDown(with event: NSEvent) {

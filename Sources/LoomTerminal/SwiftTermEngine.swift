@@ -12,8 +12,6 @@ import SwiftTerm
 public final class SwiftTermEngine: TerminalEngine {
 
     private final class HeadlessDelegate: TerminalDelegate {
-        // Terminal responses back to the PTY (DA/DSR…). Wired up by SessionRuntime
-        // when the "upstream echo" slice lands; until then, collected nowhere.
         var onSend: ((ArraySlice<UInt8>) -> Void)?
         func send(source: Terminal, data: ArraySlice<UInt8>) { onSend?(data) }
     }
@@ -39,6 +37,25 @@ public final class SwiftTermEngine: TerminalEngine {
             terminal.clearUpdateRange()
             revision += 1
         }
+    }
+
+    /// Everything the terminal answers on its own — DA/DSR, and above all the
+    /// mouse reports a full-screen agent asked for. Left unplugged, that agent is
+    /// answered by silence, and since it repaints rather than scrolls there is no
+    /// scrollback of ours to fall back on: the pane simply cannot be scrolled.
+    public var onUpstream: ((ArraySlice<UInt8>) -> Void)? {
+        get { headlessDelegate.onSend }
+        set { headlessDelegate.onSend = newValue }
+    }
+
+    public var mouseReporting: Bool { terminal.mouseMode != .off }
+
+    public func sendWheel(_ direction: WheelDirection, atCol col: Int, row: Int) {
+        guard terminal.mouseMode != .off else { return }
+        let flags = terminal.encodeButton(button: direction == .up ? 4 : 5,
+                                          release: false, shift: false,
+                                          meta: false, control: false)
+        terminal.sendEvent(buttonFlags: flags, x: col, y: row)
     }
 
     public func resize(to geometry: TerminalGeometry) {

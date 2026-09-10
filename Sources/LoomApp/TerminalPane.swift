@@ -35,7 +35,12 @@ struct TerminalPane: View {
                             model.noteTerminalGrid(cols: grid.cols, rows: grid.rows)
                         }
                         // Keystrokes go to the agent's field (first responder).
-                        .background(KeyCaptureView(focusTick: focusTick) { surface.send($0) })
+                        .background(KeyCaptureView(focusTick: focusTick,
+                                                   mouseReporting: surface.mouseReporting,
+                                                   onWheel: { direction, col, row in
+                                                       surface.sendWheel(direction, atCol: col, row: row)
+                                                   },
+                                                   onText: { surface.send($0) }))
                         .contentShape(Rectangle())
                         .onTapGesture { focusTick += 1 }
                         // claude's boot takes seconds — never a silent black screen.

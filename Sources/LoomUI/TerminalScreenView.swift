@@ -20,8 +20,13 @@ public enum TerminalMetrics {
                       height: ceil(measured.height) + 1)
     }()
 
+    /// Padding between the pane's edge and the first cell. The grid origin and
+    /// the cell count are both measured from it — they must not drift apart.
+    public static let gridInset: CGFloat = 8
+
     /// How many cells fit in `size` (view padding deducted).
-    public static func grid(fitting size: CGSize, insets: CGFloat = 16) -> (cols: Int, rows: Int) {
+    public static func grid(fitting size: CGSize,
+                            insets: CGFloat = gridInset * 2) -> (cols: Int, rows: Int) {
         let cell = cellSize
         guard cell.width > 0, cell.height > 0 else { return (80, 24) }
         return (max(20, Int((size.width - insets) / cell.width)),
@@ -61,7 +66,7 @@ public struct TerminalScreenView: View {
                         cursorCol: index == screen.cursor.row ? screen.cursor.col : nil)
                 }
             }
-            .padding(8)
+            .padding(TerminalMetrics.gridInset)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .defaultScrollAnchor(.bottom)

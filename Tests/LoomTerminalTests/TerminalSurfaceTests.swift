@@ -20,6 +20,37 @@ struct TerminalSurfaceTests {
         ).runtime
     }
 
+    // TRM-06 — a full-screen agent takes the mouse and scrolls its own viewport.
+    // The pane must learn about it, or the wheel dies in a ScrollView that has
+    // nothing left to scroll.
+    @Test("mouse tracking reaches the surface, and the wheel reaches the PTY")
+    func moletteRelayeeALAgent() async throws {
+        let pty = ScriptedPTYHost()
+        let runtime = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree"),
+                              geometry: TerminalGeometry(cols: 40, rows: 6)),
+            using: SessionRuntime.Dependencies(
+                ptyHost: pty,
+                transcript: MemoryTranscriptSink(),
+                makeEngine: { geometry, _ in
+                    SwiftTermEngine(geometry: geometry, scrollback: 100)
+                })
+        ).runtime
+        let surface = runtime.surface()
+        surface.attach()
+
+        #expect(surface.mouseReporting == false, "nothing is tracking yet")
+        pty.emit("\u{1B}[?1000h\u{1B}[?1006h")
+        #expect(await pollUntil { surface.mouseReporting },
+                "the pane must know the agent took the mouse")
+
+        surface.sendWheel(.up, atCol: 3, row: 5)
+        #expect(await pollUntil {
+            String(decoding: pty.writtenBytes, as: UTF8.self).contains("\u{1B}[<64;4;6M")
+        }, "the notch must land on the PTY, or the agent never scrolls")
+    }
+
     @Test("surface() is idempotent and its screen is never empty")
     func surfaceIdempotenteEtEcranJamaisVide() throws {
         let runtime = try makeRuntime()

@@ -100,6 +100,18 @@ public final class SessionRuntime: @unchecked Sendable {
         queue.async { self.channel.write(bytes[...]) }
     }
 
+    /// One wheel notch for a program that tracks the mouse. It scrolls its own
+    /// viewport — we could not scroll it for it (TRM-06).
+    func sendWheel(_ direction: WheelDirection, atCol col: Int, row: Int) {
+        queue.async { self.engine?.sendWheel(direction, atCol: col, row: row) }
+    }
+
+    /// What the ENGINE owes the program, not what the user typed. On the session
+    /// queue; optional-chained because the engine is built before the channel is.
+    private func writeUpstream(_ bytes: ArraySlice<UInt8>) {
+        channel?.write(bytes)
+    }
+
     /// Called from the MainActor by the surfaces; attaching immediately paints the
     /// current screen (reattachment path < 100 ms, TRM-03).
     func setAttachment(_ terminal: TerminalID, attached: Bool) {
@@ -153,9 +165,11 @@ public final class SessionRuntime: @unchecked Sendable {
         let snapshot = engine.snapshot()
         let history = engine.historyTail(400)
         let base = engine.scrollbackRows - history.count
+        let mouseReporting = engine.mouseReporting
         Task { @MainActor in
             for terminal in watching {
-                self.surfaces[terminal]?.receive(snapshot, history: history, base: base)
+                self.surfaces[terminal]?.receive(snapshot, history: history, base: base,
+                                                 mouseReporting: mouseReporting)
             }
         }
     }
@@ -323,7 +337,9 @@ public final class SessionRuntime: @unchecked Sendable {
         // structurally precedes any event the sink could deliver — even an
         // immediate exit (failed exec) cannot get ahead of it.
         queue.async {
-            runtime.engine = dependencies.makeEngine(plan.geometry, queue)
+            let engine = dependencies.makeEngine(plan.geometry, queue)
+            engine.onUpstream = { [weak runtime] bytes in runtime?.writeUpstream(bytes) }
+            runtime.engine = engine
             continuation.yield(.started)
             if let interval = plan.samplingInterval {
                 let seconds = Double(interval.components.seconds)

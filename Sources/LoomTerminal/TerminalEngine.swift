@@ -26,12 +26,34 @@ public protocol TerminalEngine: AnyObject {
     func historyTail(_ limit: Int) -> [TerminalLine]
     /// Rows above the screen — absolute base giving history lines a stable identity.
     var scrollbackRows: Int { get }
+
+    /// The terminal's own voice back to the program: DA/DSR replies, mouse reports.
+    /// Set once by the runtime, invoked on the session queue like everything else.
+    var onUpstream: ((ArraySlice<UInt8>) -> Void)? { get set }
+
+    /// True while the program tracks the mouse (DECSET 1000-1003). It then owns the
+    /// wheel: a full-screen program repaints rather than scrolls, so it holds the
+    /// only viewport there is to move.
+    var mouseReporting: Bool { get }
+
+    /// One wheel notch at a cell position (0-based) — the unit a tracking program
+    /// counts. Silent when nothing is tracking.
+    func sendWheel(_ direction: WheelDirection, atCol col: Int, row: Int)
 }
 
 public extension TerminalEngine {
     /// Adapters without a scrollback (test line engines) sit at base zero.
     var scrollbackRows: Int { 0 }
 
+    /// Adapters that parse no mode switching never track the mouse.
+    var mouseReporting: Bool { false }
+    func sendWheel(_ direction: WheelDirection, atCol col: Int, row: Int) {}
+}
+
+/// A wheel notch, as a tracking program sees it (buttons 4 and 5).
+public enum WheelDirection: Sendable {
+    case up
+    case down
 }
 
 // MARK: - Screen
