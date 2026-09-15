@@ -510,6 +510,8 @@ struct SplitDiffView: View {
 
     /// One half of a row: number gutter + text, tinted by kind. An absent
     /// side (unpaired add/delete) renders as a dimmed void, like GitHub.
+    /// Long lines wrap instead of scrolling: the code column starts after the
+    /// gutter, so continuations already hang under the code, not the number.
     @ViewBuilder
     private func side(_ line: DiffParser.Line?, isOld: Bool) -> some View {
         let background: Color = switch line?.kind {
@@ -517,30 +519,24 @@ struct SplitDiffView: View {
         case .deletion: DefaultTheme.danger.opacity(0.12)
         case .context, nil: .clear
         }
-        let text = Text(line.map { marker($0) + $0.text } ?? "")
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(line?.kind == .context || line == nil
-                             ? DefaultTheme.primaryText.opacity(0.75)
-                             : DefaultTheme.primaryText)
-            // No .textSelection here: it captured the mouse and broke the
-            // press-and-drag line selection (Copy lives in the action bar).
-            .lineLimit(1)
-            .truncationMode(.tail)
         HStack(alignment: .top, spacing: 8) {
             Text(line.flatMap { isOld ? $0.oldNumber : $0.newNumber }.map(String.init) ?? "")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(width: 34, alignment: .trailing)
-            // A tooltip means a tracking area PER LINE — thousands on a big
-            // PR. Only lines long enough to plausibly truncate get one.
-            if let full = line?.text, full.count > 110 {
-                text.help(full)
-            } else {
-                text
-            }
+            Text(line.map { marker($0) + $0.text } ?? "")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(line?.kind == .context || line == nil
+                                 ? DefaultTheme.primaryText.opacity(0.75)
+                                 : DefaultTheme.primaryText)
+                // No .textSelection here: it captured the mouse and broke the
+                // press-and-drag line selection (Copy lives in the action bar).
+                .lineLimit(nil)
         }
         .padding(.horizontal, 8).padding(.vertical, 1.5)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // maxHeight so the tint fills the row: a wrapped line on one side
+        // makes the pair taller than the other side's single line.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(line == nil ? DefaultTheme.surface.opacity(0.4) : background)
     }
 
@@ -596,11 +592,10 @@ struct SplitDiffView: View {
                 .foregroundStyle(line.kind == .context
                                  ? DefaultTheme.primaryText.opacity(0.75)
                                  : DefaultTheme.primaryText)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                .lineLimit(nil)
         }
         .padding(.horizontal, 8).padding(.vertical, 1.5)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(background)
     }
 
