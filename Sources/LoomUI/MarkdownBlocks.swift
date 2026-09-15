@@ -1,3 +1,4 @@
+import LoomCore
 import SwiftUI
 
 /// Block-level markdown for PR descriptions and comments.
@@ -110,6 +111,38 @@ public enum MarkdownBlocks {
         return blocks
     }
 
+    /// Inline markdown, plus the links CommonMark leaves on the floor.
+    ///
+    /// Foundation's parser has no autolink extension and GitHub's flavour
+    /// does, so a URL pasted bare into a PR body arrives here as dead text.
+    public static func inline(_ text: String) -> AttributedString {
+        var result = (try? AttributedString(markdown: text,
+                                            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(text)
+        autolink(&result)
+        return result
+    }
+
+    private static func autolink(_ string: inout AttributedString) {
+        for range in BareURL.ranges(in: string.characters) {
+            guard string[range].link == nil,
+                  let url = URL(string: String(string.characters[range]))
+            else { continue }
+            string[range].link = url
+        }
+    }
+
+    /// Attributes set on the run itself, not on the enclosing `Text`: the
+    /// blocks tint their whole body, which would otherwise swallow the link.
+    public static func styled(_ string: AttributedString, accent: Color) -> AttributedString {
+        var string = string
+        for range in string.runs.filter({ $0.link != nil }).map(\.range) {
+            string[range].foregroundColor = accent
+            string[range].underlineStyle = .single
+        }
+        return string
+    }
+
     private static func orderedItem(_ line: String) -> (number: Int, text: String)? {
         guard let dot = line.firstIndex(where: { $0 == "." || $0 == ")" }),
               let number = Int(line[line.startIndex..<dot]) else { return nil }
@@ -137,9 +170,7 @@ public struct MarkdownBlockView: View {
     }
 
     private static func inline(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text,
-                               options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(text)
+        MarkdownBlocks.styled(MarkdownBlocks.inline(text), accent: DefaultTheme.accent)
     }
 
     @ViewBuilder

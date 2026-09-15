@@ -89,6 +89,9 @@ public struct TerminalScreenView: View {
 
     @State private var dragging = false
     @State private var lastPress: Press?
+    @State private var hoveredLink: TerminalLink?
+    /// A ⌘-click opened a link: the drag it also started must not select.
+    @State private var openingLink = false
 
     private static let space = "loom.terminal"
 
@@ -116,12 +119,26 @@ public struct TerminalScreenView: View {
             // vanish on exactly the lines people want to copy. An overlay also
             // leaves the measured size alone, so it cannot move the bottom anchor.
             .overlay(alignment: .topLeading) { selectionLayer }
+            .overlay(alignment: .topLeading) { linkLayer }
             // Named HERE, on the padded content: the drag then reports positions
             // already free of the scroll offset, and `- gridInset` is the only
             // correction left.
             .coordinateSpace(name: Self.space)
             .contentShape(Rectangle())
             .gesture(selectionDrag)
+            .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
+                switch phase {
+                // Assigned only on a CHANGE: a mouse move over ordinary text
+                // would otherwise invalidate every visible row, and rebuilding
+                // their attributed runs is the one cost this view watches.
+                case .active(let point):
+                    let found = link(at: point)
+                    if found != hoveredLink { hoveredLink = found }
+                case .ended:
+                    if hoveredLink != nil { hoveredLink = nil }
+                }
+            }
+            .help(hoveredLink.map { "⌘-click to open \($0.target)" } ?? "")
         }
         .defaultScrollAnchor(.bottom)
         .scrollIndicators(.visible)   // a terminal that scrolls should look like it
@@ -188,17 +205,23 @@ public struct TerminalScreenView: View {
             .onChanged { value in
                 if !dragging {
                     dragging = true
+                    openingLink = openLink(at: value.location)
+                    if openingLink { return }
                     beginPress(at: value.location)
                     return
                 }
                 // Read live: pressing ⌥ MID-drag must flip to a block, the way
                 // every emulator behaves. A captured event could not tell us.
-                guard lastPress?.count == 1 else { return }
+                guard !openingLink, lastPress?.count == 1 else { return }
                 selection.mode = NSEvent.modifierFlags.contains(.option) ? .block : .linear
                 selection.head = position(at: value.location)
             }
             .onEnded { _ in
                 dragging = false
+                if openingLink {
+                    openingLink = false
+                    return
+                }
                 guard selection.isActive else { return }
                 selection.capturedText = selection.text(history: history,
                                                         historyBase: historyBase,
@@ -250,6 +273,50 @@ public struct TerminalScreenView: View {
             selection = TerminalSelection(anchor: anchor, head: head,
                                           mode: flags.contains(.option) ? .block : .linear)
         }
+    }
+
+    // MARK: - Links
+
+    /// What a browser would take, and nothing else. An OSC 8 payload is agent
+    /// output: a scheme such as `x-apple-script:` would turn a click into an
+    /// execution primitive. Anything else is not underlined either — an
+    /// affordance for something that will not open is worse than none.
+    private static let openableSchemes: Set<String> = ["http", "https", "mailto"]
+
+    private func link(at point: CGPoint) -> TerminalLink? {
+        let cols = screen.geometry.cols
+        let boundary = TerminalMetrics.boundary(at: point, rows: contentRows, cols: cols)
+        guard let link = TerminalLinks.link(rows: contentRows, line: contentLine,
+                                            row: boundary.row,
+                                            column: TerminalMetrics.cellColumn(atX: point.x, cols: cols)),
+              let scheme = URL(string: link.target)?.scheme?.lowercased(),
+              Self.openableSchemes.contains(scheme)
+        else { return nil }
+        return link
+    }
+
+    /// A ⌘-click landing on a link opens it and swallows the gesture.
+    private func openLink(at point: CGPoint) -> Bool {
+        guard NSEvent.modifierFlags.contains(.command),
+              let link = link(at: point), let url = URL(string: link.target)
+        else { return false }
+        NSWorkspace.shared.open(url)
+        return true
+    }
+
+    private var linkLayer: some View {
+        let cell = TerminalMetrics.cellSize
+        let inset = TerminalMetrics.gridInset
+        return ZStack(alignment: .topLeading) {
+            ForEach(Array((hoveredLink?.segments ?? []).enumerated()), id: \.offset) { _, segment in
+                Rectangle()
+                    .fill(DefaultTheme.accent.opacity(0.8))
+                    .frame(width: CGFloat(segment.columns.count) * cell.width, height: 1)
+                    .offset(x: inset + CGFloat(segment.columns.lowerBound) * cell.width,
+                            y: inset + CGFloat(segment.row + 1) * cell.height - 1)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     // MARK: - Rows

@@ -91,16 +91,26 @@ public struct TerminalScreen: Sendable, Equatable {
 
 public struct TerminalLine: Sendable, Equatable {
     public let cells: [TerminalCell]
-    public init(cells: [TerminalCell]) { self.cells = cells }
+    /// This row is the soft-wrapped continuation of the one above: a URL, or
+    /// any other run, straddles the boundary instead of ending at it.
+    public let isWrapped: Bool
+    public init(cells: [TerminalCell], isWrapped: Bool = false) {
+        self.cells = cells
+        self.isWrapped = isWrapped
+    }
     public var text: String { String(cells.map(\.character)) }
 }
 
 public struct TerminalCell: Sendable, Equatable {
     public let character: Character
     public let style: CellStyle
-    public init(character: Character, style: CellStyle = .init()) {
+    /// OSC 8 target. Carried per cell because the view only ever sees values,
+    /// never the emulator (ADR-0007/0008) — it cannot ask it afterwards.
+    public let link: String?
+    public init(character: Character, style: CellStyle = .init(), link: String? = nil) {
         self.character = character
         self.style = style
+        self.link = link
     }
 }
 

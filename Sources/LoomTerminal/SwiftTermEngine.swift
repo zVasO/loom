@@ -86,13 +86,10 @@ public final class SwiftTermEngine: TerminalEngine {
             cells.reserveCapacity(geometry.cols)
             for col in 0..<geometry.cols {
                 guard let charData = terminal.getCharData(col: col, row: row) else { break }
-                let character = charData.getCharacter()
-                // Never-written cells are NULs: throughout the value layer, an empty
-                // cell is a space (otherwise line endings become control characters).
-                cells.append(TerminalCell(character: character == "\0" ? " " : character,
-                                          style: Self.cellStyle(from: charData.attribute)))
+                cells.append(Self.cell(from: charData))
             }
-            lines.append(TerminalLine(cells: cells))
+            lines.append(TerminalLine(cells: cells,
+                                      isWrapped: terminal.getLine(row: row)?.isWrapped ?? false))
         }
         let cursor = terminal.getCursorLocation()
         return TerminalScreen(geometry: geometry,
@@ -128,17 +125,30 @@ public final class SwiftTermEngine: TerminalEngine {
         return tailCache.suffix(limit)
     }
 
+    /// Never-written cells are NULs: throughout the value layer, an empty cell
+    /// is a space (otherwise line endings become control characters).
+    private static func cell(from charData: CharData) -> TerminalCell {
+        let character = charData.getCharacter()
+        return TerminalCell(character: character == "\0" ? " " : character,
+                            style: cellStyle(from: charData.attribute),
+                            link: linkTarget(of: charData))
+    }
+
+    /// An OSC 8 payload is `params;URI` — only the URI is the target.
+    private static func linkTarget(of charData: CharData) -> String? {
+        guard charData.hasPayload, let payload = charData.getPayload() as? String,
+              let separator = payload.firstIndex(of: ";")
+        else { return nil }
+        let target = String(payload[payload.index(after: separator)...])
+        return target.isEmpty ? nil : target
+    }
+
     private func extractScrollbackLine(_ row: Int) -> TerminalLine {
         guard let bufferLine = terminal.getScrollInvariantLine(row: row) else {
             return TerminalLine(cells: [])
         }
-        let cells = (0..<geometry.cols).map { col -> TerminalCell in
-            let charData = bufferLine[col]
-            let character = charData.getCharacter()
-            return TerminalCell(character: character == "\0" ? " " : character,
-                                style: Self.cellStyle(from: charData.attribute))
-        }
-        return TerminalLine(cells: cells)
+        let cells = (0..<geometry.cols).map { Self.cell(from: bufferLine[$0]) }
+        return TerminalLine(cells: cells, isWrapped: bufferLine.isWrapped)
     }
 
     private func invalidateTailCache() {
