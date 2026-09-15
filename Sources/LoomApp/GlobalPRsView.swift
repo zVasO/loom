@@ -200,11 +200,17 @@ struct GlobalPRsView: View {
                 GeometryReader { geometry in
                     // One width for the three of them: the drawer, the space
                     // the controls keep clear of it, and the handle's offset.
-                    let drawer = paneOpen ? clampedDrawerWidth(available: geometry.size.width) : 0
+                    let width = clampedDrawerWidth(available: geometry.size.width)
+                    let drawer = paneOpen ? width : 0
                     ZStack(alignment: .trailing) {
                         workspace(pr, project: project, controlsInset: drawer)
                         if paneOpen, let sessionID = paneSessionID {
-                            sessionDrawer(sessionID, width: drawer,
+                            // The drawer's OWN width never animates: it slides
+                            // in at full size. Animating 0 → width resized the
+                            // terminal on every frame of the slide, and each
+                            // resize made the agent repaint its whole
+                            // conversation — the duplicated blocks.
+                            sessionDrawer(sessionID, width: width,
                                           available: geometry.size.width)
                         }
                         if paneSessionID != nil {

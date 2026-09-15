@@ -52,6 +52,32 @@ struct SwiftTermEngineTests {
         }
     }
 
+    // A long session fills the scrollback. From then on the emulator trims a
+    // line off the top for each one pushed, and its buffer offset stops
+    // growing: read as "rows above the screen", it froze the history tail under
+    // a live screen and gave shifting rows the same identity — the duplicated
+    // blocks people saw mid-stream. The base must count what was trimmed.
+    @Test("a full scrollback keeps the history tail live, its base absolute")
+    func scrollbackPleinHistoriqueVivant() {
+        let engine = makeEngine(rows: 6)   // scrollback: 100
+        queue.sync {
+            for line in 0..<200 {
+                engine.feed(ArraySlice("line \(line)\r\n".utf8))
+                if line % 10 == 0 { _ = engine.historyTail(400) }   // exercise the cache path
+            }
+            // Screen: lines 195–199 plus the empty row the last CR LF opened.
+            // Above it: 195 lines, of which the scrollback keeps the last 100.
+            #expect(engine.scrollbackRows == 195, "the base counts trimmed lines too")
+            let tail = engine.historyTail(400).map { $0.text.trimmingCharacters(in: .whitespaces) }
+            #expect(tail.count == 100)
+            #expect(tail.first == "line 95")
+            #expect(tail.last == "line 194", "the newest scrolled-off line, not a frozen one")
+            #expect(engine.historyTail(3).map { $0.text.trimmingCharacters(in: .whitespaces) }
+                    == ["line 192", "line 193", "line 194"])
+            #expect(engine.snapshot().lines[0].text.hasPrefix("line 195"))
+        }
+    }
+
     // The key encoder reads the modes a program negotiated. What claude does at
     // startup: bracketed paste on, then a kitty keyboard probe — SwiftTerm
     // answers that probe itself, so the flags pushed afterwards MUST reach the

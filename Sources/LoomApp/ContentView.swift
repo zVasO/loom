@@ -2213,9 +2213,17 @@ struct SessionDetailView: View {
         VStack(spacing: 0) {
             breadcrumb
             Divider().overlay(DefaultTheme.cardBorder)
-            HSplitView {
+            // The git panel slides OVER the terminal instead of splitting it:
+            // shrinking the pane resized the PTY, and the agent answers a
+            // resize by repainting its whole conversation — everything moved,
+            // and the scrollback kept a duplicate of every block.
+            ZStack(alignment: .trailing) {
                 TerminalPane(model: model, sessionID: sessionID)
-                if gitShown { gitPanel }
+                if gitShown {
+                    gitPanel
+                        .shadow(color: .black.opacity(0.45), radius: 20, x: -8)
+                        .transition(.move(edge: .trailing))
+                }
             }
         }
         .background(DefaultTheme.contentBackground)
@@ -2293,7 +2301,7 @@ struct SessionDetailView: View {
                 .preferredColorScheme(.dark)
             }
             GhostButton("Git", systemImage: "arrow.triangle.branch") {
-                gitShown.toggle()
+                withAnimation(.hover) { gitShown.toggle() }
                 if gitShown { Task { gitData = await model.gitPanel(for: sessionID) } }
             }
             GhostButton("Stop", systemImage: "stop.circle", role: .destructive) {
@@ -2418,7 +2426,8 @@ struct SessionDetailView: View {
             Spacer()
         }
         .padding(12)
-        .frame(minWidth: 280, maxWidth: 420)
+        .frame(width: 380)
+        .frame(maxHeight: .infinity)
         .background(DefaultTheme.background)
     }
 

@@ -42,12 +42,15 @@ struct TerminalPane: View {
                     })
                     .onPreferenceChange(PaneSizeKey.self) { paneSize = $0 }
                     // task(id:) gives a free debounce while resizing: each new
-                    // size cancels the pending one.
+                    // size cancels the pending one. The delay outlasts a layout
+                    // animation on purpose: every resize that reaches the PTY
+                    // makes the agent repaint its whole conversation, and a
+                    // slide that resized it three times left three copies.
                     .task(id: paneSize) {
                         guard paneSize.width >= Self.minimumPaneSize.width,
                               paneSize.height >= Self.minimumPaneSize.height else { return }
                         if firstResizeDone {
-                            try? await Task.sleep(for: .milliseconds(80))
+                            try? await Task.sleep(for: .milliseconds(220))
                             guard !Task.isCancelled else { return }
                         }
                         firstResizeDone = true
