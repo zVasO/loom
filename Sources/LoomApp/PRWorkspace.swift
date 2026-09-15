@@ -177,8 +177,84 @@ struct PRWorkspaceView: View {
         }
     }
 
-    /// Who and where: author (GitHub avatar), head → base branches.
+    /// Who and where: author (GitHub avatar), head → base branches — then who
+    /// it waits on, who owns it, how it is tagged, how big it is.
     private var identity: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            authorLine
+            peopleLine
+        }
+    }
+
+    /// Reviewers with their last verdict, assignees, labels, size, conflicts.
+    @ViewBuilder
+    private var peopleLine: some View {
+        let verdicts = Dictionary(pr.latestReviews.map { ($0.author, $0.state) },
+                                  uniquingKeysWith: { _, last in last })
+        // Everyone involved in the review: still requested, or already spoke.
+        let reviewers = pr.reviewers + pr.latestReviews.map(\.author)
+            .filter { !pr.reviewers.contains($0) }
+        if !reviewers.isEmpty || !pr.assignees.isEmpty || !pr.labels.isEmpty
+            || pr.changedFiles > 0 || pr.isConflicting {
+            HStack(spacing: 12) {
+                if !reviewers.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.2").font(.system(size: 10))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                        ForEach(reviewers, id: \.self) { reviewer in
+                            reviewerChip(reviewer, verdict: verdicts[reviewer])
+                        }
+                    }
+                }
+                if !pr.assignees.isEmpty {
+                    Label(pr.assignees.map { "@" + $0 }.joined(separator: ", "),
+                          systemImage: "person.crop.circle")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .lineLimit(1)
+                        .help("Assigned")
+                }
+                ForEach(pr.labels, id: \.name) { PRChips.label($0) }
+                if pr.changedFiles > 0 {
+                    HStack(spacing: 6) {
+                        PRChips.size(pr)
+                        Text(pr.changedFiles == 1 ? "1 file" : "\(pr.changedFiles) files")
+                            .font(.system(size: 10))
+                            .foregroundStyle(DefaultTheme.mutedText)
+                    }
+                }
+                if pr.isConflicting {
+                    Label("Conflicts with \(pr.baseBranch.isEmpty ? "base" : pr.baseBranch)",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.danger)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    /// ✓ approved, ✗ changes requested, ○ still to review — per person.
+    private func reviewerChip(_ reviewer: String, verdict: String?) -> some View {
+        let (symbol, color): (String, Color) = switch verdict ?? "" {
+        case "APPROVED": ("checkmark.circle.fill", DefaultTheme.groupHeader)
+        case "CHANGES_REQUESTED": ("xmark.circle.fill", DefaultTheme.danger)
+        case "COMMENTED": ("text.bubble", DefaultTheme.secondaryText)
+        default: ("circle.dotted", DefaultTheme.mutedText)
+        }
+        return HStack(spacing: 4) {
+            Image(systemName: symbol).font(.system(size: 10)).foregroundStyle(color)
+            Text(reviewer.hasPrefix("team/") ? reviewer : "@" + reviewer)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(DefaultTheme.primaryText)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(DefaultTheme.surfaceRaised, in: Capsule())
+        .help(verdict.map { $0.replacingOccurrences(of: "_", with: " ").lowercased() }
+              ?? "review requested")
+    }
+
+    private var authorLine: some View {
         HStack(spacing: 10) {
             AsyncImage(url: URL(string: "https://github.com/\(pr.author).png?size=80")) { image in
                 image.resizable()

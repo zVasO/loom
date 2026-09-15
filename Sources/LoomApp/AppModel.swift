@@ -487,11 +487,19 @@ public final class AppModel {
     }
     public var pendingPR: PendingPR?
 
-    public private(set) var prCache: [ProjectID: [GitHubService.PullRequest]] = [:]
-    /// When each list was fetched: the TTL reads it, and so does the age the
-    /// refresh button reports.
-    public private(set) var prFetchedAt: [ProjectID: Date] = [:]
-    public private(set) var prLoading: Set<ProjectID> = []
+    /// A list is one project seen through one filter.
+    public struct PRListKey: Hashable, Sendable {
+        public let projectID: ProjectID
+        public let filterID: String
+        public init(projectID: ProjectID, filterID: String) {
+            self.projectID = projectID
+            self.filterID = filterID
+        }
+    }
+
+    /// Every list ever fetched, by project and filter — the cache on disk mirrors it.
+    private var prLists: [PRListKey: PRListCache.Entry] = [:]
+    public private(set) var prLoading: Set<PRListKey> = []
     /// PRs whose review session is being prepared (worktree fetch + launch) —
     /// the UI shows progress instead of feeling frozen during the network fetch.
     public private(set) var prReviewLaunching: Set<String> = []
@@ -501,13 +509,86 @@ public final class AppModel {
     private var prDiffCache: [String: String] = [:]
     private var prCommentsCache: [String: [GitHubService.ReviewComment]] = [:]
     private var prListCache: PRListCache { PRListCache(directory: supportDirectory) }
+    private var prFilterStore: PRFilterStore { PRFilterStore(directory: supportDirectory) }
 
-    /// Seeds every project's PR list from disk: after a relaunch the tab
-    /// paints its lists, and their counts, without a single `gh` call.
+    // MARK: PR filters
+
+    /// The user's own filters, after the built-ins in every menu.
+    public private(set) var customPRFilters: [PRFilter] = []
+
+    public var prFilters: [PRFilter] { PRFilter.builtIns + customPRFilters }
+
+    /// The filter every PR list is currently seen through. Persisted: the tab
+    /// reopens on the question you were asking.
+    public var selectedPRFilterID: String = UserDefaults.standard
+        .string(forKey: "loom.pr.filter") ?? PRFilter.all.id {
+        didSet { UserDefaults.standard.set(selectedPRFilterID, forKey: "loom.pr.filter") }
+    }
+
+    /// A deleted custom filter falls back to "All open" rather than to nothing.
+    public var selectedPRFilter: PRFilter {
+        prFilters.first { $0.id == selectedPRFilterID } ?? .all
+    }
+
+    public func addCustomPRFilter(name: String, query: String) -> PRFilter {
+        let filter = PRFilter.custom(name: name, query: query)
+        customPRFilters.append(filter)
+        prFilterStore.save(customPRFilters)
+        return filter
+    }
+
+    public func updateCustomPRFilter(_ filter: PRFilter) {
+        guard let index = customPRFilters.firstIndex(where: { $0.id == filter.id }) else { return }
+        customPRFilters[index] = filter
+        prFilterStore.save(customPRFilters)
+    }
+
+    public func removeCustomPRFilter(id: String) {
+        customPRFilters.removeAll { $0.id == id }
+        prFilterStore.save(customPRFilters)
+        prLists = prLists.filter { $0.key.filterID != id }
+        if selectedPRFilterID == id { selectedPRFilterID = PRFilter.all.id }
+    }
+
+    /// Runs a query once against a project, without touching the caches —
+    /// the editor's "Test" button. The gh error text comes back verbatim:
+    /// a bad qualifier is the one thing the user must read.
+    public func testPRFilter(query: String, in projectID: ProjectID) async -> Result<Int, Error> {
+        guard let repo = projectRepo(projectID) else {
+            return .failure(GitHubService.GitHubError.commandFailed(
+                arguments: [], stderr: "The project folder is missing."))
+        }
+        let probe = PRFilter(id: "probe", name: "probe", query: query, isBuiltIn: false)
+        do {
+            return .success(try await GitHubService().listPRs(in: repo, filter: probe).count)
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    // MARK: PR lists
+
+    private func prKey(_ projectID: ProjectID) -> PRListKey {
+        PRListKey(projectID: projectID, filterID: selectedPRFilterID)
+    }
+
+    /// The project's PRs through the current filter — empty until fetched.
+    public func prs(for projectID: ProjectID) -> [GitHubService.PullRequest] {
+        prLists[prKey(projectID)]?.prs ?? []
+    }
+
+    public func isLoadingPRs(for projectID: ProjectID) -> Bool {
+        prLoading.contains(prKey(projectID))
+    }
+
+    /// Seeds every list from disk: after a relaunch the tab paints its lists,
+    /// and their counts, without a single `gh` call.
     private func loadPRListCache() {
-        for (projectID, entry) in prListCache.load() {
-            prCache[projectID] = entry.prs
-            prFetchedAt[projectID] = entry.fetchedAt
+        customPRFilters = prFilterStore.load()
+        for (projectID, lists) in prListCache.load() {
+            for (filterID, entry) in lists {
+                prLists[PRListKey(projectID: projectID, filterID: filterID)] = entry
+            }
         }
     }
 
@@ -515,17 +596,17 @@ public final class AppModel {
     /// time, where `projects` has not been read from the database yet.
     private func savePRListCache() {
         let known = Set(projects.map(\.id))
-        let entries = prCache.reduce(into: [ProjectID: PRListCache.Entry]()) { result, pair in
-            guard known.contains(pair.key), let fetchedAt = prFetchedAt[pair.key] else { return }
-            result[pair.key] = PRListCache.Entry(fetchedAt: fetchedAt, prs: pair.value)
+        var lists: PRListCache.Lists = [:]
+        for (key, entry) in prLists where known.contains(key.projectID) {
+            lists[key.projectID, default: [:]][key.filterID] = entry
         }
         let cache = prListCache
-        Task.detached(priority: .utility) { cache.save(entries) }
+        Task.detached(priority: .utility) { cache.save(lists) }
     }
 
     /// How old a project's cached list is — nil when nothing is cached.
     public func prCacheAge(for projectID: ProjectID) -> TimeInterval? {
-        prFetchedAt[projectID].map { Date().timeIntervalSince($0) }
+        prLists[prKey(projectID)].map { Date().timeIntervalSince($0.fetchedAt) }
     }
 
     /// What the refresh button says: where the list on screen comes from.
@@ -538,28 +619,30 @@ public final class AppModel {
         return "Loaded \(when) — refresh"
     }
 
-    /// Fetches only what the cache cannot answer: nothing stored, or stored
-    /// longer ago than the TTL. What visiting a project calls.
+    /// Fetches only what the cache cannot answer: nothing stored, stored
+    /// longer ago than the TTL, or stored for a filter edited since. What
+    /// visiting a project, or picking a filter, calls.
     public func ensurePRs(for projectID: ProjectID) async {
-        if let age = prCacheAge(for: projectID), age <= PRListCache.ttl { return }
+        if let entry = prLists[prKey(projectID)], !entry.isStale(for: selectedPRFilter) { return }
         await refreshPRs(for: projectID)
     }
 
     /// Fetches whatever the cache's age — the refresh button.
     public func refreshPRs(for projectID: ProjectID) async {
-        guard !prLoading.contains(projectID) else { return }
-        prLoading.insert(projectID)
-        defer { prLoading.remove(projectID) }
+        let filter = selectedPRFilter
+        let key = PRListKey(projectID: projectID, filterID: filter.id)
+        guard !prLoading.contains(key) else { return }
+        prLoading.insert(key)
+        defer { prLoading.remove(key) }
         guard let repo = projectRepo(projectID) else { return }
         // A failed gh call must never be stamped fresh: the failure would then
         // be served from the cache for the whole TTL.
-        guard let prs = try? await GitHubService().listPRs(in: repo) else { return }
+        guard let prs = try? await GitHubService().listPRs(in: repo, filter: filter) else { return }
         let prefix = "\(projectID.rawValue.uuidString)#"
         prDetailCache = prDetailCache.filter { !$0.key.hasPrefix(prefix) }
         prDiffCache = prDiffCache.filter { !$0.key.hasPrefix(prefix) }
         prCommentsCache = prCommentsCache.filter { !$0.key.hasPrefix(prefix) }
-        prCache[projectID] = prs
-        prFetchedAt[projectID] = Date()
+        prLists[key] = PRListCache.Entry(fetchedAt: Date(), prs: prs, query: filter.query)
         savePRListCache()
     }
 

@@ -45,6 +45,61 @@ struct GitHubServiceTests {
         #expect(detail.reviews.first?.state == "CHANGES_REQUESTED")
     }
 
+    @Test("a PR row carries reviewers (users and teams), assignees, labels, verdicts, size, head")
+    func parseEnrichedList() throws {
+        let json = """
+        [{"number": 7, "title": "Enrich", "author": {"login": "vaso"},
+          "headRefName": "feat", "baseRefName": "main", "headRefOid": "abc123",
+          "reviewDecision": "CHANGES_REQUESTED", "statusCheckRollup": [],
+          "updatedAt": "2026-09-01T10:00:00Z", "url": "https://x", "isDraft": false,
+          "reviewRequests": [{"__typename": "User", "login": "alice"},
+                             {"__typename": "Team", "name": "Core", "slug": "core"}],
+          "assignees": [{"login": "bob", "id": "1"}],
+          "labels": [{"name": "bug", "color": "d73a4a"}],
+          "latestReviews": [{"author": {"login": "carol"}, "state": "APPROVED"},
+                            {"author": {"login": "dave"}, "state": "CHANGES_REQUESTED"}],
+          "additions": 120, "deletions": 8, "changedFiles": 5, "mergeable": "CONFLICTING"}]
+        """
+        let pr = try #require(try GitHubService.parsePRList(Data(json.utf8)).first)
+        #expect(pr.reviewers == ["alice", "team/core"])
+        #expect(pr.assignees == ["bob"])
+        #expect(pr.labels == [GitHubService.Label(name: "bug", colorHex: "d73a4a")])
+        #expect(pr.latestReviews.map(\.author) == ["carol", "dave"])
+        #expect(pr.latestReviews.map(\.state) == ["APPROVED", "CHANGES_REQUESTED"])
+        #expect(pr.additions == 120)
+        #expect(pr.deletions == 8)
+        #expect(pr.changedFiles == 5)
+        #expect(pr.isConflicting)
+        #expect(pr.headSHA == "abc123")
+        #expect(pr.baseBranch == "main")
+    }
+
+    @Test("rows without the enrichment fields still parse, with empty defaults")
+    func parseListWithoutEnrichment() throws {
+        let json = """
+        [{"number": 1, "title": "t", "author": {"login": "a"}, "headRefName": "b",
+          "reviewDecision": "", "statusCheckRollup": [], "updatedAt": "", "url": "", "isDraft": false}]
+        """
+        let pr = try #require(try GitHubService.parsePRList(Data(json.utf8)).first)
+        #expect(pr.reviewers.isEmpty)
+        #expect(pr.labels.isEmpty)
+        #expect(pr.latestReviews.isEmpty)
+        #expect(pr.additions == 0)
+        #expect(pr.mergeable == "")
+        #expect(!pr.isConflicting)
+    }
+
+    @Test("the list field set names every key the parser reads")
+    func listFieldsCoverTheParser() {
+        let fields = Set(GitHubService.listFields.split(separator: ",").map(String.init))
+        for key in ["number", "title", "author", "headRefName", "baseRefName", "headRefOid",
+                    "reviewDecision", "statusCheckRollup", "updatedAt", "url", "isDraft",
+                    "reviewRequests", "assignees", "labels", "latestReviews",
+                    "additions", "deletions", "changedFiles", "mergeable"] {
+            #expect(fields.contains(key), "\(key) is parsed but not requested")
+        }
+    }
+
     @Test("empty checks rollup means passing — no signal is not a failure")
     func emptyChecks() throws {
         let json = """

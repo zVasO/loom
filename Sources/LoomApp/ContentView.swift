@@ -1058,21 +1058,27 @@ struct ProjectsView: View {
     /// Reads the shared PR cache: the same list the PRs tab shows, fetched at
     /// most once per TTL however many times the project is revisited.
     private func prListView(_ project: ProjectRecord) -> some View {
-        let prs = model.prCache[project.id] ?? []
-        let loading = model.prLoading.contains(project.id)
+        let prs = model.prs(for: project.id)
+        let loading = model.isLoadingPRs(for: project.id)
+        let filter = model.selectedPRFilter
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                sectionHeader("OPEN PULL REQUESTS", count: prs.count,
+                sectionHeader(filter.id == PRFilter.all.id ? "OPEN PULL REQUESTS"
+                              : filter.name.uppercased(),
+                              count: prs.count,
                               color: DefaultTheme.badgeColor(for: .working))
                 Spacer()
                 if loading { ProgressView().controlSize(.small) }
+                PRFilterMenu(model: model, projectsToRefresh: { [project.id] })
                 GhostButton(systemImage: "arrow.clockwise") {
                     Task { await model.refreshPRs(for: project.id) }
                 }
                 .help(model.prCacheHelp(for: project.id))
             }
             if prs.isEmpty && !loading {
-                Text("No open pull request — or gh is not authenticated for this repo.")
+                Text(filter.id == PRFilter.all.id
+                     ? "No open pull request — or gh is not authenticated for this repo."
+                     : "No pull request matches “\(filter.name)” — or gh is not authenticated for this repo.")
                     .font(.system(size: 12))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
@@ -1312,9 +1318,24 @@ struct PRRow: View {
                         .foregroundStyle(DefaultTheme.mutedText)
                     MonoTag(pr.branch, systemImage: "arrow.triangle.branch",
                             color: DefaultTheme.mutedText)
+                    if !pr.reviewers.isEmpty {
+                        Label(PRChips.reviewers(pr), systemImage: "person.2")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(DefaultTheme.mutedText)
+                            .lineLimit(1)
+                    }
+                    if pr.additions + pr.deletions > 0 { PRChips.size(pr) }
                 }
             }
             Spacer()
+            ForEach(pr.labels.prefix(3), id: \.name) { PRChips.label($0) }
+            if pr.isConflicting {
+                Text("conflicts")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.danger)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(DefaultTheme.danger.opacity(0.12), in: Capsule())
+            }
             if pr.isDraft {
                 Text("draft")
                     .font(.system(size: 9, weight: .semibold))

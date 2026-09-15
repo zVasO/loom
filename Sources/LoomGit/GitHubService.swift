@@ -28,6 +28,96 @@ public struct GitHubService: Sendable {
         public let isDraft: Bool
         public let updatedAt: String
         public let url: String
+        /// Requested reviewers: a login, or `team/<slug>` for a team request.
+        public let reviewers: [String]
+        public let assignees: [String]
+        public let labels: [Label]
+        /// One entry per reviewer, their LAST review — who approved, who asked
+        /// for changes, who only commented.
+        public let latestReviews: [ReviewSummary]
+        public let additions: Int
+        public let deletions: Int
+        public let changedFiles: Int
+        /// MERGEABLE, CONFLICTING or UNKNOWN (GitHub still computing).
+        public let mergeable: String
+        /// The head commit (headRefOid) — what a line comment or a file-viewed
+        /// mark must be anchored to.
+        public let headSHA: String
+
+        public init(number: Int, title: String, author: String, branch: String,
+                    baseBranch: String, reviewDecision: String, checksPassing: Bool,
+                    isDraft: Bool, updatedAt: String, url: String,
+                    reviewers: [String] = [], assignees: [String] = [], labels: [Label] = [],
+                    latestReviews: [ReviewSummary] = [], additions: Int = 0, deletions: Int = 0,
+                    changedFiles: Int = 0, mergeable: String = "", headSHA: String = "") {
+            self.number = number
+            self.title = title
+            self.author = author
+            self.branch = branch
+            self.baseBranch = baseBranch
+            self.reviewDecision = reviewDecision
+            self.checksPassing = checksPassing
+            self.isDraft = isDraft
+            self.updatedAt = updatedAt
+            self.url = url
+            self.reviewers = reviewers
+            self.assignees = assignees
+            self.labels = labels
+            self.latestReviews = latestReviews
+            self.additions = additions
+            self.deletions = deletions
+            self.changedFiles = changedFiles
+            self.mergeable = mergeable
+            self.headSHA = headSHA
+        }
+
+        /// Cached lists predate the enrichment: missing keys are defaults, not
+        /// a decoding failure that would drop the whole cache.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            number = try container.decode(Int.self, forKey: .number)
+            title = try container.decode(String.self, forKey: .title)
+            author = try container.decode(String.self, forKey: .author)
+            branch = try container.decode(String.self, forKey: .branch)
+            baseBranch = try container.decode(String.self, forKey: .baseBranch)
+            reviewDecision = try container.decode(String.self, forKey: .reviewDecision)
+            checksPassing = try container.decode(Bool.self, forKey: .checksPassing)
+            isDraft = try container.decode(Bool.self, forKey: .isDraft)
+            updatedAt = try container.decode(String.self, forKey: .updatedAt)
+            url = try container.decode(String.self, forKey: .url)
+            reviewers = try container.decodeIfPresent([String].self, forKey: .reviewers) ?? []
+            assignees = try container.decodeIfPresent([String].self, forKey: .assignees) ?? []
+            labels = try container.decodeIfPresent([Label].self, forKey: .labels) ?? []
+            latestReviews = try container.decodeIfPresent([ReviewSummary].self,
+                                                          forKey: .latestReviews) ?? []
+            additions = try container.decodeIfPresent(Int.self, forKey: .additions) ?? 0
+            deletions = try container.decodeIfPresent(Int.self, forKey: .deletions) ?? 0
+            changedFiles = try container.decodeIfPresent(Int.self, forKey: .changedFiles) ?? 0
+            mergeable = try container.decodeIfPresent(String.self, forKey: .mergeable) ?? ""
+            headSHA = try container.decodeIfPresent(String.self, forKey: .headSHA) ?? ""
+        }
+
+        public var isConflicting: Bool { mergeable == "CONFLICTING" }
+    }
+
+    public struct Label: Sendable, Equatable, Codable, Hashable {
+        public let name: String
+        /// Six hex digits, no `#` — the way GitHub stores it.
+        public let colorHex: String
+        public init(name: String, colorHex: String) {
+            self.name = name
+            self.colorHex = colorHex
+        }
+    }
+
+    public struct ReviewSummary: Sendable, Equatable, Codable, Hashable {
+        public let author: String
+        /// APPROVED, CHANGES_REQUESTED, COMMENTED, PENDING, DISMISSED.
+        public let state: String
+        public init(author: String, state: String) {
+            self.author = author
+            self.state = state
+        }
     }
 
     public struct Comment: Sendable, Equatable {
@@ -79,6 +169,14 @@ public struct GitHubService: Sendable {
 
     // MARK: - Pure parsing (the tested seam)
 
+    /// The `--json` fields of a list row. One place: the parser reads exactly these.
+    public static let listFields = [
+        "number", "title", "author", "headRefName", "baseRefName", "headRefOid",
+        "reviewDecision", "statusCheckRollup", "updatedAt", "url", "isDraft",
+        "reviewRequests", "assignees", "labels", "latestReviews",
+        "additions", "deletions", "changedFiles", "mergeable",
+    ].joined(separator: ",")
+
     public static func parsePRList(_ data: Data) throws -> [PullRequest] {
         guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             return []
@@ -88,6 +186,24 @@ public struct GitHubService: Sendable {
                   let title = row["title"] as? String else { return nil }
             let checks = row["statusCheckRollup"] as? [[String: Any]] ?? []
             let failing = checks.contains { ($0["state"] as? String) == "FAILURE" }
+            // A review request is a user ({login}) or a team ({slug}, {name}).
+            let reviewers = (row["reviewRequests"] as? [[String: Any]] ?? []).compactMap { request -> String? in
+                if let login = request["login"] as? String { return login }
+                if let slug = request["slug"] as? String { return "team/" + slug }
+                if let name = request["name"] as? String { return "team/" + name }
+                return nil
+            }
+            let assignees = (row["assignees"] as? [[String: Any]] ?? [])
+                .compactMap { $0["login"] as? String }
+            let labels = (row["labels"] as? [[String: Any]] ?? []).compactMap { label -> Label? in
+                guard let name = label["name"] as? String else { return nil }
+                return Label(name: name, colorHex: label["color"] as? String ?? "")
+            }
+            let latestReviews = (row["latestReviews"] as? [[String: Any]] ?? []).compactMap { review -> ReviewSummary? in
+                guard let author = (review["author"] as? [String: Any])?["login"] as? String
+                else { return nil }
+                return ReviewSummary(author: author, state: review["state"] as? String ?? "")
+            }
             return PullRequest(
                 number: number,
                 title: title,
@@ -98,7 +214,16 @@ public struct GitHubService: Sendable {
                 checksPassing: !failing,
                 isDraft: row["isDraft"] as? Bool ?? false,
                 updatedAt: row["updatedAt"] as? String ?? "",
-                url: row["url"] as? String ?? "")
+                url: row["url"] as? String ?? "",
+                reviewers: reviewers,
+                assignees: assignees,
+                labels: labels,
+                latestReviews: latestReviews,
+                additions: row["additions"] as? Int ?? 0,
+                deletions: row["deletions"] as? Int ?? 0,
+                changedFiles: row["changedFiles"] as? Int ?? 0,
+                mergeable: row["mergeable"] as? String ?? "",
+                headSHA: row["headRefOid"] as? String ?? "")
         }
     }
 
@@ -172,10 +297,14 @@ public struct GitHubService: Sendable {
 
     // MARK: - gh execution
 
-    public func listPRs(in repo: URL) async throws -> [PullRequest] {
-        let data = try await run(["pr", "list", "--json",
-                                  "number,title,author,headRefName,baseRefName,reviewDecision,statusCheckRollup,updatedAt,url,isDraft"],
-                                 in: repo)
+    /// The PRs of the repo a project folder belongs to, narrowed by a filter
+    /// (GitHub search syntax through `--search`; gh adds `repo:` and `is:pr`
+    /// itself). `gh search prs` was the alternative and lost: it returns
+    /// neither the branch, nor the review decision, nor the checks.
+    public func listPRs(in repo: URL, filter: PRFilter = .all,
+                        limit: Int = PRFilter.defaultLimit) async throws -> [PullRequest] {
+        let data = try await run(["pr", "list"] + filter.ghArguments(limit: limit)
+                                 + ["--json", Self.listFields], in: repo)
         return try Self.parsePRList(data)
     }
 
