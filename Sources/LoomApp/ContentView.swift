@@ -95,6 +95,7 @@ struct ContentView: View {
     /// The session that was open at quit — reopened on the next launch.
     @AppStorage("loom.session.lastOpened") private var lastOpenedSession = ""
     @State private var paletteShown = false
+    @State private var newSessionSheetShown = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -104,8 +105,8 @@ struct ContentView: View {
             case .projects: ProjectsView(model: model, onOpenSessions: { project in
                 model.selectedProject = project
                 tab = .sessions
-            }, onNewSession: { project in
-                createSession(in: project)
+            }, onNewSession: { project, placement in
+                createSession(in: project, placement: placement)
             }, onOpenSession: { id in
                 selected = .session(id)
                 tab = .sessions
@@ -246,8 +247,11 @@ struct ContentView: View {
             NavTab("Projects", isActive: tab == .projects) { tab = .projects }
             NavTab("Sessions", isActive: tab == .sessions) { tab = .sessions }
             NavTab("PRs", isActive: tab == .prs) { tab = .prs }
+            // The +: pick the project — or any folder, which becomes one —
+            // and whether the session gets its own worktree. ⌘N keeps the
+            // fast path: the selected project, its default placement.
             Button {
-                createSession(in: model.selectedProject)
+                newSessionSheetShown = true
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .bold))
@@ -257,6 +261,12 @@ struct ContentView: View {
                     .hoverBrightness()
             }
             .buttonStyle(.plain)
+            .help("New session — choose the project or a folder, and where it works")
+            .sheet(isPresented: $newSessionSheetShown) {
+                NewSessionSheet(model: model) { projectID, placement in
+                    createSession(in: projectID, placement: placement)
+                }
+            }
 
             Spacer()
 
@@ -477,9 +487,10 @@ struct ContentView: View {
 
     /// The reference's +: a claude session starts immediately,
     /// the goal is typed in the terminal.
-    private func createSession(in projectID: ProjectID?) {
+    private func createSession(in projectID: ProjectID?,
+                               placement: AppModel.LaunchPlacement? = nil) {
         Task {
-            if let id = await model.launchSession(in: projectID) {
+            if let id = await model.launchSession(in: projectID, placement: placement) {
                 selected = .session(id)
                 tab = .sessions
             }
@@ -493,7 +504,8 @@ struct ContentView: View {
 struct ProjectsView: View {
     let model: AppModel
     let onOpenSessions: (ProjectID) -> Void
-    let onNewSession: (ProjectID) -> Void
+    /// nil placement = the project's default.
+    let onNewSession: (ProjectID, AppModel.LaunchPlacement?) -> Void
     let onOpenSession: (SessionID) -> Void
     /// Clicking a PR in the project tab opens it in the global PRs tab.
     let onOpenPR: (ProjectID, GitHubService.PullRequest) -> Void
@@ -972,7 +984,36 @@ struct ProjectsView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Launch the goal in N parallel sessions, each on its own worktree")
+            .help("Launch the goal in N parallel sessions, each where the placement says")
+            // Launch = Enter, with the project's default placement. The menu
+            // beside it launches THIS goal the other way, once, without
+            // flipping the project's default.
+            HStack(spacing: 2) {
+                AccentButton("Launch") { submitGoal(project) }
+                Menu {
+                    Button {
+                        submitGoal(project, placement: .projectFolder)
+                    } label: {
+                        Label("In the project folder", systemImage: "folder")
+                    }
+                    Button {
+                        submitGoal(project, placement: .newWorktree)
+                    } label: {
+                        Label("In a new worktree", systemImage: "arrow.triangle.branch")
+                    }
+                    .disabled(!model.isGitRepository(project.id))
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(DefaultTheme.accentText)
+                        .frame(width: 22, height: 30)
+                        .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 7))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Launch this goal in the folder or on a worktree, whatever the default")
+            }
         }
         .padding(.horizontal, 18).padding(.vertical, 17)
         .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
@@ -982,7 +1023,8 @@ struct ProjectsView: View {
         .animation(.hover, value: goalFocused)
     }
 
-    private func submitGoal(_ project: ProjectRecord) {
+    private func submitGoal(_ project: ProjectRecord,
+                            placement: AppModel.LaunchPlacement? = nil) {
         let trimmed = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         goal = ""
@@ -990,7 +1032,8 @@ struct ProjectsView: View {
         Task {
             var first: SessionID?
             for _ in 0..<count {
-                if let id = await model.launchSession(prompt: trimmed, in: project.id) {
+                if let id = await model.launchSession(prompt: trimmed, in: project.id,
+                                                      placement: placement) {
                     if first == nil { first = id }
                 }
             }
@@ -1010,7 +1053,9 @@ struct ProjectsView: View {
                 ForEach(items) { item in
                     ActiveSessionCard(item: item) { onOpenSession(item.id) }
                 }
-                QuickSessionCard { onNewSession(project.id) }
+                QuickSessionCard(canWorktree: model.isGitRepository(project.id),
+                                 onCreate: { onNewSession(project.id, nil) },
+                                 onCreateIn: { onNewSession(project.id, $0) })
             }
         }
     }
@@ -1139,12 +1184,8 @@ struct ProjectsView: View {
     }
 
     private func pickProject() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        if panel.runModal() == .OK, let url = panel.url {
-            Task { await model.addProject(at: url) }
-        }
+        guard let url = AppModel.pickFolder() else { return }
+        Task { await model.addProject(at: url) }
     }
 }
 
@@ -1581,15 +1622,33 @@ struct ActiveSessionCard: View {
 
 /// The reference's dashed card: a session WITHOUT a goal, right away.
 struct QuickSessionCard: View {
+    var canWorktree = true
     let onCreate: () -> Void
+    /// Explicit placement, from the two buttons under the title.
+    var onCreateIn: ((AppModel.LaunchPlacement) -> Void)?
     @State private var hovered = false
 
     var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
-            Text("Quick empty session").font(.system(size: 12, weight: .medium))
+        VStack(spacing: 8) {
+            HStack(spacing: 7) {
+                Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                Text("Quick empty session").font(.system(size: 12, weight: .medium))
+            }
+            .foregroundStyle(hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
+            if let onCreateIn, hovered {
+                HStack(spacing: 6) {
+                    placementButton("Project folder", systemImage: "folder") {
+                        onCreateIn(.projectFolder)
+                    }
+                    if canWorktree {
+                        placementButton("New worktree", systemImage: "arrow.triangle.branch") {
+                            onCreateIn(.newWorktree)
+                        }
+                    }
+                }
+                .transition(.opacity)
+            }
         }
-        .foregroundStyle(hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
         .frame(maxWidth: .infinity, minHeight: 92)
         .background(hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
                     in: RoundedRectangle(cornerRadius: 10))
@@ -1600,6 +1659,19 @@ struct QuickSessionCard: View {
         .onTapGesture(perform: onCreate)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
+    }
+
+    private func placementButton(_ title: String, systemImage: String,
+                                 action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(DefaultTheme.secondaryText)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(DefaultTheme.surfaceRaised, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 

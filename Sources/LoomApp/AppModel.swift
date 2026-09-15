@@ -788,6 +788,9 @@ public final class AppModel {
             spec.sessionID = sessionID
             spec.title = "PR #\(pr.number) · review"
             spec.badge = "PR #\(pr.number)"
+            // The record must know it runs in a worktree: the git panel and
+            // the ship actions read worktreePath, and a nil left them blind.
+            spec.worktree = .existing(path: worktree, branch: pr.branch)
             let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(pr.number) · review",
@@ -916,6 +919,7 @@ public final class AppModel {
             spec.sessionID = sessionID
             spec.title = "PR #\(number) · guide"
             spec.badge = "PR #\(number)"
+            spec.worktree = .existing(path: worktree, branch: nil)
             let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(number) · guide",
@@ -1355,14 +1359,43 @@ public final class AppModel {
 
     /// PRJ-01: adds a project by pointing at a folder; if it is a Git repo, the
     /// current branch is detected. The app never modifies the folder.
-    public func addProject(at url: URL) async {
+    /// Registers a folder as a project — or finds it, when the same folder is
+    /// already one: picking it twice must not make two projects. Returns the
+    /// project, selected.
+    @discardableResult
+    public func addProject(at url: URL) async -> ProjectID {
+        let path = url.standardizedFileURL.path
+        if let existing = projects.first(where: { URL(fileURLWithPath: $0.path).standardizedFileURL.path == path }) {
+            selectedProject = existing.id
+            return existing.id
+        }
         let isGit = FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
         let branch = isGit ? try? await GitService().currentBranch(in: url) : nil
         let record = ProjectRecord(id: ProjectID(), name: url.lastPathComponent,
-                                   path: url.path, defaultBranch: branch, createdAt: Date())
+                                   path: path, defaultBranch: branch, createdAt: Date())
         try? store?.insertProject(record)
         reloadPersistedSessions()
         selectedProject = record.id
+        return record.id
+    }
+
+    /// The folder picker every "add a project" entry point shares. Modal:
+    /// returns the chosen folder, or nil when cancelled.
+    public static func pickFolder(title: String = "Choose a project folder") -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = title
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    /// Whether a project folder can host worktrees at all.
+    public func isGitRepository(_ projectID: ProjectID?) -> Bool {
+        guard let project = project(projectID) else { return false }
+        return FileManager.default.fileExists(
+            atPath: URL(fileURLWithPath: project.path).appendingPathComponent(".git").path)
     }
 
     public func project(_ id: ProjectID?) -> ProjectRecord? {
@@ -1479,7 +1512,21 @@ public final class AppModel {
     /// (`prompt` remains possible for the palette or future shortcuts.)
     /// Returns the identifier of the created session.
     @discardableResult
-    public func launchSession(prompt: String? = nil, in projectID: ProjectID? = nil) async -> SessionID? {
+    /// Where a new session works: straight in the project folder, or on an
+    /// isolated worktree of its own (GIT-01). A per-launch choice; the
+    /// project's preference is only the default.
+    public enum LaunchPlacement: Sendable, Equatable {
+        case projectFolder
+        case newWorktree
+    }
+
+    /// The placement a project launches with when nothing else is said.
+    public func defaultPlacement(for projectID: ProjectID?) -> LaunchPlacement {
+        worktreeEnabled(for: projectID) ? .newWorktree : .projectFolder
+    }
+
+    public func launchSession(prompt: String? = nil, in projectID: ProjectID? = nil,
+                              placement: LaunchPlacement? = nil) async -> SessionID? {
         guard let manager else { return nil }
         if let projectID { selectedProject = projectID }
         let project = project(selectedProject)
@@ -1491,6 +1538,7 @@ public final class AppModel {
             """
             return nil
         }
+        let placement = placement ?? defaultPlacement(for: project?.id)
         let initialPrompt = (prompt?.isEmpty == false) ? prompt : nil
         do {
             let sessionID = SessionID()
@@ -1506,9 +1554,11 @@ public final class AppModel {
             // A single UUID end to end: the `--session-id` one — Resume depends on it.
             spec.sessionID = sessionID
             spec.title = initialPrompt ?? Self.generatedName(project: project)
-            // GIT-01 became a per-project CHOICE: worktree isolation only when
-            // the project opted in — by default sessions run in the folder.
-            if worktreeEnabled(for: project?.id),
+            // GIT-01 became a CHOICE, per launch: worktree isolation only when
+            // asked (or when the project made it its default). A folder that is
+            // not a git repository has no worktree to offer — the session runs
+            // in it, and the record says so through its missing worktreePath.
+            if placement == .newWorktree,
                FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
                 spec.worktree = .create(repo: directory, slug: Self.slug(from: initialPrompt ?? ""))
             }
