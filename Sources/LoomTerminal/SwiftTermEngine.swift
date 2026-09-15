@@ -50,6 +50,23 @@ public final class SwiftTermEngine: TerminalEngine {
 
     public var mouseReporting: Bool { terminal.mouseMode != .off }
 
+    /// What the program negotiated, read straight off the emulator. SwiftTerm
+    /// answers the kitty `CSI ? u` probe itself, so a program that pushes
+    /// flags expects `CSI … u` reports from then on — the encoder must know.
+    public var modes: TerminalModes {
+        TerminalModes(applicationCursorKeys: terminal.applicationCursor,
+                      bracketedPaste: terminal.bracketedPasteMode,
+                      mouseReporting: terminal.mouseMode != .off,
+                      keyboardEnhancement: KeyboardEnhancement(
+                          rawValue: terminal.keyboardEnhancementFlags.rawValue))
+    }
+
+    /// SwiftTerm remembers the state and emits `CSI I` / `CSI O` only while the
+    /// program asked for focus events (DECSET 1004) — nothing to gate here.
+    public func setFocus(_ focused: Bool) {
+        terminal.setTerminalFocus(focused)
+    }
+
     public func sendWheel(_ direction: WheelDirection, atCol col: Int, row: Int) {
         guard terminal.mouseMode != .off else { return }
         let flags = terminal.encodeButton(button: direction == .up ? 4 : 5,
@@ -98,9 +115,21 @@ public final class SwiftTermEngine: TerminalEngine {
                               revision: revision)
     }
 
-    /// Rows currently above the screen — also the absolute index base that
-    /// gives history lines a STABLE identity for the view diff.
-    public var scrollbackRows: Int { terminal.getTopVisibleRow() }
+    /// Rows that ever scrolled above the screen — also the absolute index base
+    /// that gives history lines a STABLE identity for the view diff.
+    ///
+    /// ABSOLUTE, not the buffer offset: once the scrollback is full (10,000
+    /// lines into a long session) `yDisp` plateaus while the emulator trims a
+    /// line off the top for each one pushed. Read as the base, that plateau
+    /// handed the SAME identity to a row that had moved up by one every frame —
+    /// the view diffed shifting text under fixed ids, and the tail below
+    /// stopped seeing "new" rows altogether: a frozen history under a live
+    /// screen, blocks apparently duplicated. `totalLinesTrimmed` is the count
+    /// the emulator keeps for exactly this, and `getScrollInvariantLine`
+    /// already indexes in these absolute terms.
+    public var scrollbackRows: Int {
+        terminal.getTopVisibleRow() + terminal.buffer.totalLinesTrimmed
+    }
 
     // P0 perf: scrollback lines are immutable once scrolled off — the tail is
     // cached and only the NEW rows are extracted (measured 14.7 ms → ~0 per
@@ -109,7 +138,7 @@ public final class SwiftTermEngine: TerminalEngine {
     private var tailCachedRows = 0
 
     public func historyTail(_ limit: Int) -> [TerminalLine] {
-        let rows = terminal.getTopVisibleRow()   // yDisp = number of lines above
+        let rows = scrollbackRows   // absolute: keeps growing past the cap
         guard rows > 0 else { return [] }
         if rows < tailCachedRows { invalidateTailCache() }   // defensive: buffer shrank
         if rows > tailCachedRows {
@@ -122,6 +151,11 @@ public final class SwiftTermEngine: TerminalEngine {
             if tailCache.count > cap { tailCache.removeFirst(tailCache.count - cap) }
             tailCachedRows = rows
         }
+        // The tail mirrors what the emulator still holds: past the scrollback
+        // cap it trims a line per line pushed, and so must the cache (a no-op
+        // in production, where the 10,000-line scrollback dwarfs the cap).
+        let retained = rows - terminal.buffer.totalLinesTrimmed
+        if tailCache.count > retained { tailCache.removeFirst(tailCache.count - retained) }
         return tailCache.suffix(limit)
     }
 
@@ -143,6 +177,8 @@ public final class SwiftTermEngine: TerminalEngine {
         return target.isEmpty ? nil : target
     }
 
+    /// `row` is absolute (lines ever scrolled off), the emulator's own
+    /// scroll-invariant numbering — it subtracts what it trimmed itself.
     private func extractScrollbackLine(_ row: Int) -> TerminalLine {
         guard let bufferLine = terminal.getScrollInvariantLine(row: row) else {
             return TerminalLine(cells: [])

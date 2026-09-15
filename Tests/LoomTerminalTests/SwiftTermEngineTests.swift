@@ -3,6 +3,7 @@ import LoomCore
 import LoomTerminal
 import LoomTerminalTestSupport
 import Dispatch
+import Foundation
 
 // The production adapter of the TerminalEngine seam, tested at the same seam as
 // LineEngine: we feed bytes, we read screen values. Expectations come from
@@ -49,6 +50,84 @@ struct SwiftTermEngineTests {
             #expect(engine.mouseReporting, "DECSET 1000 — the program takes the mouse")
             engine.feed(ArraySlice("\u{1B}[?1000l".utf8))
             #expect(engine.mouseReporting == false, "and hands it back")
+        }
+    }
+
+    // A long session fills the scrollback. From then on the emulator trims a
+    // line off the top for each one pushed, and its buffer offset stops
+    // growing: read as "rows above the screen", it froze the history tail under
+    // a live screen and gave shifting rows the same identity — the duplicated
+    // blocks people saw mid-stream. The base must count what was trimmed.
+    @Test("a full scrollback keeps the history tail live, its base absolute")
+    func scrollbackPleinHistoriqueVivant() {
+        let engine = makeEngine(rows: 6)   // scrollback: 100
+        queue.sync {
+            for line in 0..<200 {
+                engine.feed(ArraySlice("line \(line)\r\n".utf8))
+                if line % 10 == 0 { _ = engine.historyTail(400) }   // exercise the cache path
+            }
+            // Screen: lines 195–199 plus the empty row the last CR LF opened.
+            // Above it: 195 lines, of which the scrollback keeps the last 100.
+            #expect(engine.scrollbackRows == 195, "the base counts trimmed lines too")
+            let tail = engine.historyTail(400).map { $0.text.trimmingCharacters(in: .whitespaces) }
+            #expect(tail.count == 100)
+            #expect(tail.first == "line 95")
+            #expect(tail.last == "line 194", "the newest scrolled-off line, not a frozen one")
+            #expect(engine.historyTail(3).map { $0.text.trimmingCharacters(in: .whitespaces) }
+                    == ["line 192", "line 193", "line 194"])
+            #expect(engine.snapshot().lines[0].text.hasPrefix("line 195"))
+        }
+    }
+
+    // The key encoder reads the modes a program negotiated. What claude does at
+    // startup: bracketed paste on, then a kitty keyboard probe — SwiftTerm
+    // answers that probe itself, so the flags pushed afterwards MUST reach the
+    // encoder or every modified key is misread.
+    @Test("DECSET raises the input modes the encoder reads, DECRST lowers them")
+    func modesSuiventDECSET() {
+        let engine = makeEngine()
+        queue.sync {
+            #expect(engine.modes == .none)
+            engine.feed(ArraySlice("\u{1B}[?2004h".utf8))
+            #expect(engine.modes.bracketedPaste, "DECSET 2004 — pastes must be bracketed")
+            engine.feed(ArraySlice("\u{1B}[?1h".utf8))
+            #expect(engine.modes.applicationCursorKeys, "DECSET 1 — arrows go out as SS3")
+            engine.feed(ArraySlice("\u{1B}[?1l\u{1B}[?2004l".utf8))
+            #expect(engine.modes == .none, "and back to the legacy defaults")
+        }
+    }
+
+    @Test("the kitty keyboard probe is answered, and pushed flags reach the encoder")
+    func protocoleClavierKitty() {
+        let engine = makeEngine()
+        var upstream: [UInt8] = []
+        engine.onUpstream = { upstream.append(contentsOf: $0) }
+        queue.sync {
+            engine.feed(ArraySlice("\u{1B}[?u".utf8))
+            #expect(String(decoding: upstream, as: UTF8.self) == "\u{1B}[?0u",
+                    "the emulator advertises the protocol: no flags yet")
+            engine.feed(ArraySlice("\u{1B}[>1u".utf8))
+            #expect(engine.modes.keyboardEnhancement == .disambiguate,
+                    "a pushed flag is what switches the encoder to CSI u reports")
+            engine.feed(ArraySlice("\u{1B}[<u".utf8))
+            #expect(engine.modes.keyboardEnhancement.isEmpty, "popped: legacy again")
+        }
+    }
+
+    @Test("focus reaches a program that asked for it, and only then")
+    func focusRapporteSurDemande() {
+        let engine = makeEngine()
+        var upstream: [UInt8] = []
+        engine.onUpstream = { upstream.append(contentsOf: $0) }
+        queue.sync {
+            engine.setFocus(false)
+            #expect(upstream.isEmpty, "nothing asked for focus events")
+            engine.feed(ArraySlice("\u{1B}[?1004h".utf8))
+            upstream = []
+            engine.setFocus(false)
+            #expect(String(decoding: upstream, as: UTF8.self) == "\u{1B}[O")
+            engine.setFocus(true)
+            #expect(String(decoding: upstream, as: UTF8.self) == "\u{1B}[O\u{1B}[I")
         }
     }
 

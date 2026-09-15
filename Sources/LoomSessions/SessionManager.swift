@@ -97,6 +97,10 @@ public actor SessionManager {
         /// sibling root by default — decision from the first review of the spec:
         /// never nested worktrees in the agents' sight).
         case create(repo: URL, slug: String)
+        /// A worktree somebody else prepared (a PR checkout): nothing to create,
+        /// but the record must know it IS a worktree — the git panel, and the
+        /// ship actions, only work on sessions that carry one.
+        case existing(path: URL, branch: String?)
     }
 
     /// v2 (search): per-session transcript sinks — every session writes to its
@@ -124,13 +128,22 @@ public actor SessionManager {
     public func launch(_ spec: SessionSpec) async throws -> SessionID {
         let id = spec.sessionID ?? SessionID()
         var workingDirectory = spec.workingDirectory
-        var worktree: Worktree?
-        if case .create(let repo, let slug) = spec.worktree {
+        var worktreePath: String?
+        var branch: String?
+        switch spec.worktree {
+        case .create(let repo, let slug):
             let root = repo.deletingLastPathComponent()
                 .appendingPathComponent(repo.lastPathComponent + "-worktrees")
             let created = try await git.createWorktree(repo: repo, root: root, slug: slug)
-            worktree = created
+            worktreePath = created.path.path
+            branch = created.branch
             workingDirectory = created.path
+        case .existing(let path, let existingBranch):
+            worktreePath = path.path
+            branch = existingBranch
+            workingDirectory = path
+        case .none:
+            break
         }
         var dependencies = runtimeDependencies
         if let transcriptFactory, let sink = try? transcriptFactory(id) {
@@ -150,8 +163,8 @@ public actor SessionManager {
         tokensBySession[id] = token
         try? store?.insert(SessionRecord(id: id, title: spec.title ?? "Session",
                                          agentID: "claude-code", state: .starting,
-                                         branch: worktree?.branch,
-                                         worktreePath: worktree?.path.path,
+                                         branch: branch,
+                                         worktreePath: worktreePath,
                                          projectID: spec.projectID,
                                          createdAt: Date(),
                                          badge: spec.badge))

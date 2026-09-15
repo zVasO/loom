@@ -105,6 +105,13 @@ struct PRWorkspaceView: View {
     /// silently hiding the whole file explorer.
     @State private var diffError: String?
     @State private var diffLoading = false
+    /// GitHub's "Viewed" boxes over the diff's files — the recap and the
+    /// checkboxes read it; a toggle flips it before GitHub answers.
+    @State private var progress = FileReviewProgress.empty
+    /// Syntax colours, computed after the diff off the main thread: the
+    /// diff paints plain first, then coloured.
+    @State private var highlights = DiffHighlights.none
+    @Environment(\.colorScheme) private var colorScheme
     @State private var prTour: PRTour?
     @State private var tourLoading = false
     @State private var reviewBody = ""
@@ -127,6 +134,8 @@ struct PRWorkspaceView: View {
         .task(id: pr.number) {
             prDetail = nil
             diffFiles = []
+            progress = .empty
+            highlights = .none
             await load(refresh: false)
         }
     }
@@ -177,8 +186,84 @@ struct PRWorkspaceView: View {
         }
     }
 
-    /// Who and where: author (GitHub avatar), head → base branches.
+    /// Who and where: author (GitHub avatar), head → base branches — then who
+    /// it waits on, who owns it, how it is tagged, how big it is.
     private var identity: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            authorLine
+            peopleLine
+        }
+    }
+
+    /// Reviewers with their last verdict, assignees, labels, size, conflicts.
+    @ViewBuilder
+    private var peopleLine: some View {
+        let verdicts = Dictionary(pr.latestReviews.map { ($0.author, $0.state) },
+                                  uniquingKeysWith: { _, last in last })
+        // Everyone involved in the review: still requested, or already spoke.
+        let reviewers = pr.reviewers + pr.latestReviews.map(\.author)
+            .filter { !pr.reviewers.contains($0) }
+        if !reviewers.isEmpty || !pr.assignees.isEmpty || !pr.labels.isEmpty
+            || pr.changedFiles > 0 || pr.isConflicting {
+            HStack(spacing: 12) {
+                if !reviewers.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.2").font(.system(size: 10))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                        ForEach(reviewers, id: \.self) { reviewer in
+                            reviewerChip(reviewer, verdict: verdicts[reviewer])
+                        }
+                    }
+                }
+                if !pr.assignees.isEmpty {
+                    Label(pr.assignees.map { "@" + $0 }.joined(separator: ", "),
+                          systemImage: "person.crop.circle")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .lineLimit(1)
+                        .help("Assigned")
+                }
+                ForEach(pr.labels, id: \.name) { PRChips.label($0) }
+                if pr.changedFiles > 0 {
+                    HStack(spacing: 6) {
+                        PRChips.size(pr)
+                        Text(pr.changedFiles == 1 ? "1 file" : "\(pr.changedFiles) files")
+                            .font(.system(size: 10))
+                            .foregroundStyle(DefaultTheme.mutedText)
+                    }
+                }
+                if pr.isConflicting {
+                    Label("Conflicts with \(pr.baseBranch.isEmpty ? "base" : pr.baseBranch)",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.danger)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    /// ✓ approved, ✗ changes requested, ○ still to review — per person.
+    private func reviewerChip(_ reviewer: String, verdict: String?) -> some View {
+        let (symbol, color): (String, Color) = switch verdict ?? "" {
+        case "APPROVED": ("checkmark.circle.fill", DefaultTheme.groupHeader)
+        case "CHANGES_REQUESTED": ("xmark.circle.fill", DefaultTheme.danger)
+        case "COMMENTED": ("text.bubble", DefaultTheme.secondaryText)
+        default: ("circle.dotted", DefaultTheme.mutedText)
+        }
+        return HStack(spacing: 4) {
+            Image(systemName: symbol).font(.system(size: 10)).foregroundStyle(color)
+            Text(reviewer.hasPrefix("team/") ? reviewer : "@" + reviewer)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(DefaultTheme.primaryText)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(DefaultTheme.surfaceRaised, in: Capsule())
+        .help(verdict.map { $0.replacingOccurrences(of: "_", with: " ").lowercased() }
+              ?? "review requested")
+    }
+
+    private var authorLine: some View {
         HStack(spacing: 10) {
             AsyncImage(url: URL(string: "https://github.com/\(pr.author).png?size=80")) { image in
                 image.resizable()
@@ -220,6 +305,21 @@ struct PRWorkspaceView: View {
                 sectionHeader("FILES", count: diffFiles.count,
                               color: DefaultTheme.secondaryText)
                 if diffLoading { ProgressView().controlSize(.mini) }
+                if progress.total > 0 {
+                    // The recap: how much of the PR has been checked off,
+                    // GitHub's own boxes behind it.
+                    HStack(spacing: 6) {
+                        ProgressView(value: progress.fraction)
+                            .progressViewStyle(.linear)
+                            .frame(width: 90)
+                            .tint(progress.isComplete ? DefaultTheme.groupHeader : DefaultTheme.accent)
+                        Text(progress.label)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(progress.isComplete ? DefaultTheme.groupHeader
+                                                                 : DefaultTheme.secondaryText)
+                    }
+                    .help("Files marked as viewed — the same checkboxes as on github.com")
+                }
                 Spacer()
                 // Split keeps old/new aligned; unified gives every line the
                 // full width. Long lines wrap either way.
@@ -285,7 +385,23 @@ struct PRWorkspaceView: View {
                                           prActionBusy = false
                                       }
                                   },
-                                  unified: unifiedDiff)
+                                  unified: unifiedDiff,
+                                  highlights: highlights,
+                                  viewed: progress.viewed,
+                                  changedSinceViewed: progress.changedSinceViewed,
+                                  onToggleViewed: { path, on in
+                                      // Optimistic: the box flips now, GitHub is
+                                      // told after; a refusal puts it back.
+                                      let previous = progress
+                                      progress = progress.toggling(path, viewed: on)
+                                      Task {
+                                          if let error = await model.setFileViewed(
+                                              pr.number, path: path, viewed: on, in: project.id) {
+                                              progress = previous
+                                              prActionOutput = error
+                                          }
+                                      }
+                                  })
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
                         // Identity tied to the PR: SwiftUI would otherwise
@@ -371,10 +487,26 @@ struct PRWorkspaceView: View {
                                         in: project.id, refresh: refresh)
         diffError = result.error
         let diff = result.diff
+        let parsed = await Task.detached(priority: .userInitiated) {
+            DiffParser.parse(diff)
+        }.value
         diffFiles = await Task.detached(priority: .userInitiated) {
-            DiffFileRows.compute(DiffParser.parse(diff))
+            DiffFileRows.compute(parsed)
         }.value
         diffLoading = false
+        // Colours come last, at lower priority: the diff is readable plain,
+        // and highlight.js over a big PR takes a moment.
+        let dark = colorScheme == .dark
+        let number = pr.number
+        let coloured = await Task.detached(priority: .utility) {
+            DiffHighlighter.highlight(parsed, dark: dark)
+        }.value
+        if pr.number == number { highlights = coloured }
+        // GitHub's viewed boxes, after the diff: the files on screen are the
+        // universe the recap counts.
+        let views = await model.fileViews(pr.number, in: project.id, refresh: refresh)
+        progress = FileReviewProgress.compute(paths: diffFiles.map(\.file.path),
+                                              views: views?.files ?? [])
     }
 
     /// Light markdown (bold, code, links) with line breaks preserved — a full

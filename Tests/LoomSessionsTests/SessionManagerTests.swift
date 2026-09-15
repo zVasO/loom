@@ -182,6 +182,31 @@ struct SessionManagerTests {
         #expect(record.worktreePath == opened.path)
     }
 
+    // A PR review runs in a worktree somebody else prepared. The record must
+    // still say so: the git panel and the ship actions only work on sessions
+    // that carry a worktree path.
+    @Test("a session on an existing worktree records it, without creating anything")
+    func lancementSurWorktreeExistant() async throws {
+        let repo = try await makeFixtureRepo()
+        let dbURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loom-wte-\(UUID().uuidString.prefix(8)).sqlite")
+        let store = try SessionStore(path: dbURL.path)
+        let pty = ScriptedPTYHost()
+        let manager = SessionManager(
+            runtimeDependencies: SessionRuntime.Dependencies(ptyHost: pty,
+                                                             transcript: MemoryTranscriptSink()),
+            store: store)
+
+        var spec = spec()
+        spec.worktree = .existing(path: repo, branch: "feature/pr-7")
+        let id = try await manager.launch(spec)
+
+        #expect(pty.openedWorkingDirectory == repo, "the agent starts where it was told")
+        let record = try #require(try store.session(id: id))
+        #expect(record.worktreePath == repo.path)
+        #expect(record.branch == "feature/pr-7")
+    }
+
     @Test("needs_input triggers the notification, and it alone (STA-04)")
     func notificationSurNeedsInput() async throws {
         let spy = SpyNotifier()

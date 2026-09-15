@@ -5,6 +5,7 @@ import LoomIPC
 import LoomPersistence
 import LoomSessions
 import LoomTerminal
+import LoomUI
 import LoomWeb
 import Foundation
 import Observation
@@ -178,6 +179,28 @@ public final class AppModel {
     public var reviewWorktreesReadOnly: Bool {
         get { (UserDefaults.standard.object(forKey: "loom.review.readOnly") as? Bool) ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "loom.review.readOnly") }
+    }
+
+    /// `/setup-pr-review` is typed into a fresh review session so claude loads
+    /// the PR before anyone asks. Off: the command is still installed in the
+    /// worktree, the user types it when they want it.
+    public var reviewSetupCommandEnabled: Bool {
+        get { (UserDefaults.standard.object(forKey: "loom.review.setupCommand.enabled") as? Bool) ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "loom.review.setupCommand.enabled") }
+    }
+
+    /// The command's text as the user edited it; nil = Loom's default. Filled
+    /// with the PR's placeholders at every review launch.
+    public var reviewSetupCommandTemplate: String? {
+        get { UserDefaults.standard.string(forKey: "loom.review.setupCommand.template") }
+        set {
+            let trimmed = newValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if trimmed.isEmpty || trimmed == PRReviewCommand.defaultTemplate {
+                UserDefaults.standard.removeObject(forKey: "loom.review.setupCommand.template")
+            } else {
+                UserDefaults.standard.set(newValue, forKey: "loom.review.setupCommand.template")
+            }
+        }
     }
 
     // MARK: - Worktree preference (per project, default OFF)
@@ -449,6 +472,35 @@ public final class AppModel {
         } catch { return Self.ghErrorText(error) }
     }
 
+    /// GitHub's "Viewed" state of every file of the PR — the truth lives on
+    /// GitHub (shared with the web, reset by GitHub when a file changes);
+    /// this cache only spares a gh call when the PR is revisited.
+    public func fileViews(_ number: Int, in projectID: ProjectID,
+                          refresh: Bool = false) async -> GitHubService.FileViews? {
+        guard let repo = projectRepo(projectID) else { return nil }
+        let key = prKey(number, projectID)
+        if !refresh, let cached = prFileViewsCache[key] { return cached }
+        let views = try? await GitHubService().fileViews(number, in: repo)
+        if let views { prFileViewsCache[key] = views }
+        return views
+    }
+
+    /// Checks or unchecks GitHub's "Viewed" box on a file. nil on success,
+    /// error text otherwise — the caller flipped optimistically and reverts.
+    public func setFileViewed(_ number: Int, path: String, viewed: Bool,
+                              in projectID: ProjectID) async -> String? {
+        guard let repo = projectRepo(projectID) else { return "No repo for this project" }
+        guard let views = await fileViews(number, in: projectID) else {
+            return "Could not read the PR's files from GitHub."
+        }
+        do {
+            try await GitHubService().setFileViewed(prNodeID: views.prNodeID, path: path,
+                                                    viewed: viewed, in: repo)
+            prFileViewsCache[prKey(number, projectID)] = views.setting(path, to: viewed ? .viewed : .unviewed)
+            return nil
+        } catch { return Self.ghErrorText(error) }
+    }
+
     /// Line-anchored review comment (optionally an appliable suggestion).
     /// nil on success, error text otherwise.
     public func commentOnLines(_ number: Int, path: String, firstLine: Int, lastLine: Int,
@@ -486,11 +538,19 @@ public final class AppModel {
     }
     public var pendingPR: PendingPR?
 
-    public private(set) var prCache: [ProjectID: [GitHubService.PullRequest]] = [:]
-    /// When each list was fetched: the TTL reads it, and so does the age the
-    /// refresh button reports.
-    public private(set) var prFetchedAt: [ProjectID: Date] = [:]
-    public private(set) var prLoading: Set<ProjectID> = []
+    /// A list is one project seen through one filter.
+    public struct PRListKey: Hashable, Sendable {
+        public let projectID: ProjectID
+        public let filterID: String
+        public init(projectID: ProjectID, filterID: String) {
+            self.projectID = projectID
+            self.filterID = filterID
+        }
+    }
+
+    /// Every list ever fetched, by project and filter — the cache on disk mirrors it.
+    private var prLists: [PRListKey: PRListCache.Entry] = [:]
+    public private(set) var prLoading: Set<PRListKey> = []
     /// PRs whose review session is being prepared (worktree fetch + launch) —
     /// the UI shows progress instead of feeling frozen during the network fetch.
     public private(set) var prReviewLaunching: Set<String> = []
@@ -499,14 +559,88 @@ public final class AppModel {
     private var prDetailCache: [String: GitHubService.PRDetail] = [:]
     private var prDiffCache: [String: String] = [:]
     private var prCommentsCache: [String: [GitHubService.ReviewComment]] = [:]
+    private var prFileViewsCache: [String: GitHubService.FileViews] = [:]
     private var prListCache: PRListCache { PRListCache(directory: supportDirectory) }
+    private var prFilterStore: PRFilterStore { PRFilterStore(directory: supportDirectory) }
 
-    /// Seeds every project's PR list from disk: after a relaunch the tab
-    /// paints its lists, and their counts, without a single `gh` call.
+    // MARK: PR filters
+
+    /// The user's own filters, after the built-ins in every menu.
+    public private(set) var customPRFilters: [PRFilter] = []
+
+    public var prFilters: [PRFilter] { PRFilter.builtIns + customPRFilters }
+
+    /// The filter every PR list is currently seen through. Persisted: the tab
+    /// reopens on the question you were asking.
+    public var selectedPRFilterID: String = UserDefaults.standard
+        .string(forKey: "loom.pr.filter") ?? PRFilter.all.id {
+        didSet { UserDefaults.standard.set(selectedPRFilterID, forKey: "loom.pr.filter") }
+    }
+
+    /// A deleted custom filter falls back to "All open" rather than to nothing.
+    public var selectedPRFilter: PRFilter {
+        prFilters.first { $0.id == selectedPRFilterID } ?? .all
+    }
+
+    public func addCustomPRFilter(name: String, query: String) -> PRFilter {
+        let filter = PRFilter.custom(name: name, query: query)
+        customPRFilters.append(filter)
+        prFilterStore.save(customPRFilters)
+        return filter
+    }
+
+    public func updateCustomPRFilter(_ filter: PRFilter) {
+        guard let index = customPRFilters.firstIndex(where: { $0.id == filter.id }) else { return }
+        customPRFilters[index] = filter
+        prFilterStore.save(customPRFilters)
+    }
+
+    public func removeCustomPRFilter(id: String) {
+        customPRFilters.removeAll { $0.id == id }
+        prFilterStore.save(customPRFilters)
+        prLists = prLists.filter { $0.key.filterID != id }
+        if selectedPRFilterID == id { selectedPRFilterID = PRFilter.all.id }
+    }
+
+    /// Runs a query once against a project, without touching the caches —
+    /// the editor's "Test" button. The gh error text comes back verbatim:
+    /// a bad qualifier is the one thing the user must read.
+    public func testPRFilter(query: String, in projectID: ProjectID) async -> Result<Int, Error> {
+        guard let repo = projectRepo(projectID) else {
+            return .failure(GitHubService.GitHubError.commandFailed(
+                arguments: [], stderr: "The project folder is missing."))
+        }
+        let probe = PRFilter(id: "probe", name: "probe", query: query, isBuiltIn: false)
+        do {
+            return .success(try await GitHubService().listPRs(in: repo, filter: probe).count)
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    // MARK: PR lists
+
+    private func prKey(_ projectID: ProjectID) -> PRListKey {
+        PRListKey(projectID: projectID, filterID: selectedPRFilterID)
+    }
+
+    /// The project's PRs through the current filter — empty until fetched.
+    public func prs(for projectID: ProjectID) -> [GitHubService.PullRequest] {
+        prLists[prKey(projectID)]?.prs ?? []
+    }
+
+    public func isLoadingPRs(for projectID: ProjectID) -> Bool {
+        prLoading.contains(prKey(projectID))
+    }
+
+    /// Seeds every list from disk: after a relaunch the tab paints its lists,
+    /// and their counts, without a single `gh` call.
     private func loadPRListCache() {
-        for (projectID, entry) in prListCache.load() {
-            prCache[projectID] = entry.prs
-            prFetchedAt[projectID] = entry.fetchedAt
+        customPRFilters = prFilterStore.load()
+        for (projectID, lists) in prListCache.load() {
+            for (filterID, entry) in lists {
+                prLists[PRListKey(projectID: projectID, filterID: filterID)] = entry
+            }
         }
     }
 
@@ -514,17 +648,17 @@ public final class AppModel {
     /// time, where `projects` has not been read from the database yet.
     private func savePRListCache() {
         let known = Set(projects.map(\.id))
-        let entries = prCache.reduce(into: [ProjectID: PRListCache.Entry]()) { result, pair in
-            guard known.contains(pair.key), let fetchedAt = prFetchedAt[pair.key] else { return }
-            result[pair.key] = PRListCache.Entry(fetchedAt: fetchedAt, prs: pair.value)
+        var lists: PRListCache.Lists = [:]
+        for (key, entry) in prLists where known.contains(key.projectID) {
+            lists[key.projectID, default: [:]][key.filterID] = entry
         }
         let cache = prListCache
-        Task.detached(priority: .utility) { cache.save(entries) }
+        Task.detached(priority: .utility) { cache.save(lists) }
     }
 
     /// How old a project's cached list is — nil when nothing is cached.
     public func prCacheAge(for projectID: ProjectID) -> TimeInterval? {
-        prFetchedAt[projectID].map { Date().timeIntervalSince($0) }
+        prLists[prKey(projectID)].map { Date().timeIntervalSince($0.fetchedAt) }
     }
 
     /// What the refresh button says: where the list on screen comes from.
@@ -537,28 +671,31 @@ public final class AppModel {
         return "Loaded \(when) — refresh"
     }
 
-    /// Fetches only what the cache cannot answer: nothing stored, or stored
-    /// longer ago than the TTL. What visiting a project calls.
+    /// Fetches only what the cache cannot answer: nothing stored, stored
+    /// longer ago than the TTL, or stored for a filter edited since. What
+    /// visiting a project, or picking a filter, calls.
     public func ensurePRs(for projectID: ProjectID) async {
-        if let age = prCacheAge(for: projectID), age <= PRListCache.ttl { return }
+        if let entry = prLists[prKey(projectID)], !entry.isStale(for: selectedPRFilter) { return }
         await refreshPRs(for: projectID)
     }
 
     /// Fetches whatever the cache's age — the refresh button.
     public func refreshPRs(for projectID: ProjectID) async {
-        guard !prLoading.contains(projectID) else { return }
-        prLoading.insert(projectID)
-        defer { prLoading.remove(projectID) }
+        let filter = selectedPRFilter
+        let key = PRListKey(projectID: projectID, filterID: filter.id)
+        guard !prLoading.contains(key) else { return }
+        prLoading.insert(key)
+        defer { prLoading.remove(key) }
         guard let repo = projectRepo(projectID) else { return }
         // A failed gh call must never be stamped fresh: the failure would then
         // be served from the cache for the whole TTL.
-        guard let prs = try? await GitHubService().listPRs(in: repo) else { return }
+        guard let prs = try? await GitHubService().listPRs(in: repo, filter: filter) else { return }
         let prefix = "\(projectID.rawValue.uuidString)#"
         prDetailCache = prDetailCache.filter { !$0.key.hasPrefix(prefix) }
         prDiffCache = prDiffCache.filter { !$0.key.hasPrefix(prefix) }
         prCommentsCache = prCommentsCache.filter { !$0.key.hasPrefix(prefix) }
-        prCache[projectID] = prs
-        prFetchedAt[projectID] = Date()
+        prFileViewsCache = prFileViewsCache.filter { !$0.key.hasPrefix(prefix) }
+        prLists[key] = PRListCache.Entry(fetchedAt: Date(), prs: prs, query: filter.query)
         savePRListCache()
     }
 
@@ -618,12 +755,28 @@ public final class AppModel {
             startupError = "Could not check out PR #\(pr.number): \(Self.ghErrorText(error))"
             return nil
         }
+        // The /setup-pr-review command, rewritten at every launch so the text
+        // in Settings is what claude reads. Installed even when it will not be
+        // typed automatically: the user can call it.
+        let commandMarkdown = PRReviewCommand.render(
+            template: reviewSetupCommandTemplate,
+            pr: .init(number: pr.number, title: pr.title, url: pr.url,
+                      base: pr.baseBranch.isEmpty ? "main" : pr.baseBranch, head: pr.branch))
+        do {
+            try await GitHubService().installCommand(named: PRReviewCommand.name,
+                                                     markdown: commandMarkdown, in: worktree)
+        } catch {
+            // A missing command is not a missing review: the session launches
+            // without it, and says why.
+            startupError = "Could not install /\(PRReviewCommand.name): \(Self.ghErrorText(error))"
+        }
         do {
             let sessionID = SessionID()
             let token = UUID().uuidString
             // claude boots BARE — no predefined prompt: the user decides what
             // the session does (and claude is not burning an agent run on a
-            // review nobody asked for yet).
+            // review nobody asked for yet). The setup command is typed after
+            // the boot, from the outside, and only when the setting says so.
             var spec = SessionManager.SessionSpec(
                 command: adapter.launchCommand(session: sessionID, initialPrompt: nil,
                                                hookToken: token),
@@ -635,6 +788,9 @@ public final class AppModel {
             spec.sessionID = sessionID
             spec.title = "PR #\(pr.number) · review"
             spec.badge = "PR #\(pr.number)"
+            // The record must know it runs in a worktree: the git panel and
+            // the ship actions read worktreePath, and a nil left them blind.
+            spec.worktree = .existing(path: worktree, branch: pr.branch)
             let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(pr.number) · review",
@@ -642,6 +798,14 @@ public final class AppModel {
                                         branch: pr.branch, badge: "PR #\(pr.number)"))
             rememberReviewSession(id, forPR: pr.number, in: projectID)
             reloadPersistedSessions()
+            if reviewSetupCommandEnabled {
+                // First launch only — a resumed session already carries the
+                // brief in its context. Detached from the caller: the PR tab
+                // must not wait seconds for claude to paint. Remembered, so a
+                // quick action fired meanwhile queues BEHIND it.
+                let invocation = PRReviewCommand.invocation(number: pr.number)
+                pendingReviewSetup[id] = Task { await self.submitWhenPainted(invocation, to: id) }
+            }
             return id
         } catch {
             startupError = String(describing: error)
@@ -649,12 +813,39 @@ public final class AppModel {
         }
     }
 
-    /// Types text into a session's input WITHOUT submitting — wrapped in a
-    /// bracketed-paste sequence so claude treats the newlines as one pasted
-    /// block instead of submitting on each one.
+    /// The setup command still on its way to a fresh review session.
+    @ObservationIgnored private var pendingReviewSetup: [SessionID: Task<Void, Never>] = [:]
+
+    /// Waits for the setup command to have been submitted, when one is pending:
+    /// what a quick action must do before it speaks, or the two collide.
+    private func awaitReviewSetup(for id: SessionID) async {
+        guard let pending = pendingReviewSetup[id] else { return }
+        await pending.value
+        pendingReviewSetup[id] = nil
+    }
+
+    /// Submits a line to a session once claude has painted (fresh sessions
+    /// boot for seconds; sending into the void helps nobody). Pasted, not
+    /// typed: a paste never opens the slash-command menu, so the Return that
+    /// follows submits instead of picking a suggestion.
+    private func submitWhenPainted(_ line: String, to id: SessionID) async {
+        guard let surface = await surface(for: id) else { return }
+        for _ in 0..<60 where surface.screen.revision == 0 {
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        guard surface.screen.revision != 0 else { return }
+        // A first paint is a prompt, not a prompt READY for input: claude
+        // still negotiates its terminal modes for a beat after it.
+        try? await Task.sleep(for: .milliseconds(400))
+        surface.send(KeyTranslator.paste(line, bracketed: surface.modes.bracketedPaste) + "\r")
+    }
+
+    /// Types text into a session's input WITHOUT submitting — the same path as
+    /// ⌘V: bracketed when the program asked for it, so claude treats the
+    /// newlines as one pasted block instead of submitting on each one.
     public func typeIntoSession(_ text: String, id: SessionID) async {
         guard let surface = await surface(for: id) else { return }
-        surface.send("\u{1B}[200~" + text + "\u{1B}[201~")
+        surface.send(KeyTranslator.paste(text, bracketed: surface.modes.bracketedPaste))
     }
 
     /// Phase 4 — diff quick actions: guarantees the PR's review session and
@@ -664,6 +855,9 @@ public final class AppModel {
                                       pr: GitHubService.PullRequest,
                                       in projectID: ProjectID) async -> SessionID? {
         guard let id = await launchPRReviewSession(pr, in: projectID) else { return nil }
+        // A fresh session first loads the PR: the question waits its turn, or
+        // claude answers it while the setup command lands mid-sentence.
+        await awaitReviewSetup(for: id)
         guard let surface = await surface(for: id) else { return id }
         for _ in 0..<40 where surface.screen.revision == 0 {
             try? await Task.sleep(for: .milliseconds(500))
@@ -740,6 +934,7 @@ public final class AppModel {
             spec.sessionID = sessionID
             spec.title = "PR #\(number) · guide"
             spec.badge = "PR #\(number)"
+            spec.worktree = .existing(path: worktree, branch: nil)
             let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(number) · guide",
@@ -1179,14 +1374,43 @@ public final class AppModel {
 
     /// PRJ-01: adds a project by pointing at a folder; if it is a Git repo, the
     /// current branch is detected. The app never modifies the folder.
-    public func addProject(at url: URL) async {
+    /// Registers a folder as a project — or finds it, when the same folder is
+    /// already one: picking it twice must not make two projects. Returns the
+    /// project, selected.
+    @discardableResult
+    public func addProject(at url: URL) async -> ProjectID {
+        let path = url.standardizedFileURL.path
+        if let existing = projects.first(where: { URL(fileURLWithPath: $0.path).standardizedFileURL.path == path }) {
+            selectedProject = existing.id
+            return existing.id
+        }
         let isGit = FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
         let branch = isGit ? try? await GitService().currentBranch(in: url) : nil
         let record = ProjectRecord(id: ProjectID(), name: url.lastPathComponent,
-                                   path: url.path, defaultBranch: branch, createdAt: Date())
+                                   path: path, defaultBranch: branch, createdAt: Date())
         try? store?.insertProject(record)
         reloadPersistedSessions()
         selectedProject = record.id
+        return record.id
+    }
+
+    /// The folder picker every "add a project" entry point shares. Modal:
+    /// returns the chosen folder, or nil when cancelled.
+    public static func pickFolder(title: String = "Choose a project folder") -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = title
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    /// Whether a project folder can host worktrees at all.
+    public func isGitRepository(_ projectID: ProjectID?) -> Bool {
+        guard let project = project(projectID) else { return false }
+        return FileManager.default.fileExists(
+            atPath: URL(fileURLWithPath: project.path).appendingPathComponent(".git").path)
     }
 
     public func project(_ id: ProjectID?) -> ProjectRecord? {
@@ -1303,7 +1527,21 @@ public final class AppModel {
     /// (`prompt` remains possible for the palette or future shortcuts.)
     /// Returns the identifier of the created session.
     @discardableResult
-    public func launchSession(prompt: String? = nil, in projectID: ProjectID? = nil) async -> SessionID? {
+    /// Where a new session works: straight in the project folder, or on an
+    /// isolated worktree of its own (GIT-01). A per-launch choice; the
+    /// project's preference is only the default.
+    public enum LaunchPlacement: Sendable, Equatable {
+        case projectFolder
+        case newWorktree
+    }
+
+    /// The placement a project launches with when nothing else is said.
+    public func defaultPlacement(for projectID: ProjectID?) -> LaunchPlacement {
+        worktreeEnabled(for: projectID) ? .newWorktree : .projectFolder
+    }
+
+    public func launchSession(prompt: String? = nil, in projectID: ProjectID? = nil,
+                              placement: LaunchPlacement? = nil) async -> SessionID? {
         guard let manager else { return nil }
         if let projectID { selectedProject = projectID }
         let project = project(selectedProject)
@@ -1315,6 +1553,7 @@ public final class AppModel {
             """
             return nil
         }
+        let placement = placement ?? defaultPlacement(for: project?.id)
         let initialPrompt = (prompt?.isEmpty == false) ? prompt : nil
         do {
             let sessionID = SessionID()
@@ -1330,9 +1569,11 @@ public final class AppModel {
             // A single UUID end to end: the `--session-id` one — Resume depends on it.
             spec.sessionID = sessionID
             spec.title = initialPrompt ?? Self.generatedName(project: project)
-            // GIT-01 became a per-project CHOICE: worktree isolation only when
-            // the project opted in — by default sessions run in the folder.
-            if worktreeEnabled(for: project?.id),
+            // GIT-01 became a CHOICE, per launch: worktree isolation only when
+            // asked (or when the project made it its default). A folder that is
+            // not a git repository has no worktree to offer — the session runs
+            // in it, and the record says so through its missing worktreePath.
+            if placement == .newWorktree,
                FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
                 spec.worktree = .create(repo: directory, slug: Self.slug(from: initialPrompt ?? ""))
             }

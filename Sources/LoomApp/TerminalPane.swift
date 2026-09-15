@@ -18,6 +18,9 @@ struct TerminalPane: View {
     /// applied by a resize, the characters a copy took. Two badges in the same
     /// corner would sit on top of each other.
     @State private var badge: String?
+    /// Terminal.app's "Option as Meta": ⌥+letter sends ESC+letter. Off by
+    /// default — it would take the AZERTY braces and the dead keys away.
+    @AppStorage(KeyboardPreferences.userDefaultsKey) private var optionAsMeta = false
 
     /// Below this the surface itself refuses the geometry (20 × 4 cells), so
     /// there is nothing to apply — and the first layout pass measures zero.
@@ -39,12 +42,15 @@ struct TerminalPane: View {
                     })
                     .onPreferenceChange(PaneSizeKey.self) { paneSize = $0 }
                     // task(id:) gives a free debounce while resizing: each new
-                    // size cancels the pending one.
+                    // size cancels the pending one. The delay outlasts a layout
+                    // animation on purpose: every resize that reaches the PTY
+                    // makes the agent repaint its whole conversation, and a
+                    // slide that resized it three times left three copies.
                     .task(id: paneSize) {
                         guard paneSize.width >= Self.minimumPaneSize.width,
                               paneSize.height >= Self.minimumPaneSize.height else { return }
                         if firstResizeDone {
-                            try? await Task.sleep(for: .milliseconds(80))
+                            try? await Task.sleep(for: .milliseconds(220))
                             guard !Task.isCancelled else { return }
                         }
                         firstResizeDone = true
@@ -58,7 +64,8 @@ struct TerminalPane: View {
                     // press that starts a selection drag. Reclaiming focus on click
                     // is already the job of KeyCaptureView's mouse-down monitor,
                     // which exists precisely because that tap never fired.
-                    .background(KeyCaptureView(mouseReporting: surface.mouseReporting,
+                    .background(KeyCaptureView(modes: surface.modes,
+                                               preferences: KeyboardPreferences(optionAsMeta: optionAsMeta),
                                                onWheel: { direction, col, row in
                                                    surface.sendWheel(direction, atCol: col, row: row)
                                                },
@@ -67,6 +74,7 @@ struct TerminalPane: View {
                                                },
                                                onCopy: { selection.capturedText },
                                                onCopied: { badge = copiedBadge($0) },
+                                               onFocus: { surface.setFocus($0) },
                                                onText: { text in
                                                    // Typing dismisses the selection, like any
                                                    // terminal — and this is also what covers

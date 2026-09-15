@@ -112,6 +112,12 @@ public final class SessionRuntime: @unchecked Sendable {
         queue.async { self.engine?.sendClick(atCol: col, row: row) }
     }
 
+    /// The pane gained or lost keyboard focus: a program that asked for focus
+    /// events (DECSET 1004) hears it, everyone else hears nothing.
+    func setFocus(_ focused: Bool) {
+        queue.async { self.engine?.setFocus(focused) }
+    }
+
     /// What the ENGINE owes the program, not what the user typed. On the session
     /// queue; optional-chained because the engine is built before the channel is.
     private func writeUpstream(_ bytes: ArraySlice<UInt8>) {
@@ -171,11 +177,11 @@ public final class SessionRuntime: @unchecked Sendable {
         let snapshot = engine.snapshot()
         let history = engine.historyTail(400)
         let base = engine.scrollbackRows - history.count
-        let mouseReporting = engine.mouseReporting
+        let modes = engine.modes
         Task { @MainActor in
             for terminal in watching {
                 self.surfaces[terminal]?.receive(snapshot, history: history, base: base,
-                                                 mouseReporting: mouseReporting)
+                                                 modes: modes)
             }
         }
     }

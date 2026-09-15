@@ -31,6 +31,10 @@ public protocol TerminalEngine: AnyObject {
     /// Set once by the runtime, invoked on the session queue like everything else.
     var onUpstream: ((ArraySlice<UInt8>) -> Void)? { get set }
 
+    /// The input modes the program switched on — what the key encoder and the
+    /// paste path must honour. A value: it crosses to the MainActor as-is.
+    var modes: TerminalModes { get }
+
     /// True while the program tracks the mouse (DECSET 1000-1003). It then owns the
     /// wheel: a full-screen program repaints rather than scrolls, so it holds the
     /// only viewport there is to move.
@@ -43,16 +47,67 @@ public protocol TerminalEngine: AnyObject {
     /// One left click at a cell position (0-based): press AND release, the pair a
     /// tracking program waits for. Silent when nothing is tracking.
     func sendClick(atCol col: Int, row: Int)
+
+    /// The host view gained or lost keyboard focus. A program that asked for
+    /// focus events (DECSET 1004) is told `CSI I` / `CSI O`; silent otherwise.
+    func setFocus(_ focused: Bool)
 }
 
 public extension TerminalEngine {
     /// Adapters without a scrollback (test line engines) sit at base zero.
     var scrollbackRows: Int { 0 }
 
-    /// Adapters that parse no mode switching never track the mouse.
-    var mouseReporting: Bool { false }
+    /// Adapters that parse no mode switching sit in the legacy defaults.
+    var modes: TerminalModes { .none }
+    /// Kept as a shim: the mouse is one of the modes.
+    var mouseReporting: Bool { modes.mouseReporting }
     func sendWheel(_ direction: WheelDirection, atCol col: Int, row: Int) {}
     func sendClick(atCol col: Int, row: Int) {}
+    func setFocus(_ focused: Bool) {}
+}
+
+// MARK: - Input modes
+
+/// The DEC private modes and keyboard protocol a program negotiates, read by
+/// the key encoder. Snapshot at frame cadence, like the screen (ADR-0008).
+public struct TerminalModes: Sendable, Equatable {
+    /// DECSET ?1 (DECCKM): arrows and Home/End go out as SS3, not CSI.
+    public var applicationCursorKeys: Bool
+    /// DECSET ?2004: a paste is wrapped in `CSI 200~` … `CSI 201~`.
+    public var bracketedPaste: Bool
+    /// DECSET ?1000–?1003: the program tracks the mouse.
+    public var mouseReporting: Bool
+    /// The kitty keyboard protocol flags the program pushed (`CSI > flags u`).
+    /// Empty = legacy xterm encoding.
+    public var keyboardEnhancement: KeyboardEnhancement
+
+    public init(applicationCursorKeys: Bool = false, bracketedPaste: Bool = false,
+                mouseReporting: Bool = false, keyboardEnhancement: KeyboardEnhancement = []) {
+        self.applicationCursorKeys = applicationCursorKeys
+        self.bracketedPaste = bracketedPaste
+        self.mouseReporting = mouseReporting
+        self.keyboardEnhancement = keyboardEnhancement
+    }
+
+    public static let none = TerminalModes()
+}
+
+/// Progressive-enhancement flags of the kitty keyboard protocol. Raw values are
+/// the protocol's own bits, so the emulator's flags copy over untouched.
+public struct KeyboardEnhancement: OptionSet, Sendable, Equatable {
+    public let rawValue: Int
+    public init(rawValue: Int) { self.rawValue = rawValue }
+
+    /// Esc, and every modified key, become unambiguous `CSI … u` reports.
+    public static let disambiguate = KeyboardEnhancement(rawValue: 1 << 0)
+    /// Key releases and repeats are reported, not only presses.
+    public static let reportEvents = KeyboardEnhancement(rawValue: 1 << 1)
+    /// Shifted key codes ride along (`CSI 97:65;2 u`).
+    public static let reportAlternates = KeyboardEnhancement(rawValue: 1 << 2)
+    /// Plain text keys are reported as escape codes too.
+    public static let reportAllKeys = KeyboardEnhancement(rawValue: 1 << 3)
+    /// The text a key produces is appended to its report.
+    public static let reportText = KeyboardEnhancement(rawValue: 1 << 4)
 }
 
 /// A wheel notch, as a tracking program sees it (buttons 4 and 5).

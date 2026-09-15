@@ -28,6 +28,151 @@ public struct GitHubService: Sendable {
         public let isDraft: Bool
         public let updatedAt: String
         public let url: String
+        /// Requested reviewers: a login, or `team/<slug>` for a team request.
+        public let reviewers: [String]
+        public let assignees: [String]
+        public let labels: [Label]
+        /// One entry per reviewer, their LAST review — who approved, who asked
+        /// for changes, who only commented.
+        public let latestReviews: [ReviewSummary]
+        public let additions: Int
+        public let deletions: Int
+        public let changedFiles: Int
+        /// MERGEABLE, CONFLICTING or UNKNOWN (GitHub still computing).
+        public let mergeable: String
+        /// The head commit (headRefOid) — what a line comment or a file-viewed
+        /// mark must be anchored to.
+        public let headSHA: String
+
+        public init(number: Int, title: String, author: String, branch: String,
+                    baseBranch: String, reviewDecision: String, checksPassing: Bool,
+                    isDraft: Bool, updatedAt: String, url: String,
+                    reviewers: [String] = [], assignees: [String] = [], labels: [Label] = [],
+                    latestReviews: [ReviewSummary] = [], additions: Int = 0, deletions: Int = 0,
+                    changedFiles: Int = 0, mergeable: String = "", headSHA: String = "") {
+            self.number = number
+            self.title = title
+            self.author = author
+            self.branch = branch
+            self.baseBranch = baseBranch
+            self.reviewDecision = reviewDecision
+            self.checksPassing = checksPassing
+            self.isDraft = isDraft
+            self.updatedAt = updatedAt
+            self.url = url
+            self.reviewers = reviewers
+            self.assignees = assignees
+            self.labels = labels
+            self.latestReviews = latestReviews
+            self.additions = additions
+            self.deletions = deletions
+            self.changedFiles = changedFiles
+            self.mergeable = mergeable
+            self.headSHA = headSHA
+        }
+
+        /// Cached lists predate the enrichment: missing keys are defaults, not
+        /// a decoding failure that would drop the whole cache.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            number = try container.decode(Int.self, forKey: .number)
+            title = try container.decode(String.self, forKey: .title)
+            author = try container.decode(String.self, forKey: .author)
+            branch = try container.decode(String.self, forKey: .branch)
+            baseBranch = try container.decode(String.self, forKey: .baseBranch)
+            reviewDecision = try container.decode(String.self, forKey: .reviewDecision)
+            checksPassing = try container.decode(Bool.self, forKey: .checksPassing)
+            isDraft = try container.decode(Bool.self, forKey: .isDraft)
+            updatedAt = try container.decode(String.self, forKey: .updatedAt)
+            url = try container.decode(String.self, forKey: .url)
+            reviewers = try container.decodeIfPresent([String].self, forKey: .reviewers) ?? []
+            assignees = try container.decodeIfPresent([String].self, forKey: .assignees) ?? []
+            labels = try container.decodeIfPresent([Label].self, forKey: .labels) ?? []
+            latestReviews = try container.decodeIfPresent([ReviewSummary].self,
+                                                          forKey: .latestReviews) ?? []
+            additions = try container.decodeIfPresent(Int.self, forKey: .additions) ?? 0
+            deletions = try container.decodeIfPresent(Int.self, forKey: .deletions) ?? 0
+            changedFiles = try container.decodeIfPresent(Int.self, forKey: .changedFiles) ?? 0
+            mergeable = try container.decodeIfPresent(String.self, forKey: .mergeable) ?? ""
+            headSHA = try container.decodeIfPresent(String.self, forKey: .headSHA) ?? ""
+        }
+
+        public var isConflicting: Bool { mergeable == "CONFLICTING" }
+    }
+
+    public struct Label: Sendable, Equatable, Codable, Hashable {
+        public let name: String
+        /// Six hex digits, no `#` — the way GitHub stores it.
+        public let colorHex: String
+        public init(name: String, colorHex: String) {
+            self.name = name
+            self.colorHex = colorHex
+        }
+    }
+
+    public struct ReviewSummary: Sendable, Equatable, Codable, Hashable {
+        public let author: String
+        /// APPROVED, CHANGES_REQUESTED, COMMENTED, PENDING, DISMISSED.
+        public let state: String
+        public init(author: String, state: String) {
+            self.author = author
+            self.state = state
+        }
+    }
+
+    /// GitHub's own "Viewed" checkbox on a PR file. DISMISSED is what GitHub
+    /// sets when the file changed after you viewed it — the head-moved reset
+    /// comes for free, force-pushes included.
+    public enum FileViewedState: String, Sendable, Codable, Equatable {
+        case viewed = "VIEWED"
+        case unviewed = "UNVIEWED"
+        case dismissed = "DISMISSED"
+    }
+
+    public struct FileView: Sendable, Equatable {
+        public let path: String
+        public let state: FileViewedState
+        public init(path: String, state: FileViewedState) {
+            self.path = path
+            self.state = state
+        }
+    }
+
+    /// One page of the PR's files with their viewed state.
+    public struct FileViewsPage: Sendable, Equatable {
+        /// The PR's GraphQL node id — what the mark/unmark mutations take.
+        public let prNodeID: String
+        public let headSHA: String
+        public let files: [FileView]
+        public let nextCursor: String?
+        public init(prNodeID: String, headSHA: String, files: [FileView], nextCursor: String?) {
+            self.prNodeID = prNodeID
+            self.headSHA = headSHA
+            self.files = files
+            self.nextCursor = nextCursor
+        }
+    }
+
+    public struct FileViews: Sendable, Equatable {
+        public let prNodeID: String
+        public let headSHA: String
+        public let files: [FileView]
+        public init(prNodeID: String, headSHA: String, files: [FileView]) {
+            self.prNodeID = prNodeID
+            self.headSHA = headSHA
+            self.files = files
+        }
+
+        /// The same list with one file's state replaced.
+        public func setting(_ path: String, to state: FileViewedState) -> FileViews {
+            var files = self.files
+            if let index = files.firstIndex(where: { $0.path == path }) {
+                files[index] = FileView(path: path, state: state)
+            } else {
+                files.append(FileView(path: path, state: state))
+            }
+            return FileViews(prNodeID: prNodeID, headSHA: headSHA, files: files)
+        }
     }
 
     public struct Comment: Sendable, Equatable {
@@ -79,6 +224,14 @@ public struct GitHubService: Sendable {
 
     // MARK: - Pure parsing (the tested seam)
 
+    /// The `--json` fields of a list row. One place: the parser reads exactly these.
+    public static let listFields = [
+        "number", "title", "author", "headRefName", "baseRefName", "headRefOid",
+        "reviewDecision", "statusCheckRollup", "updatedAt", "url", "isDraft",
+        "reviewRequests", "assignees", "labels", "latestReviews",
+        "additions", "deletions", "changedFiles", "mergeable",
+    ].joined(separator: ",")
+
     public static func parsePRList(_ data: Data) throws -> [PullRequest] {
         guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             return []
@@ -88,6 +241,24 @@ public struct GitHubService: Sendable {
                   let title = row["title"] as? String else { return nil }
             let checks = row["statusCheckRollup"] as? [[String: Any]] ?? []
             let failing = checks.contains { ($0["state"] as? String) == "FAILURE" }
+            // A review request is a user ({login}) or a team ({slug}, {name}).
+            let reviewers = (row["reviewRequests"] as? [[String: Any]] ?? []).compactMap { request -> String? in
+                if let login = request["login"] as? String { return login }
+                if let slug = request["slug"] as? String { return "team/" + slug }
+                if let name = request["name"] as? String { return "team/" + name }
+                return nil
+            }
+            let assignees = (row["assignees"] as? [[String: Any]] ?? [])
+                .compactMap { $0["login"] as? String }
+            let labels = (row["labels"] as? [[String: Any]] ?? []).compactMap { label -> Label? in
+                guard let name = label["name"] as? String else { return nil }
+                return Label(name: name, colorHex: label["color"] as? String ?? "")
+            }
+            let latestReviews = (row["latestReviews"] as? [[String: Any]] ?? []).compactMap { review -> ReviewSummary? in
+                guard let author = (review["author"] as? [String: Any])?["login"] as? String
+                else { return nil }
+                return ReviewSummary(author: author, state: review["state"] as? String ?? "")
+            }
             return PullRequest(
                 number: number,
                 title: title,
@@ -98,7 +269,16 @@ public struct GitHubService: Sendable {
                 checksPassing: !failing,
                 isDraft: row["isDraft"] as? Bool ?? false,
                 updatedAt: row["updatedAt"] as? String ?? "",
-                url: row["url"] as? String ?? "")
+                url: row["url"] as? String ?? "",
+                reviewers: reviewers,
+                assignees: assignees,
+                labels: labels,
+                latestReviews: latestReviews,
+                additions: row["additions"] as? Int ?? 0,
+                deletions: row["deletions"] as? Int ?? 0,
+                changedFiles: row["changedFiles"] as? Int ?? 0,
+                mergeable: row["mergeable"] as? String ?? "",
+                headSHA: row["headRefOid"] as? String ?? "")
         }
     }
 
@@ -146,6 +326,59 @@ public struct GitHubService: Sendable {
         }
     }
 
+    // MARK: File viewed state (GraphQL)
+
+    /// One page of `files { path viewerViewedState }` — the only way GitHub
+    /// exposes its "Viewed" checkbox. `{owner}`/`{repo}` are gh placeholders,
+    /// filled from the current repository — in TYPED fields (`-F`) only; a
+    /// raw field (`-f`) would send the braces as they are.
+    public static func fileViewsArguments(number: Int, cursor: String?) -> [String] {
+        var arguments = ["api", "graphql",
+                         "-F", "owner={owner}", "-F", "name={repo}", "-F", "number=\(number)"]
+        if let cursor { arguments += ["-f", "cursor=\(cursor)"] }
+        arguments += ["-f", "query=" + fileViewsQuery]
+        return arguments
+    }
+
+    static let fileViewsQuery = """
+    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          id headRefOid
+          files(first: 100, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes { path viewerViewedState }
+          }
+        }
+      }
+    }
+    """
+
+    /// `markFileAsViewed` / `unmarkFileAsViewed` on the PR node.
+    public static func fileViewedArguments(prNodeID: String, path: String, viewed: Bool) -> [String] {
+        let mutation = viewed ? "markFileAsViewed" : "unmarkFileAsViewed"
+        return ["api", "graphql", "-f", "id=\(prNodeID)", "-f", "path=\(path)",
+                "-f", "query=mutation($id: ID!, $path: String!) { \(mutation)(input: {pullRequestId: $id, path: $path}) { clientMutationId } }"]
+    }
+
+    public static func parseFileViewsPage(_ data: Data) throws -> FileViewsPage {
+        let object = (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        let pr = ((object["data"] as? [String: Any])?["repository"] as? [String: Any])?["pullRequest"]
+            as? [String: Any] ?? [:]
+        let files = pr["files"] as? [String: Any] ?? [:]
+        let nodes = (files["nodes"] as? [[String: Any]] ?? []).compactMap { node -> FileView? in
+            guard let path = node["path"] as? String else { return nil }
+            let state = FileViewedState(rawValue: node["viewerViewedState"] as? String ?? "") ?? .unviewed
+            return FileView(path: path, state: state)
+        }
+        let pageInfo = files["pageInfo"] as? [String: Any] ?? [:]
+        let hasNext = pageInfo["hasNextPage"] as? Bool ?? false
+        return FileViewsPage(prNodeID: pr["id"] as? String ?? "",
+                             headSHA: pr["headRefOid"] as? String ?? "",
+                             files: nodes,
+                             nextCursor: hasNext ? pageInfo["endCursor"] as? String : nil)
+    }
+
     /// A review comment's body. GitHub turns a ```suggestion fence into a
     /// one-click "Apply suggestion" — the note, when present, sits above it.
     public static func lineCommentBody(_ note: String, suggestion: String?) -> String {
@@ -172,10 +405,14 @@ public struct GitHubService: Sendable {
 
     // MARK: - gh execution
 
-    public func listPRs(in repo: URL) async throws -> [PullRequest] {
-        let data = try await run(["pr", "list", "--json",
-                                  "number,title,author,headRefName,baseRefName,reviewDecision,statusCheckRollup,updatedAt,url,isDraft"],
-                                 in: repo)
+    /// The PRs of the repo a project folder belongs to, narrowed by a filter
+    /// (GitHub search syntax through `--search`; gh adds `repo:` and `is:pr`
+    /// itself). `gh search prs` was the alternative and lost: it returns
+    /// neither the branch, nor the review decision, nor the checks.
+    public func listPRs(in repo: URL, filter: PRFilter = .all,
+                        limit: Int = PRFilter.defaultLimit) async throws -> [PullRequest] {
+        let data = try await run(["pr", "list"] + filter.ghArguments(limit: limit)
+                                 + ["--json", Self.listFields], in: repo)
         return try Self.parsePRList(data)
     }
 
@@ -217,6 +454,31 @@ public struct GitHubService: Sendable {
         let data = try await run(["api", "--paginate",
                                   "repos/{owner}/{repo}/pulls/\(number)/comments"], in: repo)
         return try Self.parseReviewComments(data)
+    }
+
+    /// Every file of the PR with GitHub's own viewed state, all pages. Bounded:
+    /// a PR is never more than a few hundred files, and a page is 100.
+    public func fileViews(_ number: Int, in repo: URL) async throws -> FileViews {
+        var cursor: String?
+        var files: [FileView] = []
+        var prNodeID = "", headSHA = ""
+        for _ in 0..<50 {
+            let data = try await run(Self.fileViewsArguments(number: number, cursor: cursor), in: repo)
+            let page = try Self.parseFileViewsPage(data)
+            prNodeID = page.prNodeID
+            headSHA = page.headSHA
+            files += page.files
+            guard let next = page.nextCursor else { break }
+            cursor = next
+        }
+        return FileViews(prNodeID: prNodeID, headSHA: headSHA, files: files)
+    }
+
+    /// GitHub's "Viewed" checkbox, checked or unchecked — shared with the web.
+    public func setFileViewed(prNodeID: String, path: String, viewed: Bool,
+                              in repo: URL) async throws {
+        _ = try await run(Self.fileViewedArguments(prNodeID: prNodeID, path: path, viewed: viewed),
+                          in: repo)
     }
 
     /// Replies inside an existing thread (GitHub's own "reply" on a comment).
@@ -303,6 +565,70 @@ public struct GitHubService: Sendable {
             try await unprotectWorktree(path)
         }
         return path
+    }
+
+    /// Files Loom drops into a review worktree, kept out of `git status` for
+    /// THIS worktree only: an excludes file of our own, wired through the
+    /// worktree-scoped config (`core.excludesFile`), never the repository's
+    /// shared `info/exclude` and never the user's own checkout.
+    public static let loomDirectory = ".loom-review"
+
+    /// Installs a slash command in the worktree (`.claude/commands/<name>.md`)
+    /// so claude finds it at startup. Rewritten on every install: the text
+    /// follows what the user set in Settings.
+    public func installCommand(named name: String, markdown: String, in worktree: URL) async throws {
+        let commands = worktree.appendingPathComponent(".claude/commands")
+        try FileManager.default.createDirectory(at: commands, withIntermediateDirectories: true)
+        try markdown.write(to: commands.appendingPathComponent("\(name).md"),
+                           atomically: true, encoding: .utf8)
+        try await excludeLoomFiles(in: worktree)
+    }
+
+    /// The exclude list a review worktree carries — everything Loom writes there.
+    static func loomExcludes(commandNames: [String]) -> String {
+        (["/\(loomDirectory)/", "/.loom-guard-hooks/"]
+         + commandNames.map { "/.claude/commands/\($0).md" })
+            .joined(separator: "\n") + "\n"
+    }
+
+    private func excludeLoomFiles(in worktree: URL) async throws {
+        let directory = worktree.appendingPathComponent(Self.loomDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let commandsDirectory = worktree.appendingPathComponent(".claude/commands")
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: commandsDirectory.path)) ?? [])
+            .filter { $0.hasSuffix(".md") }
+            .map { String($0.dropLast(3)) }
+            .sorted()
+        // core.excludesFile is one file, not a list: ours REPLACES the user's
+        // global one for this worktree, so it carries the global patterns
+        // first (.DS_Store, editor folders…) and Loom's after.
+        let global = await globalExcludes(in: worktree)
+        let excludes = directory.appendingPathComponent("exclude")
+        try (global + "\n# Loom review worktree\n" + Self.loomExcludes(commandNames: names))
+            .write(to: excludes, atomically: true, encoding: .utf8)
+        // Worktree-scoped config needs the extension on the repository — the
+        // guard hooks already rely on it; this is the same switch.
+        _ = try await runGit(["config", "extensions.worktreeConfig", "true"], in: worktree)
+        _ = try await runGit(["config", "--worktree", "core.excludesFile", excludes.path], in: worktree)
+    }
+
+    /// The user's global excludes, as git would read them: `core.excludesFile`
+    /// from the global config (our worktree-scoped value ignored), else
+    /// `$XDG_CONFIG_HOME/git/ignore`, else `~/.config/git/ignore`.
+    private func globalExcludes(in worktree: URL) async -> String {
+        var candidates: [URL] = []
+        if let data = try? await runGit(["config", "--global", "--get", "core.excludesFile"], in: worktree) {
+            let path = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !path.isEmpty { candidates.append(URL(fileURLWithPath: (path as NSString).expandingTildeInPath)) }
+        }
+        let environment = ProcessInfo.processInfo.environment
+        let configHome = environment["XDG_CONFIG_HOME"].map(URL.init(fileURLWithPath:))
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config")
+        candidates.append(configHome.appendingPathComponent("git/ignore"))
+        for candidate in candidates {
+            if let content = try? String(contentsOf: candidate, encoding: .utf8) { return content }
+        }
+        return ""
     }
 
     /// Reverses `protectWorktree` (setting turned off on a reused worktree).

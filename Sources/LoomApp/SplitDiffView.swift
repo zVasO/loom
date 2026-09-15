@@ -60,6 +60,13 @@ struct SplitDiffView: View {
     /// Unified layout: one full-width column (deletions then additions) —
     /// whole lines stay readable; split keeps old/new aligned side by side.
     var unified = false
+    /// Syntax colours per line, computed after the diff; empty paints plain.
+    var highlights = DiffHighlights.none
+    /// GitHub's "Viewed" checkbox per file: checked files fold away.
+    var viewed: Set<String> = []
+    /// Viewed once, changed since: unchecked again, and flagged.
+    var changedSinceViewed: Set<String> = []
+    var onToggleViewed: ((String, Bool) -> Void)?
 
     @State private var collapsed: Set<String> = []
     /// The selection's two ends, addressed globally — an interval between two
@@ -120,6 +127,11 @@ struct SplitDiffView: View {
         }
         .animation(.hover, value: selectionSettled)
         .onExitCommand { clearSelection() }
+        // A viewed file starts folded, the way GitHub folds it. Only ever
+        // ADDS to the fold: a reviewer who re-opened a viewed file keeps it open.
+        .onChange(of: viewed, initial: true) { _, viewed in
+            collapsed.formUnion(viewed)
+        }
     }
 
     /// One drag for the entire diff — dragging past a file's last line simply
@@ -368,14 +380,36 @@ struct SplitDiffView: View {
         let file = entry.file
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: collapsed.contains(file.path) ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Text(file.path)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.primaryText)
-                    .lineLimit(1)
-                Spacer()
+                // The fold lives on the leading group (chevron, path, and the
+                // empty run up to the controls), not on the whole header: the
+                // checkbox and buttons on the right keep their own clicks.
+                HStack(spacing: 8) {
+                    Image(systemName: collapsed.contains(file.path) ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                    Text(file.path)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                        .lineLimit(1)
+                    if changedSinceViewed.contains(file.path) {
+                        Text("changed since viewed")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(DefaultTheme.badgeColor(for: .needsInput).opacity(0.15),
+                                        in: Capsule())
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if collapsed.contains(file.path) {
+                        collapsed.remove(file.path)
+                    } else {
+                        collapsed.insert(file.path)
+                    }
+                }
                 // The file-wide entry point to the same actions as a line
                 // selection: select every row, the action bar takes over.
                 HoverIconButton(systemImage: "selection.pin.in.out",
@@ -388,17 +422,25 @@ struct SplitDiffView: View {
                 Text("−\(file.deletions)")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(DefaultTheme.danger)
+                if onToggleViewed != nil {
+                    // GitHub's own checkbox: shared with the web, and what the
+                    // "n / m viewed" recap counts. Its click stays its own —
+                    // the header's tap (fold) must not fire with it.
+                    Toggle("Viewed", isOn: Binding(
+                        get: { viewed.contains(file.path) },
+                        set: { on in
+                            if on { collapsed.insert(file.path) } else { collapsed.remove(file.path) }
+                            onToggleViewed?(file.path, on)
+                        }))
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .help(viewed.contains(file.path) ? "Viewed — uncheck to reopen"
+                          : "Mark as viewed (folds the file)")
+                }
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
             .background(DefaultTheme.surfaceRaised)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if collapsed.contains(file.path) {
-                    collapsed.remove(file.path)
-                } else {
-                    collapsed.insert(file.path)
-                }
-            }
 
             if !collapsed.contains(file.path) {
                 // Comments on the file itself (no line anchor) sit right
@@ -439,20 +481,20 @@ struct SplitDiffView: View {
                             // the addition/context line, both with dual gutters.
                             VStack(alignment: .leading, spacing: 0) {
                                 if let left = row.left, left.kind == .deletion {
-                                    unifiedLine(left, isOld: true)
+                                    unifiedLine(left, isOld: true, file: file)
                                 }
                                 if let right = row.right {
-                                    unifiedLine(right, isOld: false)
+                                    unifiedLine(right, isOld: false, file: file)
                                 }
                             }
                         } else {
                             HStack(alignment: .top, spacing: 0) {
-                                side(row.left, isOld: true)
+                                side(row.left, isOld: true, file: file)
                                     .frame(maxWidth: .infinity, alignment: .topLeading)
                                 Rectangle()
                                     .fill(DefaultTheme.cardBorder)
                                     .frame(width: 1)
-                                side(row.right, isOld: false)
+                                side(row.right, isOld: false, file: file)
                                     .frame(maxWidth: .infinity, alignment: .topLeading)
                             }
                         }
@@ -513,7 +555,7 @@ struct SplitDiffView: View {
     /// Long lines wrap instead of scrolling: the code column starts after the
     /// gutter, so continuations already hang under the code, not the number.
     @ViewBuilder
-    private func side(_ line: DiffParser.Line?, isOld: Bool) -> some View {
+    private func side(_ line: DiffParser.Line?, isOld: Bool, file: String) -> some View {
         let background: Color = switch line?.kind {
         case .addition: DefaultTheme.groupHeader.opacity(0.12)
         case .deletion: DefaultTheme.danger.opacity(0.12)
@@ -524,7 +566,7 @@ struct SplitDiffView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(width: 34, alignment: .trailing)
-            Text(line.map { marker($0) + $0.text } ?? "")
+            Text(line.map { code($0, isOld: isOld, file: file) } ?? AttributedString())
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(line?.kind == .context || line == nil
                                  ? DefaultTheme.primaryText.opacity(0.75)
@@ -572,7 +614,7 @@ struct SplitDiffView: View {
 
     /// One full-width unified line: old + new number gutters, then the text.
     @ViewBuilder
-    private func unifiedLine(_ line: DiffParser.Line, isOld: Bool) -> some View {
+    private func unifiedLine(_ line: DiffParser.Line, isOld: Bool, file: String) -> some View {
         let background: Color = switch line.kind {
         case .addition: DefaultTheme.groupHeader.opacity(0.12)
         case .deletion: DefaultTheme.danger.opacity(0.12)
@@ -587,7 +629,7 @@ struct SplitDiffView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(width: 34, alignment: .trailing)
-            Text(marker(line) + line.text)
+            Text(code(line, isOld: isOld, file: file))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(line.kind == .context
                                  ? DefaultTheme.primaryText.opacity(0.75)
@@ -605,6 +647,19 @@ struct SplitDiffView: View {
         case .deletion: "− "
         case .context: "  "
         }
+    }
+
+    /// The marker, then the line — coloured by language when the highlights
+    /// have arrived, plain (and identical in shape) until then.
+    private func code(_ line: DiffParser.Line, isOld: Bool, file: String) -> AttributedString {
+        var result = AttributedString(marker(line))
+        if let coloured = highlights.line(path: file, isOld: isOld,
+                                          number: isOld ? line.oldNumber : line.newNumber) {
+            result.append(coloured)
+        } else {
+            result.append(AttributedString(line.text))
+        }
+        return result
     }
 }
 

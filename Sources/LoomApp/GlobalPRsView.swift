@@ -90,20 +90,31 @@ struct GlobalPRsView: View {
     // MARK: Sidebar — projects and their PRs
 
     private var sidebar: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                ForEach(gitProjects, id: \.id) { project in
-                    projectGroup(project)
-                }
+        VStack(spacing: 0) {
+            // The question every list below answers: all open, mine, waiting
+            // on my review… Changing it refetches the expanded projects only.
+            HStack(spacing: 8) {
+                PRFilterMenu(model: model,
+                             projectsToRefresh: { Array(expandedProjects) })
+                Spacer()
             }
-            .padding(12)
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            Divider().overlay(DefaultTheme.cardBorder)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(gitProjects, id: \.id) { project in
+                        projectGroup(project)
+                    }
+                }
+                .padding(12)
+            }
         }
         .frame(width: 300)
         .background(DefaultTheme.background)
     }
 
     private func projectGroup(_ project: ProjectRecord) -> some View {
-        let prs = model.prCache[project.id] ?? []
+        let prs = model.prs(for: project.id)
         let expanded = expandedProjects.contains(project.id)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -135,7 +146,7 @@ struct GlobalPRsView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                if model.prLoading.contains(project.id) {
+                if model.isLoadingPRs(for: project.id) {
                     ProgressView().controlSize(.mini)
                 }
                 if expanded {
@@ -147,8 +158,9 @@ struct GlobalPRsView: View {
             }
             .padding(.horizontal, 2)
             if expanded {
-                if prs.isEmpty && !model.prLoading.contains(project.id) {
-                    Text("No open PR")
+                if prs.isEmpty && !model.isLoadingPRs(for: project.id) {
+                    Text(model.selectedPRFilterID == PRFilter.all.id
+                         ? "No open PR" : "No PR matches “\(model.selectedPRFilter.name)”")
                         .font(.system(size: 11))
                         .foregroundStyle(DefaultTheme.mutedText)
                         .padding(.leading, 2)
@@ -200,11 +212,17 @@ struct GlobalPRsView: View {
                 GeometryReader { geometry in
                     // One width for the three of them: the drawer, the space
                     // the controls keep clear of it, and the handle's offset.
-                    let drawer = paneOpen ? clampedDrawerWidth(available: geometry.size.width) : 0
+                    let width = clampedDrawerWidth(available: geometry.size.width)
+                    let drawer = paneOpen ? width : 0
                     ZStack(alignment: .trailing) {
                         workspace(pr, project: project, controlsInset: drawer)
                         if paneOpen, let sessionID = paneSessionID {
-                            sessionDrawer(sessionID, width: drawer,
+                            // The drawer's OWN width never animates: it slides
+                            // in at full size. Animating 0 → width resized the
+                            // terminal on every frame of the slide, and each
+                            // resize made the agent repaint its whole
+                            // conversation — the duplicated blocks.
+                            sessionDrawer(sessionID, width: width,
                                           available: geometry.size.width)
                         }
                         if paneSessionID != nil {
@@ -472,6 +490,26 @@ private struct PRSidebarRow: View {
                         .lineLimit(1)
                     MonoTag(pr.branch, systemImage: "arrow.triangle.branch",
                             color: DefaultTheme.mutedText)
+                }
+                // One more line at most: who it waits on, what it is tagged,
+                // how big it is, whether it still merges.
+                if !pr.reviewers.isEmpty || !pr.labels.isEmpty || pr.additions + pr.deletions > 0
+                    || pr.isConflicting {
+                    HStack(spacing: 6) {
+                        if !pr.reviewers.isEmpty {
+                            Label(PRChips.reviewers(pr, limit: 2), systemImage: "person.2")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(DefaultTheme.mutedText)
+                                .lineLimit(1)
+                        }
+                        ForEach(pr.labels.prefix(2), id: \.name) { PRChips.label($0) }
+                        if pr.additions + pr.deletions > 0 { PRChips.size(pr) }
+                        if pr.isConflicting {
+                            Text("conflicts")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(DefaultTheme.danger)
+                        }
+                    }
                 }
             }
             Spacer()
