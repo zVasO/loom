@@ -450,6 +450,35 @@ public final class AppModel {
         } catch { return Self.ghErrorText(error) }
     }
 
+    /// GitHub's "Viewed" state of every file of the PR — the truth lives on
+    /// GitHub (shared with the web, reset by GitHub when a file changes);
+    /// this cache only spares a gh call when the PR is revisited.
+    public func fileViews(_ number: Int, in projectID: ProjectID,
+                          refresh: Bool = false) async -> GitHubService.FileViews? {
+        guard let repo = projectRepo(projectID) else { return nil }
+        let key = prKey(number, projectID)
+        if !refresh, let cached = prFileViewsCache[key] { return cached }
+        let views = try? await GitHubService().fileViews(number, in: repo)
+        if let views { prFileViewsCache[key] = views }
+        return views
+    }
+
+    /// Checks or unchecks GitHub's "Viewed" box on a file. nil on success,
+    /// error text otherwise — the caller flipped optimistically and reverts.
+    public func setFileViewed(_ number: Int, path: String, viewed: Bool,
+                              in projectID: ProjectID) async -> String? {
+        guard let repo = projectRepo(projectID) else { return "No repo for this project" }
+        guard let views = await fileViews(number, in: projectID) else {
+            return "Could not read the PR's files from GitHub."
+        }
+        do {
+            try await GitHubService().setFileViewed(prNodeID: views.prNodeID, path: path,
+                                                    viewed: viewed, in: repo)
+            prFileViewsCache[prKey(number, projectID)] = views.setting(path, to: viewed ? .viewed : .unviewed)
+            return nil
+        } catch { return Self.ghErrorText(error) }
+    }
+
     /// Line-anchored review comment (optionally an appliable suggestion).
     /// nil on success, error text otherwise.
     public func commentOnLines(_ number: Int, path: String, firstLine: Int, lastLine: Int,
@@ -508,6 +537,7 @@ public final class AppModel {
     private var prDetailCache: [String: GitHubService.PRDetail] = [:]
     private var prDiffCache: [String: String] = [:]
     private var prCommentsCache: [String: [GitHubService.ReviewComment]] = [:]
+    private var prFileViewsCache: [String: GitHubService.FileViews] = [:]
     private var prListCache: PRListCache { PRListCache(directory: supportDirectory) }
     private var prFilterStore: PRFilterStore { PRFilterStore(directory: supportDirectory) }
 
@@ -642,6 +672,7 @@ public final class AppModel {
         prDetailCache = prDetailCache.filter { !$0.key.hasPrefix(prefix) }
         prDiffCache = prDiffCache.filter { !$0.key.hasPrefix(prefix) }
         prCommentsCache = prCommentsCache.filter { !$0.key.hasPrefix(prefix) }
+        prFileViewsCache = prFileViewsCache.filter { !$0.key.hasPrefix(prefix) }
         prLists[key] = PRListCache.Entry(fetchedAt: Date(), prs: prs, query: filter.query)
         savePRListCache()
     }

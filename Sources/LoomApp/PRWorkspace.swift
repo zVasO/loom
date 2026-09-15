@@ -105,6 +105,9 @@ struct PRWorkspaceView: View {
     /// silently hiding the whole file explorer.
     @State private var diffError: String?
     @State private var diffLoading = false
+    /// GitHub's "Viewed" boxes over the diff's files — the recap and the
+    /// checkboxes read it; a toggle flips it before GitHub answers.
+    @State private var progress = FileReviewProgress.empty
     @State private var prTour: PRTour?
     @State private var tourLoading = false
     @State private var reviewBody = ""
@@ -127,6 +130,7 @@ struct PRWorkspaceView: View {
         .task(id: pr.number) {
             prDetail = nil
             diffFiles = []
+            progress = .empty
             await load(refresh: false)
         }
     }
@@ -296,6 +300,21 @@ struct PRWorkspaceView: View {
                 sectionHeader("FILES", count: diffFiles.count,
                               color: DefaultTheme.secondaryText)
                 if diffLoading { ProgressView().controlSize(.mini) }
+                if progress.total > 0 {
+                    // The recap: how much of the PR has been checked off,
+                    // GitHub's own boxes behind it.
+                    HStack(spacing: 6) {
+                        ProgressView(value: progress.fraction)
+                            .progressViewStyle(.linear)
+                            .frame(width: 90)
+                            .tint(progress.isComplete ? DefaultTheme.groupHeader : DefaultTheme.accent)
+                        Text(progress.label)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(progress.isComplete ? DefaultTheme.groupHeader
+                                                                 : DefaultTheme.secondaryText)
+                    }
+                    .help("Files marked as viewed — the same checkboxes as on github.com")
+                }
                 Spacer()
                 // Split keeps old/new aligned; unified gives every line the
                 // full width. Long lines wrap either way.
@@ -361,7 +380,22 @@ struct PRWorkspaceView: View {
                                           prActionBusy = false
                                       }
                                   },
-                                  unified: unifiedDiff)
+                                  unified: unifiedDiff,
+                                  viewed: progress.viewed,
+                                  changedSinceViewed: progress.changedSinceViewed,
+                                  onToggleViewed: { path, on in
+                                      // Optimistic: the box flips now, GitHub is
+                                      // told after; a refusal puts it back.
+                                      let previous = progress
+                                      progress = progress.toggling(path, viewed: on)
+                                      Task {
+                                          if let error = await model.setFileViewed(
+                                              pr.number, path: path, viewed: on, in: project.id) {
+                                              progress = previous
+                                              prActionOutput = error
+                                          }
+                                      }
+                                  })
                         .padding(.horizontal, 12)
                         .padding(.vertical, 10)
                         // Identity tied to the PR: SwiftUI would otherwise
@@ -451,6 +485,11 @@ struct PRWorkspaceView: View {
             DiffFileRows.compute(DiffParser.parse(diff))
         }.value
         diffLoading = false
+        // GitHub's viewed boxes, after the diff: the files on screen are the
+        // universe the recap counts.
+        let views = await model.fileViews(pr.number, in: project.id, refresh: refresh)
+        progress = FileReviewProgress.compute(paths: diffFiles.map(\.file.path),
+                                              views: views?.files ?? [])
     }
 
     /// Light markdown (bold, code, links) with line breaks preserved — a full

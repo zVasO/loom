@@ -60,6 +60,11 @@ struct SplitDiffView: View {
     /// Unified layout: one full-width column (deletions then additions) —
     /// whole lines stay readable; split keeps old/new aligned side by side.
     var unified = false
+    /// GitHub's "Viewed" checkbox per file: checked files fold away.
+    var viewed: Set<String> = []
+    /// Viewed once, changed since: unchecked again, and flagged.
+    var changedSinceViewed: Set<String> = []
+    var onToggleViewed: ((String, Bool) -> Void)?
 
     @State private var collapsed: Set<String> = []
     /// The selection's two ends, addressed globally — an interval between two
@@ -120,6 +125,11 @@ struct SplitDiffView: View {
         }
         .animation(.hover, value: selectionSettled)
         .onExitCommand { clearSelection() }
+        // A viewed file starts folded, the way GitHub folds it. Only ever
+        // ADDS to the fold: a reviewer who re-opened a viewed file keeps it open.
+        .onChange(of: viewed, initial: true) { _, viewed in
+            collapsed.formUnion(viewed)
+        }
     }
 
     /// One drag for the entire diff — dragging past a file's last line simply
@@ -375,6 +385,14 @@ struct SplitDiffView: View {
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(DefaultTheme.primaryText)
                     .lineLimit(1)
+                if changedSinceViewed.contains(file.path) {
+                    Text("changed since viewed")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(DefaultTheme.badgeColor(for: .needsInput).opacity(0.15),
+                                    in: Capsule())
+                }
                 Spacer()
                 // The file-wide entry point to the same actions as a line
                 // selection: select every row, the action bar takes over.
@@ -388,6 +406,23 @@ struct SplitDiffView: View {
                 Text("−\(file.deletions)")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(DefaultTheme.danger)
+                if onToggleViewed != nil {
+                    // GitHub's own checkbox: shared with the web, and what the
+                    // "n / m viewed" recap counts. Its click stays its own —
+                    // the header's tap (fold) must not fire with it.
+                    Toggle("Viewed", isOn: Binding(
+                        get: { viewed.contains(file.path) },
+                        set: { on in
+                            if on { collapsed.insert(file.path) } else { collapsed.remove(file.path) }
+                            onToggleViewed?(file.path, on)
+                        }))
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .help(viewed.contains(file.path) ? "Viewed — uncheck to reopen"
+                          : "Mark as viewed (folds the file)")
+                    .onTapGesture {}
+                }
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
             .background(DefaultTheme.surfaceRaised)

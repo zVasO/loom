@@ -120,6 +120,61 @@ public struct GitHubService: Sendable {
         }
     }
 
+    /// GitHub's own "Viewed" checkbox on a PR file. DISMISSED is what GitHub
+    /// sets when the file changed after you viewed it — the head-moved reset
+    /// comes for free, force-pushes included.
+    public enum FileViewedState: String, Sendable, Codable, Equatable {
+        case viewed = "VIEWED"
+        case unviewed = "UNVIEWED"
+        case dismissed = "DISMISSED"
+    }
+
+    public struct FileView: Sendable, Equatable {
+        public let path: String
+        public let state: FileViewedState
+        public init(path: String, state: FileViewedState) {
+            self.path = path
+            self.state = state
+        }
+    }
+
+    /// One page of the PR's files with their viewed state.
+    public struct FileViewsPage: Sendable, Equatable {
+        /// The PR's GraphQL node id — what the mark/unmark mutations take.
+        public let prNodeID: String
+        public let headSHA: String
+        public let files: [FileView]
+        public let nextCursor: String?
+        public init(prNodeID: String, headSHA: String, files: [FileView], nextCursor: String?) {
+            self.prNodeID = prNodeID
+            self.headSHA = headSHA
+            self.files = files
+            self.nextCursor = nextCursor
+        }
+    }
+
+    public struct FileViews: Sendable, Equatable {
+        public let prNodeID: String
+        public let headSHA: String
+        public let files: [FileView]
+        public init(prNodeID: String, headSHA: String, files: [FileView]) {
+            self.prNodeID = prNodeID
+            self.headSHA = headSHA
+            self.files = files
+        }
+
+        /// The same list with one file's state replaced.
+        public func setting(_ path: String, to state: FileViewedState) -> FileViews {
+            var files = self.files
+            if let index = files.firstIndex(where: { $0.path == path }) {
+                files[index] = FileView(path: path, state: state)
+            } else {
+                files.append(FileView(path: path, state: state))
+            }
+            return FileViews(prNodeID: prNodeID, headSHA: headSHA, files: files)
+        }
+    }
+
     public struct Comment: Sendable, Equatable {
         public let author: String
         public let body: String
@@ -271,6 +326,58 @@ public struct GitHubService: Sendable {
         }
     }
 
+    // MARK: File viewed state (GraphQL)
+
+    /// One page of `files { path viewerViewedState }` — the only way GitHub
+    /// exposes its "Viewed" checkbox. `{owner}`/`{repo}` are gh placeholders,
+    /// filled from the current repository like in REST endpoints.
+    public static func fileViewsArguments(number: Int, cursor: String?) -> [String] {
+        var arguments = ["api", "graphql",
+                         "-f", "owner={owner}", "-f", "name={repo}", "-F", "number=\(number)"]
+        if let cursor { arguments += ["-f", "cursor=\(cursor)"] }
+        arguments += ["-f", "query=" + fileViewsQuery]
+        return arguments
+    }
+
+    static let fileViewsQuery = """
+    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          id headRefOid
+          files(first: 100, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes { path viewerViewedState }
+          }
+        }
+      }
+    }
+    """
+
+    /// `markFileAsViewed` / `unmarkFileAsViewed` on the PR node.
+    public static func fileViewedArguments(prNodeID: String, path: String, viewed: Bool) -> [String] {
+        let mutation = viewed ? "markFileAsViewed" : "unmarkFileAsViewed"
+        return ["api", "graphql", "-f", "id=\(prNodeID)", "-f", "path=\(path)",
+                "-f", "query=mutation($id: ID!, $path: String!) { \(mutation)(input: {pullRequestId: $id, path: $path}) { clientMutationId } }"]
+    }
+
+    public static func parseFileViewsPage(_ data: Data) throws -> FileViewsPage {
+        let object = (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        let pr = ((object["data"] as? [String: Any])?["repository"] as? [String: Any])?["pullRequest"]
+            as? [String: Any] ?? [:]
+        let files = pr["files"] as? [String: Any] ?? [:]
+        let nodes = (files["nodes"] as? [[String: Any]] ?? []).compactMap { node -> FileView? in
+            guard let path = node["path"] as? String else { return nil }
+            let state = FileViewedState(rawValue: node["viewerViewedState"] as? String ?? "") ?? .unviewed
+            return FileView(path: path, state: state)
+        }
+        let pageInfo = files["pageInfo"] as? [String: Any] ?? [:]
+        let hasNext = pageInfo["hasNextPage"] as? Bool ?? false
+        return FileViewsPage(prNodeID: pr["id"] as? String ?? "",
+                             headSHA: pr["headRefOid"] as? String ?? "",
+                             files: nodes,
+                             nextCursor: hasNext ? pageInfo["endCursor"] as? String : nil)
+    }
+
     /// A review comment's body. GitHub turns a ```suggestion fence into a
     /// one-click "Apply suggestion" — the note, when present, sits above it.
     public static func lineCommentBody(_ note: String, suggestion: String?) -> String {
@@ -346,6 +453,31 @@ public struct GitHubService: Sendable {
         let data = try await run(["api", "--paginate",
                                   "repos/{owner}/{repo}/pulls/\(number)/comments"], in: repo)
         return try Self.parseReviewComments(data)
+    }
+
+    /// Every file of the PR with GitHub's own viewed state, all pages. Bounded:
+    /// a PR is never more than a few hundred files, and a page is 100.
+    public func fileViews(_ number: Int, in repo: URL) async throws -> FileViews {
+        var cursor: String?
+        var files: [FileView] = []
+        var prNodeID = "", headSHA = ""
+        for _ in 0..<50 {
+            let data = try await run(Self.fileViewsArguments(number: number, cursor: cursor), in: repo)
+            let page = try Self.parseFileViewsPage(data)
+            prNodeID = page.prNodeID
+            headSHA = page.headSHA
+            files += page.files
+            guard let next = page.nextCursor else { break }
+            cursor = next
+        }
+        return FileViews(prNodeID: prNodeID, headSHA: headSHA, files: files)
+    }
+
+    /// GitHub's "Viewed" checkbox, checked or unchecked — shared with the web.
+    public func setFileViewed(prNodeID: String, path: String, viewed: Bool,
+                              in repo: URL) async throws {
+        _ = try await run(Self.fileViewedArguments(prNodeID: prNodeID, path: path, viewed: viewed),
+                          in: repo)
     }
 
     /// Replies inside an existing thread (GitHub's own "reply" on a comment).

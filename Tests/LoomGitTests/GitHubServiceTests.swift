@@ -100,6 +100,58 @@ struct GitHubServiceTests {
         }
     }
 
+    // GitHub's "Viewed" checkbox on PR files — GraphQL only, paged by 100.
+    @Test("a file-views page carries paths, the three states, node id, head and the next cursor")
+    func parseFileViewsPage() throws {
+        let json = """
+        {"data": {"repository": {"pullRequest": {"id": "PR_kwDOA", "headRefOid": "abc123",
+          "files": {"pageInfo": {"hasNextPage": true, "endCursor": "Y3Vyc29y"},
+                    "nodes": [{"path": "a.swift", "viewerViewedState": "VIEWED"},
+                              {"path": "b.swift", "viewerViewedState": "UNVIEWED"},
+                              {"path": "c.swift", "viewerViewedState": "DISMISSED"}]}}}}}
+        """
+        let page = try GitHubService.parseFileViewsPage(Data(json.utf8))
+        #expect(page.prNodeID == "PR_kwDOA")
+        #expect(page.headSHA == "abc123")
+        #expect(page.files.map(\.path) == ["a.swift", "b.swift", "c.swift"])
+        #expect(page.files.map(\.state) == [.viewed, .unviewed, .dismissed])
+        #expect(page.nextCursor == "Y3Vyc29y")
+    }
+
+    @Test("the last page has no cursor, and an unknown state reads as unviewed")
+    func lastFileViewsPage() throws {
+        let json = """
+        {"data": {"repository": {"pullRequest": {"id": "PR_1", "headRefOid": "h",
+          "files": {"pageInfo": {"hasNextPage": false, "endCursor": "end"},
+                    "nodes": [{"path": "z.swift", "viewerViewedState": "SOMETHING_NEW"}]}}}}}
+        """
+        let page = try GitHubService.parseFileViewsPage(Data(json.utf8))
+        #expect(page.nextCursor == nil)
+        #expect(page.files.first?.state == .unviewed)
+    }
+
+    @Test("file-views arguments name the PR, and pass the cursor only after the first page")
+    func fileViewsArguments() {
+        let first = GitHubService.fileViewsArguments(number: 42, cursor: nil)
+        #expect(first.prefix(2) == ["api", "graphql"])
+        #expect(first.contains("number=42"))
+        #expect(first.contains("owner={owner}") && first.contains("name={repo}"))
+        #expect(!first.contains { $0.hasPrefix("cursor=") })
+        let next = GitHubService.fileViewsArguments(number: 42, cursor: "c2")
+        #expect(next.contains("cursor=c2"))
+        #expect(next.last?.contains("viewerViewedState") == true)
+    }
+
+    @Test("marking a file viewed or unviewed picks the matching mutation")
+    func fileViewedArguments() {
+        let mark = GitHubService.fileViewedArguments(prNodeID: "PR_1", path: "a.swift", viewed: true)
+        #expect(mark.contains("id=PR_1") && mark.contains("path=a.swift"))
+        #expect(mark.last?.contains("markFileAsViewed(") == true)
+        #expect(mark.last?.contains("unmarkFileAsViewed") == false)
+        let unmark = GitHubService.fileViewedArguments(prNodeID: "PR_1", path: "a.swift", viewed: false)
+        #expect(unmark.last?.contains("unmarkFileAsViewed(") == true)
+    }
+
     @Test("empty checks rollup means passing — no signal is not a failure")
     func emptyChecks() throws {
         let json = """
