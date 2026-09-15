@@ -278,19 +278,22 @@ public enum KeyTranslator {
             let alternates = flags.contains(.reportAlternates)
             let reportText = allKeys && flags.contains(.reportText)
             if event == .release, !reportEvents { return nil }
-            let modifiers = modifierBits(key, optionAsMeta: preferences.optionAsMeta)
             let eventField = eventSuffix(event, reportEvents: reportEvents)
 
             if let functional = FunctionalKey(keyCode: key.keyCode) {
                 if event == .release, !allKeys,
                    [.enter, .tab, .backspace].contains(functional) { return nil }
-                return encodeFunctional(functional, modifiers: modifiers, eventField: eventField,
-                                        disambiguate: disambiguate, allKeys: allKeys,
-                                        modes: modes)
+                // ⌥ on a special key is alt whatever the Meta preference — as in
+                // the legacy dialect: ⌥↩ inserts a newline, ⌥⌫ deletes a word,
+                // ⌥← jumps a word, on every layout.
+                return encodeFunctional(functional, modifiers: modifierBits(key, optionAsMeta: true),
+                                        eventField: eventField, disambiguate: disambiguate,
+                                        allKeys: allKeys, modes: modes)
             }
 
             // Text keys. ⌥ without Meta is a compose layer (AZERTY braces, dead
             // keys): the glyph it makes is the key, and AppKit composes it.
+            let modifiers = modifierBits(key, optionAsMeta: preferences.optionAsMeta)
             let modified = key.control || (key.option && preferences.optionAsMeta)
             guard let base = KeyTranslator.baseScalar(of: key) else { return nil }
             let shifted = shiftedScalar(of: key, base: base)

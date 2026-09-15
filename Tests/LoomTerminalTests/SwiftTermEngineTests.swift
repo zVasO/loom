@@ -3,6 +3,7 @@ import LoomCore
 import LoomTerminal
 import LoomTerminalTestSupport
 import Dispatch
+import Foundation
 
 // The production adapter of the TerminalEngine seam, tested at the same seam as
 // LineEngine: we feed bytes, we read screen values. Expectations come from

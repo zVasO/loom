@@ -330,10 +330,11 @@ public struct GitHubService: Sendable {
 
     /// One page of `files { path viewerViewedState }` — the only way GitHub
     /// exposes its "Viewed" checkbox. `{owner}`/`{repo}` are gh placeholders,
-    /// filled from the current repository like in REST endpoints.
+    /// filled from the current repository — in TYPED fields (`-F`) only; a
+    /// raw field (`-f`) would send the braces as they are.
     public static func fileViewsArguments(number: Int, cursor: String?) -> [String] {
         var arguments = ["api", "graphql",
-                         "-f", "owner={owner}", "-f", "name={repo}", "-F", "number=\(number)"]
+                         "-F", "owner={owner}", "-F", "name={repo}", "-F", "number=\(number)"]
         if let cursor { arguments += ["-f", "cursor=\(cursor)"] }
         arguments += ["-f", "query=" + fileViewsQuery]
         return arguments
@@ -598,12 +599,36 @@ public struct GitHubService: Sendable {
             .filter { $0.hasSuffix(".md") }
             .map { String($0.dropLast(3)) }
             .sorted()
+        // core.excludesFile is one file, not a list: ours REPLACES the user's
+        // global one for this worktree, so it carries the global patterns
+        // first (.DS_Store, editor folders…) and Loom's after.
+        let global = await globalExcludes(in: worktree)
         let excludes = directory.appendingPathComponent("exclude")
-        try Self.loomExcludes(commandNames: names).write(to: excludes, atomically: true, encoding: .utf8)
+        try (global + "\n# Loom review worktree\n" + Self.loomExcludes(commandNames: names))
+            .write(to: excludes, atomically: true, encoding: .utf8)
         // Worktree-scoped config needs the extension on the repository — the
         // guard hooks already rely on it; this is the same switch.
         _ = try await runGit(["config", "extensions.worktreeConfig", "true"], in: worktree)
         _ = try await runGit(["config", "--worktree", "core.excludesFile", excludes.path], in: worktree)
+    }
+
+    /// The user's global excludes, as git would read them: `core.excludesFile`
+    /// from the global config (our worktree-scoped value ignored), else
+    /// `$XDG_CONFIG_HOME/git/ignore`, else `~/.config/git/ignore`.
+    private func globalExcludes(in worktree: URL) async -> String {
+        var candidates: [URL] = []
+        if let data = try? await runGit(["config", "--global", "--get", "core.excludesFile"], in: worktree) {
+            let path = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !path.isEmpty { candidates.append(URL(fileURLWithPath: (path as NSString).expandingTildeInPath)) }
+        }
+        let environment = ProcessInfo.processInfo.environment
+        let configHome = environment["XDG_CONFIG_HOME"].map(URL.init(fileURLWithPath:))
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config")
+        candidates.append(configHome.appendingPathComponent("git/ignore"))
+        for candidate in candidates {
+            if let content = try? String(contentsOf: candidate, encoding: .utf8) { return content }
+        }
+        return ""
     }
 
     /// Reverses `protectWorktree` (setting turned off on a reused worktree).

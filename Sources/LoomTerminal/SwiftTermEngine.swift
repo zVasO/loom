@@ -151,6 +151,11 @@ public final class SwiftTermEngine: TerminalEngine {
             if tailCache.count > cap { tailCache.removeFirst(tailCache.count - cap) }
             tailCachedRows = rows
         }
+        // The tail mirrors what the emulator still holds: past the scrollback
+        // cap it trims a line per line pushed, and so must the cache (a no-op
+        // in production, where the 10,000-line scrollback dwarfs the cap).
+        let retained = rows - terminal.buffer.totalLinesTrimmed
+        if tailCache.count > retained { tailCache.removeFirst(tailCache.count - retained) }
         return tailCache.suffix(limit)
     }
 

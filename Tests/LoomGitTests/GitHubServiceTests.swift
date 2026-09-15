@@ -131,11 +131,17 @@ struct GitHubServiceTests {
     }
 
     @Test("file-views arguments name the PR, and pass the cursor only after the first page")
-    func fileViewsArguments() {
+    func fileViewsArguments() throws {
         let first = GitHubService.fileViewsArguments(number: 42, cursor: nil)
         #expect(first.prefix(2) == ["api", "graphql"])
         #expect(first.contains("number=42"))
         #expect(first.contains("owner={owner}") && first.contains("name={repo}"))
+        // gh fills {owner}/{repo} in typed (-F) fields only — a raw -f field
+        // would send the braces verbatim and every call would fail.
+        for placeholder in ["owner={owner}", "name={repo}"] {
+            let index = try #require(first.firstIndex(of: placeholder))
+            #expect(first[index - 1] == "-F", "\(placeholder) must ride a typed field")
+        }
         #expect(!first.contains { $0.hasPrefix("cursor=") })
         let next = GitHubService.fileViewsArguments(number: 42, cursor: "c2")
         #expect(next.contains("cursor=c2"))

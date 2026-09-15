@@ -1,5 +1,6 @@
 import Testing
 import AppKit
+import SwiftUI
 import LoomGit
 @testable import LoomUI
 
@@ -30,9 +31,9 @@ struct DiffHighlighterTests {
         let lines = try #require(DiffHighlighter.split(document, expectedLines: 4))
         #expect(lines.map { String($0.characters) } == ["let a = 1", "// note", "", "end"])
         let keyword = try #require(lines[0].runs.first)
-        #expect(keyword.foregroundColor != nil, "the keyword keeps its colour")
+        #expect(keyword.swiftUI.foregroundColor != nil, "the keyword keeps its colour")
         #expect(String(lines[0][keyword.range].characters) == "let")
-        #expect(lines[3].runs.first?.foregroundColor == nil, "uncoloured text carries no colour")
+        #expect(lines[3].runs.first?.swiftUI.foregroundColor == nil, "uncoloured text carries no colour")
     }
 
     @Test("a line count that does not match the input means plain, not misaligned colours")
@@ -69,7 +70,7 @@ struct DiffHighlighterTests {
         let addition = highlights.line(path: "A.swift", isOld: false, number: 2)
         #expect(deletion.map { String($0.characters) } == "let old = \"a\"")
         #expect(addition.map { String($0.characters) } == "let new = \"b\"")
-        #expect(addition?.runs.contains { $0.foregroundColor != nil } == true, "a keyword is coloured")
+        #expect(addition?.runs.contains { $0.swiftUI.foregroundColor != nil } == true, "a keyword is coloured")
         #expect(highlights.line(path: "A.swift", isOld: true, number: 3) == nil)
     }
 }

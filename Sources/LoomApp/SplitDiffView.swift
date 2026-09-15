@@ -380,22 +380,36 @@ struct SplitDiffView: View {
         let file = entry.file
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: collapsed.contains(file.path) ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Text(file.path)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.primaryText)
-                    .lineLimit(1)
-                if changedSinceViewed.contains(file.path) {
-                    Text("changed since viewed")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(DefaultTheme.badgeColor(for: .needsInput).opacity(0.15),
-                                    in: Capsule())
+                // The fold lives on the leading group (chevron, path, and the
+                // empty run up to the controls), not on the whole header: the
+                // checkbox and buttons on the right keep their own clicks.
+                HStack(spacing: 8) {
+                    Image(systemName: collapsed.contains(file.path) ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                    Text(file.path)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                        .lineLimit(1)
+                    if changedSinceViewed.contains(file.path) {
+                        Text("changed since viewed")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(DefaultTheme.badgeColor(for: .needsInput).opacity(0.15),
+                                        in: Capsule())
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if collapsed.contains(file.path) {
+                        collapsed.remove(file.path)
+                    } else {
+                        collapsed.insert(file.path)
+                    }
+                }
                 // The file-wide entry point to the same actions as a line
                 // selection: select every row, the action bar takes over.
                 HoverIconButton(systemImage: "selection.pin.in.out",
@@ -423,19 +437,10 @@ struct SplitDiffView: View {
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .help(viewed.contains(file.path) ? "Viewed — uncheck to reopen"
                           : "Mark as viewed (folds the file)")
-                    .onTapGesture {}
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
             .background(DefaultTheme.surfaceRaised)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if collapsed.contains(file.path) {
-                    collapsed.remove(file.path)
-                } else {
-                    collapsed.insert(file.path)
-                }
-            }
 
             if !collapsed.contains(file.path) {
                 // Comments on the file itself (no line anchor) sit right

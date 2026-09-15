@@ -205,6 +205,16 @@ struct KeyTranslatorTests {
                 "⌥ as a compose layer stays with AppKit")
     }
 
+    @Test("under 'disambiguate', ⌥ on a special key is alt whatever the Meta preference")
+    func kittyOptionOnSpecialKeys() {
+        let modes = kitty(.disambiguate)
+        #expect(legacy(key(Code.enter, chars: "\r", option: true), modes: modes) == "\u{1b}[13;3u",
+                "⌥↩ still inserts a newline")
+        #expect(legacy(key(Code.backspace, chars: "\u{8}", option: true), modes: modes) == "\u{1b}[127;3u",
+                "⌥⌫ still deletes a word")
+        #expect(legacy(key(Code.left, option: true), modes: modes) == "\u{1b}[1;3D", "⌥← still jumps a word")
+    }
+
     @Test("under 'disambiguate', arrows and function keys keep CSI, with modifiers as usual")
     func kittyDisambiguateNavigation() {
         let modes = kitty(.disambiguate)

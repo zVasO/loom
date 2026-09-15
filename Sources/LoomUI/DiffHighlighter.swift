@@ -150,7 +150,7 @@ public enum DiffHighlighter {
         attributed.enumerateAttribute(.foregroundColor, in: range) { value, runRange, _ in
             var run = AttributedString(attributed.attributedSubstring(from: runRange).string)
             if let color = value as? NSColor {
-                run.foregroundColor = Color(nsColor: color)
+                run.swiftUI.foregroundColor = Color(nsColor: color)
             }
             result.append(run)
         }

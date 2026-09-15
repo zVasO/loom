@@ -1,6 +1,6 @@
 import Testing
-import LoomGit
 import Foundation
+@testable import LoomGit
 
 // What Loom drops into a review worktree — the /setup-pr-review command, its
 // guard hooks — must never show up in that worktree's `git status`, and must

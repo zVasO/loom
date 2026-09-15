@@ -54,6 +54,6 @@ let package = Package(
         .testTarget(name: "LoomGitTests", dependencies: ["LoomGit", "LoomCore"]),
         .testTarget(name: "LoomPersistenceTests", dependencies: ["LoomPersistence"]),
         .testTarget(name: "LoomWebTests", dependencies: ["LoomWeb"]),
-        .testTarget(name: "LoomUITests", dependencies: ["LoomUI"]),
+        .testTarget(name: "LoomUITests", dependencies: ["LoomUI", "LoomTerminal", "LoomGit"]),
     ]
 )

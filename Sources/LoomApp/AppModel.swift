@@ -801,15 +801,27 @@ public final class AppModel {
             if reviewSetupCommandEnabled {
                 // First launch only — a resumed session already carries the
                 // brief in its context. Detached from the caller: the PR tab
-                // must not wait seconds for claude to paint.
+                // must not wait seconds for claude to paint. Remembered, so a
+                // quick action fired meanwhile queues BEHIND it.
                 let invocation = PRReviewCommand.invocation(number: pr.number)
-                Task { await self.submitWhenPainted(invocation, to: id) }
+                pendingReviewSetup[id] = Task { await self.submitWhenPainted(invocation, to: id) }
             }
             return id
         } catch {
             startupError = String(describing: error)
             return nil
         }
+    }
+
+    /// The setup command still on its way to a fresh review session.
+    @ObservationIgnored private var pendingReviewSetup: [SessionID: Task<Void, Never>] = [:]
+
+    /// Waits for the setup command to have been submitted, when one is pending:
+    /// what a quick action must do before it speaks, or the two collide.
+    private func awaitReviewSetup(for id: SessionID) async {
+        guard let pending = pendingReviewSetup[id] else { return }
+        await pending.value
+        pendingReviewSetup[id] = nil
     }
 
     /// Submits a line to a session once claude has painted (fresh sessions
@@ -843,6 +855,9 @@ public final class AppModel {
                                       pr: GitHubService.PullRequest,
                                       in projectID: ProjectID) async -> SessionID? {
         guard let id = await launchPRReviewSession(pr, in: projectID) else { return nil }
+        // A fresh session first loads the PR: the question waits its turn, or
+        // claude answers it while the setup command lands mid-sentence.
+        await awaitReviewSetup(for: id)
         guard let surface = await surface(for: id) else { return id }
         for _ in 0..<40 where surface.screen.revision == 0 {
             try? await Task.sleep(for: .milliseconds(500))
