@@ -106,6 +106,12 @@ public final class SessionRuntime: @unchecked Sendable {
         queue.async { self.engine?.sendWheel(direction, atCol: col, row: row) }
     }
 
+    /// One click for a program that tracks the mouse — the only way to reach a
+    /// target it draws without a keybinding (TRM-06).
+    func sendClick(atCol col: Int, row: Int) {
+        queue.async { self.engine?.sendClick(atCol: col, row: row) }
+    }
+
     /// What the ENGINE owes the program, not what the user typed. On the session
     /// queue; optional-chained because the engine is built before the channel is.
     private func writeUpstream(_ bytes: ArraySlice<UInt8>) {

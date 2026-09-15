@@ -58,6 +58,18 @@ public final class SwiftTermEngine: TerminalEngine {
         terminal.sendEvent(buttonFlags: flags, x: col, y: row)
     }
 
+    /// A click is a PAIR on the wire: the program acts on the release, and one
+    /// left unsent leaves it holding a button forever.
+    public func sendClick(atCol col: Int, row: Int) {
+        guard terminal.mouseMode != .off else { return }
+        for release in [false, true] {
+            let flags = terminal.encodeButton(button: 0, release: release,
+                                              shift: false, meta: false,
+                                              control: false)
+            terminal.sendEvent(buttonFlags: flags, x: col, y: row)
+        }
+    }
+
     public func resize(to geometry: TerminalGeometry) {
         self.geometry = geometry
         terminal.resize(cols: geometry.cols, rows: geometry.rows)

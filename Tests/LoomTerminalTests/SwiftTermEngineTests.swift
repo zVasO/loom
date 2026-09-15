@@ -67,6 +67,33 @@ struct SwiftTermEngineTests {
         #expect(String(decoding: upstream, as: UTF8.self) == "\u{1B}[<64;4;6M\u{1B}[<65;4;6M")
     }
 
+    // The agent draws targets — a close box, a file row — that carry no
+    // keybinding whatsoever. A click is the ONLY way in, and it is a pair: the
+    // press opens it, the release is what the program acts on.
+    @Test("a click becomes an SGR press AND release for the program")
+    func clicEncodeEnPaireSGR() {
+        let engine = makeEngine()
+        var upstream: [UInt8] = []
+        engine.onUpstream = { upstream.append(contentsOf: $0) }
+        queue.sync {
+            engine.feed(ArraySlice("\u{1B}[?1000h\u{1B}[?1006h".utf8))
+            engine.sendClick(atCol: 3, row: 5)
+        }
+        // Button 0, coordinates 1-based on the wire; 'M' opens, 'm' closes.
+        #expect(String(decoding: upstream, as: UTF8.self) == "\u{1B}[<0;4;6M\u{1B}[<0;4;6m")
+    }
+
+    @Test("without mouse tracking a click sends nothing at all")
+    func clicMuetSansSuivi() {
+        let engine = makeEngine()
+        var upstream: [UInt8] = []
+        engine.onUpstream = { upstream.append(contentsOf: $0) }
+        queue.sync {
+            engine.sendClick(atCol: 0, row: 0)
+        }
+        #expect(upstream.isEmpty, "a program that did not ask for the mouse must not be fed bytes")
+    }
+
     @Test("without mouse tracking the wheel sends nothing at all")
     func moletteMuetteSansSuivi() {
         let engine = makeEngine()

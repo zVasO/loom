@@ -78,6 +78,12 @@ public final class TerminalSurface {
         runtime?.sendWheel(direction, atCol: col, row: row)
     }
 
+    /// One click at the cell under the pointer (0-based). Only a tracking agent
+    /// hears it; for everyone else a click is nothing but a selection.
+    public func sendClick(atCol col: Int, row: Int) {
+        runtime?.sendClick(atCol: col, row: row)
+    }
+
     /// TRM-02: the view announces its grid; engine and PTY follow (SIGWINCH on the
     /// agent side). Coalesced at the call site: only a genuinely new geometry gets through.
     public func resize(cols: Int, rows: Int) {

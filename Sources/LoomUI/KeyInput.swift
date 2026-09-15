@@ -60,22 +60,29 @@ public enum KeyTranslator {
 /// go through `interpretKeyEvents` to compose dead keys (ê, î…),
 /// ⌘ shortcuts stay with the system, ⌘V pastes into the agent's field.
 public struct KeyCaptureView: NSViewRepresentable {
-    /// Incremented by the host view when the user clicks the terminal:
-    /// explicit signal to reclaim focus, even if a TextField had it.
-    let focusTick: Int
     /// The agent tracks the mouse: the wheel is its input, not our scrolling.
     let mouseReporting: Bool
     let onWheel: ((WheelDirection, Int, Int) -> Void)?
+    /// A click the agent asked for, at the cell under the pointer (0-based).
+    let onClick: ((Int, Int) -> Void)?
+    /// The selected text, or nil when there is no selection.
+    let onCopy: (() -> String?)?
+    /// How many characters actually reached the pasteboard.
+    let onCopied: ((Int) -> Void)?
     let onText: (String) -> Void
 
     /// `onText` comes last so the trailing-closure form still means "the keystrokes".
-    public init(focusTick: Int = 0,
-                mouseReporting: Bool = false,
+    public init(mouseReporting: Bool = false,
                 onWheel: ((WheelDirection, Int, Int) -> Void)? = nil,
+                onClick: ((Int, Int) -> Void)? = nil,
+                onCopy: (() -> String?)? = nil,
+                onCopied: ((Int) -> Void)? = nil,
                 onText: @escaping (String) -> Void) {
-        self.focusTick = focusTick
         self.mouseReporting = mouseReporting
         self.onWheel = onWheel
+        self.onClick = onClick
+        self.onCopy = onCopy
+        self.onCopied = onCopied
         self.onText = onText
     }
 
@@ -83,6 +90,9 @@ public struct KeyCaptureView: NSViewRepresentable {
         let view = CaptureNSView()
         view.onText = onText
         view.onWheel = onWheel
+        view.onClick = onClick
+        view.onCopy = onCopy
+        view.onCopied = onCopied
         view.mouseReporting = mouseReporting
         return view
     }
@@ -90,13 +100,16 @@ public struct KeyCaptureView: NSViewRepresentable {
     public func updateNSView(_ view: CaptureNSView, context: Context) {
         view.onText = onText
         view.onWheel = onWheel
+        view.onClick = onClick
+        view.onCopy = onCopy
+        view.onCopied = onCopied
         view.mouseReporting = mouseReporting
         guard let window = view.window else { return }
-        let clicked = view.lastFocusTick != focusTick
-        view.lastFocusTick = focusTick
-        // Reclaiming focus: on an explicit click, or if nothing is focused anymore —
-        // never by stealing it from an active text field (renaming, palette…).
-        if clicked || window.firstResponder === window {
+        // Reclaiming focus when nothing is focused anymore — never by stealing it
+        // from an active text field (renaming, palette…). A click inside the pane
+        // is handled by the mouse monitor instead, which leaves the press itself
+        // alone so a selection drag can start on it.
+        if window.firstResponder === window {
             DispatchQueue.main.async { [weak view] in
                 view.map { $0.window?.makeFirstResponder($0) }
             }
@@ -106,11 +119,18 @@ public struct KeyCaptureView: NSViewRepresentable {
     public final class CaptureNSView: NSView {
         var onText: ((String) -> Void)?
         var onWheel: ((WheelDirection, Int, Int) -> Void)?
+        var onClick: ((Int, Int) -> Void)?
+        var onCopy: (() -> String?)?
+        var onCopied: ((Int) -> Void)?
         var mouseReporting = false
-        var lastFocusTick = 0
         private var clickMonitor: Any?
+        private var releaseMonitor: Any?
         private var wheelMonitor: Any?
         private var responderObservation: NSKeyValueObservation?
+        /// Where the press landed, kept until the release decides what it was.
+        private var press: (point: NSPoint, col: Int, row: Int)?
+        /// A hand never holds perfectly still: below this, the pointer did not travel.
+        private static let tapSlop: CGFloat = 3
         /// Sub-notch trackpad pixels, kept between events.
         private var wheelResidual: CGFloat = 0
         /// A flick of the trackpad must not become a burst the agent has to
@@ -156,11 +176,34 @@ public struct KeyCaptureView: NSViewRepresentable {
             clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
                 guard let self, event.window === self.window else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
+                self.press = nil
                 if self.bounds.contains(point) {
+                    let cell = self.gridPosition(of: point)
+                    self.press = (point: point, col: cell.col, row: cell.row)
                     DispatchQueue.main.async { [weak self] in
                         self.map { $0.window?.makeFirstResponder($0) }
                     }
                 }
+                return event
+            }
+            // 4. The agent also draws TARGETS — a close box, a file row, a "jump
+            //    to bottom". Nothing but a click reaches them: those actions carry
+            //    no keybinding at all. The click is decided on the RELEASE, because
+            //    only then is it known whether the pointer travelled: a press that
+            //    moved was a selection, and the agent must hear nothing of it.
+            releaseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+                guard let self, let press = self.press else { return event }
+                self.press = nil
+                guard self.mouseReporting, let onClick = self.onClick,
+                      event.window === self.window
+                else { return event }
+                let point = self.convert(event.locationInWindow, from: nil)
+                let cell = self.gridPosition(of: point)
+                guard TerminalClick.isTap(from: press.point, to: point,
+                                          sameCell: cell.col == press.col && cell.row == press.row,
+                                          slop: Self.tapSlop)
+                else { return event }
+                onClick(cell.col, cell.row)
                 return event
             }
             // 3. A full-screen agent REPAINTS its viewport instead of scrolling
@@ -218,6 +261,8 @@ public struct KeyCaptureView: NSViewRepresentable {
             responderObservation = nil
             if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
             clickMonitor = nil
+            if let releaseMonitor { NSEvent.removeMonitor(releaseMonitor) }
+            releaseMonitor = nil
             if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
             wheelMonitor = nil
         }
@@ -225,11 +270,30 @@ public struct KeyCaptureView: NSViewRepresentable {
         deinit {
             responderObservation?.invalidate()
             if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+            if let releaseMonitor { NSEvent.removeMonitor(releaseMonitor) }
             if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
         }
 
         public override func mouseDown(with event: NSEvent) {
             window?.makeFirstResponder(self)
+        }
+
+        /// Nothing claims a cursor since text selection became ours.
+        public override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .iBeam)
+        }
+
+        /// Edit ▸ Copy finds this through the responder chain — the view keeps
+        /// itself first responder, and the standard Edit menu is untouched.
+        @objc func copy(_ sender: Any?) {
+            copySelection()
+        }
+
+        private func copySelection() {
+            guard let text = onCopy?(), !text.isEmpty else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            onCopied?(text.count)
         }
 
         public override func keyDown(with event: NSEvent) {
@@ -275,6 +339,14 @@ public struct KeyCaptureView: NSViewRepresentable {
                 onText?(text)
                 return true
             }
+            // ⌘C is swallowed WHETHER OR NOT there is a selection. Letting it
+            // through on an empty one leaves the key equivalent unclaimed, and it
+            // falls to keyDown → super → noResponder → beep. `.textSelection`
+            // used to absorb that; nothing does since it left.
+            if characters == "c" {
+                copySelection()
+                return true
+            }
             // Mac editing shortcuts (⌘A, ⌘Z, ⌘←/→, ⌘⌫) — everything else
             // (⌘K, ⌘N, ⌘T…) falls through to the app's own commands.
             if let bytes = KeyTranslator.command(characters: characters, keyCode: event.keyCode) {
@@ -283,5 +355,13 @@ public struct KeyCaptureView: NSViewRepresentable {
             }
             return super.performKeyEquivalent(with: event)
         }
+    }
+}
+
+/// Greys out Edit ▸ Copy when there is nothing selected.
+extension KeyCaptureView.CaptureNSView: NSMenuItemValidation {
+    public func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        guard item.action == #selector(copy(_:)) else { return true }
+        return onCopy?()?.isEmpty == false
     }
 }

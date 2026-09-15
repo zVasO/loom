@@ -39,6 +39,10 @@ public protocol TerminalEngine: AnyObject {
     /// One wheel notch at a cell position (0-based) — the unit a tracking program
     /// counts. Silent when nothing is tracking.
     func sendWheel(_ direction: WheelDirection, atCol col: Int, row: Int)
+
+    /// One left click at a cell position (0-based): press AND release, the pair a
+    /// tracking program waits for. Silent when nothing is tracking.
+    func sendClick(atCol col: Int, row: Int)
 }
 
 public extension TerminalEngine {
@@ -48,6 +52,7 @@ public extension TerminalEngine {
     /// Adapters that parse no mode switching never track the mouse.
     var mouseReporting: Bool { false }
     func sendWheel(_ direction: WheelDirection, atCol col: Int, row: Int) {}
+    func sendClick(atCol col: Int, row: Int) {}
 }
 
 /// A wheel notch, as a tracking program sees it (buttons 4 and 5).

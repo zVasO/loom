@@ -8,6 +8,8 @@ struct SettingsPage: View {
     let model: AppModel
 
     @AppStorage("loom.terminal.fps") private var fps = 30
+    @AppStorage("loom.terminal.copyOnSelect") private var copyOnSelect = false
+    @AppStorage("loom.session.restoreOnLaunch") private var restoreOnLaunch = true
     @AppStorage("loom.shortcut.newSession") private var keyNewSession = "n"
     @AppStorage("loom.shortcut.newTab") private var keyNewTab = "t"
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
@@ -21,6 +23,7 @@ struct SettingsPage: View {
                     .foregroundStyle(DefaultTheme.primaryText)
 
                 generalSection
+                sessionsSection
                 reviewSection
                 shortcutsSection
                 badgesSection
@@ -73,6 +76,35 @@ struct SettingsPage: View {
                     }
                 }
                 Text("Caps how often terminal frames are produced during streaming. 30 fps is fluid everywhere; 60/120 for fast Macs. The first frame of any burst is always immediate.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                Divider().overlay(DefaultTheme.cardBorder)
+                Toggle(isOn: $copyOnSelect) {
+                    Text("Copy terminal selection on release")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                Text("Releasing a drag in a session terminal puts the text on the clipboard right away, the way iTerm does. Off, the selection waits for ⌘C. Select everything the pane holds with ⌘⇧A — ⌘A keeps typing into the agent's own field.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
+        }
+    }
+
+    // MARK: Sessions
+
+    private var sessionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("Sessions")
+            card {
+                Toggle(isOn: $restoreOnLaunch) {
+                    Text("Reopen the last session on launch")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                Text("Loom comes back to the project you left and restarts the session you had open. Your other closed sessions keep showing in the sidebar as they always do, and stay asleep until you click one — waking them all would reload every plugin and MCP server at once.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }

@@ -23,8 +23,8 @@ struct TerminalSurfaceTests {
     // TRM-06 — a full-screen agent takes the mouse and scrolls its own viewport.
     // The pane must learn about it, or the wheel dies in a ScrollView that has
     // nothing left to scroll.
-    @Test("mouse tracking reaches the surface, and the wheel reaches the PTY")
-    func moletteRelayeeALAgent() async throws {
+    @Test("mouse tracking reaches the surface, and wheel and click reach the PTY")
+    func souriRelayeeALAgent() async throws {
         let pty = ScriptedPTYHost()
         let runtime = try SessionRuntime.launch(
             SessionLaunchPlan(command: Command(executable: "/fake/claude"),
@@ -49,6 +49,11 @@ struct TerminalSurfaceTests {
         #expect(await pollUntil {
             String(decoding: pty.writtenBytes, as: UTF8.self).contains("\u{1B}[<64;4;6M")
         }, "the notch must land on the PTY, or the agent never scrolls")
+
+        surface.sendClick(atCol: 3, row: 5)
+        #expect(await pollUntil {
+            String(decoding: pty.writtenBytes, as: UTF8.self).contains("\u{1B}[<0;4;6M\u{1B}[<0;4;6m")
+        }, "the click must land on the PTY, or the agent's own targets are unreachable")
     }
 
     @Test("surface() is idempotent and its screen is never empty")
