@@ -108,6 +108,10 @@ struct PRWorkspaceView: View {
     /// GitHub's "Viewed" boxes over the diff's files — the recap and the
     /// checkboxes read it; a toggle flips it before GitHub answers.
     @State private var progress = FileReviewProgress.empty
+    /// Syntax colours, computed after the diff off the main thread: the
+    /// diff paints plain first, then coloured.
+    @State private var highlights = DiffHighlights.none
+    @Environment(\.colorScheme) private var colorScheme
     @State private var prTour: PRTour?
     @State private var tourLoading = false
     @State private var reviewBody = ""
@@ -131,6 +135,7 @@ struct PRWorkspaceView: View {
             prDetail = nil
             diffFiles = []
             progress = .empty
+            highlights = .none
             await load(refresh: false)
         }
     }
@@ -381,6 +386,7 @@ struct PRWorkspaceView: View {
                                       }
                                   },
                                   unified: unifiedDiff,
+                                  highlights: highlights,
                                   viewed: progress.viewed,
                                   changedSinceViewed: progress.changedSinceViewed,
                                   onToggleViewed: { path, on in
@@ -481,10 +487,21 @@ struct PRWorkspaceView: View {
                                         in: project.id, refresh: refresh)
         diffError = result.error
         let diff = result.diff
+        let parsed = await Task.detached(priority: .userInitiated) {
+            DiffParser.parse(diff)
+        }.value
         diffFiles = await Task.detached(priority: .userInitiated) {
-            DiffFileRows.compute(DiffParser.parse(diff))
+            DiffFileRows.compute(parsed)
         }.value
         diffLoading = false
+        // Colours come last, at lower priority: the diff is readable plain,
+        // and highlight.js over a big PR takes a moment.
+        let dark = colorScheme == .dark
+        let number = pr.number
+        let coloured = await Task.detached(priority: .utility) {
+            DiffHighlighter.highlight(parsed, dark: dark)
+        }.value
+        if pr.number == number { highlights = coloured }
         // GitHub's viewed boxes, after the diff: the files on screen are the
         // universe the recap counts.
         let views = await model.fileViews(pr.number, in: project.id, refresh: refresh)

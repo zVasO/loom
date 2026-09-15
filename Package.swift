@@ -17,6 +17,9 @@ let package = Package(
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", .upToNextMinor(from: "1.18.0")),
         // ADR-0002 : GRDB pour migrations contrôlées, FTS5, accès concurrents.
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
+        // Coloration syntaxique du diff : highlight.js sous JavaScriptCore,
+        // 190 langages. Épinglé en minor : le JS embarqué change à chaque mineure.
+        .package(url: "https://github.com/raspu/Highlightr.git", .upToNextMinor(from: "2.3.0")),
     ],
     targets: [
         .target(name: "LoomCore"),
@@ -31,7 +34,9 @@ let package = Package(
         .target(name: "LoomSessions", dependencies: ["LoomCore", "LoomTerminal", "LoomAgents", "LoomPersistence", "LoomGit"]),
         // Adapters de test du seam PTY, partagés par les cibles de test (jamais exposé en produit).
         .target(name: "LoomTerminalTestSupport", dependencies: ["LoomCore", "LoomTerminal"]),
-        .target(name: "LoomUI", dependencies: ["LoomCore", "LoomTerminal"]),
+        // LoomUI lit les valeurs de LoomGit (diff) pour les colorer : sens UI → service, jamais l'inverse.
+        .target(name: "LoomUI", dependencies: ["LoomCore", "LoomTerminal", "LoomGit",
+                                               .product(name: "Highlightr", package: "Highlightr")]),
         .executableTarget(
             name: "LoomApp",
             dependencies: [

@@ -60,6 +60,8 @@ struct SplitDiffView: View {
     /// Unified layout: one full-width column (deletions then additions) —
     /// whole lines stay readable; split keeps old/new aligned side by side.
     var unified = false
+    /// Syntax colours per line, computed after the diff; empty paints plain.
+    var highlights = DiffHighlights.none
     /// GitHub's "Viewed" checkbox per file: checked files fold away.
     var viewed: Set<String> = []
     /// Viewed once, changed since: unchecked again, and flagged.
@@ -474,20 +476,20 @@ struct SplitDiffView: View {
                             // the addition/context line, both with dual gutters.
                             VStack(alignment: .leading, spacing: 0) {
                                 if let left = row.left, left.kind == .deletion {
-                                    unifiedLine(left, isOld: true)
+                                    unifiedLine(left, isOld: true, file: file)
                                 }
                                 if let right = row.right {
-                                    unifiedLine(right, isOld: false)
+                                    unifiedLine(right, isOld: false, file: file)
                                 }
                             }
                         } else {
                             HStack(alignment: .top, spacing: 0) {
-                                side(row.left, isOld: true)
+                                side(row.left, isOld: true, file: file)
                                     .frame(maxWidth: .infinity, alignment: .topLeading)
                                 Rectangle()
                                     .fill(DefaultTheme.cardBorder)
                                     .frame(width: 1)
-                                side(row.right, isOld: false)
+                                side(row.right, isOld: false, file: file)
                                     .frame(maxWidth: .infinity, alignment: .topLeading)
                             }
                         }
@@ -548,7 +550,7 @@ struct SplitDiffView: View {
     /// Long lines wrap instead of scrolling: the code column starts after the
     /// gutter, so continuations already hang under the code, not the number.
     @ViewBuilder
-    private func side(_ line: DiffParser.Line?, isOld: Bool) -> some View {
+    private func side(_ line: DiffParser.Line?, isOld: Bool, file: String) -> some View {
         let background: Color = switch line?.kind {
         case .addition: DefaultTheme.groupHeader.opacity(0.12)
         case .deletion: DefaultTheme.danger.opacity(0.12)
@@ -559,7 +561,7 @@ struct SplitDiffView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(width: 34, alignment: .trailing)
-            Text(line.map { marker($0) + $0.text } ?? "")
+            Text(line.map { code($0, isOld: isOld, file: file) } ?? AttributedString())
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(line?.kind == .context || line == nil
                                  ? DefaultTheme.primaryText.opacity(0.75)
@@ -607,7 +609,7 @@ struct SplitDiffView: View {
 
     /// One full-width unified line: old + new number gutters, then the text.
     @ViewBuilder
-    private func unifiedLine(_ line: DiffParser.Line, isOld: Bool) -> some View {
+    private func unifiedLine(_ line: DiffParser.Line, isOld: Bool, file: String) -> some View {
         let background: Color = switch line.kind {
         case .addition: DefaultTheme.groupHeader.opacity(0.12)
         case .deletion: DefaultTheme.danger.opacity(0.12)
@@ -622,7 +624,7 @@ struct SplitDiffView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(width: 34, alignment: .trailing)
-            Text(marker(line) + line.text)
+            Text(code(line, isOld: isOld, file: file))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(line.kind == .context
                                  ? DefaultTheme.primaryText.opacity(0.75)
@@ -640,6 +642,19 @@ struct SplitDiffView: View {
         case .deletion: "− "
         case .context: "  "
         }
+    }
+
+    /// The marker, then the line — coloured by language when the highlights
+    /// have arrived, plain (and identical in shape) until then.
+    private func code(_ line: DiffParser.Line, isOld: Bool, file: String) -> AttributedString {
+        var result = AttributedString(marker(line))
+        if let coloured = highlights.line(path: file, isOld: isOld,
+                                          number: isOld ? line.oldNumber : line.newNumber) {
+            result.append(coloured)
+        } else {
+            result.append(AttributedString(line.text))
+        }
+        return result
     }
 }
 
