@@ -139,7 +139,15 @@ public final class AppModel {
     public private(set) var sessions: [SessionItem] = []
     /// PRJ-03: the sidebar groups by project.
     public private(set) var projects: [ProjectRecord] = []
-    public var selectedProject: ProjectID?
+    /// Remembered across launches: landing in the project you left is half of
+    /// "everything as it was", and the sidebar is scoped to it.
+    public var selectedProject: ProjectID? {
+        didSet {
+            guard selectedProject != oldValue else { return }
+            UserDefaults.standard.set(selectedProject?.rawValue.uuidString,
+                                      forKey: "loom.project.last")
+        }
+    }
     /// UC-7: offered for Resume on relaunch.
     public private(set) var interruptedSessions: [SessionRecord] = []
     /// SES-07: completed/failed/archived, browsable.
@@ -268,6 +276,7 @@ public final class AppModel {
     public func start() {
         do {
             try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
+            loadPRListCache()
             let store = try SessionStore(path: supportDirectory.appendingPathComponent("loom.sqlite").path)
             self.store = store
             try store.markLiveSessionsInterrupted()
@@ -354,18 +363,13 @@ public final class AppModel {
         }
         projects = ((try? store?.activeProjects()) ?? nil) ?? []
         applySavedProjectOrder()
-        if selectedProject == nil { selectedProject = projects.first?.id }
+        if selectedProject == nil { selectedProject = lastOpenedProject ?? projects.first?.id }
     }
 
     // MARK: - v4: GitHub PR review through the user's authenticated gh
 
     private func projectRepo(_ id: ProjectID?) -> URL? {
         project(id).map { URL(fileURLWithPath: $0.path) }
-    }
-
-    public func listPRs(for projectID: ProjectID) async -> [GitHubService.PullRequest] {
-        guard let repo = projectRepo(projectID) else { return [] }
-        return (try? await GitHubService().listPRs(in: repo)) ?? []
     }
 
     public func prDetail(_ number: Int, in projectID: ProjectID,
@@ -483,6 +487,9 @@ public final class AppModel {
     public var pendingPR: PendingPR?
 
     public private(set) var prCache: [ProjectID: [GitHubService.PullRequest]] = [:]
+    /// When each list was fetched: the TTL reads it, and so does the age the
+    /// refresh button reports.
+    public private(set) var prFetchedAt: [ProjectID: Date] = [:]
     public private(set) var prLoading: Set<ProjectID> = []
     /// PRs whose review session is being prepared (worktree fetch + launch) —
     /// the UI shows progress instead of feeling frozen during the network fetch.
@@ -492,16 +499,67 @@ public final class AppModel {
     private var prDetailCache: [String: GitHubService.PRDetail] = [:]
     private var prDiffCache: [String: String] = [:]
     private var prCommentsCache: [String: [GitHubService.ReviewComment]] = [:]
+    private var prListCache: PRListCache { PRListCache(directory: supportDirectory) }
 
+    /// Seeds every project's PR list from disk: after a relaunch the tab
+    /// paints its lists, and their counts, without a single `gh` call.
+    private func loadPRListCache() {
+        for (projectID, entry) in prListCache.load() {
+            prCache[projectID] = entry.prs
+            prFetchedAt[projectID] = entry.fetchedAt
+        }
+    }
+
+    /// Projects that no longer exist are dropped here rather than at load
+    /// time, where `projects` has not been read from the database yet.
+    private func savePRListCache() {
+        let known = Set(projects.map(\.id))
+        let entries = prCache.reduce(into: [ProjectID: PRListCache.Entry]()) { result, pair in
+            guard known.contains(pair.key), let fetchedAt = prFetchedAt[pair.key] else { return }
+            result[pair.key] = PRListCache.Entry(fetchedAt: fetchedAt, prs: pair.value)
+        }
+        let cache = prListCache
+        Task.detached(priority: .utility) { cache.save(entries) }
+    }
+
+    /// How old a project's cached list is — nil when nothing is cached.
+    public func prCacheAge(for projectID: ProjectID) -> TimeInterval? {
+        prFetchedAt[projectID].map { Date().timeIntervalSince($0) }
+    }
+
+    /// What the refresh button says: where the list on screen comes from.
+    public func prCacheHelp(for projectID: ProjectID) -> String {
+        guard let age = prCacheAge(for: projectID) else { return "Fetch the pull requests" }
+        let minutes = Int(age / 60)
+        let when = minutes < 1 ? "just now"
+                 : minutes < 60 ? "\(minutes) min ago"
+                 : "\(minutes / 60) h ago"
+        return "Loaded \(when) — refresh"
+    }
+
+    /// Fetches only what the cache cannot answer: nothing stored, or stored
+    /// longer ago than the TTL. What visiting a project calls.
+    public func ensurePRs(for projectID: ProjectID) async {
+        if let age = prCacheAge(for: projectID), age <= PRListCache.ttl { return }
+        await refreshPRs(for: projectID)
+    }
+
+    /// Fetches whatever the cache's age — the refresh button.
     public func refreshPRs(for projectID: ProjectID) async {
         guard !prLoading.contains(projectID) else { return }
         prLoading.insert(projectID)
+        defer { prLoading.remove(projectID) }
+        guard let repo = projectRepo(projectID) else { return }
+        // A failed gh call must never be stamped fresh: the failure would then
+        // be served from the cache for the whole TTL.
+        guard let prs = try? await GitHubService().listPRs(in: repo) else { return }
         let prefix = "\(projectID.rawValue.uuidString)#"
         prDetailCache = prDetailCache.filter { !$0.key.hasPrefix(prefix) }
         prDiffCache = prDiffCache.filter { !$0.key.hasPrefix(prefix) }
         prCommentsCache = prCommentsCache.filter { !$0.key.hasPrefix(prefix) }
-        prCache[projectID] = await listPRs(for: projectID)
-        prLoading.remove(projectID)
+        prCache[projectID] = prs
+        prFetchedAt[projectID] = Date()
+        savePRListCache()
     }
 
     public func isLaunchingReview(forPR number: Int, in projectID: ProjectID) -> Bool {
@@ -818,6 +876,15 @@ public final class AppModel {
         projects.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
         UserDefaults.standard.set(projects.map(\.id.rawValue.uuidString),
                                   forKey: "loom.projects.order")
+    }
+
+    /// `nil` when the remembered project has since been removed.
+    private var lastOpenedProject: ProjectID? {
+        guard let saved = UserDefaults.standard.string(forKey: "loom.project.last"),
+              let uuid = UUID(uuidString: saved)
+        else { return nil }
+        let id = ProjectID(uuid)
+        return projects.contains { $0.id == id } ? id : nil
     }
 
     private func applySavedProjectOrder() {

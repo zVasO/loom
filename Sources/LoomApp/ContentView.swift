@@ -91,6 +91,9 @@ struct ContentView: View {
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
     @State private var selected: DetailSelection?
+    @AppStorage("loom.session.restoreOnLaunch") private var restoreOnLaunch = true
+    /// The session that was open at quit — reopened on the next launch.
+    @AppStorage("loom.session.lastOpened") private var lastOpenedSession = ""
     @State private var paletteShown = false
 
     var body: some View {
@@ -135,10 +138,15 @@ struct ContentView: View {
         .onAppear {
             model.start()
             applyTheme()
+            restoreLastSession()
         }
         // The app follows the project you are working in: override, else global.
         .onChange(of: model.selectedProject) { applyTheme() }
-        .onChange(of: selected) { applyTheme() }
+        .onChange(of: selected) {
+            applyTheme()
+            // A web pane is not worth reopening on its own; the last SESSION is.
+            if case .session(let id) = selected { lastOpenedSession = id.rawValue.uuidString }
+        }
         .onChange(of: tab) { applyTheme() }
         .onReceive(NotificationCenter.default.publisher(for: .loomThemeChanged)) { _ in
             applyTheme()
@@ -200,6 +208,23 @@ struct ContentView: View {
 
     private func applyTheme() {
         ThemeStore.shared.apply(projectID: contextProjectID)
+    }
+
+    /// The sidebar already lists closed sessions and wakes them on click — what
+    /// did not survive a relaunch was being DROPPED somewhere else entirely:
+    /// another project, nothing open. We only put the user back where they were,
+    /// and start the one session they were actually in.
+    private func restoreLastSession() {
+        guard restoreOnLaunch,
+              let uuid = UUID(uuidString: lastOpenedSession)
+        else { return }
+        let id = SessionID(uuid)
+        guard let record = model.dormantSessions.first(where: { $0.id == id }) else { return }
+        if let project = record.projectID { model.selectedProject = project }
+        Task {
+            await model.resumeDormant(id)
+            selected = .session(id)
+        }
     }
 
     // MARK: - Navigation bar
@@ -303,12 +328,19 @@ struct ContentView: View {
         .frame(height: 52)
         .background(DefaultTheme.background)
         .contentShape(Rectangle())
-        // The navbar IS the title bar (native one hidden): double-clicking it
-        // toggles full screen, like a browser's tab strip. Buttons win over
-        // the tap, and a double-click on empty navbar space is safe.
-        .onTapGesture(count: 2) {
-            NSApp.keyWindow?.toggleFullScreen(nil)
-        }
+        // The navbar IS the title bar (native one hidden), and double-clicking it
+        // goes FULL SCREEN — deliberately not the zoom a stock title bar performs.
+        // Below AppKit's title-bar band the gesture fires and buttons win over it;
+        // inside the band the window eats the second click, hence the monitor.
+        .onTapGesture(count: 2) { toggleFullScreen() }
+        .background(TitleBarDoubleClick { toggleFullScreen() })
+    }
+
+    /// keyWindow is nil while a sheet or the palette holds focus, and the
+    /// gesture would then do nothing at all.
+    private func toggleFullScreen() {
+        let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first
+        window?.toggleFullScreen(nil)
     }
 
     // MARK: - ⌘K action palette (Raycast-style)
@@ -471,9 +503,6 @@ struct ProjectsView: View {
     @State private var removalTarget: ProjectRecord?
     @State private var fanOut = 1
     // v4 — PR review
-    @State private var prs: [GitHubService.PullRequest] = []
-    @State private var prsLoading = false
-    @State private var selectedPR: GitHubService.PullRequest?
     // P1 perf: filesystem scans live in .task, never in body.
     @State private var loadedSkills: [SkillEntry] = []
     @State private var loadedRules: [AppModel.RuleFile] = []
@@ -606,11 +635,9 @@ struct ProjectsView: View {
             filesPath = ""
             gitData = nil
             viewedDocument = nil
-            resetPRState()
         }
         .onChange(of: projectTab) {
             viewedDocument = nil
-            if projectTab != .prs { resetPRState() }
         }
         .task(id: "\(current?.id.rawValue.uuidString ?? "")-\(projectTab.rawValue)") {
             guard let project = current else { return }
@@ -1017,11 +1044,6 @@ struct ProjectsView: View {
 
     // MARK: PRs tab (v4) — inbox, detail, verdict, guided tour
 
-    private func resetPRState() {
-        prs = []
-        selectedPR = nil
-    }
-
     @ViewBuilder
     private func prsTab(_ project: ProjectRecord) -> some View {
         if !GitHubService.isAvailable {
@@ -1033,16 +1055,23 @@ struct ProjectsView: View {
         }
     }
 
+    /// Reads the shared PR cache: the same list the PRs tab shows, fetched at
+    /// most once per TTL however many times the project is revisited.
     private func prListView(_ project: ProjectRecord) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let prs = model.prCache[project.id] ?? []
+        let loading = model.prLoading.contains(project.id)
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 sectionHeader("OPEN PULL REQUESTS", count: prs.count,
                               color: DefaultTheme.badgeColor(for: .working))
                 Spacer()
-                if prsLoading { ProgressView().controlSize(.small) }
-                GhostButton(systemImage: "arrow.clockwise") { loadPRs(project) }
+                if loading { ProgressView().controlSize(.small) }
+                GhostButton(systemImage: "arrow.clockwise") {
+                    Task { await model.refreshPRs(for: project.id) }
+                }
+                .help(model.prCacheHelp(for: project.id))
             }
-            if prs.isEmpty && !prsLoading {
+            if prs.isEmpty && !loading {
                 Text("No open pull request — or gh is not authenticated for this repo.")
                     .font(.system(size: 12))
                     .foregroundStyle(DefaultTheme.secondaryText)
@@ -1055,15 +1084,7 @@ struct ProjectsView: View {
                 }
             }
         }
-        .task(id: current?.id) { loadPRs(project) }
-    }
-
-    private func loadPRs(_ project: ProjectRecord) {
-        prsLoading = true
-        Task {
-            prs = await model.listPRs(for: project.id)
-            prsLoading = false
-        }
+        .task(id: current?.id) { await model.ensurePRs(for: project.id) }
     }
 
     private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {

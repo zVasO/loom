@@ -15,7 +15,7 @@ public struct GitHubService: Sendable {
 
     // MARK: - Value types
 
-    public struct PullRequest: Sendable, Equatable, Identifiable {
+    public struct PullRequest: Sendable, Equatable, Identifiable, Codable {
         public var id: Int { number }
         public let number: Int
         public let title: String
