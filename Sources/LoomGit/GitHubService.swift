@@ -566,6 +566,46 @@ public struct GitHubService: Sendable {
         return path
     }
 
+    /// Files Loom drops into a review worktree, kept out of `git status` for
+    /// THIS worktree only: an excludes file of our own, wired through the
+    /// worktree-scoped config (`core.excludesFile`), never the repository's
+    /// shared `info/exclude` and never the user's own checkout.
+    public static let loomDirectory = ".loom-review"
+
+    /// Installs a slash command in the worktree (`.claude/commands/<name>.md`)
+    /// so claude finds it at startup. Rewritten on every install: the text
+    /// follows what the user set in Settings.
+    public func installCommand(named name: String, markdown: String, in worktree: URL) async throws {
+        let commands = worktree.appendingPathComponent(".claude/commands")
+        try FileManager.default.createDirectory(at: commands, withIntermediateDirectories: true)
+        try markdown.write(to: commands.appendingPathComponent("\(name).md"),
+                           atomically: true, encoding: .utf8)
+        try await excludeLoomFiles(in: worktree)
+    }
+
+    /// The exclude list a review worktree carries — everything Loom writes there.
+    static func loomExcludes(commandNames: [String]) -> String {
+        (["/\(loomDirectory)/", "/.loom-guard-hooks/"]
+         + commandNames.map { "/.claude/commands/\($0).md" })
+            .joined(separator: "\n") + "\n"
+    }
+
+    private func excludeLoomFiles(in worktree: URL) async throws {
+        let directory = worktree.appendingPathComponent(Self.loomDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let commandsDirectory = worktree.appendingPathComponent(".claude/commands")
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: commandsDirectory.path)) ?? [])
+            .filter { $0.hasSuffix(".md") }
+            .map { String($0.dropLast(3)) }
+            .sorted()
+        let excludes = directory.appendingPathComponent("exclude")
+        try Self.loomExcludes(commandNames: names).write(to: excludes, atomically: true, encoding: .utf8)
+        // Worktree-scoped config needs the extension on the repository — the
+        // guard hooks already rely on it; this is the same switch.
+        _ = try await runGit(["config", "extensions.worktreeConfig", "true"], in: worktree)
+        _ = try await runGit(["config", "--worktree", "core.excludesFile", excludes.path], in: worktree)
+    }
+
     /// Reverses `protectWorktree` (setting turned off on a reused worktree).
     public func unprotectWorktree(_ path: URL) async throws {
         _ = try? await runGit(["config", "--worktree", "--unset", "core.hooksPath"], in: path)

@@ -181,6 +181,28 @@ public final class AppModel {
         set { UserDefaults.standard.set(newValue, forKey: "loom.review.readOnly") }
     }
 
+    /// `/setup-pr-review` is typed into a fresh review session so claude loads
+    /// the PR before anyone asks. Off: the command is still installed in the
+    /// worktree, the user types it when they want it.
+    public var reviewSetupCommandEnabled: Bool {
+        get { (UserDefaults.standard.object(forKey: "loom.review.setupCommand.enabled") as? Bool) ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "loom.review.setupCommand.enabled") }
+    }
+
+    /// The command's text as the user edited it; nil = Loom's default. Filled
+    /// with the PR's placeholders at every review launch.
+    public var reviewSetupCommandTemplate: String? {
+        get { UserDefaults.standard.string(forKey: "loom.review.setupCommand.template") }
+        set {
+            let trimmed = newValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if trimmed.isEmpty || trimmed == PRReviewCommand.defaultTemplate {
+                UserDefaults.standard.removeObject(forKey: "loom.review.setupCommand.template")
+            } else {
+                UserDefaults.standard.set(newValue, forKey: "loom.review.setupCommand.template")
+            }
+        }
+    }
+
     // MARK: - Worktree preference (per project, default OFF)
 
     /// Whether new sessions of a project run in an isolated worktree (GIT-01)
@@ -733,12 +755,28 @@ public final class AppModel {
             startupError = "Could not check out PR #\(pr.number): \(Self.ghErrorText(error))"
             return nil
         }
+        // The /setup-pr-review command, rewritten at every launch so the text
+        // in Settings is what claude reads. Installed even when it will not be
+        // typed automatically: the user can call it.
+        let commandMarkdown = PRReviewCommand.render(
+            template: reviewSetupCommandTemplate,
+            pr: .init(number: pr.number, title: pr.title, url: pr.url,
+                      base: pr.baseBranch.isEmpty ? "main" : pr.baseBranch, head: pr.branch))
+        do {
+            try await GitHubService().installCommand(named: PRReviewCommand.name,
+                                                     markdown: commandMarkdown, in: worktree)
+        } catch {
+            // A missing command is not a missing review: the session launches
+            // without it, and says why.
+            startupError = "Could not install /\(PRReviewCommand.name): \(Self.ghErrorText(error))"
+        }
         do {
             let sessionID = SessionID()
             let token = UUID().uuidString
             // claude boots BARE — no predefined prompt: the user decides what
             // the session does (and claude is not burning an agent run on a
-            // review nobody asked for yet).
+            // review nobody asked for yet). The setup command is typed after
+            // the boot, from the outside, and only when the setting says so.
             var spec = SessionManager.SessionSpec(
                 command: adapter.launchCommand(session: sessionID, initialPrompt: nil,
                                                hookToken: token),
@@ -757,11 +795,34 @@ public final class AppModel {
                                         branch: pr.branch, badge: "PR #\(pr.number)"))
             rememberReviewSession(id, forPR: pr.number, in: projectID)
             reloadPersistedSessions()
+            if reviewSetupCommandEnabled {
+                // First launch only — a resumed session already carries the
+                // brief in its context. Detached from the caller: the PR tab
+                // must not wait seconds for claude to paint.
+                let invocation = PRReviewCommand.invocation(number: pr.number)
+                Task { await self.submitWhenPainted(invocation, to: id) }
+            }
             return id
         } catch {
             startupError = String(describing: error)
             return nil
         }
+    }
+
+    /// Submits a line to a session once claude has painted (fresh sessions
+    /// boot for seconds; sending into the void helps nobody). Pasted, not
+    /// typed: a paste never opens the slash-command menu, so the Return that
+    /// follows submits instead of picking a suggestion.
+    private func submitWhenPainted(_ line: String, to id: SessionID) async {
+        guard let surface = await surface(for: id) else { return }
+        for _ in 0..<60 where surface.screen.revision == 0 {
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        guard surface.screen.revision != 0 else { return }
+        // A first paint is a prompt, not a prompt READY for input: claude
+        // still negotiates its terminal modes for a beat after it.
+        try? await Task.sleep(for: .milliseconds(400))
+        surface.send(KeyTranslator.paste(line, bracketed: surface.modes.bracketedPaste) + "\r")
     }
 
     /// Types text into a session's input WITHOUT submitting — the same path as

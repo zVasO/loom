@@ -1,3 +1,4 @@
+import LoomAgents
 import LoomCore
 import LoomUI
 import SwiftUI
@@ -186,9 +187,51 @@ struct SettingsPage: View {
                 Text("Guard hooks block commit/push in PR review worktrees — the session can build and test but never lands work on someone else's branch. Applies at the next checkout of each PR.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
+                Divider().overlay(DefaultTheme.cardBorder)
+                Toggle(isOn: Binding(
+                    get: { model.reviewSetupCommandEnabled },
+                    set: { model.reviewSetupCommandEnabled = $0 })) {
+                    Text("Run /\(PRReviewCommand.name) when a review starts")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                Text("The command is installed in every review worktree either way; on, it is typed into a fresh review session so claude loads the PR — body, diff, threads, linked issues — and keeps a brief in memory before you point it at lines.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                HStack {
+                    Text("/\(PRReviewCommand.name) command")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                    Spacer()
+                    if model.reviewSetupCommandTemplate != nil {
+                        GhostButton("Reset to default", systemImage: "arrow.counterclockwise") {
+                            model.reviewSetupCommandTemplate = nil
+                            setupCommandDraft = PRReviewCommand.defaultTemplate
+                        }
+                    }
+                }
+                TextEditor(text: $setupCommandDraft)
+                    .font(.system(size: 11, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(minHeight: 220)
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    .onAppear {
+                        setupCommandDraft = model.reviewSetupCommandTemplate ?? PRReviewCommand.defaultTemplate
+                    }
+                    .onChange(of: setupCommandDraft) { _, draft in
+                        model.reviewSetupCommandTemplate = draft
+                    }
+                Text("Claude Code slash-command markdown: a frontmatter, then the prompt. Placeholders filled at launch: \(PRReviewCommand.placeholders.joined(separator: ", ")). $ARGUMENTS is claude's own — the PR number typed after the command.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
             }
         }
     }
+
+    @State private var setupCommandDraft = ""
 
     // MARK: Badges
 
