@@ -905,9 +905,15 @@ public final class AppModel {
     public func launchShell(for parent: SessionItem, title: String? = nil) async -> SessionID? {
         guard let manager else { return nil }
         let record = (try? store?.session(id: parent.id)) ?? nil
-        let directory = record?.worktreePath.map(URL.init(fileURLWithPath:))
-            ?? project(parent.projectID).map { URL(fileURLWithPath: $0.path) }
-            ?? FileManager.default.homeDirectoryForCurrentUser
+        guard let directory = workingDirectory(worktreePath: record?.worktreePath,
+                                               project: project(parent.projectID))
+        else {
+            startupError = """
+            Could not open a terminal for \(parent.title): its folder is missing \
+            or its project is no longer in Loom.
+            """
+            return nil
+        }
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let count = sessions.filter { $0.parentID == parent.id }.count
             + dormantShells.filter { $0.parentID == parent.id }.count + 1
@@ -1187,6 +1193,22 @@ public final class AppModel {
         projects.first { $0.id == id }
     }
 
+    /// No home fallback: an agent launched there would get the whole home, and
+    /// a failed `chdir` is ignored downstream (SwiftTerm `Pty.swift`), so a
+    /// stale path would start the agent wherever the app happens to sit.
+    private func workingDirectory(worktreePath: String?,
+                                  project: ProjectRecord?) -> URL? {
+        guard let candidate = worktreePath.map(URL.init(fileURLWithPath:))
+            ?? project.map({ URL(fileURLWithPath: $0.path) })
+        else { return nil }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: candidate.path,
+                                             isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else { return nil }
+        return candidate
+    }
+
     /// UC-7: Resume — same identifier, hooks re-injected, original worktree.
     /// If claude never persisted the conversation (session launched but never
     /// used), `--resume` would have nothing to resume: we relaunch FRESH under
@@ -1197,8 +1219,15 @@ public final class AppModel {
         let command = ClaudeNativeSessions.exists(record.id)
             ? adapter.resumeCommand(session: record.id, hookToken: token)
             : adapter.launchCommand(session: record.id, initialPrompt: nil, hookToken: token)
-        let directory = record.worktreePath.map(URL.init(fileURLWithPath:))
-            ?? FileManager.default.homeDirectoryForCurrentUser
+        guard let directory = workingDirectory(worktreePath: record.worktreePath,
+                                               project: project(record.projectID))
+        else {
+            startupError = """
+            Could not resume \(record.title): its folder is missing or its \
+            project is no longer in Loom.
+            """
+            return
+        }
         do {
             try await manager.resume(record, command: command, workingDirectory: directory,
                                      geometry: preferredGrid,
@@ -1278,8 +1307,14 @@ public final class AppModel {
         guard let manager else { return nil }
         if let projectID { selectedProject = projectID }
         let project = project(selectedProject)
-        let directory = project.map { URL(fileURLWithPath: $0.path) }
-            ?? FileManager.default.homeDirectoryForCurrentUser
+        guard let directory = workingDirectory(worktreePath: nil, project: project)
+        else {
+            startupError = """
+            Could not start a session: no project is selected, or its folder is \
+            missing.
+            """
+            return nil
+        }
         let initialPrompt = (prompt?.isEmpty == false) ? prompt : nil
         do {
             let sessionID = SessionID()
