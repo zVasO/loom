@@ -287,6 +287,7 @@ struct PRFilterEditorSheet: View {
 }
 
 /// Small shared chips for the enriched PR rows.
+@MainActor
 enum PRChips {
     static func label(_ label: GitHubService.Label) -> some View {
         HStack(spacing: 4) {

@@ -525,7 +525,8 @@ public struct KeyCaptureView: NSViewRepresentable {
         // alone so a selection drag can start on it.
         if window.firstResponder === window {
             DispatchQueue.main.async { [weak view] in
-                view.map { $0.window?.makeFirstResponder($0) }
+                guard let view else { return }
+                view.window?.makeFirstResponder(view)
             }
         }
     }
@@ -623,7 +624,8 @@ public struct KeyCaptureView: NSViewRepresentable {
                     let cell = self.gridPosition(of: point)
                     self.press = (point: point, col: cell.col, row: cell.row)
                     DispatchQueue.main.async { [weak self] in
-                        self.map { $0.window?.makeFirstResponder($0) }
+                        guard let self else { return }
+                        self.window?.makeFirstResponder(self)
                     }
                 }
                 return event

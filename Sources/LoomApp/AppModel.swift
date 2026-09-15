@@ -1522,11 +1522,6 @@ public final class AppModel {
 
     // MARK: - Actions (UC-1, SES-06)
 
-    /// UC-1, per the reference: one click launches claude immediately in the
-    /// project — no prior input; the goal is then typed in the terminal.
-    /// (`prompt` remains possible for the palette or future shortcuts.)
-    /// Returns the identifier of the created session.
-    @discardableResult
     /// Where a new session works: straight in the project folder, or on an
     /// isolated worktree of its own (GIT-01). A per-launch choice; the
     /// project's preference is only the default.
@@ -1540,6 +1535,11 @@ public final class AppModel {
         worktreeEnabled(for: projectID) ? .newWorktree : .projectFolder
     }
 
+    /// UC-1, per the reference: one click launches claude immediately in the
+    /// project — no prior input; the goal is then typed in the terminal.
+    /// (`prompt` remains possible for the palette or future shortcuts.)
+    /// Returns the identifier of the created session.
+    @discardableResult
     public func launchSession(prompt: String? = nil, in projectID: ProjectID? = nil,
                               placement: LaunchPlacement? = nil) async -> SessionID? {
         guard let manager else { return nil }
