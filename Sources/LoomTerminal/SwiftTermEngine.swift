@@ -50,6 +50,23 @@ public final class SwiftTermEngine: TerminalEngine {
 
     public var mouseReporting: Bool { terminal.mouseMode != .off }
 
+    /// What the program negotiated, read straight off the emulator. SwiftTerm
+    /// answers the kitty `CSI ? u` probe itself, so a program that pushes
+    /// flags expects `CSI … u` reports from then on — the encoder must know.
+    public var modes: TerminalModes {
+        TerminalModes(applicationCursorKeys: terminal.applicationCursor,
+                      bracketedPaste: terminal.bracketedPasteMode,
+                      mouseReporting: terminal.mouseMode != .off,
+                      keyboardEnhancement: KeyboardEnhancement(
+                          rawValue: terminal.keyboardEnhancementFlags.rawValue))
+    }
+
+    /// SwiftTerm remembers the state and emits `CSI I` / `CSI O` only while the
+    /// program asked for focus events (DECSET 1004) — nothing to gate here.
+    public func setFocus(_ focused: Bool) {
+        terminal.setTerminalFocus(focused)
+    }
+
     public func sendWheel(_ direction: WheelDirection, atCol col: Int, row: Int) {
         guard terminal.mouseMode != .off else { return }
         let flags = terminal.encodeButton(button: direction == .up ? 4 : 5,

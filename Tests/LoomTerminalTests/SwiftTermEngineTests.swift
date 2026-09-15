@@ -52,6 +52,58 @@ struct SwiftTermEngineTests {
         }
     }
 
+    // The key encoder reads the modes a program negotiated. What claude does at
+    // startup: bracketed paste on, then a kitty keyboard probe — SwiftTerm
+    // answers that probe itself, so the flags pushed afterwards MUST reach the
+    // encoder or every modified key is misread.
+    @Test("DECSET raises the input modes the encoder reads, DECRST lowers them")
+    func modesSuiventDECSET() {
+        let engine = makeEngine()
+        queue.sync {
+            #expect(engine.modes == .none)
+            engine.feed(ArraySlice("\u{1B}[?2004h".utf8))
+            #expect(engine.modes.bracketedPaste, "DECSET 2004 — pastes must be bracketed")
+            engine.feed(ArraySlice("\u{1B}[?1h".utf8))
+            #expect(engine.modes.applicationCursorKeys, "DECSET 1 — arrows go out as SS3")
+            engine.feed(ArraySlice("\u{1B}[?1l\u{1B}[?2004l".utf8))
+            #expect(engine.modes == .none, "and back to the legacy defaults")
+        }
+    }
+
+    @Test("the kitty keyboard probe is answered, and pushed flags reach the encoder")
+    func protocoleClavierKitty() {
+        let engine = makeEngine()
+        var upstream: [UInt8] = []
+        engine.onUpstream = { upstream.append(contentsOf: $0) }
+        queue.sync {
+            engine.feed(ArraySlice("\u{1B}[?u".utf8))
+            #expect(String(decoding: upstream, as: UTF8.self) == "\u{1B}[?0u",
+                    "the emulator advertises the protocol: no flags yet")
+            engine.feed(ArraySlice("\u{1B}[>1u".utf8))
+            #expect(engine.modes.keyboardEnhancement == .disambiguate,
+                    "a pushed flag is what switches the encoder to CSI u reports")
+            engine.feed(ArraySlice("\u{1B}[<u".utf8))
+            #expect(engine.modes.keyboardEnhancement.isEmpty, "popped: legacy again")
+        }
+    }
+
+    @Test("focus reaches a program that asked for it, and only then")
+    func focusRapporteSurDemande() {
+        let engine = makeEngine()
+        var upstream: [UInt8] = []
+        engine.onUpstream = { upstream.append(contentsOf: $0) }
+        queue.sync {
+            engine.setFocus(false)
+            #expect(upstream.isEmpty, "nothing asked for focus events")
+            engine.feed(ArraySlice("\u{1B}[?1004h".utf8))
+            upstream = []
+            engine.setFocus(false)
+            #expect(String(decoding: upstream, as: UTF8.self) == "\u{1B}[O")
+            engine.setFocus(true)
+            #expect(String(decoding: upstream, as: UTF8.self) == "\u{1B}[O\u{1B}[I")
+        }
+    }
+
     @Test("a wheel notch becomes an SGR mouse report for the program")
     func moletteEncodeeEnRapportSGR() {
         let engine = makeEngine()

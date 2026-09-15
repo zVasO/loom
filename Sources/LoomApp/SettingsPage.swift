@@ -9,6 +9,7 @@ struct SettingsPage: View {
 
     @AppStorage("loom.terminal.fps") private var fps = 30
     @AppStorage("loom.terminal.copyOnSelect") private var copyOnSelect = false
+    @AppStorage(KeyboardPreferences.userDefaultsKey) private var optionAsMeta = false
     @AppStorage("loom.session.restoreOnLaunch") private var restoreOnLaunch = true
     @AppStorage("loom.shortcut.newSession") private var keyNewSession = "n"
     @AppStorage("loom.shortcut.newTab") private var keyNewTab = "t"
@@ -86,6 +87,16 @@ struct SettingsPage: View {
                 }
                 .toggleStyle(.switch)
                 Text("Releasing a drag in a session terminal puts the text on the clipboard right away, the way iTerm does. Off, the selection waits for ⌘C. Select everything the pane holds with ⌘⇧A — ⌘A keeps typing into the agent's own field.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                Divider().overlay(DefaultTheme.cardBorder)
+                Toggle(isOn: $optionAsMeta) {
+                    Text("Use Option as Meta key")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                Text("⌥ + a letter sends ESC + the letter (Emacs-style bindings). Off, ⌥ stays the compose layer of your keyboard — braces and brackets on AZERTY, dead keys everywhere. ⌥←, ⌥→, ⌥⌫ and ⌥↩ work either way, and ⇧Tab, ⇧↩, Esc, ⌃ shortcuts always reach claude.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
