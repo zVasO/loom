@@ -55,6 +55,24 @@ struct TerminalMetricsTests {
         #expect(TerminalMetrics.boundary(at: CGPoint(x: x, y: inset), rows: 10, cols: 40).col == 6)
     }
 
+    // MARK: - Staying glued to the bottom
+
+    @Test("pinned only when the end of the content sits at the bottom edge")
+    func colleEnBas() {
+        let height = cell.height
+        #expect(TerminalMetrics.isPinnedToBottom(contentEnd: 600, viewportHeight: 600,
+                                                 cellHeight: height))
+        #expect(TerminalMetrics.isPinnedToBottom(contentEnd: 600 + height / 3,
+                                                 viewportHeight: 600, cellHeight: height),
+                "a fraction of a row past the edge is still the bottom")
+        #expect(!TerminalMetrics.isPinnedToBottom(contentEnd: 600 + height * 10,
+                                                  viewportHeight: 600, cellHeight: height),
+                "ten rows below the edge: the user scrolled up, leave them there")
+        #expect(TerminalMetrics.isPinnedToBottom(contentEnd: 400, viewportHeight: 600,
+                                                 cellHeight: height),
+                "content shorter than the viewport is always at its end")
+    }
+
     @Test("the word column never runs off the row")
     func colonneDeMotBornee() {
         #expect(TerminalMetrics.cellColumn(atX: inset + cell.width * 999, cols: 40) == 39)

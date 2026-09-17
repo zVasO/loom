@@ -33,6 +33,17 @@ public enum TerminalMetrics {
                 max(4, Int((size.height - insets) / cell.height)))
     }
 
+    /// Is the end of the content still at the bottom edge of the viewport?
+    ///
+    /// `contentEnd` is the content's last point measured in the SCROLL VIEW's
+    /// own space: glued to the bottom it equals the viewport height, and every
+    /// row the user scrolls up pushes it one row below. Half a row of tolerance
+    /// absorbs the fractional cell height, which never divides the pane evenly.
+    public static func isPinnedToBottom(contentEnd: CGFloat, viewportHeight: CGFloat,
+                                        cellHeight: CGFloat) -> Bool {
+        contentEnd - viewportHeight <= cellHeight / 2
+    }
+
     /// A point in the padded content's coordinate space → a cell boundary.
     ///
     /// The row is an INDEX — floor, the row the pointer is over. The column is a
@@ -94,57 +105,107 @@ public struct TerminalScreenView: View {
     @State private var openingLink = false
 
     private static let space = "loom.terminal"
+    /// The scroll view's own space: where the content's end is measured.
+    private static let scroll = "loom.terminal.scroll"
+
+    @State private var contentEnd: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
 
     public var body: some View {
         let cell = TerminalMetrics.cellSize
-        // NO manual follow-the-tail machinery. Every previous attempt (scrollTo
-        // on each revision, then a wheel sensor unpinning it) fought the user
-        // for control of the scroll position — and the user lost. SwiftUI's own
-        // bottom anchor keeps new output in view AND leaves the wheel alone.
-        ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(history.enumerated()), id: \.offset) { index, line in
-                    row(line, height: cell.height)
-                        .id(historyBase + index)
+        // Following the tail asks BEFORE it scrolls. The attempt this replaced
+        // scrolled on each revision and tried to unpin afterwards through a
+        // wheel sensor: it fought the user for the scroll position, and the
+        // user lost. Here the anchor does the work, and the scrollTo below only
+        // covers the one case it cannot see.
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    // Rows are identified by their ABSOLUTE scrollback number, which
+                    // is what historyBase is for. Positional ids made every line
+                    // change meaning the moment the scrollback trimmed its front.
+                    ForEach(Array(history.enumerated()), id: \.offset) { index, line in
+                        row(line, height: cell.height)
+                            .id(historyBase + index)
+                    }
+                    ForEach(Array(screen.lines.enumerated()), id: \.offset) { index, line in
+                        row(line, height: cell.height,
+                            cursorCol: index == screen.cursor.row ? screen.cursor.col : nil)
+                            .id(lastRowID - (screen.lines.count - 1 - index))
+                    }
+                    Color.clear.frame(height: 0)
+                        .background(GeometryReader { end in
+                            Color.clear.preference(key: ContentEndKey.self,
+                                                   value: end.frame(in: .named(Self.scroll)).minY)
+                        })
                 }
-                ForEach(Array(screen.lines.enumerated()), id: \.offset) { index, line in
-                    row(line, height: cell.height,
-                        cursorCol: index == screen.cursor.row ? screen.cursor.col : nil)
+                .padding(TerminalMetrics.gridInset)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                // The selection layer sits ON TOP: cells carry ANSI background
+                // colours painted by Text itself, and a highlight behind them would
+                // vanish on exactly the lines people want to copy. An overlay also
+                // leaves the measured size alone, so it cannot move the bottom anchor.
+                .overlay(alignment: .topLeading) { selectionLayer }
+                .overlay(alignment: .topLeading) { linkLayer }
+                // Named HERE, on the padded content: the drag then reports positions
+                // already free of the scroll offset, and `- gridInset` is the only
+                // correction left.
+                .coordinateSpace(name: Self.space)
+                .contentShape(Rectangle())
+                .gesture(selectionDrag)
+                .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
+                    switch phase {
+                    // Assigned only on a CHANGE: a mouse move over ordinary text
+                    // would otherwise invalidate every visible row, and rebuilding
+                    // their attributed runs is the one cost this view watches.
+                    case .active(let point):
+                        let found = link(at: point)
+                        if found != hoveredLink { hoveredLink = found }
+                    case .ended:
+                        if hoveredLink != nil { hoveredLink = nil }
+                    }
                 }
+                .help(hoveredLink.map { "⌘-click to open \($0.target)" } ?? "")
             }
-            .padding(TerminalMetrics.gridInset)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            // The selection layer sits ON TOP: cells carry ANSI background
-            // colours painted by Text itself, and a highlight behind them would
-            // vanish on exactly the lines people want to copy. An overlay also
-            // leaves the measured size alone, so it cannot move the bottom anchor.
-            .overlay(alignment: .topLeading) { selectionLayer }
-            .overlay(alignment: .topLeading) { linkLayer }
-            // Named HERE, on the padded content: the drag then reports positions
-            // already free of the scroll offset, and `- gridInset` is the only
-            // correction left.
-            .coordinateSpace(name: Self.space)
-            .contentShape(Rectangle())
-            .gesture(selectionDrag)
-            .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
-                switch phase {
-                // Assigned only on a CHANGE: a mouse move over ordinary text
-                // would otherwise invalidate every visible row, and rebuilding
-                // their attributed runs is the one cost this view watches.
-                case .active(let point):
-                    let found = link(at: point)
-                    if found != hoveredLink { hoveredLink = found }
-                case .ended:
-                    if hoveredLink != nil { hoveredLink = nil }
-                }
+            .defaultScrollAnchor(.bottom)
+            .scrollIndicators(.visible)   // a terminal that scrolls should look like it
+            .coordinateSpace(name: Self.scroll)
+            .background(GeometryReader { viewport in
+                Color.clear.preference(key: ViewportHeightKey.self, value: viewport.size.height)
+            })
+            .onPreferenceChange(ContentEndKey.self) { contentEnd = $0 }
+            .onPreferenceChange(ViewportHeightKey.self) { viewportHeight = $0 }
+            // Past the scrollback cap the history stops growing: a line is trimmed
+            // for each one pushed, the content keeps its SIZE, and the bottom anchor
+            // — which only re-applies on a size change — never fires again while the
+            // content slides a row up. Only a real shift re-pins, and only when the
+            // end of the content is still at the bottom edge: a reader who scrolled
+            // up is never moved.
+            .onChange(of: historyBase) {
+                guard TerminalMetrics.isPinnedToBottom(contentEnd: contentEnd,
+                                                       viewportHeight: viewportHeight,
+                                                       cellHeight: cell.height)
+                else { return }
+                proxy.scrollTo(lastRowID, anchor: .bottom)
             }
-            .help(hoveredLink.map { "⌘-click to open \($0.target)" } ?? "")
         }
-        .defaultScrollAnchor(.bottom)
-        .scrollIndicators(.visible)   // a terminal that scrolls should look like it
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
         .background(DefaultTheme.contentBackground)
+    }
+
+    /// The absolute number of the last row on screen — the scroll target that
+    /// keeps the agent's input field against the bottom edge.
+    private var lastRowID: Int { historyBase + contentRows - 1 }
+
+    private struct ContentEndKey: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+    }
+
+    private struct ViewportHeightKey: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
     }
 
     // MARK: - Selection
