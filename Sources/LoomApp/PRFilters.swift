@@ -289,15 +289,24 @@ struct PRFilterEditorSheet: View {
 /// Small shared chips for the enriched PR rows.
 @MainActor
 enum PRChips {
+    /// A label name comes from the repository, not from us: capped so one
+    /// verbose label cannot eat the whole row.
+    private static let labelWidth: CGFloat = 64
+
     static func label(_ label: GitHubService.Label) -> some View {
         HStack(spacing: 4) {
-            Circle().fill(AppModel.color(hex: label.colorHex)).frame(width: 6, height: 6)
-            Text(label.name).font(.system(size: 9, weight: .medium))
+            Circle()
+                .fill(AppModel.color(hex: label.colorHex))
+                .frame(width: 6, height: 6)
+            Text(label.name)
+                .font(.system(size: 9, weight: .medium))
+                .frame(maxWidth: labelWidth, alignment: .leading)
         }
         .foregroundStyle(DefaultTheme.secondaryText)
         .padding(.horizontal, 6).padding(.vertical, 2)
         .background(DefaultTheme.surfaceRaised, in: Capsule())
         .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     static func size(_ pr: GitHubService.PullRequest) -> some View {
@@ -306,6 +315,7 @@ enum PRChips {
             Text("−\(pr.deletions)").foregroundStyle(DefaultTheme.danger)
         }
         .font(.system(size: 10, weight: .medium, design: .monospaced))
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     /// `@a, @b, team/core` — the people the PR is waiting on.
