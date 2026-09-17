@@ -13,7 +13,8 @@ struct PRFilterTests {
         let ids = PRFilter.builtIns.map(\.id)
         #expect(Set(ids).count == ids.count)
         #expect(ids.first == "all")
-        #expect(PRFilter.builtIns.allSatisfy(\.isBuiltIn))
+        let allBuiltIn = PRFilter.builtIns.allSatisfy(\.isBuiltIn)
+        #expect(allBuiltIn)
         #expect(PRFilter.reviewRequested.query == "review-requested:@me",
                 "direct AND team requests — the wide net")
         #expect(PRFilter.reviewRequestedDirectly.query == "user-review-requested:@me")
