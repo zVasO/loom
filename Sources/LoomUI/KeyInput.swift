@@ -38,6 +38,16 @@ public enum KeyTranslator {
         return Legacy.encode(key, modes: modes, preferences: preferences)
     }
 
+    /// A pasted path may land in a shell as much as in an agent's field: only
+    /// a POSIX-safe one travels bare. Single quotes protect everything but a
+    /// single quote, which has to leave the quoting to be escaped.
+    public static func quoted(path: String) -> String {
+        let safe = !path.isEmpty
+            && path.allSatisfy { $0.isLetter || $0.isNumber || "/._-+=@:,".contains($0) }
+        guard !safe else { return path }
+        return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     /// A paste, ready for the wire: line endings become CR (what Enter sends,
     /// and what every emulator does), a smuggled end marker is dropped so the
     /// pasted text can never close its own bracket, and the whole is wrapped
@@ -758,6 +768,34 @@ public struct KeyCaptureView: NSViewRepresentable {
             copySelection()
         }
 
+        /// ⌘V means three different things depending on what was copied.
+        /// Copied FILES come first: a terminal wants their paths, and a Finder
+        /// copy also carries a bare filename as text, which would win otherwise.
+        /// A raw image — a screenshot — is left to the agent, which reads the
+        /// pasteboard itself; 0x16 is the gesture it listens for.
+        private func paste() -> Bool {
+            let pasteboard = NSPasteboard.general
+            let filesOnly: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+            if let urls = pasteboard.readObjects(forClasses: [NSURL.self],
+                                                 options: filesOnly) as? [URL],
+               !urls.isEmpty {
+                let paths = urls.map { KeyTranslator.quoted(path: $0.path) }.joined(separator: " ")
+                onText?(KeyTranslator.paste(paths, bracketed: modes.bracketedPaste))
+                return true
+            }
+            // Bracketed when the program asked, so a multi-line paste is one
+            // block, not N submits.
+            if let text = pasteboard.string(forType: .string) {
+                onText?(KeyTranslator.paste(text, bracketed: modes.bracketedPaste))
+                return true
+            }
+            if pasteboard.canReadObject(forClasses: [NSImage.self], options: nil) {
+                onText?("\u{16}")
+                return true
+            }
+            return false
+        }
+
         private func copySelection() {
             guard let text = onCopy?(), !text.isEmpty else { return }
             NSPasteboard.general.clearContents()
@@ -815,12 +853,7 @@ public struct KeyCaptureView: NSViewRepresentable {
                 return super.performKeyEquivalent(with: event)
             }
             let characters = event.charactersIgnoringModifiers ?? ""
-            // ⌘V: paste directly into the agent's field — bracketed when the
-            // program asked, so a multi-line paste is one block, not N submits.
-            if characters == "v", let text = NSPasteboard.general.string(forType: .string) {
-                onText?(KeyTranslator.paste(text, bracketed: modes.bracketedPaste))
-                return true
-            }
+            if characters == "v" { return paste() }
             // ⌘C is swallowed WHETHER OR NOT there is a selection. Letting it
             // through on an empty one leaves the key equivalent unclaimed, and it
             // falls to keyDown → super → noResponder → beep. `.textSelection`

@@ -71,19 +71,19 @@ struct KeyTranslatorTests {
         for (code, base, bytes) in expected {
             #expect(legacy(key(code, chars: bytes, base: base, control: true)) == bytes)
         }
-        #expect(legacy(key(Code.c, chars: "\u{03}", base: "C", control: true, shift: true)) == "\u{03}",
+        #expect(legacy(key(Code.c, chars: "\u{03}", base: "C", shift: true, control: true)) == "\u{03}",
                 "Shift does not change a control character")
     }
 
     @Test("Ctrl+_ and Ctrl+/ send 0x1F (undo), Ctrl+Space sends NUL")
     func controlPunctuation() {
-        #expect(legacy(key(Code.minus, chars: "_", base: "_", control: true, shift: true)) == "\u{1f}")
+        #expect(legacy(key(Code.minus, chars: "_", base: "_", shift: true, control: true)) == "\u{1f}")
         #expect(legacy(key(Code.slash, chars: "/", base: "/", control: true)) == "\u{1f}")
         #expect(legacy(key(Code.space, chars: " ", base: " ", control: true)) == "\u{0}")
         #expect(legacy(key(Code.bracketLeft, chars: "[", base: "[", control: true)) == "\u{1b}")
         #expect(legacy(key(Code.backslash, chars: "\\", base: "\\", control: true)) == "\u{1c}")
         #expect(legacy(key(Code.bracketRight, chars: "]", base: "]", control: true)) == "\u{1d}")
-        #expect(legacy(key(Code.six, chars: "^", base: "^", control: true, shift: true)) == "\u{1e}")
+        #expect(legacy(key(Code.six, chars: "^", base: "^", shift: true, control: true)) == "\u{1e}")
     }
 
     @Test("Ctrl on a non-ASCII layout falls back to the character AppKit folded")
@@ -254,6 +254,18 @@ struct KeyTranslatorTests {
         #expect(KeyTranslator.paste("a\r\nb", bracketed: false) == "a\rb")
         #expect(KeyTranslator.paste("x\u{1b}[201~y", bracketed: true) == "\u{1b}[200~xy\u{1b}[201~",
                 "pasted text can never close its own bracket")
+    }
+
+    @Test("a pasted path travels bare when POSIX-safe, quoted otherwise")
+    func cheminsColles() {
+        #expect(KeyTranslator.quoted(path: "/Users/me/shot.png") == "/Users/me/shot.png")
+        #expect(KeyTranslator.quoted(path: "/Users/me/my shot.png") == "'/Users/me/my shot.png'")
+        #expect(KeyTranslator.quoted(path: "/tmp/a;rm -rf b") == "'/tmp/a;rm -rf b'",
+                "a shell metacharacter never reaches the shell unquoted")
+        #expect(KeyTranslator.quoted(path: "/tmp/it's here") == "'/tmp/it'\\''s here'",
+                "a single quote has to leave the quoting to be escaped")
+        #expect(KeyTranslator.quoted(path: "/tmp/été.png") == "/tmp/été.png",
+                "an accent is a letter, not a metacharacter: quoting it buys nothing")
     }
 
     // MARK: - Mac editing shortcuts (⌘), translated to the sequences claude's input
