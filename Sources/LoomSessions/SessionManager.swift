@@ -224,18 +224,20 @@ public actor SessionManager {
         let next = StateEngine.reduce(current, event, at: clock.now, tuning: tuning)
         states[id] = next
         guard next.session != current.session else { return }
-        stateContinuation?.yield(StateUpdate(id: id, state: next.session))
-        if next.session == .needsInput {
-            let record = (try? store?.session(id: id)) ?? nil
-            notifier?.sessionNeedsInput(id, title: record?.title ?? "Session")
-        }
-        // The transition is real: STA-06 journal + current state in the database.
+        // STA-06 journal and current state FIRST: the UI reloads the store the
+        // moment it receives an update, so announcing before writing would hand
+        // it the state this transition replaces.
         try? store?.recordTransition(session: id, from: current.session, to: next.session,
                                      source: Self.source(of: event), at: Date())
         if case .process(.exited(let code)) = event {
             try? store?.updateState(session: id, to: next.session, exitCode: code, endedAt: Date())
         } else {
             try? store?.updateState(session: id, to: next.session)
+        }
+        stateContinuation?.yield(StateUpdate(id: id, state: next.session))
+        if next.session == .needsInput {
+            let record = (try? store?.session(id: id)) ?? nil
+            notifier?.sessionNeedsInput(id, title: record?.title ?? "Session")
         }
     }
 

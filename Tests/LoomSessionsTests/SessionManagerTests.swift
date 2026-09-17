@@ -156,6 +156,33 @@ struct SessionManagerTests {
         #expect(second?.state == .needsInput, "only real transitions are pushed")
     }
 
+    @Test("a state is announced only once the database holds it")
+    func laBaseEstEcriteAvantLAnnonce() async throws {
+        let dbURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loom-order-\(UUID().uuidString.prefix(8)).sqlite")
+        let store = try SessionStore(path: dbURL.path)
+        let pty = ScriptedPTYHost()
+        let manager = SessionManager(
+            runtimeDependencies: SessionRuntime.Dependencies(ptyHost: pty,
+                                                             transcript: MemoryTranscriptSink()),
+            store: store)
+        let updates = await manager.stateUpdates()
+        let id = try await manager.launch(spec())
+
+        // The UI reloads the store the moment it receives a terminal state
+        // (AppModel.observeStates): reading it here reproduces that exactly.
+        let persisted = Task { () -> SessionState? in
+            for await update in updates where update.state == .completed {
+                return ((try? store.session(id: id)) ?? nil)?.state
+            }
+            return nil
+        }
+        pty.exit(code: 0)
+
+        #expect(await persisted.value == .completed,
+                "announcing before writing makes the reader see the previous state")
+    }
+
     @Test("full UC-1: launch creates the worktree and the session works there in isolation")
     func lancementSurWorktree() async throws {
         let repo = try await makeFixtureRepo()
