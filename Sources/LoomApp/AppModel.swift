@@ -1502,13 +1502,23 @@ public final class AppModel {
             if [.completed, .failed, .interrupted].contains(update.state) {
                 let closed = update.id
                 // The item may already be gone (optimistic close) — its project
-                // was parked in pendingCloseProjects.
+                // was parked in pendingCloseProjects, which also says the close
+                // was ASKED for rather than suffered.
+                let requested = pendingCloseProjects.removeValue(forKey: closed)
                 let closedProject = sessions.first(where: { $0.id == closed })?.projectID
-                    ?? pendingCloseProjects.removeValue(forKey: closed) ?? nil
+                    ?? requested ?? nil
                 sessions.removeAll { $0.id == closed }
                 nativeExistsCache.removeValue(forKey: closed)   // settled at close: rescan once
                 saveStackChildren()
-                reloadPersistedSessions()
+                // SES-07: a close the user asked for — the cross, or `exit`,
+                // which leaves through code 0 — archives on the spot. A session
+                // that DIED keeps its inactive card, so UC-7 Resume after a
+                // crash stays one click away.
+                if requested != nil || update.state == .completed {
+                    await archiveSession(closed)
+                } else {
+                    reloadPersistedSessions()
+                }
                 indexSessionForSearch(closed)
                 // v3 pipeline: the queued follow-up takes over, same project.
                 if let next = followUps.removeValue(forKey: closed) {

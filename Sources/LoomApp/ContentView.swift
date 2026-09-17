@@ -2034,10 +2034,10 @@ struct SessionsView: View {
                 onArchive: { Task { await model.archiveSession(item.id) } },
                 onClose: {
                     pendingClose = item.isDormant
-                        ? PendingClose(message: "“\(item.title)” is inactive: it will be destroyed (archived), permanently.") {
+                        ? PendingClose(message: "“\(item.title)” leaves this stack and moves to RECENT, where a click resumes it.") {
                             Task { await model.archiveSession(item.id) }
                         }
-                        : PendingClose(message: "claude will be stopped cleanly — “\(item.title)” will remain resumable as “inactive”.") {
+                        : PendingClose(message: "claude will be stopped cleanly, then “\(item.title)” moves to RECENT, where a click resumes it.") {
                             Task { await model.stopSession(item.id) }
                         }
                 })
