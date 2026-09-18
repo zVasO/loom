@@ -20,12 +20,50 @@ public enum TerminalMetrics {
                       height: ceil(measured.height) + 1)
     }()
 
+    /// Padding between the pane's edge and the first cell. The grid origin and
+    /// the cell count are both measured from it — they must not drift apart.
+    public static let gridInset: CGFloat = 8
+
     /// How many cells fit in `size` (view padding deducted).
-    public static func grid(fitting size: CGSize, insets: CGFloat = 16) -> (cols: Int, rows: Int) {
+    public static func grid(fitting size: CGSize,
+                            insets: CGFloat = gridInset * 2) -> (cols: Int, rows: Int) {
         let cell = cellSize
         guard cell.width > 0, cell.height > 0 else { return (80, 24) }
         return (max(20, Int((size.width - insets) / cell.width)),
                 max(4, Int((size.height - insets) / cell.height)))
+    }
+
+    /// Is the end of the content still at the bottom edge of the viewport?
+    ///
+    /// `contentEnd` is the content's last point measured in the SCROLL VIEW's
+    /// own space: glued to the bottom it equals the viewport height, and every
+    /// row the user scrolls up pushes it one row below. Half a row of tolerance
+    /// absorbs the fractional cell height, which never divides the pane evenly.
+    public static func isPinnedToBottom(contentEnd: CGFloat, viewportHeight: CGFloat,
+                                        cellHeight: CGFloat) -> Bool {
+        contentEnd - viewportHeight <= cellHeight / 2
+    }
+
+    /// A point in the padded content's coordinate space → a cell boundary.
+    ///
+    /// The row is an INDEX — floor, the row the pointer is over. The column is a
+    /// BOUNDARY — rounded to the nearest, so dragging past half a glyph takes it,
+    /// and a plain click lands on a single boundary, which is an EMPTY selection
+    /// rather than a stray one-character highlight.
+    public static func boundary(at point: CGPoint, rows: Int, cols: Int) -> (row: Int, col: Int) {
+        let cell = cellSize
+        guard cell.width > 0, cell.height > 0 else { return (0, 0) }
+        let row = Int(((point.y - gridInset) / cell.height).rounded(.down))
+        let col = Int(((point.x - gridInset) / cell.width).rounded())
+        return (min(max(0, row), max(0, rows - 1)), min(max(0, col), max(0, cols)))
+    }
+
+    /// The cell the pointer is INSIDE, for word and line selection. A boundary
+    /// would round up on the right half of a glyph and pick the next word.
+    public static func cellColumn(atX x: CGFloat, cols: Int) -> Int {
+        let cell = cellSize
+        guard cell.width > 0 else { return 0 }
+        return min(max(0, Int(((x - gridInset) / cell.width).rounded(.down))), max(0, cols - 1))
     }
 }
 
@@ -38,45 +76,317 @@ public struct TerminalScreenView: View {
     /// Absolute scrollback index of history[0] — STABLE row identity, so the
     /// diff skips untouched history lines instead of re-checking 400 per frame.
     public let historyBase: Int
-    public init(screen: TerminalScreen, history: [TerminalLine] = [], historyBase: Int = 0) {
+    @Binding public var selection: TerminalSelection
+    /// How many characters copy-on-select put on the pasteboard.
+    private let onCopied: ((Int) -> Void)?
+
+    public init(screen: TerminalScreen, history: [TerminalLine] = [], historyBase: Int = 0,
+                selection: Binding<TerminalSelection> = .constant(.empty),
+                onCopied: ((Int) -> Void)? = nil) {
         self.screen = screen
         self.history = history
         self.historyBase = historyBase
+        self._selection = selection
+        self.onCopied = onCopied
     }
+
+    /// One press, kept only to tell a double click from two single ones.
+    private struct Press {
+        let at: TimeInterval
+        let row: Int
+        let col: Int
+        let count: Int
+    }
+
+    @State private var dragging = false
+    @State private var lastPress: Press?
+    @State private var hoveredLink: TerminalLink?
+    /// A ⌘-click opened a link: the drag it also started must not select.
+    @State private var openingLink = false
+
+    private static let space = "loom.terminal"
+    /// The scroll view's own space: where the content's end is measured.
+    private static let scroll = "loom.terminal.scroll"
+
+    @State private var contentEnd: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
 
     public var body: some View {
         let cell = TerminalMetrics.cellSize
-        // NO manual follow-the-tail machinery. Every previous attempt (scrollTo
-        // on each revision, then a wheel sensor unpinning it) fought the user
-        // for control of the scroll position — and the user lost. SwiftUI's own
-        // bottom anchor keeps new output in view AND leaves the wheel alone.
-        ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(history.enumerated()), id: \.offset) { index, line in
-                    row(line, height: cell.height)
-                        .id(historyBase + index)
+        // Following the tail asks BEFORE it scrolls. The attempt this replaced
+        // scrolled on each revision and tried to unpin afterwards through a
+        // wheel sensor: it fought the user for the scroll position, and the
+        // user lost. Here the anchor does the work, and the scrollTo below only
+        // covers the one case it cannot see.
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    // Rows are identified by their ABSOLUTE scrollback number, which
+                    // is what historyBase is for. Positional ids made every line
+                    // change meaning the moment the scrollback trimmed its front.
+                    ForEach(Array(history.enumerated()), id: \.offset) { index, line in
+                        row(line, height: cell.height)
+                            .id(historyBase + index)
+                    }
+                    ForEach(Array(screen.lines.enumerated()), id: \.offset) { index, line in
+                        row(line, height: cell.height,
+                            cursorCol: index == screen.cursor.row ? screen.cursor.col : nil)
+                            .id(lastRowID - (screen.lines.count - 1 - index))
+                    }
+                    Color.clear.frame(height: 0)
+                        .background(GeometryReader { end in
+                            Color.clear.preference(key: ContentEndKey.self,
+                                                   value: end.frame(in: .named(Self.scroll)).minY)
+                        })
                 }
-                ForEach(Array(screen.lines.enumerated()), id: \.offset) { index, line in
-                    row(line, height: cell.height,
-                        cursorCol: index == screen.cursor.row ? screen.cursor.col : nil)
+                .padding(TerminalMetrics.gridInset)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                // The selection layer sits ON TOP: cells carry ANSI background
+                // colours painted by Text itself, and a highlight behind them would
+                // vanish on exactly the lines people want to copy. An overlay also
+                // leaves the measured size alone, so it cannot move the bottom anchor.
+                .overlay(alignment: .topLeading) { selectionLayer }
+                .overlay(alignment: .topLeading) { linkLayer }
+                // Named HERE, on the padded content: the drag then reports positions
+                // already free of the scroll offset, and `- gridInset` is the only
+                // correction left.
+                .coordinateSpace(name: Self.space)
+                .contentShape(Rectangle())
+                .gesture(selectionDrag)
+                .onContinuousHover(coordinateSpace: .named(Self.space)) { phase in
+                    switch phase {
+                    // Assigned only on a CHANGE: a mouse move over ordinary text
+                    // would otherwise invalidate every visible row, and rebuilding
+                    // their attributed runs is the one cost this view watches.
+                    case .active(let point):
+                        let found = link(at: point)
+                        if found != hoveredLink { hoveredLink = found }
+                    case .ended:
+                        if hoveredLink != nil { hoveredLink = nil }
+                    }
                 }
+                .help(hoveredLink.map { "⌘-click to open \($0.target)" } ?? "")
             }
-            .padding(8)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .defaultScrollAnchor(.bottom)
+            .scrollIndicators(.visible)   // a terminal that scrolls should look like it
+            .coordinateSpace(name: Self.scroll)
+            .background(GeometryReader { viewport in
+                Color.clear.preference(key: ViewportHeightKey.self, value: viewport.size.height)
+            })
+            .onPreferenceChange(ContentEndKey.self) { contentEnd = $0 }
+            .onPreferenceChange(ViewportHeightKey.self) { viewportHeight = $0 }
+            // Past the scrollback cap the history stops growing: a line is trimmed
+            // for each one pushed, the content keeps its SIZE, and the bottom anchor
+            // — which only re-applies on a size change — never fires again while the
+            // content slides a row up. Only a real shift re-pins, and only when the
+            // end of the content is still at the bottom edge: a reader who scrolled
+            // up is never moved.
+            .onChange(of: historyBase) {
+                guard TerminalMetrics.isPinnedToBottom(contentEnd: contentEnd,
+                                                       viewportHeight: viewportHeight,
+                                                       cellHeight: cell.height)
+                else { return }
+                proxy.scrollTo(lastRowID, anchor: .bottom)
+            }
         }
-        .defaultScrollAnchor(.bottom)
-        .scrollIndicators(.visible)   // a terminal that scrolls should look like it
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
         .background(DefaultTheme.contentBackground)
     }
+
+    /// The absolute number of the last row on screen — the scroll target that
+    /// keeps the agent's input field against the bottom edge.
+    private var lastRowID: Int { historyBase + contentRows - 1 }
+
+    private struct ContentEndKey: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+    }
+
+    private struct ViewportHeightKey: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+    }
+
+    // MARK: - Selection
+
+    private var contentRows: Int { history.count + screen.lines.count }
+
+    private func contentLine(_ index: Int) -> TerminalLine? {
+        guard index >= 0 else { return nil }
+        if index < history.count { return history[index] }
+        let onScreen = index - history.count
+        return onScreen < screen.lines.count ? screen.lines[onScreen] : nil
+    }
+
+    /// Consecutive rows sharing one column range become ONE rectangle: a linear
+    /// selection is at most three (partial head, full body, partial tail), a block
+    /// exactly one — instead of a shape per row.
+    private var selectionRects: [CGRect] {
+        guard selection.isActive, let rows = selection.rowRange else { return [] }
+        let cell = TerminalMetrics.cellSize
+        let inset = TerminalMetrics.gridInset
+        let cols = screen.geometry.cols
+        var rects: [CGRect] = []
+        var run: (first: Int, last: Int, columns: Range<Int>)?
+        func flush() {
+            guard let run else { return }
+            rects.append(CGRect(x: inset + CGFloat(run.columns.lowerBound) * cell.width,
+                                y: inset + CGFloat(run.first - historyBase) * cell.height,
+                                width: CGFloat(run.columns.count) * cell.width,
+                                height: CGFloat(run.last - run.first + 1) * cell.height))
+        }
+        for row in rows {
+            guard let columns = selection.columnRange(forRow: row, cols: cols) else { continue }
+            if let current = run, current.columns == columns, current.last + 1 == row {
+                run = (current.first, row, columns)
+            } else {
+                flush()
+                run = (row, row, columns)
+            }
+        }
+        flush()
+        return rects
+    }
+
+    private var selectionLayer: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(selectionRects.enumerated()), id: \.offset) { _, rect in
+                Rectangle()
+                    .fill(DefaultTheme.accent.opacity(0.25))
+                    .frame(width: rect.width, height: rect.height)
+                    .offset(x: rect.minX, y: rect.minY)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var selectionDrag: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
+            .onChanged { value in
+                if !dragging {
+                    dragging = true
+                    openingLink = openLink(at: value.location)
+                    if openingLink { return }
+                    beginPress(at: value.location)
+                    return
+                }
+                // Read live: pressing ⌥ MID-drag must flip to a block, the way
+                // every emulator behaves. A captured event could not tell us.
+                guard !openingLink, lastPress?.count == 1 else { return }
+                selection.mode = NSEvent.modifierFlags.contains(.option) ? .block : .linear
+                selection.head = position(at: value.location)
+            }
+            .onEnded { _ in
+                dragging = false
+                if openingLink {
+                    openingLink = false
+                    return
+                }
+                guard selection.isActive else { return }
+                selection.capturedText = selection.text(history: history,
+                                                        historyBase: historyBase,
+                                                        screen: screen)
+                if UserDefaults.standard.bool(forKey: "loom.terminal.copyOnSelect"),
+                   let text = selection.capturedText, !text.isEmpty {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                    onCopied?(text.count)
+                }
+            }
+    }
+
+    private func position(at point: CGPoint) -> TerminalPosition {
+        let boundary = TerminalMetrics.boundary(at: point, rows: contentRows,
+                                                cols: screen.geometry.cols)
+        return TerminalPosition(row: historyBase + boundary.row, col: boundary.col)
+    }
+
+    /// Mouse-down: word and line selection happen HERE, not on release — that is
+    /// the right feel, and it is also the only moment a click count means anything.
+    private func beginPress(at point: CGPoint) {
+        let cols = screen.geometry.cols
+        let boundary = TerminalMetrics.boundary(at: point, rows: contentRows, cols: cols)
+        let now = Date.timeIntervalSinceReferenceDate
+        let count = TerminalClick.count(
+            previous: lastPress?.count ?? 0,
+            sameCell: lastPress.map { $0.row == boundary.row && $0.col == boundary.col } ?? false,
+            elapsed: now - (lastPress?.at ?? 0),
+            interval: NSEvent.doubleClickInterval)
+        lastPress = Press(at: now, row: boundary.row, col: boundary.col, count: count)
+        let row = historyBase + boundary.row
+
+        switch count {
+        case 2:
+            let cells = contentLine(boundary.row)?.cells ?? []
+            let word = TerminalWord.range(in: cells,
+                                          at: TerminalMetrics.cellColumn(atX: point.x, cols: cols))
+            selection = TerminalSelection(anchor: TerminalPosition(row: row, col: word.lowerBound),
+                                          head: TerminalPosition(row: row, col: word.upperBound))
+        case 3:
+            selection = TerminalSelection(anchor: TerminalPosition(row: row, col: 0),
+                                          head: TerminalPosition(row: row, col: cols))
+        default:
+            let flags = NSEvent.modifierFlags
+            let head = TerminalPosition(row: row, col: boundary.col)
+            // ⇧ keeps the anchor where it was: the selection grows from it.
+            let anchor = flags.contains(.shift) ? (selection.anchor ?? head) : head
+            selection = TerminalSelection(anchor: anchor, head: head,
+                                          mode: flags.contains(.option) ? .block : .linear)
+        }
+    }
+
+    // MARK: - Links
+
+    /// What a browser would take, and nothing else. An OSC 8 payload is agent
+    /// output: a scheme such as `x-apple-script:` would turn a click into an
+    /// execution primitive. Anything else is not underlined either — an
+    /// affordance for something that will not open is worse than none.
+    private static let openableSchemes: Set<String> = ["http", "https", "mailto"]
+
+    private func link(at point: CGPoint) -> TerminalLink? {
+        let cols = screen.geometry.cols
+        let boundary = TerminalMetrics.boundary(at: point, rows: contentRows, cols: cols)
+        guard let link = TerminalLinks.link(rows: contentRows, line: contentLine,
+                                            row: boundary.row,
+                                            column: TerminalMetrics.cellColumn(atX: point.x, cols: cols)),
+              let scheme = URL(string: link.target)?.scheme?.lowercased(),
+              Self.openableSchemes.contains(scheme)
+        else { return nil }
+        return link
+    }
+
+    /// A ⌘-click landing on a link opens it and swallows the gesture.
+    private func openLink(at point: CGPoint) -> Bool {
+        guard NSEvent.modifierFlags.contains(.command),
+              let link = link(at: point), let url = URL(string: link.target)
+        else { return false }
+        NSWorkspace.shared.open(url)
+        return true
+    }
+
+    private var linkLayer: some View {
+        let cell = TerminalMetrics.cellSize
+        let inset = TerminalMetrics.gridInset
+        return ZStack(alignment: .topLeading) {
+            ForEach(Array((hoveredLink?.segments ?? []).enumerated()), id: \.offset) { _, segment in
+                Rectangle()
+                    .fill(DefaultTheme.accent.opacity(0.8))
+                    .frame(width: CGFloat(segment.columns.count) * cell.width, height: 1)
+                    .offset(x: inset + CGFloat(segment.columns.lowerBound) * cell.width,
+                            y: inset + CGFloat(segment.row + 1) * cell.height - 1)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    // MARK: - Rows
 
     /// `cursorCol`: the terminal cursor, drawn by US (the agent only paints
     /// its cells) — without it, one would type blind into its field.
     private func row(_ line: TerminalLine, height: CGFloat, cursorCol: Int? = nil) -> some View {
         Text(attributed(line))
             .font(.system(size: TerminalMetrics.fontSize, design: .monospaced))
-            .textSelection(.enabled)   // mouse selection + ⌘C
             .frame(height: height, alignment: .leading)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)

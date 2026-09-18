@@ -12,8 +12,6 @@ import SwiftTerm
 public final class SwiftTermEngine: TerminalEngine {
 
     private final class HeadlessDelegate: TerminalDelegate {
-        // Terminal responses back to the PTY (DA/DSR…). Wired up by SessionRuntime
-        // when the "upstream echo" slice lands; until then, collected nowhere.
         var onSend: ((ArraySlice<UInt8>) -> Void)?
         func send(source: Terminal, data: ArraySlice<UInt8>) { onSend?(data) }
     }
@@ -41,6 +39,54 @@ public final class SwiftTermEngine: TerminalEngine {
         }
     }
 
+    /// Everything the terminal answers on its own — DA/DSR, and above all the
+    /// mouse reports a full-screen agent asked for. Left unplugged, that agent is
+    /// answered by silence, and since it repaints rather than scrolls there is no
+    /// scrollback of ours to fall back on: the pane simply cannot be scrolled.
+    public var onUpstream: ((ArraySlice<UInt8>) -> Void)? {
+        get { headlessDelegate.onSend }
+        set { headlessDelegate.onSend = newValue }
+    }
+
+    public var mouseReporting: Bool { terminal.mouseMode != .off }
+
+    /// What the program negotiated, read straight off the emulator. SwiftTerm
+    /// answers the kitty `CSI ? u` probe itself, so a program that pushes
+    /// flags expects `CSI … u` reports from then on — the encoder must know.
+    public var modes: TerminalModes {
+        TerminalModes(applicationCursorKeys: terminal.applicationCursor,
+                      bracketedPaste: terminal.bracketedPasteMode,
+                      mouseReporting: terminal.mouseMode != .off,
+                      keyboardEnhancement: KeyboardEnhancement(
+                          rawValue: terminal.keyboardEnhancementFlags.rawValue))
+    }
+
+    /// SwiftTerm remembers the state and emits `CSI I` / `CSI O` only while the
+    /// program asked for focus events (DECSET 1004) — nothing to gate here.
+    public func setFocus(_ focused: Bool) {
+        terminal.setTerminalFocus(focused)
+    }
+
+    public func sendWheel(_ direction: WheelDirection, atCol col: Int, row: Int) {
+        guard terminal.mouseMode != .off else { return }
+        let flags = terminal.encodeButton(button: direction == .up ? 4 : 5,
+                                          release: false, shift: false,
+                                          meta: false, control: false)
+        terminal.sendEvent(buttonFlags: flags, x: col, y: row)
+    }
+
+    /// A click is a PAIR on the wire: the program acts on the release, and one
+    /// left unsent leaves it holding a button forever.
+    public func sendClick(atCol col: Int, row: Int) {
+        guard terminal.mouseMode != .off else { return }
+        for release in [false, true] {
+            let flags = terminal.encodeButton(button: 0, release: release,
+                                              shift: false, meta: false,
+                                              control: false)
+            terminal.sendEvent(buttonFlags: flags, x: col, y: row)
+        }
+    }
+
     public func resize(to geometry: TerminalGeometry) {
         self.geometry = geometry
         terminal.resize(cols: geometry.cols, rows: geometry.rows)
@@ -57,13 +103,10 @@ public final class SwiftTermEngine: TerminalEngine {
             cells.reserveCapacity(geometry.cols)
             for col in 0..<geometry.cols {
                 guard let charData = terminal.getCharData(col: col, row: row) else { break }
-                let character = charData.getCharacter()
-                // Never-written cells are NULs: throughout the value layer, an empty
-                // cell is a space (otherwise line endings become control characters).
-                cells.append(TerminalCell(character: character == "\0" ? " " : character,
-                                          style: Self.cellStyle(from: charData.attribute)))
+                cells.append(Self.cell(from: charData))
             }
-            lines.append(TerminalLine(cells: cells))
+            lines.append(TerminalLine(cells: cells,
+                                      isWrapped: terminal.getLine(row: row)?.isWrapped ?? false))
         }
         let cursor = terminal.getCursorLocation()
         return TerminalScreen(geometry: geometry,
@@ -72,9 +115,21 @@ public final class SwiftTermEngine: TerminalEngine {
                               revision: revision)
     }
 
-    /// Rows currently above the screen — also the absolute index base that
-    /// gives history lines a STABLE identity for the view diff.
-    public var scrollbackRows: Int { terminal.getTopVisibleRow() }
+    /// Rows that ever scrolled above the screen — also the absolute index base
+    /// that gives history lines a STABLE identity for the view diff.
+    ///
+    /// ABSOLUTE, not the buffer offset: once the scrollback is full (10,000
+    /// lines into a long session) `yDisp` plateaus while the emulator trims a
+    /// line off the top for each one pushed. Read as the base, that plateau
+    /// handed the SAME identity to a row that had moved up by one every frame —
+    /// the view diffed shifting text under fixed ids, and the tail below
+    /// stopped seeing "new" rows altogether: a frozen history under a live
+    /// screen, blocks apparently duplicated. `totalLinesTrimmed` is the count
+    /// the emulator keeps for exactly this, and `getScrollInvariantLine`
+    /// already indexes in these absolute terms.
+    public var scrollbackRows: Int {
+        terminal.getTopVisibleRow() + terminal.buffer.totalLinesTrimmed
+    }
 
     // P0 perf: scrollback lines are immutable once scrolled off — the tail is
     // cached and only the NEW rows are extracted (measured 14.7 ms → ~0 per
@@ -83,7 +138,7 @@ public final class SwiftTermEngine: TerminalEngine {
     private var tailCachedRows = 0
 
     public func historyTail(_ limit: Int) -> [TerminalLine] {
-        let rows = terminal.getTopVisibleRow()   // yDisp = number of lines above
+        let rows = scrollbackRows   // absolute: keeps growing past the cap
         guard rows > 0 else { return [] }
         if rows < tailCachedRows { invalidateTailCache() }   // defensive: buffer shrank
         if rows > tailCachedRows {
@@ -96,20 +151,40 @@ public final class SwiftTermEngine: TerminalEngine {
             if tailCache.count > cap { tailCache.removeFirst(tailCache.count - cap) }
             tailCachedRows = rows
         }
+        // The tail mirrors what the emulator still holds: past the scrollback
+        // cap it trims a line per line pushed, and so must the cache (a no-op
+        // in production, where the 10,000-line scrollback dwarfs the cap).
+        let retained = rows - terminal.buffer.totalLinesTrimmed
+        if tailCache.count > retained { tailCache.removeFirst(tailCache.count - retained) }
         return tailCache.suffix(limit)
     }
 
+    /// Never-written cells are NULs: throughout the value layer, an empty cell
+    /// is a space (otherwise line endings become control characters).
+    private static func cell(from charData: CharData) -> TerminalCell {
+        let character = charData.getCharacter()
+        return TerminalCell(character: character == "\0" ? " " : character,
+                            style: cellStyle(from: charData.attribute),
+                            link: linkTarget(of: charData))
+    }
+
+    /// An OSC 8 payload is `params;URI` — only the URI is the target.
+    private static func linkTarget(of charData: CharData) -> String? {
+        guard charData.hasPayload, let payload = charData.getPayload() as? String,
+              let separator = payload.firstIndex(of: ";")
+        else { return nil }
+        let target = String(payload[payload.index(after: separator)...])
+        return target.isEmpty ? nil : target
+    }
+
+    /// `row` is absolute (lines ever scrolled off), the emulator's own
+    /// scroll-invariant numbering — it subtracts what it trimmed itself.
     private func extractScrollbackLine(_ row: Int) -> TerminalLine {
         guard let bufferLine = terminal.getScrollInvariantLine(row: row) else {
             return TerminalLine(cells: [])
         }
-        let cells = (0..<geometry.cols).map { col -> TerminalCell in
-            let charData = bufferLine[col]
-            let character = charData.getCharacter()
-            return TerminalCell(character: character == "\0" ? " " : character,
-                                style: Self.cellStyle(from: charData.attribute))
-        }
-        return TerminalLine(cells: cells)
+        let cells = (0..<geometry.cols).map { Self.cell(from: bufferLine[$0]) }
+        return TerminalLine(cells: cells, isWrapped: bufferLine.isWrapped)
     }
 
     private func invalidateTailCache() {

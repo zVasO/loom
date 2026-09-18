@@ -4,10 +4,11 @@ import LoomPersistence
 import LoomUI
 import SwiftUI
 
-/// The global PRs tab: every project's open pull requests in one sidebar,
-/// the shared PR workspace in the middle, and (phase 3) the review session
-/// embedded on the right. "Start review" is the one-click quick action —
-/// one claude session per PR, badged, reattached when it already exists.
+/// The global PRs tab: every project's open pull requests in one sidebar, the
+/// shared PR workspace in the middle, and the review session in a drawer that
+/// slides over the right edge — the diff never gives up width for it.
+/// "Start review" is the one-click quick action — one claude session per PR,
+/// badged, reattached when it already exists.
 struct GlobalPRsView: View {
     let model: AppModel
     /// Opens the session in the Sessions tab (used until the pane is embedded).
@@ -15,7 +16,7 @@ struct GlobalPRsView: View {
 
     @State private var selectedProjectID: ProjectID?
     @State private var selectedPR: GitHubService.PullRequest?
-    /// The embedded review session (phase 3): shown on the right, so the user
+    /// The embedded review session: shown in the right drawer, so the user
     /// switches diff ↔ session without leaving the tab.
     @State private var paneSessionID: SessionID?
     @State private var paneOpen = false
@@ -24,9 +25,25 @@ struct GlobalPRsView: View {
     @State private var expandedProjects: Set<ProjectID> = []
     /// The PR list steps aside when a review starts — toggle to bring it back.
     @State private var sidebarHidden = false
-    /// Diff above, session below (full-width lines) — or side by side.
-    /// Persisted: a layout choice is a habit, not a whim.
-    @State private var stackedLayout = UserDefaults.standard.bool(forKey: "loom.review.stacked")
+    /// Which region of the workspace is showing. Persisted: whichever one you
+    /// work in, you come back to it.
+    @State private var pane = PRPane(rawValue: UserDefaults.standard
+        .string(forKey: Self.paneKey) ?? "") ?? .files
+    /// UserDefaults answers 0 for a key never written — that is "unset", not
+    /// a width the user chose.
+    @State private var drawerWidth: CGFloat = {
+        let stored = UserDefaults.standard.double(forKey: GlobalPRsView.drawerWidthKey)
+        return stored > 0 ? stored : 420
+    }()
+    /// A drag reports its translation from where it started, not since the
+    /// last frame: the width it started from has to be remembered.
+    @State private var drawerWidthAtDragStart: CGFloat?
+
+    private static let paneKey = "loom.pr.pane"
+    private static let drawerWidthKey = "loom.review.drawerWidth"
+    private static let drawerMinWidth: CGFloat = 320
+    /// However wide the drawer is dragged, this much diff stays uncovered.
+    private static let workspaceMinWidth: CGFloat = 360
 
     private var gitProjects: [ProjectRecord] { model.projects }
 
@@ -66,29 +83,38 @@ struct GlobalPRsView: View {
         selectedProjectID = pending.projectID
         selectedPR = pending.pr
         expandedProjects.insert(pending.projectID)
-        if model.prCache[pending.projectID] == nil {
-            Task { await model.refreshPRs(for: pending.projectID) }
-        }
+        Task { await model.ensurePRs(for: pending.projectID) }
         model.pendingPR = nil
     }
 
     // MARK: Sidebar — projects and their PRs
 
     private var sidebar: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                ForEach(gitProjects, id: \.id) { project in
-                    projectGroup(project)
-                }
+        VStack(spacing: 0) {
+            // The question every list below answers: all open, mine, waiting
+            // on my review… Changing it refetches the expanded projects only.
+            HStack(spacing: 8) {
+                PRFilterMenu(model: model,
+                             projectsToRefresh: { Array(expandedProjects) })
+                Spacer()
             }
-            .padding(12)
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            Divider().overlay(DefaultTheme.cardBorder)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(gitProjects, id: \.id) { project in
+                        projectGroup(project)
+                    }
+                }
+                .padding(12)
+            }
         }
         .frame(width: 300)
         .background(DefaultTheme.background)
     }
 
     private func projectGroup(_ project: ProjectRecord) -> some View {
-        let prs = model.prCache[project.id] ?? []
+        let prs = model.prs(for: project.id)
         let expanded = expandedProjects.contains(project.id)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -97,9 +123,7 @@ struct GlobalPRsView: View {
                         expandedProjects.remove(project.id)
                     } else {
                         expandedProjects.insert(project.id)
-                        if model.prCache[project.id] == nil {
-                            Task { await model.refreshPRs(for: project.id) }
-                        }
+                        Task { await model.ensurePRs(for: project.id) }
                     }
                 } label: {
                     HStack(spacing: 6) {
@@ -109,8 +133,8 @@ struct GlobalPRsView: View {
                         Text(project.name.uppercased())
                             .font(.system(size: 10, weight: .semibold))
                             .kerning(0.8)
-                        if let cached = model.prCache[project.id], !cached.isEmpty {
-                            Text("\(cached.count)")
+                        if !prs.isEmpty {
+                            Text("\(prs.count)")
                                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(DefaultTheme.secondaryText)
                                 .padding(.horizontal, 5).padding(.vertical, 1)
@@ -122,19 +146,21 @@ struct GlobalPRsView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                if model.prLoading.contains(project.id) {
+                if model.isLoadingPRs(for: project.id) {
                     ProgressView().controlSize(.mini)
                 }
                 if expanded {
-                    HoverIconButton(systemImage: "arrow.clockwise", help: "Refresh") {
+                    HoverIconButton(systemImage: "arrow.clockwise",
+                                    help: model.prCacheHelp(for: project.id)) {
                         Task { await model.refreshPRs(for: project.id) }
                     }
                 }
             }
             .padding(.horizontal, 2)
             if expanded {
-                if prs.isEmpty && !model.prLoading.contains(project.id) {
-                    Text("No open PR")
+                if prs.isEmpty && !model.isLoadingPRs(for: project.id) {
+                    Text(model.selectedPRFilterID == PRFilter.all.id
+                         ? "No open PR" : "No PR matches “\(model.selectedPRFilter.name)”")
                         .font(.system(size: 11))
                         .foregroundStyle(DefaultTheme.mutedText)
                         .padding(.leading, 2)
@@ -163,91 +189,47 @@ struct GlobalPRsView: View {
         selectedPR = pr
         Task {
             if let id = await model.launchPRReviewSession(pr, in: project.id) {
-                // Stay in the PR tab: the session opens in the embedded pane,
-                // and the PR list steps aside to give the diff room.
+                // Stay in the PR tab: the session opens in the drawer, and the
+                // PR list steps aside to give the diff room.
                 paneSessionID = id
-                paneOpen = true
-                withAnimation(.hover) { sidebarHidden = true }
+                withAnimation(.hover) {
+                    paneOpen = true
+                    sidebarHidden = true
+                }
             }
         }
     }
 
-    // MARK: Detail — the shared workspace
+    // MARK: Detail — toolbar, workspace, session drawer
 
     @ViewBuilder
     private var detail: some View {
         if let pr = selectedPR,
            let project = gitProjects.first(where: { $0.id == selectedProjectID }) {
             VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    HoverIconButton(systemImage: "sidebar.leading",
-                                    help: sidebarHidden ? "Show the PR list" : "Hide the PR list") {
-                        withAnimation(.hover) { sidebarHidden.toggle() }
-                    }
-                    Spacer()
-                    if paneOpen {
-                        HoverIconButton(systemImage: stackedLayout
-                                            ? "rectangle.split.2x1" : "rectangle.split.1x2",
-                                        help: stackedLayout
-                                            ? "Side by side (diff | session)"
-                                            : "Stacked (diff above, session below)") {
-                            withAnimation(.hover) { stackedLayout.toggle() }
-                            UserDefaults.standard.set(stackedLayout, forKey: "loom.review.stacked")
-                        }
-                        GhostButton("Hide session", systemImage: "sidebar.trailing") {
-                            paneOpen = false
-                        }
-                    } else if let existing = model.reviewSession(forPR: pr.number, in: project.id) {
-                        GhostButton("Show session", systemImage: "sidebar.trailing") {
-                            Task {
-                                _ = await model.launchPRReviewSession(pr, in: project.id)
-                                paneSessionID = existing
-                                paneOpen = true
-                            }
-                        }
-                    }
-                    if model.isLaunchingReview(forPR: pr.number, in: project.id) {
-                        // The checkout fetches from the network: without this
-                        // the click felt like a frozen app.
-                        HStack(spacing: 6) {
-                            ProgressView().controlSize(.small)
-                            Text("Preparing the review worktree…")
-                                .font(.system(size: 11))
-                                .foregroundStyle(DefaultTheme.secondaryText)
-                        }
-                    } else {
-                        AccentButton(model.reviewSession(forPR: pr.number, in: project.id) != nil
-                                     ? "Review session" : "Start review",
-                                     systemImage: "sparkles") {
-                            startReview(pr, project: project)
-                        }
-                    }
-                }
-                .padding(.horizontal, 14).padding(.vertical, 8)
-                .background(DefaultTheme.background)
+                toolbar(pr, project: project)
                 Divider().overlay(DefaultTheme.cardBorder)
-                if paneOpen, let sessionID = paneSessionID {
-                    // Two arrangements for the same pair: side by side keeps
-                    // both tall; stacked gives the diff the full width.
-                    if stackedLayout {
-                        VSplitView {
-                            workspace(pr, project: project)
-                                .frame(minHeight: 240)
-                            // ≥ pane header (~35) + the terminal's own 200 pt
-                            // resize floor, or the grid would stop following.
-                            embeddedSession(sessionID)
-                                .frame(minHeight: 260)
+                GeometryReader { geometry in
+                    // One width for the three of them: the drawer, the space
+                    // the controls keep clear of it, and the handle's offset.
+                    let width = clampedDrawerWidth(available: geometry.size.width)
+                    let drawer = paneOpen ? width : 0
+                    ZStack(alignment: .trailing) {
+                        workspace(pr, project: project, controlsInset: drawer)
+                        if paneOpen, let sessionID = paneSessionID {
+                            // The drawer's OWN width never animates: it slides
+                            // in at full size. Animating 0 → width resized the
+                            // terminal on every frame of the slide, and each
+                            // resize made the agent repaint its whole
+                            // conversation — the duplicated blocks.
+                            sessionDrawer(sessionID, width: width,
+                                          available: geometry.size.width)
                         }
-                    } else {
-                        HSplitView {
-                            workspace(pr, project: project)
-                                .frame(minWidth: 420)
-                            embeddedSession(sessionID)
-                                .frame(minWidth: 380)
+                        if paneSessionID != nil {
+                            sessionToggle.padding(.trailing, drawer + 12)
                         }
                     }
-                } else {
-                    workspace(pr, project: project)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .onChange(of: pr.number) { syncPane(pr, project: project) }
@@ -264,6 +246,134 @@ struct GlobalPRsView: View {
             .background(DefaultTheme.contentBackground)
         }
     }
+
+    private func toolbar(_ pr: GitHubService.PullRequest,
+                         project: ProjectRecord) -> some View {
+        HStack(spacing: 10) {
+            HoverIconButton(systemImage: "sidebar.leading",
+                            help: sidebarHidden ? "Show the PR list" : "Hide the PR list") {
+                withAnimation(.hover) { sidebarHidden.toggle() }
+            }
+            Text("#\(pr.number)")
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .foregroundStyle(DefaultTheme.accent)
+            Text(pr.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(DefaultTheme.primaryText)
+                .lineLimit(1)
+            Spacer(minLength: 12)
+            HStack(spacing: 4) {
+                ForEach(PRPane.allCases) { candidate in
+                    NavTab(candidate.rawValue, isActive: pane == candidate) {
+                        pane = candidate
+                        UserDefaults.standard.set(candidate.rawValue, forKey: Self.paneKey)
+                    }
+                }
+            }
+            Spacer(minLength: 12)
+            GhostButton("GitHub", systemImage: "arrow.up.forward.square") {
+                if let url = URL(string: pr.url) { NSWorkspace.shared.open(url) }
+            }
+            if model.isLaunchingReview(forPR: pr.number, in: project.id) {
+                // The checkout fetches from the network: without this the
+                // click felt like a frozen app.
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Preparing the review worktree…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                }
+            } else {
+                AccentButton(model.reviewSession(forPR: pr.number, in: project.id) != nil
+                             ? "Review session" : "Start review",
+                             systemImage: "sparkles") {
+                    startReview(pr, project: project)
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(DefaultTheme.background)
+    }
+
+    /// The drawer slides over the diff instead of shrinking it: opening it
+    /// never reflows the code, so no line changes where it wraps.
+    private func sessionDrawer(_ sessionID: SessionID, width: CGFloat,
+                               available: CGFloat) -> some View {
+        embeddedSession(sessionID)
+            .frame(width: width)
+            .frame(maxHeight: .infinity)
+            .background(DefaultTheme.background)
+            .overlay(alignment: .leading) { drawerResizeHandle(available: available) }
+            .shadow(color: .black.opacity(0.45), radius: 20, x: -8)
+            .transition(.move(edge: .trailing))
+    }
+
+    private func clampedDrawerWidth(available: CGFloat) -> CGFloat {
+        let ceiling = max(available - Self.workspaceMinWidth, Self.drawerMinWidth)
+        return min(max(drawerWidth, Self.drawerMinWidth), ceiling)
+    }
+
+    private func drawerResizeHandle(available: CGFloat) -> some View {
+        Rectangle()
+            .fill(DefaultTheme.cardBorder)
+            .frame(width: 1)
+            .overlay {
+                Rectangle()
+                    .fill(.clear)
+                    .frame(width: 10)
+                    .contentShape(Rectangle())
+                    // set(), not push()/pop(): a hover whose exit is missed
+                    // would leave the resize cursor stuck on the stack.
+                    .onHover { inside in
+                        (inside ? NSCursor.resizeLeftRight : NSCursor.arrow).set()
+                    }
+                    .gesture(DragGesture()
+                        .onChanged { value in
+                            let start = drawerWidthAtDragStart ?? drawerWidth
+                            drawerWidthAtDragStart = start
+                            let ceiling = max(available - Self.workspaceMinWidth,
+                                              Self.drawerMinWidth)
+                            drawerWidth = min(max(start - value.translation.width,
+                                                  Self.drawerMinWidth), ceiling)
+                        }
+                        .onEnded { _ in
+                            drawerWidthAtDragStart = nil
+                            UserDefaults.standard.set(drawerWidth, forKey: Self.drawerWidthKey)
+                        })
+            }
+    }
+
+    /// The floating handle: the one control that shows or hides the session,
+    /// riding the drawer's edge so it stays the same target either way.
+    private var sessionToggle: some View {
+        let state = paneSessionID.flatMap { id in
+            model.sessions.first { $0.id == id }?.state
+        }
+        return Button {
+            withAnimation(.hover) { paneOpen.toggle() }
+        } label: {
+            VStack(spacing: 5) {
+                Image(systemName: paneOpen ? "chevron.right" : "chevron.left")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.accent)
+                if let state, !paneOpen {
+                    Circle()
+                        .fill(DefaultTheme.badgeColor(for: state))
+                        .frame(width: 5, height: 5)
+                }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 11)
+            .background(DefaultTheme.surfaceRaised, in: Capsule())
+            .overlay(Capsule().stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .shadow(color: .black.opacity(0.4), radius: 10, y: 2)
+            .hoverBrightness()
+        }
+        .buttonStyle(.plain)
+        .help(paneOpen ? "Hide the review session" : "Show the review session")
+    }
 }
 
 extension GlobalPRsView {
@@ -279,17 +389,21 @@ extension GlobalPRsView {
         }
     }
 
-    /// The shared PR workspace, wired once for both arrangements.
+    /// The shared PR workspace, wired once for both regions. `controlsInset`
+    /// is what the drawer covers: the diff may pass under it, its buttons
+    /// may not.
     fileprivate func workspace(_ pr: GitHubService.PullRequest,
-                               project: ProjectRecord) -> some View {
-        PRWorkspaceView(model: model, project: project, pr: pr,
-                        onBack: nil, onOpenSession: onOpenSession,
+                               project: ProjectRecord,
+                               controlsInset: CGFloat) -> some View {
+        PRWorkspaceView(model: model, project: project, pr: pr, pane: pane,
+                        controlsInset: controlsInset,
+                        onOpenSession: onOpenSession,
                         sendToSession: { message in
                             Task {
                                 if let id = await model.sendToPRReviewSession(
                                     message, pr: pr, in: project.id) {
                                     paneSessionID = id
-                                    paneOpen = true
+                                    withAnimation(.hover) { paneOpen = true }
                                 }
                             }
                         },
@@ -305,6 +419,7 @@ extension GlobalPRsView {
                                 """, id: id)
                             }
                         } : nil)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     fileprivate func embeddedSession(_ sessionID: SessionID) -> some View {
@@ -375,6 +490,26 @@ private struct PRSidebarRow: View {
                         .lineLimit(1)
                     MonoTag(pr.branch, systemImage: "arrow.triangle.branch",
                             color: DefaultTheme.mutedText)
+                }
+                // One more line at most: who it waits on, what it is tagged,
+                // how big it is, whether it still merges.
+                if !pr.reviewers.isEmpty || !pr.labels.isEmpty || pr.additions + pr.deletions > 0
+                    || pr.isConflicting {
+                    HStack(spacing: 6) {
+                        if !pr.reviewers.isEmpty {
+                            Label(PRChips.reviewers(pr, limit: 2), systemImage: "person.2")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(DefaultTheme.mutedText)
+                                .lineLimit(1)
+                        }
+                        ForEach(pr.labels.prefix(2), id: \.name) { PRChips.label($0) }
+                        if pr.additions + pr.deletions > 0 { PRChips.size(pr) }
+                        if pr.isConflicting {
+                            Text("conflicts")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(DefaultTheme.danger)
+                        }
+                    }
                 }
             }
             Spacer()

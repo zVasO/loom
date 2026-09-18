@@ -20,6 +20,69 @@ struct TerminalSurfaceTests {
         ).runtime
     }
 
+    // TRM-06 — a full-screen agent takes the mouse and scrolls its own viewport.
+    // The pane must learn about it, or the wheel dies in a ScrollView that has
+    // nothing left to scroll.
+    @Test("mouse tracking reaches the surface, and wheel and click reach the PTY")
+    func souriRelayeeALAgent() async throws {
+        let pty = ScriptedPTYHost()
+        let runtime = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree"),
+                              geometry: TerminalGeometry(cols: 40, rows: 6)),
+            using: SessionRuntime.Dependencies(
+                ptyHost: pty,
+                transcript: MemoryTranscriptSink(),
+                makeEngine: { geometry, _ in
+                    SwiftTermEngine(geometry: geometry, scrollback: 100)
+                })
+        ).runtime
+        let surface = runtime.surface()
+        surface.attach()
+
+        #expect(surface.mouseReporting == false, "nothing is tracking yet")
+        pty.emit("\u{1B}[?1000h\u{1B}[?1006h")
+        #expect(await pollUntil { surface.mouseReporting },
+                "the pane must know the agent took the mouse")
+
+        surface.sendWheel(.up, atCol: 3, row: 5)
+        #expect(await pollUntil {
+            String(decoding: pty.writtenBytes, as: UTF8.self).contains("\u{1B}[<64;4;6M")
+        }, "the notch must land on the PTY, or the agent never scrolls")
+
+        surface.sendClick(atCol: 3, row: 5)
+        #expect(await pollUntil {
+            String(decoding: pty.writtenBytes, as: UTF8.self).contains("\u{1B}[<0;4;6M\u{1B}[<0;4;6m")
+        }, "the click must land on the PTY, or the agent's own targets are unreachable")
+    }
+
+    // The key capture reads the modes off the surface: bracketed paste, cursor
+    // keys and the kitty flags must travel the same road as the mouse.
+    @Test("the negotiated input modes reach the surface")
+    func modesRelayesALaSurface() async throws {
+        let pty = ScriptedPTYHost()
+        let runtime = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree"),
+                              geometry: TerminalGeometry(cols: 40, rows: 6)),
+            using: SessionRuntime.Dependencies(
+                ptyHost: pty,
+                transcript: MemoryTranscriptSink(),
+                makeEngine: { geometry, _ in
+                    SwiftTermEngine(geometry: geometry, scrollback: 100)
+                })
+        ).runtime
+        let surface = runtime.surface()
+        surface.attach()
+
+        #expect(surface.modes == .none, "legacy defaults before the program speaks")
+        pty.emit("\u{1B}[?2004h\u{1B}[>1u")
+        #expect(await pollUntil { surface.modes.bracketedPaste },
+                "⌘V must know to bracket the paste")
+        #expect(await pollUntil { surface.modes.keyboardEnhancement.contains(.disambiguate) },
+                "the encoder must know the program expects CSI u reports")
+    }
+
     @Test("surface() is idempotent and its screen is never empty")
     func surfaceIdempotenteEtEcranJamaisVide() throws {
         let runtime = try makeRuntime()

@@ -15,17 +15,31 @@ public enum DiffParser {
         public let oldNumber: Int?
         /// Line number in the NEW file (nil for deletions).
         public let newNumber: Int?
+        public init(kind: LineKind, text: String, oldNumber: Int?, newNumber: Int?) {
+            self.kind = kind
+            self.text = text
+            self.oldNumber = oldNumber
+            self.newNumber = newNumber
+        }
     }
 
     public struct Hunk: Sendable, Equatable {
         public let header: String
         public let lines: [Line]
+        public init(header: String, lines: [Line]) {
+            self.header = header
+            self.lines = lines
+        }
     }
 
     public struct File: Sendable, Equatable, Identifiable {
         public var id: String { path }
         public let path: String
         public let hunks: [Hunk]
+        public init(path: String, hunks: [Hunk]) {
+            self.path = path
+            self.hunks = hunks
+        }
         public var additions: Int { hunks.flatMap(\.lines).count { $0.kind == .addition } }
         public var deletions: Int { hunks.flatMap(\.lines).count { $0.kind == .deletion } }
     }

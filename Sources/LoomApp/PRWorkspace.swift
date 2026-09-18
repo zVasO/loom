@@ -5,9 +5,9 @@ import LoomPersistence
 import LoomUI
 import SwiftUI
 
-/// The shared PR workspace: header, Overview (description, conversation,
-/// guided tour, verdict) and Files (GitHub-style split diff). Used by the
-/// project detail AND the global PRs tab — one implementation.
+/// The shared PR workspace: two regions that never compete for the same
+/// scroll — Overview (identity, guided tour, description, conversation) and
+/// Files (the diff, full-bleed) — over a docked verdict bar.
 /// One comment/review of the conversation: collapsed to two lines when long,
 /// chevron to expand — long threads stay scannable.
 struct ConversationRow: View {
@@ -69,11 +69,23 @@ struct ConversationRow: View {
     }
 }
 
+/// Which region of the workspace is on screen. The diff is not a section of a
+/// page any more: it is one of two regions, and it owns its own scroll.
+enum PRPane: String, CaseIterable, Identifiable {
+    case overview = "Overview"
+    case files = "Files"
+
+    var id: String { rawValue }
+}
+
 struct PRWorkspaceView: View {
     let model: AppModel
     let project: ProjectRecord
     let pr: GitHubService.PullRequest
-    var onBack: (() -> Void)?
+    let pane: PRPane
+    /// How much of the right edge the session drawer covers. The diff scrolls
+    /// under it; the controls step aside, or they would be unreachable.
+    let controlsInset: CGFloat
     let onOpenSession: (SessionID) -> Void
     /// Phase 4 — receives the composed message for the PR's review session
     /// ("Explain these lines…", "Ask about…"). nil = quick actions still work
@@ -93,217 +105,239 @@ struct PRWorkspaceView: View {
     /// silently hiding the whole file explorer.
     @State private var diffError: String?
     @State private var diffLoading = false
+    /// GitHub's "Viewed" boxes over the diff's files — the recap and the
+    /// checkboxes read it; a toggle flips it before GitHub answers.
+    @State private var progress = FileReviewProgress.empty
+    /// Syntax colours, computed after the diff off the main thread: the
+    /// diff paints plain first, then coloured.
+    @State private var highlights = DiffHighlights.none
+    @Environment(\.colorScheme) private var colorScheme
     @State private var prTour: PRTour?
     @State private var tourLoading = false
     @State private var reviewBody = ""
     @State private var prActionOutput: String?
     @State private var prActionBusy = false
-    /// Diff layout, persisted: split (aligned old/new) or unified (full-width
-    /// lines — the whole line stays readable).
+    /// Diff layout, persisted: split (aligned old/new) or unified (one line
+    /// per change, both gutters).
     @State private var unifiedDiff = UserDefaults.standard.bool(forKey: "loom.diff.unified")
 
     var body: some View {
-        ScrollView {
-            prDetailView(pr, project: project)
-                .frame(maxWidth: 900, alignment: .leading)
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(spacing: 0) {
+            switch pane {
+            case .overview: overviewPane
+            case .files: filesPane
+            }
+            Divider().overlay(DefaultTheme.cardBorder)
+            verdictBar
         }
         .background(DefaultTheme.background)
         .task(id: pr.number) {
             prDetail = nil
             diffFiles = []
+            progress = .empty
+            highlights = .none
             await load(refresh: false)
         }
     }
 
-    /// Detail + diff (cached in the model unless refresh), then the heavy
-    /// parse/pair work off the main thread.
-    private func load(refresh: Bool) async {
-        diffLoading = true
-        prDetail = await model.prDetail(pr.number, in: project.id, refresh: refresh)
-        lineComments = await model.reviewComments(pr.number, in: project.id, refresh: refresh)
-        let result = await model.prDiff(pr.number, baseBranch: pr.baseBranch,
-                                        in: project.id, refresh: refresh)
-        diffError = result.error
-        let diff = result.diff
-        diffFiles = await Task.detached(priority: .userInitiated) {
-            DiffFileRows.compute(DiffParser.parse(diff))
-        }.value
-        diffLoading = false
-    }
+    // MARK: Overview — who, why, and what the conversation says
 
-    /// Light markdown (bold, code, links) with line breaks preserved — a full
-    /// block parser would flatten lists; this keeps PR descriptions readable.
-    static func markdown(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text,
-                               options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(text)
-    }
-
-    private func deliver(_ message: String) {
-        if let sendToSession {
-            sendToSession(message)
-        } else {
-            // Fallback (project tab): route through the review session and jump to it.
-            Task {
-                if let id = await model.sendToPRReviewSession(message, pr: pr, in: project.id) {
-                    onOpenSession(id)
-                }
-            }
-        }
-    }
-
-    private func loadPRDetail(_ pr: GitHubService.PullRequest, project: ProjectRecord) {
-        // After a submission the cached conversation is stale: force a refetch.
-        Task { await load(refresh: true) }
-    }
-
-    private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {
-        HStack(spacing: 8) {
-            Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
-                .foregroundStyle(DefaultTheme.secondaryText)
-            Text("\(count)")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(color)
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
-        }
-    }
-
-    private func prDetailView(_ pr: GitHubService.PullRequest,
-                              project: ProjectRecord) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 10) {
-                if let onBack {
-                    HoverIconButton(systemImage: "arrow.left", help: "Back to the list") {
-                        onBack()
+    private var overviewPane: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                identity
+                tourSection(pr, project: project)
+                if let detail = prDetail {
+                    if !detail.body.isEmpty {
+                        // Block-level rendering: headings, lists, quotes and
+                        // fences as structure — not literal ## and -.
+                        MarkdownBlockView(detail.body)
+                            .textSelection(.enabled)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(DefaultTheme.surface,
+                                        in: RoundedRectangle(cornerRadius: 10))
                     }
-                }
-                Text("#\(pr.number)")
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.accent)
-                Text(pr.title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(DefaultTheme.primaryText)
-                    .lineLimit(1)
-                Spacer()
-                GhostButton("GitHub", systemImage: "arrow.up.forward.square") {
-                    if let url = URL(string: pr.url) { NSWorkspace.shared.open(url) }
-                }
-            }
-
-            // Who and where: author (GitHub avatar), head → base branches.
-            HStack(spacing: 10) {
-                AsyncImage(url: URL(string: "https://github.com/\(pr.author).png?size=80")) { image in
-                    image.resizable()
-                } placeholder: {
-                    Circle().fill(DefaultTheme.surfaceRaised)
-                }
-                .frame(width: 26, height: 26)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(DefaultTheme.cardBorder, lineWidth: 1))
-                Text("@" + pr.author)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.branch)
-                Text("wants to merge")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                MonoTag(pr.branch, systemImage: "arrow.triangle.branch")
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(DefaultTheme.mutedText)
-                MonoTag(pr.baseBranch.isEmpty ? "main" : pr.baseBranch,
-                        systemImage: "arrow.triangle.branch",
-                        color: DefaultTheme.secondaryText)
-                if pr.isDraft {
-                    Text("draft")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(DefaultTheme.mutedText)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(DefaultTheme.surfaceRaised, in: Capsule())
-                }
-                Spacer()
-            }
-
-            // The playful part: the guided tour.
-            tourSection(pr, project: project)
-
-            if let detail = prDetail {
-                if !detail.body.isEmpty {
-                    // Block-level rendering: headings, lists, quotes and
-                    // fences as structure — not literal ## and -.
-                    MarkdownBlockView(detail.body)
-                        .textSelection(.enabled)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-                }
-                if !detail.reviews.isEmpty || !detail.comments.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        sectionHeader("CONVERSATION",
-                                      count: detail.reviews.count + detail.comments.count,
-                                      color: DefaultTheme.secondaryText)
-                        ForEach(Array(detail.reviews.enumerated()), id: \.offset) { _, review in
-                            conversationRow(author: review.author,
-                                            chip: review.state.replacingOccurrences(of: "_", with: " ").lowercased(),
-                                            body: review.body)
-                        }
-                        ForEach(Array(detail.comments.enumerated()), id: \.offset) { _, comment in
-                            conversationRow(author: comment.author, chip: nil, body: comment.body)
-                        }
-                    }
-                }
-            } else {
-                ProgressView().controlSize(.small)
-            }
-
-            if diffFiles.isEmpty {
-                // The explorer never vanishes silently: loading shows a
-                // spinner, failure shows the reason and a way to retry.
-                VStack(alignment: .leading, spacing: 6) {
-                    sectionHeader("DIFF", count: 0, color: DefaultTheme.secondaryText)
-                    HStack(spacing: 8) {
-                        if diffLoading {
-                            ProgressView().controlSize(.small)
-                            Text("Loading the diff…")
-                                .font(.system(size: 11))
-                                .foregroundStyle(DefaultTheme.secondaryText)
-                        } else {
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.system(size: 11))
-                                .foregroundStyle(DefaultTheme.danger)
-                            Text(diffError ?? "This PR has no diff.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(DefaultTheme.secondaryText)
-                                .textSelection(.enabled)
-                            GhostButton("Retry", systemImage: "arrow.clockwise") {
-                                Task { await load(refresh: true) }
+                    if !detail.reviews.isEmpty || !detail.comments.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            sectionHeader("CONVERSATION",
+                                          count: detail.reviews.count + detail.comments.count,
+                                          color: DefaultTheme.secondaryText)
+                            ForEach(Array(detail.reviews.enumerated()), id: \.offset) { _, review in
+                                conversationRow(
+                                    author: review.author,
+                                    chip: review.state
+                                        .replacingOccurrences(of: "_", with: " ").lowercased(),
+                                    body: review.body)
+                            }
+                            ForEach(Array(detail.comments.enumerated()), id: \.offset) { _, comment in
+                                conversationRow(author: comment.author, chip: nil,
+                                                body: comment.body)
                             }
                         }
                     }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                } else {
+                    ProgressView().controlSize(.small)
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 10) {
-                        sectionHeader("DIFF", count: diffFiles.count,
-                                      color: DefaultTheme.secondaryText)
-                        Spacer()
-                        // Split keeps old/new aligned; unified gives every
-                        // line the full width.
-                        HoverIconButton(systemImage: unifiedDiff
-                                            ? "rectangle.split.2x1" : "list.bullet.rectangle",
-                                        help: unifiedDiff ? "Split view (old | new)"
-                                                          : "Unified view (full-width lines)") {
-                            unifiedDiff.toggle()
-                            UserDefaults.standard.set(unifiedDiff, forKey: "loom.diff.unified")
+            }
+            .frame(maxWidth: 900, alignment: .leading)
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Who and where: author (GitHub avatar), head → base branches — then who
+    /// it waits on, who owns it, how it is tagged, how big it is.
+    private var identity: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            authorLine
+            peopleLine
+        }
+    }
+
+    /// Reviewers with their last verdict, assignees, labels, size, conflicts.
+    @ViewBuilder
+    private var peopleLine: some View {
+        let verdicts = Dictionary(pr.latestReviews.map { ($0.author, $0.state) },
+                                  uniquingKeysWith: { _, last in last })
+        // Everyone involved in the review: still requested, or already spoke.
+        let reviewers = pr.reviewers + pr.latestReviews.map(\.author)
+            .filter { !pr.reviewers.contains($0) }
+        if !reviewers.isEmpty || !pr.assignees.isEmpty || !pr.labels.isEmpty
+            || pr.changedFiles > 0 || pr.isConflicting {
+            HStack(spacing: 12) {
+                if !reviewers.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.2").font(.system(size: 10))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                        ForEach(reviewers, id: \.self) { reviewer in
+                            reviewerChip(reviewer, verdict: verdicts[reviewer])
                         }
                     }
+                }
+                if !pr.assignees.isEmpty {
+                    Label(pr.assignees.map { "@" + $0 }.joined(separator: ", "),
+                          systemImage: "person.crop.circle")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .lineLimit(1)
+                        .help("Assigned")
+                }
+                ForEach(pr.labels, id: \.name) { PRChips.label($0) }
+                if pr.changedFiles > 0 {
+                    HStack(spacing: 6) {
+                        PRChips.size(pr)
+                        Text(pr.changedFiles == 1 ? "1 file" : "\(pr.changedFiles) files")
+                            .font(.system(size: 10))
+                            .foregroundStyle(DefaultTheme.mutedText)
+                    }
+                }
+                if pr.isConflicting {
+                    Label("Conflicts with \(pr.baseBranch.isEmpty ? "base" : pr.baseBranch)",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.danger)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    /// ✓ approved, ✗ changes requested, ○ still to review — per person.
+    private func reviewerChip(_ reviewer: String, verdict: String?) -> some View {
+        let (symbol, color): (String, Color) = switch verdict ?? "" {
+        case "APPROVED": ("checkmark.circle.fill", DefaultTheme.groupHeader)
+        case "CHANGES_REQUESTED": ("xmark.circle.fill", DefaultTheme.danger)
+        case "COMMENTED": ("text.bubble", DefaultTheme.secondaryText)
+        default: ("circle.dotted", DefaultTheme.mutedText)
+        }
+        return HStack(spacing: 4) {
+            Image(systemName: symbol).font(.system(size: 10)).foregroundStyle(color)
+            Text(reviewer.hasPrefix("team/") ? reviewer : "@" + reviewer)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(DefaultTheme.primaryText)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(DefaultTheme.surfaceRaised, in: Capsule())
+        .help(verdict.map { $0.replacingOccurrences(of: "_", with: " ").lowercased() }
+              ?? "review requested")
+    }
+
+    private var authorLine: some View {
+        HStack(spacing: 10) {
+            AsyncImage(url: URL(string: "https://github.com/\(pr.author).png?size=80")) { image in
+                image.resizable()
+            } placeholder: {
+                Circle().fill(DefaultTheme.surfaceRaised)
+            }
+            .frame(width: 26, height: 26)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            Text("@" + pr.author)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(DefaultTheme.branch)
+            Text("wants to merge")
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.secondaryText)
+            MonoTag(pr.branch, systemImage: "arrow.triangle.branch")
+            Image(systemName: "arrow.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(DefaultTheme.mutedText)
+            MonoTag(pr.baseBranch.isEmpty ? "main" : pr.baseBranch,
+                    systemImage: "arrow.triangle.branch",
+                    color: DefaultTheme.secondaryText)
+            if pr.isDraft {
+                Text("draft")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.mutedText)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(DefaultTheme.surfaceRaised, in: Capsule())
+            }
+            Spacer()
+        }
+    }
+
+    // MARK: Files — the diff, and nothing else
+
+    private var filesPane: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                sectionHeader("FILES", count: diffFiles.count,
+                              color: DefaultTheme.secondaryText)
+                if diffLoading { ProgressView().controlSize(.mini) }
+                if progress.total > 0 {
+                    // The recap: how much of the PR has been checked off,
+                    // GitHub's own boxes behind it.
+                    HStack(spacing: 6) {
+                        ProgressView(value: progress.fraction)
+                            .progressViewStyle(.linear)
+                            .frame(width: 90)
+                            .tint(progress.isComplete ? DefaultTheme.groupHeader : DefaultTheme.accent)
+                        Text(progress.label)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(progress.isComplete ? DefaultTheme.groupHeader
+                                                                 : DefaultTheme.secondaryText)
+                    }
+                    .help("Files marked as viewed — the same checkboxes as on github.com")
+                }
+                Spacer()
+                // Split keeps old/new aligned; unified gives every line the
+                // full width. Long lines wrap either way.
+                HoverIconButton(systemImage: unifiedDiff
+                                    ? "rectangle.split.2x1" : "list.bullet.rectangle",
+                                help: unifiedDiff ? "Split view (old | new)"
+                                                  : "Unified view (full-width lines)") {
+                    unifiedDiff.toggle()
+                    UserDefaults.standard.set(unifiedDiff, forKey: "loom.diff.unified")
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 6)
+            .padding(.trailing, controlsInset)
+            Divider().overlay(DefaultTheme.cardBorder)
+            if diffFiles.isEmpty {
+                diffPlaceholder
+            } else {
+                ScrollView {
                     // GitHub-style side-by-side: old on the left, new on the
                     // right, aligned and tinted, per-file collapsible sections.
                     SplitDiffView(files: diffFiles,
@@ -351,42 +385,162 @@ struct PRWorkspaceView: View {
                                           prActionBusy = false
                                       }
                                   },
-                                  unified: unifiedDiff)
+                                  unified: unifiedDiff,
+                                  highlights: highlights,
+                                  viewed: progress.viewed,
+                                  changedSinceViewed: progress.changedSinceViewed,
+                                  onToggleViewed: { path, on in
+                                      // Optimistic: the box flips now, GitHub is
+                                      // told after; a refusal puts it back.
+                                      let previous = progress
+                                      progress = progress.toggling(path, viewed: on)
+                                      Task {
+                                          if let error = await model.setFileViewed(
+                                              pr.number, path: path, viewed: on, in: project.id) {
+                                              progress = previous
+                                              prActionOutput = error
+                                          }
+                                      }
+                                  })
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
                         // Identity tied to the PR: SwiftUI would otherwise
                         // reuse the view and carry a selection (and collapsed
                         // files, and the bar's position) over to the next PR.
                         .id(pr.number)
                 }
             }
+        }
+    }
 
-            // Verdict bar.
-            VStack(alignment: .leading, spacing: 8) {
+    /// The explorer never vanishes silently: loading shows a spinner, failure
+    /// shows the reason and a way to retry.
+    private var diffPlaceholder: some View {
+        HStack(spacing: 8) {
+            if diffLoading {
+                ProgressView().controlSize(.small)
+                Text("Loading the diff…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            } else {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.danger)
+                Text(diffError ?? "This PR has no diff.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .textSelection(.enabled)
+                GhostButton("Retry", systemImage: "arrow.clockwise") {
+                    Task { await load(refresh: true) }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    // MARK: The verdict — docked, so it is never a scroll away
+
+    private var verdictBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
                 TextField("Review comment…", text: $reviewBody, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
-                    .lineLimit(2...5)
-                    .padding(10)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-                    .overlay(RoundedRectangle(cornerRadius: 9)
+                    .lineLimit(1...4)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8)
                         .stroke(DefaultTheme.cardBorder, lineWidth: 1))
-                HStack(spacing: 8) {
-                    AccentButton("Approve") { submitReview(pr, .approve, project) }
-                    GhostButton("Request changes", systemImage: "exclamationmark.bubble") {
-                        submitReview(pr, .requestChanges, project)
-                    }
-                    GhostButton("Comment", systemImage: "bubble.left") {
-                        submitReview(pr, .comment, project)
-                    }
-                    if prActionBusy { ProgressView().controlSize(.small) }
-                    Spacer()
+                AccentButton("Approve") { submitReview(pr, .approve, project) }
+                GhostButton("Request changes", systemImage: "exclamationmark.bubble") {
+                    submitReview(pr, .requestChanges, project)
                 }
-                if let prActionOutput {
-                    Text(prActionOutput)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(prActionOutput.hasSuffix("✓") ? DefaultTheme.groupHeader
-                                                                       : DefaultTheme.secondaryText)
+                GhostButton("Comment", systemImage: "bubble.left") {
+                    submitReview(pr, .comment, project)
+                }
+                if prActionBusy { ProgressView().controlSize(.small) }
+            }
+            if let prActionOutput {
+                Text(prActionOutput)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(prActionOutput.hasSuffix("✓") ? DefaultTheme.groupHeader
+                                                                   : DefaultTheme.secondaryText)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .padding(.trailing, controlsInset)
+        // Background after the inset: the strip still spans the window, only
+        // its contents step out from under the drawer.
+        .background(DefaultTheme.background)
+    }
+
+    // MARK: Loading and actions
+
+    /// Detail + diff (cached in the model unless refresh), then the heavy
+    /// parse/pair work off the main thread.
+    private func load(refresh: Bool) async {
+        diffLoading = true
+        prDetail = await model.prDetail(pr.number, in: project.id, refresh: refresh)
+        lineComments = await model.reviewComments(pr.number, in: project.id, refresh: refresh)
+        let result = await model.prDiff(pr.number, baseBranch: pr.baseBranch,
+                                        in: project.id, refresh: refresh)
+        diffError = result.error
+        let diff = result.diff
+        let parsed = await Task.detached(priority: .userInitiated) {
+            DiffParser.parse(diff)
+        }.value
+        diffFiles = await Task.detached(priority: .userInitiated) {
+            DiffFileRows.compute(parsed)
+        }.value
+        diffLoading = false
+        // Colours come last, at lower priority: the diff is readable plain,
+        // and highlight.js over a big PR takes a moment.
+        let dark = colorScheme == .dark
+        let number = pr.number
+        let coloured = await Task.detached(priority: .utility) {
+            DiffHighlighter.highlight(parsed, dark: dark)
+        }.value
+        if pr.number == number { highlights = coloured }
+        // GitHub's viewed boxes, after the diff: the files on screen are the
+        // universe the recap counts.
+        let views = await model.fileViews(pr.number, in: project.id, refresh: refresh)
+        progress = FileReviewProgress.compute(paths: diffFiles.map(\.file.path),
+                                              views: views?.files ?? [])
+    }
+
+    /// Light markdown (bold, code, links) with line breaks preserved — a full
+    /// block parser would flatten lists; this keeps PR descriptions readable.
+    static func markdown(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text,
+                               options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(text)
+    }
+
+    private func deliver(_ message: String) {
+        if let sendToSession {
+            sendToSession(message)
+        } else {
+            // Fallback (project tab): route through the review session and jump to it.
+            Task {
+                if let id = await model.sendToPRReviewSession(message, pr: pr, in: project.id) {
+                    onOpenSession(id)
                 }
             }
+        }
+    }
+
+    private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .kerning(0.8)
+                .foregroundStyle(DefaultTheme.secondaryText)
+            Text("\(count)")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(color)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
         }
     }
 
@@ -404,7 +558,8 @@ struct PRWorkspaceView: View {
             prActionOutput = error ?? "Review sent ✓"
             if error == nil {
                 reviewBody = ""
-                loadPRDetail(pr, project: project)
+                // After a submission the cached conversation is stale.
+                await load(refresh: true)
             }
             prActionBusy = false
         }
@@ -459,5 +614,4 @@ struct PRWorkspaceView: View {
             }
         }
     }
-
 }

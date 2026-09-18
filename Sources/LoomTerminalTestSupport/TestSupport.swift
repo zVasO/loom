@@ -115,6 +115,7 @@ public final class LineEngine: TerminalEngine {
     private let geometry: TerminalGeometry
     private var text = ""
     private var revision: UInt64 = 0
+    public var onUpstream: ((ArraySlice<UInt8>) -> Void)?
 
     public init(geometry: TerminalGeometry) { self.geometry = geometry }
 

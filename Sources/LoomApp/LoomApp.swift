@@ -52,6 +52,15 @@ struct LoomApp: App {
                 }
                 .keyboardShortcut("t", modifiers: .command)
             }
+            // ⌘⇧A, not ⌘A: ⌘A stays the agent's own select-all inside its input
+            // field, which is the one actually pressed. A menu item rather than a
+            // silent key handler — nobody discovers ⌘⇧A on their own.
+            CommandGroup(after: .pasteboard) {
+                Button("Select All in Terminal") {
+                    NotificationCenter.default.post(name: .loomSelectAllTerminal, object: nil)
+                }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+            }
         }
     }
 }
@@ -68,4 +77,6 @@ extension Notification.Name {
     static let loomNewSession = Notification.Name("loom.newSession")
     /// ⌘T — contextual: web tab in the browser, terminal in a session.
     static let loomNewTab = Notification.Name("loom.newTab")
+    /// ⌘⇧A — select everything the terminal pane holds.
+    static let loomSelectAllTerminal = Notification.Name("loom.selectAllTerminal")
 }

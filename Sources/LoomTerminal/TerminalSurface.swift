@@ -20,6 +20,11 @@ public final class TerminalSurface {
     /// Absolute scrollback index of history[0]: stable identity for the view diff.
     public private(set) var historyBase = 0
     public private(set) var isAttached = false
+    /// The input modes the program negotiated (mouse, bracketed paste, cursor
+    /// keys, kitty keyboard flags) — what the key capture must honour.
+    public private(set) var modes = TerminalModes.none
+    /// The agent tracks the mouse: the wheel belongs to IT, not to our ScrollView.
+    public var mouseReporting: Bool { modes.mouseReporting }
 
     private weak var runtime: SessionRuntime?
 
@@ -70,6 +75,24 @@ public final class TerminalSurface {
         runtime?.write(text, to: terminal)
     }
 
+    /// One wheel notch at the cell under the pointer (0-based). Only a tracking
+    /// agent hears it; for everyone else the view scrolls the scrollback itself.
+    public func sendWheel(_ direction: WheelDirection, atCol col: Int, row: Int) {
+        runtime?.sendWheel(direction, atCol: col, row: row)
+    }
+
+    /// One click at the cell under the pointer (0-based). Only a tracking agent
+    /// hears it; for everyone else a click is nothing but a selection.
+    public func sendClick(atCol col: Int, row: Int) {
+        runtime?.sendClick(atCol: col, row: row)
+    }
+
+    /// The pane gained or lost keyboard focus (DECSET 1004 reports it to a
+    /// program that asked). Idempotent on the wire: the emulator dedupes.
+    public func setFocus(_ focused: Bool) {
+        runtime?.setFocus(focused)
+    }
+
     /// TRM-02: the view announces its grid; engine and PTY follow (SIGWINCH on the
     /// agent side). Coalesced at the call site: only a genuinely new geometry gets through.
     public func resize(cols: Int, rows: Int) {
@@ -82,11 +105,15 @@ public final class TerminalSurface {
 
     private var lastRequestedGeometry: TerminalGeometry?
 
-    func receive(_ screen: TerminalScreen, history: [TerminalLine], base: Int = 0) {
+    func receive(_ screen: TerminalScreen, history: [TerminalLine], base: Int = 0,
+                 modes: TerminalModes = .none) {
         guard isAttached else { return }
         self.screen = screen
         self.history = history
         self.historyBase = base
+        // @Observable notifies on assignment, not on change: modes that flip once
+        // per session must not invalidate the view at frame rate.
+        if self.modes != modes { self.modes = modes }
     }
 
     private var lifecycleContinuation: CheckedContinuation<Void, Never>?

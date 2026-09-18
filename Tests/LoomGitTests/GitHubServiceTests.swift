@@ -45,6 +45,119 @@ struct GitHubServiceTests {
         #expect(detail.reviews.first?.state == "CHANGES_REQUESTED")
     }
 
+    @Test("a PR row carries reviewers (users and teams), assignees, labels, verdicts, size, head")
+    func parseEnrichedList() throws {
+        let json = """
+        [{"number": 7, "title": "Enrich", "author": {"login": "vaso"},
+          "headRefName": "feat", "baseRefName": "main", "headRefOid": "abc123",
+          "reviewDecision": "CHANGES_REQUESTED", "statusCheckRollup": [],
+          "updatedAt": "2026-09-01T10:00:00Z", "url": "https://x", "isDraft": false,
+          "reviewRequests": [{"__typename": "User", "login": "alice"},
+                             {"__typename": "Team", "name": "Core", "slug": "core"}],
+          "assignees": [{"login": "bob", "id": "1"}],
+          "labels": [{"name": "bug", "color": "d73a4a"}],
+          "latestReviews": [{"author": {"login": "carol"}, "state": "APPROVED"},
+                            {"author": {"login": "dave"}, "state": "CHANGES_REQUESTED"}],
+          "additions": 120, "deletions": 8, "changedFiles": 5, "mergeable": "CONFLICTING"}]
+        """
+        let pr = try #require(try GitHubService.parsePRList(Data(json.utf8)).first)
+        #expect(pr.reviewers == ["alice", "team/core"])
+        #expect(pr.assignees == ["bob"])
+        #expect(pr.labels == [GitHubService.Label(name: "bug", colorHex: "d73a4a")])
+        #expect(pr.latestReviews.map(\.author) == ["carol", "dave"])
+        #expect(pr.latestReviews.map(\.state) == ["APPROVED", "CHANGES_REQUESTED"])
+        #expect(pr.additions == 120)
+        #expect(pr.deletions == 8)
+        #expect(pr.changedFiles == 5)
+        #expect(pr.isConflicting)
+        #expect(pr.headSHA == "abc123")
+        #expect(pr.baseBranch == "main")
+    }
+
+    @Test("rows without the enrichment fields still parse, with empty defaults")
+    func parseListWithoutEnrichment() throws {
+        let json = """
+        [{"number": 1, "title": "t", "author": {"login": "a"}, "headRefName": "b",
+          "reviewDecision": "", "statusCheckRollup": [], "updatedAt": "", "url": "", "isDraft": false}]
+        """
+        let pr = try #require(try GitHubService.parsePRList(Data(json.utf8)).first)
+        #expect(pr.reviewers.isEmpty)
+        #expect(pr.labels.isEmpty)
+        #expect(pr.latestReviews.isEmpty)
+        #expect(pr.additions == 0)
+        #expect(pr.mergeable == "")
+        #expect(!pr.isConflicting)
+    }
+
+    @Test("the list field set names every key the parser reads")
+    func listFieldsCoverTheParser() {
+        let fields = Set(GitHubService.listFields.split(separator: ",").map(String.init))
+        for key in ["number", "title", "author", "headRefName", "baseRefName", "headRefOid",
+                    "reviewDecision", "statusCheckRollup", "updatedAt", "url", "isDraft",
+                    "reviewRequests", "assignees", "labels", "latestReviews",
+                    "additions", "deletions", "changedFiles", "mergeable"] {
+            #expect(fields.contains(key), "\(key) is parsed but not requested")
+        }
+    }
+
+    // GitHub's "Viewed" checkbox on PR files — GraphQL only, paged by 100.
+    @Test("a file-views page carries paths, the three states, node id, head and the next cursor")
+    func parseFileViewsPage() throws {
+        let json = """
+        {"data": {"repository": {"pullRequest": {"id": "PR_kwDOA", "headRefOid": "abc123",
+          "files": {"pageInfo": {"hasNextPage": true, "endCursor": "Y3Vyc29y"},
+                    "nodes": [{"path": "a.swift", "viewerViewedState": "VIEWED"},
+                              {"path": "b.swift", "viewerViewedState": "UNVIEWED"},
+                              {"path": "c.swift", "viewerViewedState": "DISMISSED"}]}}}}}
+        """
+        let page = try GitHubService.parseFileViewsPage(Data(json.utf8))
+        #expect(page.prNodeID == "PR_kwDOA")
+        #expect(page.headSHA == "abc123")
+        #expect(page.files.map(\.path) == ["a.swift", "b.swift", "c.swift"])
+        #expect(page.files.map(\.state) == [.viewed, .unviewed, .dismissed])
+        #expect(page.nextCursor == "Y3Vyc29y")
+    }
+
+    @Test("the last page has no cursor, and an unknown state reads as unviewed")
+    func lastFileViewsPage() throws {
+        let json = """
+        {"data": {"repository": {"pullRequest": {"id": "PR_1", "headRefOid": "h",
+          "files": {"pageInfo": {"hasNextPage": false, "endCursor": "end"},
+                    "nodes": [{"path": "z.swift", "viewerViewedState": "SOMETHING_NEW"}]}}}}}
+        """
+        let page = try GitHubService.parseFileViewsPage(Data(json.utf8))
+        #expect(page.nextCursor == nil)
+        #expect(page.files.first?.state == .unviewed)
+    }
+
+    @Test("file-views arguments name the PR, and pass the cursor only after the first page")
+    func fileViewsArguments() throws {
+        let first = GitHubService.fileViewsArguments(number: 42, cursor: nil)
+        #expect(first.prefix(2) == ["api", "graphql"])
+        #expect(first.contains("number=42"))
+        #expect(first.contains("owner={owner}") && first.contains("name={repo}"))
+        // gh fills {owner}/{repo} in typed (-F) fields only — a raw -f field
+        // would send the braces verbatim and every call would fail.
+        for placeholder in ["owner={owner}", "name={repo}"] {
+            let index = try #require(first.firstIndex(of: placeholder))
+            #expect(first[index - 1] == "-F", "\(placeholder) must ride a typed field")
+        }
+        #expect(!first.contains { $0.hasPrefix("cursor=") })
+        let next = GitHubService.fileViewsArguments(number: 42, cursor: "c2")
+        #expect(next.contains("cursor=c2"))
+        #expect(next.last?.contains("viewerViewedState") == true)
+    }
+
+    @Test("marking a file viewed or unviewed picks the matching mutation")
+    func fileViewedArguments() {
+        let mark = GitHubService.fileViewedArguments(prNodeID: "PR_1", path: "a.swift", viewed: true)
+        #expect(mark.contains("id=PR_1") && mark.contains("path=a.swift"))
+        #expect(mark.last?.contains("markFileAsViewed(") == true)
+        #expect(mark.last?.contains("unmarkFileAsViewed") == false)
+        let unmark = GitHubService.fileViewedArguments(prNodeID: "PR_1", path: "a.swift", viewed: false)
+        #expect(unmark.last?.contains("unmarkFileAsViewed(") == true)
+    }
+
     @Test("empty checks rollup means passing — no signal is not a failure")
     func emptyChecks() throws {
         let json = """
