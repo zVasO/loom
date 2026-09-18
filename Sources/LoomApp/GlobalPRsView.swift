@@ -466,6 +466,10 @@ private struct PRSidebarRow: View {
             .foregroundStyle(color)
             .padding(.horizontal, 7).padding(.vertical, 2)
             .background(DefaultTheme.surfaceRaised, in: Capsule())
+            // One line, at its own width: the HStack would otherwise offer it
+            // half the remaining room and "changes requested" would fold.
+            .lineLimit(1)
+            .fixedSize()
     }
 
     var body: some View {
@@ -492,27 +496,37 @@ private struct PRSidebarRow: View {
                             color: DefaultTheme.mutedText)
                 }
                 // One more line at most: who it waits on, what it is tagged,
-                // how big it is, whether it still merges.
+                // how big it is, whether it still merges. The chips are rigid,
+                // so the line can be wider than the row; a disabled horizontal
+                // ScrollView takes exactly the proposed width and clips the
+                // rest — a plain frame(maxWidth:) would grow to fit the child
+                // and push the whole sidebar past its 300 pt.
                 if !pr.reviewers.isEmpty || !pr.labels.isEmpty || pr.additions + pr.deletions > 0
                     || pr.isConflicting {
-                    HStack(spacing: 6) {
-                        if !pr.reviewers.isEmpty {
-                            Label(PRChips.reviewers(pr, limit: 2), systemImage: "person.2")
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(DefaultTheme.mutedText)
-                                .lineLimit(1)
-                        }
-                        ForEach(pr.labels.prefix(2), id: \.name) { PRChips.label($0) }
-                        if pr.additions + pr.deletions > 0 { PRChips.size(pr) }
-                        if pr.isConflicting {
-                            Text("conflicts")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(DefaultTheme.danger)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            if !pr.reviewers.isEmpty {
+                                Label(PRChips.reviewers(pr, limit: 2), systemImage: "person.2")
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(DefaultTheme.mutedText)
+                                    .lineLimit(1)
+                            }
+                            ForEach(pr.labels.prefix(2), id: \.name) { PRChips.label($0) }
+                            if pr.additions + pr.deletions > 0 { PRChips.size(pr) }
+                            if pr.isConflicting {
+                                Text("conflicts")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(DefaultTheme.danger)
+                            }
                         }
                     }
+                    .scrollDisabled(true)
                 }
             }
-            Spacer()
+            // The column takes every point the trailing chips leave — safe now
+            // that none of its lines can outgrow the proposal. Not a Spacer: one
+            // would share that width fifty-fifty with the equally greedy column.
+            .frame(maxWidth: .infinity, alignment: .leading)
             if launching {
                 ProgressView().controlSize(.mini)
                     .help("Preparing the review worktree…")
