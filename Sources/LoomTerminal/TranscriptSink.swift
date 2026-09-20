@@ -3,7 +3,7 @@ import Foundation
 
 // Transcript seam (locally substitutable). Adapters: FileTranscriptSink (prod, 250 ms
 // batching, 10 MB rotation, raw stream + de-ANSI-fied version for FTS5 — DAT-01) and
-// MemoryTranscriptSink (test, with a failing mode to verify degradation into a notice).
+// MemoryTranscriptSink (test).
 
 public protocol TranscriptSink: Sendable {
     /// Called on the session queue, BEFORE parsing (an engine crash loses no byte

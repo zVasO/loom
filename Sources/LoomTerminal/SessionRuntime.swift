@@ -3,8 +3,8 @@ import Dispatch
 import Foundation
 
 /// Everything alive in a session: the agent process on its PTY, the tee to the
-/// Transcript, and (upcoming slices) the terminal engine, sampling, and the view
-/// surfaces. Interface decision: docs/design/session-runtime.md, ADR-0008.
+/// Transcript, the terminal engine, sampling, and the view surfaces.
+/// Interface decision: docs/design/session-runtime.md, ADR-0008.
 public final class SessionRuntime: @unchecked Sendable {
 
     /// Internal seams with defaults — no production caller ever names them.

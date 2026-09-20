@@ -48,7 +48,7 @@ let package = Package(
         ),
         .testTarget(name: "LoomCoreTests", dependencies: ["LoomCore"]),
         .testTarget(name: "LoomAgentsTests", dependencies: ["LoomAgents"]),
-        .testTarget(name: "LoomTerminalTests", dependencies: ["LoomTerminal", "LoomTerminalTestSupport"]),
+        .testTarget(name: "LoomTerminalTests", dependencies: ["LoomTerminal", "LoomTerminalTestSupport", "LoomAgents"]),
         .testTarget(name: "LoomSessionsTests", dependencies: ["LoomSessions", "LoomTerminalTestSupport"]),
         .testTarget(name: "LoomIPCTests", dependencies: ["LoomIPC"]),
         .testTarget(name: "LoomGitTests", dependencies: ["LoomGit", "LoomCore"]),

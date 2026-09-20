@@ -5,7 +5,7 @@ import LoomPersistence
 import LoomUI
 import SwiftUI
 
-/// « Usage & estimated costs »: every claude session on this machine, priced
+/// "Usage & estimated costs": every claude session on this machine, priced
 /// from the public list. Opens from the `$` in the navbar. All the work
 /// (scan + aggregate) runs off the main actor; the sheet only displays.
 struct UsageSheet: View {

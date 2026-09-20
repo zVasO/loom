@@ -1,1 +1,1 @@
-// LoomIPC package — see spec §6.1. Interfaces to be defined via codebase-design.
+// LoomIPC package — see spec §6.1.

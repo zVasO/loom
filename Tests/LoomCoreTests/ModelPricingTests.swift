@@ -2,8 +2,8 @@ import Testing
 import LoomCore
 import Foundation
 
-// Seam : la table de prix publique (platform.claude.com, 2026-09-02) et la
-// résolution des identifiants de modèle tels que claude les écrit.
+// Seam: the public price table (platform.claude.com, 2026-09-02) and the
+// resolution of model identifiers the way claude writes them.
 
 @Suite("ModelPricing — tarifs publics")
 struct ModelPricingTests {

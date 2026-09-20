@@ -193,33 +193,10 @@ struct ContentView: View {
         }
         .sheet(isPresented: $paletteShown) { palette }
         .sheet(isPresented: $usageShown) { UsageSheet(model: model) { usageShown = false } }
-        .onAppear {
-            // LOOM_DEBUG_OPEN_USAGE: end-to-end injection (like LOOM_SUPPORT_DIR) —
-            // opens the usage sheet at launch so a screenshot needs no click.
-            if ProcessInfo.processInfo.environment["LOOM_DEBUG_OPEN_USAGE"] != nil { usageShown = true }
-            if let path = ProcessInfo.processInfo.environment["LOOM_DEBUG_USAGE_SNAPSHOT"] {
-                Self.snapshotSheet(after: 30, to: path)
-            }
-        }
         .alert("Incomplete startup", isPresented: .constant(model.startupError != nil)) {
             Button("OK") { model.clearError() }
         } message: {
             Text(model.startupError ?? "")
-        }
-    }
-
-    /// Debug only: writes a PNG of the frontmost sheet — the app may capture its
-    /// own windows without the screen-recording permission a terminal lacks.
-    private static func snapshotSheet(after seconds: Double, to path: String) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
-            guard let sheet = NSApp.windows.first(where: { $0.sheetParent != nil }),
-                  let parent = sheet.sheetParent else { return }
-            for (window, file) in [(sheet, path), (parent, path.replacingOccurrences(of: ".png", with: "-main.png"))] {
-                let id = CGWindowID(window.windowNumber)
-                guard let image = CGWindowListCreateImage(.null, .optionIncludingWindow, id, [.boundsIgnoreFraming]) else { continue }
-                let rep = NSBitmapImageRep(cgImage: image)
-                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
-            }
         }
     }
 
@@ -337,7 +314,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut(KeyEquivalent(keyPalette.first ?? "k"), modifiers: .command)
-            // Usage & estimated costs: every claude session on this machine.
+            // Every claude session on this machine, not just Loom's own.
             Button {
                 usageShown = true
             } label: {
@@ -350,7 +327,6 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .help("Usage & estimated costs")
-            // Settings: the gear toggles the in-app page.
             Button {
                 if tab == .settings {
                     tab = tabBeforeSettings
@@ -398,7 +374,6 @@ struct ContentView: View {
     private var paletteActions: [PaletteAction] {
         var actions: [PaletteAction] = []
 
-        // Navigation
         actions.append(PaletteAction(id: "nav.projects", icon: "house",
                                      title: "Go to Projects", subtitle: "View all projects",
                                      section: "Navigation") { tab = .projects })
@@ -419,7 +394,6 @@ struct ContentView: View {
                                      subtitle: "Shortcuts, themes, projects",
                                      section: "Navigation", shortcut: "⌘,") { tab = .settings })
 
-        // Actions
         actions.append(PaletteAction(id: "act.newSession", icon: "plus",
                                      title: "New claude session",
                                      subtitle: "In the current project",
@@ -461,7 +435,6 @@ struct ContentView: View {
             })
         }
 
-        // Themes — quick-apply, filterable by name.
         for palette in ThemePalette.all {
             actions.append(PaletteAction(id: "theme.\(palette.name)", icon: "paintpalette",
                                          title: "Set theme: \(palette.name)",
@@ -472,7 +445,6 @@ struct ContentView: View {
             })
         }
 
-        // Projects
         for project in model.projects {
             actions.append(PaletteAction(id: "project.\(project.id.rawValue.uuidString)",
                                          icon: "folder",
@@ -484,7 +456,6 @@ struct ContentView: View {
             })
         }
 
-        // Sessions (live + resumable)
         let dormantIDs = Set(model.dormantSessions.map(\.id))
         let entries = model.sessions.filter { !$0.isShell }.map { ($0.title, $0.id) }
             + model.dormantSessions.map { ($0.title, $0.id) }
@@ -552,7 +523,6 @@ struct ProjectsView: View {
     @State private var draggedProject: ProjectID?
     @State private var removalTarget: ProjectRecord?
     @State private var fanOut = 1
-    // v4 — PR review
     // P1 perf: filesystem scans live in .task, never in body.
     @State private var loadedSkills: [SkillEntry] = []
     @State private var loadedRules: [AppModel.RuleFile] = []
@@ -679,7 +649,6 @@ struct ProjectsView: View {
             }
         }
         .background(DefaultTheme.background)
-        // Switching projects resets the tab navigation.
         .onChange(of: current?.id) {
             projectTab = .overview
             filesPath = ""
@@ -1601,7 +1570,6 @@ struct ProjectSidebarRow: View {
                 .lineLimit(1)
             Spacer()
             if hovered {
-                // The handle (drag and drop) + the cross (project removal).
                 HStack(spacing: 4) {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 9))
@@ -2362,7 +2330,6 @@ struct SessionDetailView: View {
 
     private var breadcrumb: some View {
         HStack(spacing: 10) {
-            // ← back to the project page (Xirp reference).
             HoverIconButton(systemImage: "arrow.left", help: "Back to project") {
                 onBack(item?.projectID)
             }
@@ -2378,7 +2345,6 @@ struct SessionDetailView: View {
             if let branch = item?.branch {
                 MonoTag(branch, systemImage: "arrow.triangle.branch")
             }
-            // ⌄ the session's record: identity, worktree, dates.
             HoverIconButton(systemImage: "chevron.down", help: "Session info") {
                 infoShown.toggle()
             }

@@ -73,7 +73,7 @@ struct SplitDiffView: View {
     /// row identifiers naturally spans hunks AND files.
     @State private var anchor: DiffSelection.RowID?
     @State private var head: DiffSelection.RowID?
-    /// Set while a drag is in flight (nil between drags).
+    /// Set while a drag is in flight.
     @State private var dragging = false
     /// What the action bar is composing, and its text.
     @State private var composer: Composer = .none

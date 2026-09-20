@@ -3,9 +3,9 @@ import LoomCore
 import LoomPersistence
 import Foundation
 
-// Seam : l'index incrémental sur un vrai SQLite temporaire et un faux
-// ~/.claude/projects. Le contrat : ne jamais relire ce qui a déjà été consommé,
-// ne jamais consommer une ligne à moitié écrite.
+// Seam: the incremental index over a real temporary SQLite and a fake
+// ~/.claude/projects. The contract: never re-read what was already consumed,
+// never consume a half-written line.
 
 @Suite("UsageIndex — index incrémental des .jsonl")
 struct UsageIndexTests {

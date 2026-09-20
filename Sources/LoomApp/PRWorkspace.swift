@@ -338,8 +338,6 @@ struct PRWorkspaceView: View {
                 diffPlaceholder
             } else {
                 ScrollView {
-                    // GitHub-style side-by-side: old on the left, new on the
-                    // right, aligned and tinted, per-file collapsible sections.
                     SplitDiffView(files: diffFiles,
                                   onExplain: { snippet in
                                       deliver("""

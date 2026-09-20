@@ -1372,11 +1372,10 @@ public final class AppModel {
         allRecords.filter { $0.projectID == projectID }.map(\.createdAt).max()
     }
 
-    /// PRJ-01: adds a project by pointing at a folder; if it is a Git repo, the
-    /// current branch is detected. The app never modifies the folder.
-    /// Registers a folder as a project — or finds it, when the same folder is
-    /// already one: picking it twice must not make two projects. Returns the
-    /// project, selected.
+    /// PRJ-01: registers a folder as a project — or finds it, when the same
+    /// folder is already one: picking it twice must not make two projects.
+    /// If it is a Git repo, the current branch is detected; the app never
+    /// modifies the folder. Returns the project, selected.
     @discardableResult
     public func addProject(at url: URL) async -> ProjectID {
         let path = url.standardizedFileURL.path

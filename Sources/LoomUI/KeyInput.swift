@@ -817,7 +817,6 @@ public struct KeyCaptureView: NSViewRepresentable {
                 onText?(bytes)
                 return
             }
-            // System composition (dead keys, IME) → insertText.
             interpretKeyEvents([event])
         }
 

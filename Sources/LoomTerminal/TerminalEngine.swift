@@ -10,8 +10,8 @@ import Foundation
 // the type states the confinement.
 
 // The factory seam is the `SessionRuntime.Dependencies.makeEngine` closure — a single
-// mechanism (ADR-0008). The return channel to the PTY (DA/DSR responses) and the title
-// will arrive with the SwiftTerm adapter, dictated by its actual needs, not before.
+// mechanism (ADR-0008). The window title will arrive with the SwiftTerm adapter,
+// dictated by its actual needs, not before.
 public protocol TerminalEngine: AnyObject {
     func feed(_ bytes: ArraySlice<UInt8>)
     func resize(to geometry: TerminalGeometry)

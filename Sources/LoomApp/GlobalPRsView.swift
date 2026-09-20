@@ -11,7 +11,7 @@ import SwiftUI
 /// badged, reattached when it already exists.
 struct GlobalPRsView: View {
     let model: AppModel
-    /// Opens the session in the Sessions tab (used until the pane is embedded).
+    /// Opens the session in the Sessions tab.
     let onOpenSession: (SessionID) -> Void
 
     @State private var selectedProjectID: ProjectID?

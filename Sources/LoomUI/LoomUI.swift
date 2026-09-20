@@ -1,1 +1,1 @@
-// LoomUI package — see spec §6.1. Interfaces to be defined via codebase-design.
+// LoomUI package — see spec §6.1.

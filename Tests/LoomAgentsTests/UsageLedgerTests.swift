@@ -3,8 +3,8 @@ import LoomAgents
 import LoomCore
 import Foundation
 
-// Seam : le parseur pur des .jsonl natifs de claude. Les fixtures reproduisent
-// la forme réelle observée (une ligne assistant PAR BLOC de contenu, même usage).
+// Seam: the pure parser for claude's native .jsonl. The fixtures reproduce the
+// shape actually observed (one assistant line PER CONTENT BLOCK, same usage).
 
 @Suite("UsageLedger — tours facturés depuis le .jsonl natif")
 struct UsageLedgerTests {

@@ -2,7 +2,7 @@ import Testing
 import LoomCore
 import Foundation
 
-// Seam : les clés de jour civil, en UTC pour rester déterministe.
+// Seam: the calendar-day keys, in UTC so they stay deterministic.
 
 @Suite("UsageDay — clés de jour civil")
 struct UsageDayTests {

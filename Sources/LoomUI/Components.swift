@@ -170,7 +170,7 @@ public struct StatusLabel: View {
     }
 }
 
-/// Mono tag (`loom/corrige-cache` branch, path…).
+/// Mono tag (`loom/fix-cache` branch, path…).
 public struct MonoTag: View {
     let text: String
     let systemImage: String?

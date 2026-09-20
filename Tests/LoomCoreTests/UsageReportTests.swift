@@ -2,7 +2,7 @@ import Testing
 import LoomCore
 import Foundation
 
-// Seam : l'agrégation fenêtrée et tarifée. Tout en UTC pour rester déterministe.
+// Seam: the windowed, priced aggregation. All in UTC so it stays deterministic.
 
 @Suite("UsageReport — fenêtres civiles et ventilation par modèle")
 struct UsageReportTests {
@@ -22,13 +22,13 @@ struct UsageReportTests {
 
     @Test("aujourd'hui, 7 jours et 30 jours sont des fenêtres civiles inclusives")
     func fenetres() {
-        // opus-5 : 1M output = 25 $
+        // opus-5: 1M output = $25
         let report = UsageReport(totals: [
-            totals("2026-09-02", "claude-opus-5", output: 1_000_000),   // aujourd'hui
-            totals("2026-08-27", "claude-opus-5", output: 1_000_000),   // 7e jour inclus
-            totals("2026-08-26", "claude-opus-5", output: 1_000_000),   // hors 7 j
-            totals("2026-08-04", "claude-opus-5", output: 1_000_000),   // 30e jour inclus
-            totals("2026-08-03", "claude-opus-5", output: 1_000_000),   // hors 30 j
+            totals("2026-09-02", "claude-opus-5", output: 1_000_000),   // today
+            totals("2026-08-27", "claude-opus-5", output: 1_000_000),   // 7th day, included
+            totals("2026-08-26", "claude-opus-5", output: 1_000_000),   // outside 7 days
+            totals("2026-08-04", "claude-opus-5", output: 1_000_000),   // 30th day, included
+            totals("2026-08-03", "claude-opus-5", output: 1_000_000),   // outside 30 days
         ], today: today, calendar: utc)
         #expect(report.today == Decimal(25))
         #expect(report.last7Days == Decimal(50))
@@ -39,9 +39,9 @@ struct UsageReportTests {
     @Test("byModel regroupe par famille, trié par coût décroissant, non tarifés en fin")
     func parModele() {
         let report = UsageReport(totals: [
-            totals("2026-09-02", "claude-opus-5", output: 1_000_000),          // 25 $
-            totals("2026-09-01", "claude-opus-4-8", output: 1_000_000),        // 25 $, famille distincte
-            totals("2026-09-02", "claude-fable-5-1", output: 1_000_000),       // 50 $
+            totals("2026-09-02", "claude-opus-5", output: 1_000_000),          // $25
+            totals("2026-09-01", "claude-opus-4-8", output: 1_000_000),        // $25, distinct family
+            totals("2026-09-02", "claude-fable-5-1", output: 1_000_000),       // $50
             totals("2026-09-02", "claude-unicorn-9", output: 5),               // unpriced
         ], today: today, calendar: utc)
         let lines = report.byModel(lastDays: 30)
@@ -65,7 +65,7 @@ struct UsageReportTests {
         #expect(points.first?.day == "2026-09-02")
         #expect(points.first?.family == "opus-5")
         #expect(points.first?.tokens == 1_000_100)
-        // 10×5 + 20×6.25 + 30×10 + 40×0.5 + 1 000 000×25 = 25 000 495 / 1e6
+        // 10×5 + 20×6.25 + 30×10 + 40×0.5 + 1000000×25 = 25000495 / 1e6
         #expect(points.first?.cost == Decimal(string: "25.000495"))
     }
 }
