@@ -7,7 +7,7 @@ import Foundation
 // ~/.claude/projects. The contract: never re-read what was already consumed,
 // never consume a half-written line.
 
-@Suite("UsageIndex — index incrémental des .jsonl")
+@Suite("UsageIndex — incremental index of the .jsonl files")
 struct UsageIndexTests {
 
     private let utc: Calendar = {
@@ -30,7 +30,7 @@ struct UsageIndexTests {
         #"{"type":"assistant","timestamp":"\#(ts)","sessionId":"s","requestId":"r-\#(id)","message":{"id":"\#(id)","model":"\#(model)","usage":{"input_tokens":1,"cache_creation_input_tokens":2,"cache_read_input_tokens":3,"output_tokens":\#(output)}}}"#
     }
 
-    @Test("premier scan : tout est indexé, y compris les sous-dossiers")
+    @Test("first scan: everything is indexed, subdirectories included")
     func premierScan() throws {
         let (index, projects) = try makeWorld()
         let file = projects.appendingPathComponent("-Users-me-app/a.jsonl")
@@ -44,7 +44,7 @@ struct UsageIndexTests {
         #expect(summary.turnsAdded == 3)
     }
 
-    @Test("un fichier qui grossit : seuls les nouveaux tours sont ajoutés")
+    @Test("a growing file: only the new turns are added")
     func fichierQuiGrossit() throws {
         let (index, projects) = try makeWorld()
         let file = projects.appendingPathComponent("-Users-me-app/a.jsonl")
@@ -61,7 +61,7 @@ struct UsageIndexTests {
         #expect(try index.dailyTotals(fromDay: "2026-09-01").first?.output == 20)
     }
 
-    @Test("un fichier inchangé n'est pas relu")
+    @Test("an unchanged file is not re-read")
     func fichierInchange() throws {
         let (index, projects) = try makeWorld()
         let file = projects.appendingPathComponent("-Users-me-app/a.jsonl")
@@ -71,7 +71,7 @@ struct UsageIndexTests {
         #expect(second.turnsAdded == 0)
     }
 
-    @Test("une ligne sans retour à la ligne final n'est pas consommée")
+    @Test("a line without a trailing newline is not consumed")
     func lignePartielle() throws {
         let (index, projects) = try makeWorld()
         let file = projects.appendingPathComponent("-Users-me-app/a.jsonl")
@@ -86,7 +86,7 @@ struct UsageIndexTests {
         #expect(second.turnsAdded == 1, "la ligne complétée est lue au scan suivant")
     }
 
-    @Test("un fichier tronqué est réindexé depuis le début sans doublon")
+    @Test("a truncated file is re-indexed from the start without duplicates")
     func fichierTronque() throws {
         let (index, projects) = try makeWorld()
         let file = projects.appendingPathComponent("-Users-me-app/a.jsonl")
@@ -99,7 +99,7 @@ struct UsageIndexTests {
                 "m2 reste : l'index n'efface jamais un tour (compromis accepté par la spec)")
     }
 
-    @Test("dailyTotals agrège par jour du calendrier donné et par modèle")
+    @Test("dailyTotals aggregates per day of the given calendar and per model")
     func totauxJournaliers() throws {
         let (index, projects) = try makeWorld()
         let file = projects.appendingPathComponent("-Users-me-app/a.jsonl")
@@ -120,7 +120,7 @@ struct UsageIndexTests {
                                                   cacheRead: 3, output: 11)))
     }
 
-    @Test("dossier absent : rapport vide, pas d'erreur")
+    @Test("missing directory: empty report, no error")
     func dossierAbsent() throws {
         let (index, projects) = try makeWorld()
         let summary = try index.refresh(projectsDirectory: projects.appendingPathComponent("nope"), calendar: utc)

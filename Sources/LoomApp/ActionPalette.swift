@@ -117,7 +117,9 @@ struct ActionPaletteView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(displayedSections, id: \.section) { section, start, entries in
+                    let sections = displayedSections
+                    let actionCount = sections.reduce(0) { $0 + $1.actions.count }
+                    ForEach(sections, id: \.section) { section, start, entries in
                         sectionHeader(section)
                         ForEach(Array(entries.enumerated()), id: \.element.id) { offset, action in
                             row(action, index: start + offset)
@@ -127,8 +129,8 @@ struct ActionPaletteView: View {
                     if !transcriptHits.isEmpty {
                         sectionHeader("In transcripts")
                         ForEach(Array(transcriptHits.enumerated()), id: \.element.id) { offset, hit in
-                            transcriptRow(hit, index: visibleActions.count + offset)
-                                .id(visibleActions.count + offset)
+                            transcriptRow(hit, index: actionCount + offset)
+                                .id(actionCount + offset)
                         }
                     }
                     if totalCount == 0 {

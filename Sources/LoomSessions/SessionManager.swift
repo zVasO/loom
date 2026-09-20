@@ -161,6 +161,7 @@ public actor SessionManager {
             using: dependencies)
         runtime.setFrameInterval(frameInterval)
         runtimes[id] = runtime
+        finished.remove(id)   // a relaunch after a crash: this runtime is live again
         states[id] = StateEngine.State(session: .starting)
         let token = spec.hookToken ?? UUID().uuidString
         tokens[token] = id
@@ -199,6 +200,7 @@ public actor SessionManager {
             using: dependencies)
         runtime.setFrameInterval(frameInterval)
         runtimes[id] = runtime
+        finished.remove(id)   // a relaunch after a crash: this runtime is live again
         states[id] = StateEngine.State(session: .interrupted)
         let token = hookToken ?? UUID().uuidString
         tokens[token] = id
@@ -219,6 +221,11 @@ public actor SessionManager {
             states[id] = StateEngine.State(session: record.state)
         }
         apply(.user(.archive), to: id)
+        // Archiving a live session closes it: the ladder runs in the background
+        // and the `.terminated` it produces releases the runtime.
+        if !finished.contains(id), runtimes[id] != nil {
+            Task { await self.stop(id) }
+        }
         releaseIfArchived(id)
     }
 

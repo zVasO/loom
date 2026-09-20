@@ -6,7 +6,7 @@ import Foundation
 // Seam: the pure parser for claude's native .jsonl. The fixtures reproduce the
 // shape actually observed (one assistant line PER CONTENT BLOCK, same usage).
 
-@Suite("UsageLedger — tours facturés depuis le .jsonl natif")
+@Suite("UsageLedger — billed turns from the native .jsonl")
 struct UsageLedgerTests {
 
     private func line(id: String, request: String = "req-1", model: String = "claude-opus-5",
@@ -15,7 +15,7 @@ struct UsageLedgerTests {
         #"{"type":"assistant","timestamp":"\#(ts)","sessionId":"sess-1","cwd":"/tmp/wt","requestId":"\#(request)","message":{"id":"\#(id)","model":"\#(model)","usage":\#(usage)}}"#
     }
 
-    @Test("une ligne par bloc de contenu : trois lignes, un seul tour")
+    @Test("one line per content block: three lines, a single turn")
     func dedoublonnage() {
         let jsonl = [line(id: "m1"), line(id: "m1"), line(id: "m1")].joined(separator: "\n")
         let turns = UsageLedger.turns(fromJSONL: jsonl)
@@ -24,7 +24,7 @@ struct UsageLedgerTests {
         #expect(turns.first?.requestID == "req-1")
     }
 
-    @Test("la ventilation 5 min / 1 h est lue quand elle existe")
+    @Test("the 5 min / 1 h breakdown is read when present")
     func ventilationCache() {
         let turn = UsageLedger.turns(fromJSONL: line(id: "m1")).first
         #expect(turn?.input == 2)
@@ -37,7 +37,7 @@ struct UsageLedgerTests {
         #expect(turn?.cwd == "/tmp/wt")
     }
 
-    @Test("sans ventilation, toute la création de cache compte en 5 min")
+    @Test("without a breakdown, all cache creation counts as 5 min")
     func sansVentilation() {
         let usage = #"{"input_tokens":1,"cache_creation_input_tokens":500,"cache_read_input_tokens":0,"output_tokens":9}"#
         let turn = UsageLedger.turns(fromJSONL: line(id: "m2", usage: usage)).first
@@ -45,14 +45,14 @@ struct UsageLedgerTests {
         #expect(turn?.cacheWrite1h == 0)
     }
 
-    @Test("le timestamp ISO 8601 avec fractions est lu en UTC")
+    @Test("the ISO 8601 timestamp with fractions is read as UTC")
     func horodatage() {
         let turn = UsageLedger.turns(fromJSONL: line(id: "m1", ts: "2026-09-02T18:13:08.073Z")).first
         let expected = Date(timeIntervalSince1970: 1_788_372_788.073)
         #expect(abs((turn?.timestamp.timeIntervalSince1970 ?? 0) - expected.timeIntervalSince1970) < 0.001)
     }
 
-    @Test("lignes ignorées : user, sans usage, sans modèle, synthétique, JSON cassé")
+    @Test("skipped lines: user, no usage, no model, synthetic, broken JSON")
     func lignesIgnorees() {
         let jsonl = """
         {"type":"user","message":{"content":"hi"}}
@@ -66,7 +66,7 @@ struct UsageLedgerTests {
         #expect(turns.map(\.messageID) == ["ok"])
     }
 
-    @Test("deux requêtes distinctes avec le même message.id restent deux tours")
+    @Test("two distinct requests sharing a message.id stay two turns")
     func memeIdRequetesDifferentes() {
         let jsonl = [line(id: "m1", request: "r1"), line(id: "m1", request: "r2")].joined(separator: "\n")
         #expect(UsageLedger.turns(fromJSONL: jsonl).count == 2)

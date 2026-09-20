@@ -1488,6 +1488,11 @@ public final class AppModel {
         func register(token: String, session: SessionID) {
             lock.withLock { sessionsByToken[token] = session }
         }
+        /// A dead session's hook must stop resolving: the manager already
+        /// dropped its token, the server's registry has to follow.
+        func unregister(session: SessionID) {
+            lock.withLock { sessionsByToken = sessionsByToken.filter { $0.value != session } }
+        }
         func session(for token: String) -> SessionID? {
             lock.withLock { sessionsByToken[token] }
         }
@@ -1513,6 +1518,7 @@ public final class AppModel {
                 let closedProject = sessions.first(where: { $0.id == closed })?.projectID
                     ?? requested ?? nil
                 sessions.removeAll { $0.id == closed }
+                tokenRegistry.unregister(session: closed)
                 nativeExistsCache.removeValue(forKey: closed)   // settled at close: rescan once
                 saveStackChildren()
                 // SES-07: a close the user asked for — the cross, or `exit`,

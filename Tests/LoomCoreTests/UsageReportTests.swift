@@ -4,7 +4,7 @@ import Foundation
 
 // Seam: the windowed, priced aggregation. All in UTC so it stays deterministic.
 
-@Suite("UsageReport — fenêtres civiles et ventilation par modèle")
+@Suite("UsageReport — civil windows and per-model breakdown")
 struct UsageReportTests {
 
     private let utc: Calendar = {
@@ -20,7 +20,7 @@ struct UsageReportTests {
                          cacheRead: 0, output: output)
     }
 
-    @Test("aujourd'hui, 7 jours et 30 jours sont des fenêtres civiles inclusives")
+    @Test("today, 7 days and 30 days are inclusive civil windows")
     func fenetres() {
         // opus-5: 1M output = $25
         let report = UsageReport(totals: [
@@ -36,7 +36,7 @@ struct UsageReportTests {
         #expect(report.total(lastDays: 90) == Decimal(125))
     }
 
-    @Test("byModel regroupe par famille, trié par coût décroissant, non tarifés en fin")
+    @Test("byModel groups by family, sorted by descending cost, unpriced last")
     func parModele() {
         let report = UsageReport(totals: [
             totals("2026-09-02", "claude-opus-5", output: 1_000_000),          // $25
@@ -53,7 +53,7 @@ struct UsageReportTests {
         #expect(report.unpricedModels == ["unicorn-9"])
     }
 
-    @Test("points : une entrée par (jour, famille) dans la fenêtre, coût et tokens")
+    @Test("points: one entry per (day, family) in the window, cost and tokens")
     func points() {
         let report = UsageReport(totals: [
             DailyModelTotals(day: "2026-09-02", model: "claude-opus-5", input: 10, cacheWrite5m: 20,

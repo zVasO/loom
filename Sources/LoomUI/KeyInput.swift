@@ -533,7 +533,7 @@ public struct KeyCaptureView: NSViewRepresentable {
         // is handled by the mouse monitor instead, which leaves the press itself
         // alone so a selection drag can start on it.
         guard view.focusIsIdle() else { return }
-        DispatchQueue.main.async { [weak view] in view?.reclaimFocusIfIdle() }
+        DispatchQueue.main.async { [weak view] in view?.reclaimFocusIfIdle(acceptingUnset: true) }
     }
 
     private func configure(_ view: CaptureNSView) {
