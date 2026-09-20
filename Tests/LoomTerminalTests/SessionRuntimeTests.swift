@@ -292,6 +292,27 @@ struct SessionRuntimeTests {
         #expect(pty.openedEnvironment["LANG"] == "fr_FR.UTF-8", "the overlay wins over the base on collision")
         #expect(pty.openedEnvironment["TERM"] == "xterm-256color", "the terminal base is set")
     }
+    @Test("an exec that fails instantly still concludes")
+    func exitImmediatConclut() async throws {
+        let pty = InstantExitPTYHost(exitCode: 127)
+        let (_, events) = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/nonexistent/agent"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree")),
+            using: SessionRuntime.Dependencies(ptyHost: pty, transcript: MemoryTranscriptSink()))
+
+        var iterator = events.makeAsyncIterator()
+        guard case .started = await iterator.next() else {
+            Issue.record("no .started")
+            return
+        }
+        guard case .terminated(let report) = await iterator.next() else {
+            Issue.record("an exit delivered before the channel is stored must still conclude")
+            return
+        }
+        #expect(report.exitStatus.code == 127)
+        #expect(await iterator.next() == nil, "the stream ends right after .terminated")
+    }
+
     /// Bounded active wait (2 s) — the PTY → queue → PTY path is asynchronous by nature.
     private func pollUntil(_ condition: () -> Bool) async -> Bool {
         for _ in 0..<200 {
@@ -301,4 +322,39 @@ struct SessionRuntimeTests {
         return condition()
     }
 
+}
+
+/// An exec that fails instantly: the process is already gone when `open` returns,
+/// so the whole termination is drained on the session queue BEFORE the caller can
+/// store the channel — the conclusion has to survive that.
+private final class InstantExitPTYHost: PTYHost, @unchecked Sendable {
+    private let exitCode: Int32
+    init(exitCode: Int32) { self.exitCode = exitCode }
+
+    func open(command: Command,
+              workingDirectory: URL,
+              environment: [String: String],
+              geometry: TerminalGeometry,
+              deliveringOn queue: DispatchQueue,
+              sink: @escaping @Sendable (PTYEvent) -> Void) throws -> any PTYChannel {
+        let code = exitCode
+        let delivered = DispatchSemaphore(value: 0)
+        queue.async {
+            sink(.terminated(ExitStatus(code: code)))
+            sink(.endOfFile)
+            delivered.signal()
+        }
+        delivered.wait()
+        return InertChannel()
+    }
+}
+
+private final class InertChannel: PTYChannel, @unchecked Sendable {
+    func write(_ bytes: ArraySlice<UInt8>) {}
+    func resize(to geometry: TerminalGeometry) {}
+    func signal(_ signal: PTYSignal, scope: PTYSignalScope) {}
+    func close() {}
+    var capabilities: PTYCapabilities { [] }
+    var processGroup: pid_t? { nil }
+    func cpuFraction() -> Double { 0 }
 }

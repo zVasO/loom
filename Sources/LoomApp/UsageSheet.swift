@@ -285,14 +285,19 @@ struct UsageSheet: View {
 
     // MARK: - Formatting
 
-    static func money(_ value: Decimal) -> String {
-        let number = NSDecimalNumber(decimal: value)
+    /// Cached like `clock` below: building a NumberFormatter per cell is costly.
+    private static let currency: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = "USD"
         formatter.locale = Locale(identifier: "en_US")
         formatter.maximumFractionDigits = 2
-        return formatter.string(from: number) ?? "$0.00"
+        return formatter
+    }()
+
+    static func money(_ value: Decimal) -> String {
+        let number = NSDecimalNumber(decimal: value)
+        return currency.string(from: number) ?? "$0.00"
     }
 
     static func tokens(_ count: Int) -> String {

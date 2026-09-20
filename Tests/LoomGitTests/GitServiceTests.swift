@@ -74,6 +74,22 @@ struct GitServiceTests {
         #expect(diff.contains("+brand new"), "untracked files are part of the diff (intent-to-add)")
     }
 
+    @Test("the diff accepts a status the caller already has")
+    func diffAvecStatutFourni() async throws {
+        let repo = try await makeFixtureRepo()
+        try "modified content".write(to: repo.appendingPathComponent("README.md"),
+                                     atomically: true, encoding: .utf8)
+        try "brand new".write(to: repo.appendingPathComponent("note.txt"),
+                              atomically: true, encoding: .utf8)
+        let changes = try await service.status(in: repo)
+
+        let diff = try await service.diff(in: repo, changes: changes)
+
+        #expect(diff == (try await service.diff(in: repo)),
+                "the provided status yields exactly the diff the call would have computed")
+        #expect(diff.contains("+brand new"), "untracked files come from the provided status")
+    }
+
     @Test("safe removal: refuses on uncommitted changes, explicit force (GIT-05)")
     func suppressionSecurisee() async throws {
         let repo = try await makeFixtureRepo()

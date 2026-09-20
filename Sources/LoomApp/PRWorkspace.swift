@@ -495,11 +495,9 @@ struct PRWorkspaceView: View {
         // Colours come last, at lower priority: the diff is readable plain,
         // and highlight.js over a big PR takes a moment.
         let dark = colorScheme == .dark
-        let number = pr.number
-        let coloured = await Task.detached(priority: .utility) {
+        highlights = await Task.detached(priority: .utility) {
             DiffHighlighter.highlight(parsed, dark: dark)
         }.value
-        if pr.number == number { highlights = coloured }
         // GitHub's viewed boxes, after the diff: the files on screen are the
         // universe the recap counts.
         let views = await model.fileViews(pr.number, in: project.id, refresh: refresh)

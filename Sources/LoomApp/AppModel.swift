@@ -1046,8 +1046,14 @@ public final class AppModel {
         }
     }
 
-    public func searchTranscripts(_ query: String) -> [SessionStore.SearchHit] {
-        ((try? store?.searchTranscripts(matching: query)) ?? nil) ?? []
+    /// Off the main actor: the palette queries on every keystroke and the FTS
+    /// lookup walks the whole index. SessionStore is Sendable — GRDB's
+    /// DatabaseQueue serialises access itself.
+    public func searchTranscripts(_ query: String) async -> [SessionStore.SearchHit] {
+        guard let store else { return [] }
+        return await Task.detached(priority: .userInitiated) {
+            ((try? store.searchTranscripts(matching: query)) ?? nil) ?? []
+        }.value
     }
 
     /// A session's record for the info panel (breadcrumb chevron).
@@ -1675,7 +1681,7 @@ public final class AppModel {
 
     /// `gh pr create --fill` in the worktree. Success carries the PR URL.
     public func shipCreatePR(_ id: SessionID) async -> (success: Bool, message: String)? {
-        guard let worktree = worktreeURL(for: id), let gh = Self.ghPath else { return nil }
+        guard let worktree = worktreeURL(for: id), let gh = GitHubService.ghPath else { return nil }
         let process = Process()
         process.executableURL = gh
         process.arguments = ["pr", "create", "--fill"]
@@ -1699,11 +1705,6 @@ public final class AppModel {
         }
     }
 
-    /// GUI apps do not inherit the shell PATH: well-known locations only.
-    public static let ghPath: URL? = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
-        .map(URL.init(fileURLWithPath:))
-        .first { FileManager.default.isExecutableFile(atPath: $0.path) }
-
     private static func gitErrorText(_ error: Error) -> String {
         if case GitError.commandFailed(_, _, let stderr) = error, !stderr.isEmpty { return stderr }
         return String(describing: error)
@@ -1716,7 +1717,7 @@ public final class AppModel {
         let worktree = URL(fileURLWithPath: path)
         let git = GitService()
         let changes = (try? await git.status(in: worktree)) ?? []
-        let diff = (try? await git.diff(in: worktree)) ?? ""
+        let diff = (try? await git.diff(in: worktree, changes: changes)) ?? ""
         return GitPanelData(changes: changes, diff: diff)
     }
 

@@ -29,6 +29,17 @@ struct SessionStoreTests {
         #expect(try store.allSessions().count == 1)
     }
 
+    @Test("the badge of a session persists and reads back")
+    func allerRetourBadge() throws {
+        let store = try makeStore()
+        let id = SessionID()
+        try store.insert(SessionRecord(id: id, title: "Review", agentID: "claude-code",
+                                       state: .working, createdAt: Date(timeIntervalSince1970: 1000),
+                                       badge: "PR #42"))
+
+        #expect(try store.session(id: id)?.badge == "PR #42")
+    }
+
     @Test("the transition journal keeps the history, source included (STA-06)")
     func journalDesTransitions() throws {
         let store = try makeStore()
@@ -80,28 +91,6 @@ struct SessionStoreTests {
                                            "https://github.com/vaso/loom/pulls"],
                 "prefix honored, most recent first")
         #expect(try store.historySuggestions(prefix: "https://example.org").isEmpty)
-    }
-
-    @Test("full-text search: titles AND transcripts, via FTS5 (SES-08)")
-    func recherchePleinTexte() throws {
-        let store = try makeStore()
-        let cache = SessionID()
-        let deploy = SessionID()
-        try store.insert(SessionRecord(id: cache, title: "Fix the cache bug",
-                                       agentID: "claude-code", state: .completed, createdAt: Date()))
-        try store.insert(SessionRecord(id: deploy, title: "Deploy to staging",
-                                       agentID: "claude-code", state: .completed, createdAt: Date()))
-        try store.indexForSearch(session: cache, title: "Fix the cache bug",
-                                 transcript: "TTL invalidation was too approximate")
-        try store.indexForSearch(session: deploy, title: "Deploy to staging",
-                                 transcript: "kubectl apply succeeded, pods green")
-
-        #expect(try store.searchSessions(matching: "cache") == [cache], "match on the title")
-        #expect(try store.searchSessions(matching: "kubectl") == [deploy], "match on the transcript")
-        #expect(try store.searchSessions(matching: "invalidation") == [cache])
-        #expect(try store.searchSessions(matching: "notfound-xyz").isEmpty)
-        #expect(try store.searchSessions(matching: "\"quoted\" special*").isEmpty,
-                "a query with special FTS characters never errors")
     }
 
     @Test("projects: insert, session attachment, archive without touching the folder (PRJ-01/03/06)")

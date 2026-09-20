@@ -4,8 +4,8 @@ import SwiftUI
 
 /// Default theme tokens — modeled on the validated visual reference (Xirp):
 /// near-black background, flat outlined cards, warm orange accent, mono for
-/// paths and branches. The full theme system (Theme/ThemeResolver) translates
-/// to these tokens; no hardcoded color in the views.
+/// paths and branches. Every token proxies the active ThemePalette held by
+/// ThemeStore; no hardcoded color in the views.
 @MainActor
 public enum DefaultTheme {
 

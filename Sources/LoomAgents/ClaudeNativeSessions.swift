@@ -56,10 +56,11 @@ public enum ClaudeNativeSessions {
 
     /// Disk convenience: locate the native file and parse it. `tailBytes` reads
     /// only the file's tail (the context figure lives in the LAST assistant
-    /// entry) — the cumulative output count then covers the tail only.
+    /// entry) — the cumulative output count then covers the tail only. Bounded
+    /// by default: these files reach megabytes. Pass nil for the whole file.
     public static func usage(for id: SessionID,
                              projectsDirectory: URL = defaultProjectsDirectory,
-                             tailBytes: Int? = nil) -> SessionUsage? {
+                             tailBytes: Int? = 65_536) -> SessionUsage? {
         guard let file = path(for: id, projectsDirectory: projectsDirectory) else { return nil }
         let text: String
         if let tailBytes,

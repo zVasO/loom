@@ -528,17 +528,12 @@ public struct KeyCaptureView: NSViewRepresentable {
 
     public func updateNSView(_ view: CaptureNSView, context: Context) {
         configure(view)
-        guard let window = view.window else { return }
         // Reclaiming focus when nothing is focused anymore — never by stealing it
         // from an active text field (renaming, palette…). A click inside the pane
         // is handled by the mouse monitor instead, which leaves the press itself
         // alone so a selection drag can start on it.
-        if window.firstResponder === window {
-            DispatchQueue.main.async { [weak view] in
-                guard let view else { return }
-                view.window?.makeFirstResponder(view)
-            }
-        }
+        guard view.focusIsIdle() else { return }
+        DispatchQueue.main.async { [weak view] in view?.reclaimFocusIfIdle() }
     }
 
     private func configure(_ view: CaptureNSView) {
@@ -582,6 +577,22 @@ public struct KeyCaptureView: NSViewRepresentable {
 
         public override var acceptsFirstResponder: Bool { true }
 
+        /// Nothing owns the keyboard: the window itself is the first responder — or,
+        /// with `acceptingUnset`, no one is at all, which is what the window reports
+        /// while a freshly inserted view's layout settles.
+        fileprivate func focusIsIdle(acceptingUnset: Bool = false) -> Bool {
+            guard let window else { return false }
+            if window.firstResponder === window { return true }
+            return acceptingUnset && window.firstResponder == nil
+        }
+
+        /// The one way this view takes the keyboard back: only when nothing owns it,
+        /// never by stealing it from a text field the user is typing in.
+        fileprivate func reclaimFocusIfIdle(acceptingUnset: Bool = false) {
+            guard focusIsIdle(acceptingUnset: acceptingUnset), let window else { return }
+            window.makeFirstResponder(self)
+        }
+
         public override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             teardownFocusWatchers()
@@ -593,10 +604,7 @@ public struct KeyCaptureView: NSViewRepresentable {
             // (the KVO path already guards that case).
             for delay in [0.05, 0.25] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                    guard let self, let window = self.window,
-                          window.firstResponder === window || window.firstResponder == nil
-                    else { return }
-                    window.makeFirstResponder(self)
+                    self?.reclaimFocusIfIdle(acceptingUnset: true)
                 }
             }
             // FOCUS BUG FIX — two ways typing used to die, both independent of
@@ -606,11 +614,11 @@ public struct KeyCaptureView: NSViewRepresentable {
             //    first responder back to the window and nothing reclaimed it.
             //    KVO on firstResponder reclaims the instant focus lands on
             //    "nothing" — and never steals from a real text field.
-            responderObservation = window.observe(\.firstResponder) { [weak self] window, _ in
+            responderObservation = window.observe(\.firstResponder) { [weak self] _, _ in
                 guard let self else { return }
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    if window.firstResponder === window { self.window?.makeFirstResponder(self) }
+                    self.reclaimFocusIfIdle()
                     self.reportFocusIfChanged()
                 }
             }

@@ -57,6 +57,10 @@ public actor SessionManager {
     private var runtimes: [SessionID: SessionRuntime] = [:]
     private var states: [SessionID: StateEngine.State] = [:]
     private var pumps: [SessionID: Task<Void, Never>] = [:]
+    /// Sessions whose process has exited. Their runtime is kept — it holds the
+    /// final screen the UI still shows for a closed session — until archiving,
+    /// the one gesture that removes the session from view.
+    private var finished: Set<SessionID> = []
     /// Per-session IPC token (ADR-0005): issued at birth, verified on every payload.
     private var tokens: [String: SessionID] = [:]
     private var tokensBySession: [SessionID: String] = [:]
@@ -215,6 +219,7 @@ public actor SessionManager {
             states[id] = StateEngine.State(session: record.state)
         }
         apply(.user(.archive), to: id)
+        releaseIfArchived(id)
     }
 
     /// Entry point for hooks (IPC server) and heuristics: every transition
@@ -278,10 +283,6 @@ public actor SessionManager {
         states[id]?.session
     }
 
-    public func sessions() -> [SessionID] {
-        Array(runtimes.keys)
-    }
-
     public func runtime(for id: SessionID) -> SessionRuntime? {
         runtimes[id]
     }
@@ -304,6 +305,22 @@ public actor SessionManager {
         case .terminated(let report):
             apply(.process(.exited(code: report.exitStatus.code)), to: id)
             pumps[id] = nil
+            // The process is gone: its IPC token must stop validating. The
+            // runtime stays until archiving — see `finished`.
+            if let token = tokensBySession.removeValue(forKey: id) {
+                tokens[token] = nil
+            }
+            finished.insert(id)
+            releaseIfArchived(id)
         }
+    }
+
+    /// A runtime is released once the session is both dead and archived —
+    /// whichever comes last — so the terminal of a closed session stays
+    /// readable, and an archived-then-exited one does not leak its scrollback.
+    private func releaseIfArchived(_ id: SessionID) {
+        guard finished.contains(id), states[id]?.session == .archived else { return }
+        finished.remove(id)
+        runtimes[id] = nil
     }
 }

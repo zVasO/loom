@@ -75,9 +75,17 @@ public struct GitService: Sendable {
 
     /// GIT-03: read-only unified diff — untracked files are included
     /// too (via `--no-index` against /dev/null, never touching the index).
-    public func diff(in worktree: URL) async throws -> String {
+    /// `changes`: the status a caller already has in hand — passing it spares
+    /// the second `status` call this diff would otherwise make itself.
+    public func diff(in worktree: URL, changes: [FileChange]? = nil) async throws -> String {
         var output = try await run(["diff", "HEAD"], in: worktree)
-        let untracked = try await status(in: worktree).filter { $0.kind == .untracked }
+        let known: [FileChange]
+        if let changes {
+            known = changes
+        } else {
+            known = try await status(in: worktree)
+        }
+        let untracked = known.filter { $0.kind == .untracked }
         for change in untracked {
             // `--no-index` exits with 1 when there are differences: that is the nominal case.
             if let piece = try? await run(["diff", "--no-index", "--", "/dev/null", change.path],
@@ -117,15 +125,6 @@ public struct GitService: Sendable {
     public func push(in worktree: URL) async throws {
         let branch = try await currentBranch(in: worktree)
         _ = try await run(["push", "-u", "origin", branch], in: worktree)
-    }
-
-    /// Commits ahead of origin/<branch> — what "Ship" is about to publish.
-    /// `nil` when the branch has no upstream yet (never pushed).
-    public func aheadCount(in worktree: URL) async throws -> Int? {
-        let branch = try await currentBranch(in: worktree)
-        guard let output = try? await run(["rev-list", "--count", "origin/\(branch)..HEAD"],
-                                          in: worktree) else { return nil }
-        return Int(output)
     }
 
     // MARK: - Execution

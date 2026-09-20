@@ -26,8 +26,30 @@ struct SessionManagerTests {
     func lancerUneSession() async throws {
         let manager = makeManager()
         let id = try await manager.launch(spec())
-        #expect(await manager.sessions() == [id])
+        #expect(await manager.runtime(for: id) != nil)
         #expect(await manager.state(of: id) == .starting)
+    }
+
+    @Test("a terminated session drops its token, keeps its screen, and frees the runtime once archived")
+    func sessionTermineeLibereSesRessources() async throws {
+        let pty = ScriptedPTYHost()
+        let manager = makeManager(pty: pty)
+        let id = try await manager.launch(spec())
+        let token = try #require(await manager.hookToken(for: id))
+        #expect(await manager.runtime(for: id) != nil)
+
+        pty.exit(code: 0)
+        _ = await pollUntil { await manager.state(of: id) == .completed }
+
+        #expect(await manager.hookToken(for: id) == nil)
+        #expect(await manager.session(forToken: token) == nil,
+                "the token of a dead session no longer validates")
+        #expect(await manager.runtime(for: id) != nil,
+                "a closed session still shows its last screen until it is archived")
+
+        await manager.archive(id)
+        #expect(await manager.runtime(for: id) == nil,
+                "archiving a dead session releases its runtime and scrollback")
     }
 
     @Test("process exit surfaces in the state: completed or failed (STA-05)")
@@ -285,7 +307,8 @@ struct SessionManagerTests {
         try await manager.resume(record, command: command,
                                  workingDirectory: URL(fileURLWithPath: "/tmp/worktree"))
 
-        #expect(await manager.sessions() == [id], "same identifier: the history stays one continuous thread")
+        #expect(await manager.runtime(for: id) != nil,
+                "same identifier: the history stays one continuous thread")
         #expect(await manager.state(of: id) == .starting)
         #expect(try store.session(id: id)?.state == .starting, "the database follows the resume")
     }

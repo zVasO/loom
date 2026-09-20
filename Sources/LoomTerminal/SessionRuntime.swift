@@ -58,7 +58,9 @@ public final class SessionRuntime: @unchecked Sendable {
     }
 
     private let queue: DispatchQueue
-    private var channel: (any PTYChannel)!
+    /// Confined to `queue`: stored there once `open` has returned, so an exec that
+    /// fails instantly cannot conclude the session before the channel exists.
+    private var channel: (any PTYChannel)?
     /// Confined to `queue`, no exceptions (ADR-0007). Created and fed on the session queue.
     private var engine: (any TerminalEngine)?
     // Drainage barrier (EOF/exit race, research §7.4): the session only concludes
@@ -88,7 +90,7 @@ public final class SessionRuntime: @unchecked Sendable {
     func resize(to geometry: TerminalGeometry) {
         queue.async {
             self.engine?.resize(to: geometry)
-            self.channel.resize(to: geometry)
+            self.channel?.resize(to: geometry)
             self.scheduleFrame()
         }
     }
@@ -97,7 +99,7 @@ public final class SessionRuntime: @unchecked Sendable {
     /// Non-blocking: one hop onto the session queue, then the channel.
     func write(_ text: String, to terminal: TerminalID) {
         let bytes = Array(text.utf8)
-        queue.async { self.channel.write(bytes[...]) }
+        queue.async { self.channel?.write(bytes[...]) }
     }
 
     /// One wheel notch for a program that tracks the mouse. It scrolls its own
@@ -200,7 +202,7 @@ public final class SessionRuntime: @unchecked Sendable {
             bytesSinceLastSample: bytesSinceLastSample,
             silence: lastByteAt.map { now - $0 } ?? .zero,
             visibleTail: Array(tail),
-            cpuFraction: channel.cpuFraction())))
+            cpuFraction: channel?.cpuFraction() ?? 0)))
         bytesSinceLastSample = 0
     }
 
@@ -208,7 +210,10 @@ public final class SessionRuntime: @unchecked Sendable {
     /// the channel, seals the transcript, emits `.terminated`, finishes the stream.
     private func concludeIfDrained(transcript: any TranscriptSink,
                                    continuation: AsyncStream<Event>.Continuation) {
-        guard sawEOF, let status = exitStatus else { return }
+        // The channel is part of the barrier: an immediate exec failure can deliver
+        // both the exit and the EOF before `launch` has stored it. The conclusion
+        // then waits for the store, which retries it.
+        guard sawEOF, let status = exitStatus, let channel else { return }
         samplingTimer?.cancel()
         samplingTimer = nil
         channel.close()
@@ -254,7 +259,7 @@ public final class SessionRuntime: @unchecked Sendable {
 
         for step in ladder.steps {
             if let done = currentReport() { return done }
-            channel.signal(step.signal, scope: step.scope)
+            channel?.signal(step.signal, scope: step.scope)
             if let done = await awaitTermination(upTo: step.grace) { return done }
         }
         // After the last rung (normally SIGKILL), exit is inevitable; this wait
@@ -366,7 +371,7 @@ public final class SessionRuntime: @unchecked Sendable {
             }
         }
 
-        runtime.channel = try dependencies.ptyHost.open(
+        let channel = try dependencies.ptyHost.open(
             command: plan.command,
             workingDirectory: plan.workingDirectory,
             environment: Self.childEnvironment(overlay: plan.command.environment),
@@ -394,6 +399,15 @@ public final class SessionRuntime: @unchecked Sendable {
                 runtime.exitStatus = status
                 runtime.concludeIfDrained(transcript: dependencies.transcript, continuation: continuation)
             }
+        }
+
+        // On the queue, and therefore after any event `open` already delivered:
+        // the store is race-free, and it retries a conclusion those events held
+        // back. Synchronous, so a `stop` issued right after `launch` finds the
+        // channel and its SIGINT is not dropped.
+        queue.sync {
+            runtime.channel = channel
+            runtime.concludeIfDrained(transcript: dependencies.transcript, continuation: continuation)
         }
 
         return (runtime, stream)

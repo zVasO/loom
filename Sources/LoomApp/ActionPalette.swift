@@ -20,7 +20,7 @@ struct PaletteAction: Identifiable {
 /// With an empty query only Navigation + Actions show — the launcher pose.
 struct ActionPaletteView: View {
     let actions: [PaletteAction]
-    let transcriptSearch: (String) -> [SessionStore.SearchHit]
+    let transcriptSearch: (String) async -> [SessionStore.SearchHit]
     let onOpenSession: (SessionID) -> Void
     @Binding var isPresented: Bool
 
@@ -29,18 +29,40 @@ struct ActionPaletteView: View {
     @State private var transcriptHits: [SessionStore.SearchHit] = []
     @FocusState private var searchFocused: Bool
 
-    /// The flat, filtered list the keyboard walks through — section order is
-    /// the display order.
-    private var visibleActions: [PaletteAction] {
+    /// The order sections are drawn in — also the order ↑↓ walks through them.
+    private static let sectionOrder = ["Navigation", "Actions", "Theme", "Projects", "Sessions"]
+
+    /// The filtered entries, rank-sorted inside each section.
+    private var matchedActions: [PaletteAction] {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
             return actions.filter { $0.section == "Navigation" || $0.section == "Actions" }
         }
         let ranked = CommandPalette.rank(query: trimmed, in: actions.map(\.title))
-        let order = Dictionary(uniqueKeysWithValues: ranked.enumerated().map { ($1, $0) })
+        let order = Dictionary(ranked.enumerated().map { ($1, $0) }) { first, _ in first }
         return actions
             .filter { order[$0.title] != nil }
             .sorted { (order[$0.title] ?? .max, $0.section) < (order[$1.title] ?? .max, $1.section) }
+    }
+
+    /// The sections as displayed, each with the index its first row carries.
+    /// Rendering and keyboard selection both read this, so the highlighted row
+    /// is always the one ↑↓ landed on.
+    private var displayedSections: [(section: String, start: Int, actions: [PaletteAction])] {
+        let grouped = Dictionary(grouping: matchedActions, by: \.section)
+        var start = 0
+        var result: [(String, Int, [PaletteAction])] = []
+        for section in Self.sectionOrder {
+            guard let entries = grouped[section], !entries.isEmpty else { continue }
+            result.append((section, start, entries))
+            start += entries.count
+        }
+        return result
+    }
+
+    /// The displayed entries flattened — index i is the i-th visible row.
+    private var visibleActions: [PaletteAction] {
+        displayedSections.flatMap(\.actions)
     }
 
     private var totalCount: Int { visibleActions.count + transcriptHits.count }
@@ -60,10 +82,15 @@ struct ActionPaletteView: View {
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(DefaultTheme.cardBorder, lineWidth: 1))
         .task(id: query) {
             selection = 0
-            guard query.count >= 2 else { transcriptHits = []; return }
+            let searched = query
+            guard searched.count >= 2 else { transcriptHits = []; return }
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
-            transcriptHits = transcriptSearch(query)
+            let hits = await transcriptSearch(searched)
+            // The text may have moved on while the query ran: stale hits would
+            // answer a question nobody is asking any more.
+            guard !Task.isCancelled, searched == query else { return }
+            transcriptHits = hits
         }
     }
 
@@ -90,15 +117,11 @@ struct ActionPaletteView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    let grouped = Dictionary(grouping: Array(visibleActions.enumerated()),
-                                             by: { $0.element.section })
-                    let sections = ["Navigation", "Actions", "Theme", "Projects", "Sessions"]
-                        .filter { grouped[$0] != nil }
-                    ForEach(sections, id: \.self) { section in
+                    ForEach(displayedSections, id: \.section) { section, start, entries in
                         sectionHeader(section)
-                        ForEach(grouped[section] ?? [], id: \.element.id) { index, action in
-                            row(action, index: index)
-                                .id(index)
+                        ForEach(Array(entries.enumerated()), id: \.element.id) { offset, action in
+                            row(action, index: start + offset)
+                                .id(start + offset)
                         }
                     }
                     if !transcriptHits.isEmpty {

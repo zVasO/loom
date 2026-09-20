@@ -1,3 +1,4 @@
+import Foundation
 import LoomCore
 import SwiftUI
 
@@ -152,13 +153,56 @@ public enum MarkdownBlocks {
     }
 }
 
+/// SwiftUI rebuilds `MarkdownBlockView` on every render of its parent, and both
+/// the block split and `AttributedString(markdown:)` are pure functions of their
+/// input. This bounded cache makes each distinct string pay for them once
+/// instead of once per frame.
+private enum MarkdownCache {
+    struct InlineKey: Hashable {
+        let text: String
+        let accent: Color
+    }
+
+    private static let lock = NSLock()
+    private static var parsed: [String: [MarkdownBlocks.Block]] = [:]
+    private static var rendered: [InlineKey: AttributedString] = [:]
+    /// A full flush is cheaper than tracking recency, and the next render
+    /// repopulates only what is actually on screen.
+    private static let limit = 256
+
+    static func blocks(for text: String) -> [MarkdownBlocks.Block] {
+        lock.lock()
+        if let hit = parsed[text] { lock.unlock(); return hit }
+        lock.unlock()
+        let value = MarkdownBlocks.parse(text)
+        lock.lock()
+        if parsed.count >= limit { parsed.removeAll(keepingCapacity: true) }
+        parsed[text] = value
+        lock.unlock()
+        return value
+    }
+
+    static func inline(_ text: String, accent: Color) -> AttributedString {
+        let key = InlineKey(text: text, accent: accent)
+        lock.lock()
+        if let hit = rendered[key] { lock.unlock(); return hit }
+        lock.unlock()
+        let value = MarkdownBlocks.styled(MarkdownBlocks.inline(text), accent: accent)
+        lock.lock()
+        if rendered.count >= limit { rendered.removeAll(keepingCapacity: true) }
+        rendered[key] = value
+        lock.unlock()
+        return value
+    }
+}
+
 /// Renders parsed blocks with the theme's typography; bold/code/links inside
 /// each block go through the inline AttributedString parser as before.
 public struct MarkdownBlockView: View {
     private let blocks: [MarkdownBlocks.Block]
 
     public init(_ text: String) {
-        blocks = MarkdownBlocks.parse(text)
+        blocks = MarkdownCache.blocks(for: text)
     }
 
     public var body: some View {
@@ -170,7 +214,7 @@ public struct MarkdownBlockView: View {
     }
 
     private static func inline(_ text: String) -> AttributedString {
-        MarkdownBlocks.styled(MarkdownBlocks.inline(text), accent: DefaultTheme.accent)
+        MarkdownCache.inline(text, accent: DefaultTheme.accent)
     }
 
     @ViewBuilder

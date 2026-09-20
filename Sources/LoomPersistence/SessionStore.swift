@@ -128,21 +128,6 @@ public final class SessionStore: Sendable {
         }
     }
 
-    /// The user query is wrapped in FTS quotes (prefix allowed):
-    /// no special character of the MATCH syntax can cause an error.
-    public func searchSessions(matching query: String) throws -> [SessionID] {
-        let sanitized = query.replacingOccurrences(of: "\"", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !sanitized.isEmpty else { return [] }
-        let match = "\"\(sanitized)\"*"
-        return try database.read { db in
-            let rows = try Row.fetchAll(db, sql: """
-                SELECT sessionID FROM sessionFTS WHERE sessionFTS MATCH ? ORDER BY rank
-                """, arguments: [match])
-            return rows.compactMap { UUID(uuidString: $0["sessionID"]).map(SessionID.init) }
-        }
-    }
-
     /// A full-text hit: the session plus the transcript excerpt that matched,
     /// with the match highlighted by FTS5's snippet().
     public struct SearchHit: Sendable, Equatable {
@@ -152,8 +137,8 @@ public final class SessionStore: Sendable {
     }
 
     /// v2 search: sessions ranked by FTS5 relevance, each with a short excerpt
-    /// around the match. Same sanitation as `searchSessions` — user input can
-    /// never produce a MATCH syntax error.
+    /// around the match. The user query is wrapped in FTS quotes (prefix
+    /// allowed): no special character of the MATCH syntax can cause an error.
     public func searchTranscripts(matching query: String) throws -> [SearchHit] {
         let sanitized = query.replacingOccurrences(of: "\"", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -312,7 +297,7 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
 
     enum CodingKeys: String, CodingKey {
         case id, title, agentID, state, branch, worktreePath, initialPrompt, exitCode, projectID,
-             createdAt, endedAt
+             createdAt, endedAt, badge
     }
 
     public func encode(to container: inout PersistenceContainer) throws {
@@ -327,6 +312,7 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
         container["projectID"] = projectID?.rawValue.uuidString
         container["createdAt"] = createdAt
         container["endedAt"] = endedAt
+        container["badge"] = badge
     }
 
     public init(row: Row) throws {
@@ -344,6 +330,7 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
         projectID = (row["projectID"] as String?).flatMap(UUID.init(uuidString:)).map(ProjectID.init)
         createdAt = row["createdAt"]
         endedAt = row["endedAt"]
+        badge = row["badge"]
     }
 }
 

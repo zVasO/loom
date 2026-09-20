@@ -46,11 +46,11 @@ struct LoomApp: App {
                 Button("New claude session") {
                     NotificationCenter.default.post(name: .loomNewSession, object: nil)
                 }
-                .keyboardShortcut("n", modifiers: .command)
+                .keyboardShortcut(KeyEquivalent(keyNewSession.first ?? "n"), modifiers: .command)
                 Button("New tab in the stack") {
                     NotificationCenter.default.post(name: .loomNewTab, object: nil)
                 }
-                .keyboardShortcut("t", modifiers: .command)
+                .keyboardShortcut(KeyEquivalent(keyNewTab.first ?? "t"), modifiers: .command)
             }
             // ⌘⇧A, not ⌘A: ⌘A stays the agent's own select-all inside its input
             // field, which is the one actually pressed. A menu item rather than a

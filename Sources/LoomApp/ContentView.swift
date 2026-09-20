@@ -474,7 +474,7 @@ struct ContentView: View {
 
     private var palette: some View {
         ActionPaletteView(actions: paletteActions,
-                          transcriptSearch: { model.searchTranscripts($0) },
+                          transcriptSearch: { await model.searchTranscripts($0) },
                           onOpenSession: { openSessionByID($0) },
                           isPresented: $paletteShown)
     }
@@ -1996,11 +1996,16 @@ struct SessionsView: View {
     /// form ONE joined block; each stack is separated from the next.
     @ViewBuilder
     private func projectStacks(items: [AppModel.SessionItem]) -> some View {
+        // Grouped once by parent instead of rescanning all three lists per
+        // stack: the sidebar rebuilds on every session update.
+        let childrenByParent = Dictionary(grouping: items, by: \.parentID)
+        let dormantByParent = Dictionary(grouping: model.dormantShells, by: \.parentID)
+        let panesByParent = Dictionary(grouping: model.browserPanes, by: \.parentID)
         ForEach(items.filter { !$0.isShell }) { item in
             sessionStack(item,
-                         shells: items.filter { $0.parentID == item.id },
-                         dormantShells: model.dormantShells.filter { $0.parentID == item.id },
-                         panes: model.browserPanes.filter { $0.parentID == item.id })
+                         shells: childrenByParent[item.id] ?? [],
+                         dormantShells: dormantByParent[item.id] ?? [],
+                         panes: panesByParent[item.id] ?? [])
         }
     }
 
@@ -2303,6 +2308,7 @@ struct SessionDetailView: View {
     @State private var shipBusy = false
     @State private var followUpShown = false
     @State private var followUpDraft = ""
+    @State private var infoUsage: ClaudeNativeSessions.SessionUsage?
 
     private var item: AppModel.SessionItem? {
         model.sessions.first { $0.id == sessionID }
@@ -2434,7 +2440,7 @@ struct SessionDetailView: View {
             if let branch = record?.branch { infoRow("Branch", branch) }
             infoRow("Agent", record?.agentID ?? "claude-code")
             // v3 — real counters, read from claude's own native records.
-            if let usage = ClaudeNativeSessions.usage(for: sessionID) {
+            if let usage = infoUsage {
                 infoRow("Context", "\(Self.tokens(usage.contextTokens)) tokens (last turn)")
                 infoRow("Output", "\(Self.tokens(usage.outputTokens)) tokens total")
             }
@@ -2456,6 +2462,15 @@ struct SessionDetailView: View {
         .frame(width: 400, alignment: .leading)
         .background(DefaultTheme.surface)
         .preferredColorScheme(.dark)
+        .task(id: sessionID) {
+            // The whole file, not the default tail: this panel states the
+            // session's lifetime output, and a tail would only total the end
+            // of it. Off the main actor, so the megabytes never stall the UI.
+            let id = sessionID
+            infoUsage = await Task.detached(priority: .utility) {
+                ClaudeNativeSessions.usage(for: id, tailBytes: nil)
+            }.value
+        }
     }
 
     private func infoRow(_ label: String, _ value: String,
@@ -2570,7 +2585,7 @@ struct SessionDetailView: View {
                     }
                 }
                 .help("A second claude reviews this worktree's diff")
-                if AppModel.ghPath != nil {
+                if GitHubService.ghPath != nil {
                     GhostButton("Create PR", systemImage: "arrow.triangle.pull") {
                         shipBusy = true
                         Task {
