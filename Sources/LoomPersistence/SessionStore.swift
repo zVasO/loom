@@ -92,6 +92,24 @@ public final class SessionStore: Sendable {
                 t.primaryKey(["messageID", "requestID"])
             }
         }
+        migrator.registerMigration("v7-session-badges") { db in
+            // Several badges per session (PR #42 + review + urgent): one row per
+            // assignment, kept in assignment order. The v5 column carried at
+            // most one — its value moves across, then the column goes.
+            try db.create(table: "sessionBadge") { t in
+                t.column("sessionID", .text).notNull()
+                    .references("session", onDelete: .cascade)
+                t.column("name", .text).notNull()
+                t.column("position", .integer).notNull()
+                // The key doubles as the per-session index: lookups lead with sessionID.
+                t.primaryKey(["sessionID", "name"])
+            }
+            try db.execute(sql: """
+                INSERT INTO sessionBadge (sessionID, name, position)
+                SELECT id, badge, 0 FROM session WHERE badge IS NOT NULL AND badge <> ''
+                """)
+            try db.alter(table: "session") { $0.drop(column: "badge") }
+        }
         try migrator.migrate(database)
     }
 
@@ -173,10 +191,57 @@ public final class SessionStore: Sendable {
         }
     }
 
-    public func setBadge(session id: SessionID, badge: String?) throws {
-        try database.write { db in
-            try db.execute(sql: "UPDATE session SET badge = ? WHERE id = ?",
-                           arguments: [badge, id.rawValue.uuidString])
+    // MARK: - Badges
+
+    /// Replaces a session's badges — the whole list, in the given order; an
+    /// empty list clears them. Duplicates and blanks never land.
+    public func setBadges(session id: SessionID, badges: [String]) throws {
+        try database.write { db in try Self.writeBadges(db, session: id, badges: badges) }
+    }
+
+    private static func writeBadges(_ db: Database, session id: SessionID,
+                                    badges: [String]) throws {
+        let key = id.rawValue.uuidString
+        try db.execute(sql: "DELETE FROM sessionBadge WHERE sessionID = ?", arguments: [key])
+        for (position, name) in SessionRecord.normalizedBadges(badges).enumerated() {
+            try db.execute(
+                sql: "INSERT INTO sessionBadge (sessionID, name, position) VALUES (?, ?, ?)",
+                arguments: [key, name, position])
+        }
+    }
+
+    /// Badges of every session in one query, keyed by the session's stored id.
+    private static func badgesBySession(_ db: Database,
+                                        only ids: [String]? = nil) throws -> [String: [String]] {
+        let rows: [Row]
+        if let ids {
+            guard !ids.isEmpty else { return [:] }
+            let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+            rows = try Row.fetchAll(
+                db,
+                sql: "SELECT sessionID, name FROM sessionBadge WHERE sessionID IN (\(placeholders)) ORDER BY position",
+                arguments: StatementArguments(ids))
+        } else {
+            rows = try Row.fetchAll(
+                db, sql: "SELECT sessionID, name FROM sessionBadge ORDER BY sessionID, position")
+        }
+        var result: [String: [String]] = [:]
+        for row in rows {
+            let session: String = row["sessionID"]
+            let name: String = row["name"]
+            result[session, default: []].append(name)
+        }
+        return result
+    }
+
+    private static func attachBadges(_ db: Database, to records: [SessionRecord],
+                                     bulk: Bool) throws -> [SessionRecord] {
+        guard !records.isEmpty else { return records }
+        let badges = try badgesBySession(db, only: bulk ? nil : records.map(\.id.rawValue.uuidString))
+        return records.map { record in
+            var copy = record
+            copy.badges = badges[record.id.rawValue.uuidString] ?? []
+            return copy
         }
     }
 
@@ -209,16 +274,24 @@ public final class SessionStore: Sendable {
     // MARK: - Sessions
 
     public func insert(_ record: SessionRecord) throws {
-        try database.write { db in try record.insert(db) }
+        try database.write { db in
+            try record.insert(db)
+            try Self.writeBadges(db, session: record.id, badges: record.badges)
+        }
     }
 
     public func session(id: SessionID) throws -> SessionRecord? {
-        try database.read { db in try SessionRecord.fetchOne(db, key: id.rawValue.uuidString) }
+        try database.read { db in
+            guard let record = try SessionRecord.fetchOne(db, key: id.rawValue.uuidString)
+            else { return nil }
+            return try Self.attachBadges(db, to: [record], bulk: false).first
+        }
     }
 
     public func allSessions() throws -> [SessionRecord] {
         try database.read { db in
-            try SessionRecord.order(Column("createdAt").desc).fetchAll(db)
+            let records = try SessionRecord.order(Column("createdAt").desc).fetchAll(db)
+            return try Self.attachBadges(db, to: records, bulk: true)
         }
     }
 
@@ -289,13 +362,15 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
     public var projectID: ProjectID?
     public var createdAt: Date
     public var endedAt: Date?
-    /// Session badge label — resolved to a color by the badge definitions.
-    public var badge: String?
+    /// Session badges, in assignment order — each resolved to a color by the
+    /// badge definitions. Stored in `sessionBadge`, not in the session row:
+    /// the record carries them, the store loads and writes them.
+    public var badges: [String] = []
 
     public init(id: SessionID, title: String, agentID: String, state: SessionState,
                 branch: String? = nil, worktreePath: String? = nil, initialPrompt: String? = nil,
                 exitCode: Int32? = nil, projectID: ProjectID? = nil,
-                createdAt: Date, endedAt: Date? = nil, badge: String? = nil) {
+                createdAt: Date, endedAt: Date? = nil, badges: [String] = []) {
         self.id = id
         self.title = title
         self.agentID = agentID
@@ -307,7 +382,18 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
         self.projectID = projectID
         self.createdAt = createdAt
         self.endedAt = endedAt
-        self.badge = badge
+        self.badges = Self.normalizedBadges(badges)
+    }
+
+    /// The badges a session may wear: trimmed, non-empty, each name once,
+    /// first occurrence wins the position.
+    public static func normalizedBadges(_ badges: [String]) -> [String] {
+        var seen = Set<String>()
+        return badges.compactMap { raw in
+            let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seen.insert(name).inserted else { return nil }
+            return name
+        }
     }
 
     enum CodingKeys: String, CodingKey {

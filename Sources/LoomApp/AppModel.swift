@@ -78,8 +78,9 @@ public final class AppModel {
         public var isShell: Bool = false
         /// Closed but not destroyed ("inactive"): clicking resumes the session.
         public var isDormant: Bool = false
-        /// Badge label — resolved to a color by the badge definitions.
-        public var badge: String?
+        /// Badges, in assignment order — each resolved to a color by the
+        /// badge definitions.
+        public var badges: [String] = []
     }
 
     // MARK: - Badges: user-defined labels with a color
@@ -128,13 +129,33 @@ public final class AppModel {
                      blue: Double(number & 0xFF) / 255)
     }
 
-    /// Assigns (or clears) a session's badge — card, fleet, tabs and base follow.
-    public func setBadge(_ badge: String?, for id: SessionID) {
-        try? store?.setBadge(session: id, badge: badge)
+    /// The badges a session wears right now — live item first, record otherwise.
+    public func badges(of id: SessionID) -> [String] {
+        sessions.first { $0.id == id }?.badges
+            ?? allRecords.first { $0.id == id }?.badges
+            ?? []
+    }
+
+    /// Replaces a session's badges (empty = none) — card, fleet, tabs and base follow.
+    public func setBadges(_ badges: [String], for id: SessionID) {
+        let normalized = SessionRecord.normalizedBadges(badges)
+        try? store?.setBadges(session: id, badges: normalized)
         if let index = sessions.firstIndex(where: { $0.id == id }) {
-            sessions[index].badge = badge
+            sessions[index].badges = normalized
         }
         reloadPersistedSessions()
+    }
+
+    /// Adds the badge when the session lacks it, removes it otherwise — the
+    /// right-click menu's one gesture.
+    public func toggleBadge(_ name: String, for id: SessionID) {
+        var current = badges(of: id)
+        if let index = current.firstIndex(of: name) {
+            current.remove(at: index)
+        } else {
+            current.append(name)
+        }
+        setBadges(current, for: id)
     }
 
     public private(set) var sessions: [SessionItem] = []
@@ -787,7 +808,7 @@ public final class AppModel {
             spec.projectID = projectID
             spec.sessionID = sessionID
             spec.title = "PR #\(pr.number) · review"
-            spec.badge = "PR #\(pr.number)"
+            spec.badges = ["PR #\(pr.number)"]
             // The record must know it runs in a worktree: the git panel and
             // the ship actions read worktreePath, and a nil left them blind.
             spec.worktree = .existing(path: worktree, branch: pr.branch)
@@ -795,7 +816,7 @@ public final class AppModel {
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(pr.number) · review",
                                         state: .starting, projectID: projectID,
-                                        branch: pr.branch, badge: "PR #\(pr.number)"))
+                                        branch: pr.branch, badges: ["PR #\(pr.number)"]))
             rememberReviewSession(id, forPR: pr.number, in: projectID)
             reloadPersistedSessions()
             if reviewSetupCommandEnabled {
@@ -933,13 +954,13 @@ public final class AppModel {
             spec.projectID = projectID
             spec.sessionID = sessionID
             spec.title = "PR #\(number) · guide"
-            spec.badge = "PR #\(number)"
+            spec.badges = ["PR #\(number)"]
             spec.worktree = .existing(path: worktree, branch: nil)
             let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(number) · guide",
                                         state: .starting, projectID: projectID,
-                                        branch: nil, badge: "PR #\(number)"))
+                                        branch: nil, badges: ["PR #\(number)"]))
             reloadPersistedSessions()
             return id
         } catch {
@@ -972,12 +993,12 @@ public final class AppModel {
             spec.projectID = record.projectID
             spec.sessionID = sessionID
             spec.title = "Review · \(record.title)"
-            spec.badge = "review"
+            spec.badges = ["review"]
             let reviewID = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: reviewID)
             sessions.append(SessionItem(id: reviewID, title: "Review · \(record.title)",
                                         state: .starting, projectID: record.projectID,
-                                        branch: record.branch, badge: "review"))
+                                        branch: record.branch, badges: ["review"]))
             reloadPersistedSessions()
             return reviewID
         } catch {
@@ -1174,7 +1195,7 @@ public final class AppModel {
         if let live = sessions.first(where: { $0.id == id }) { return live }
         return allRecords.first { $0.id == id }.map {
             SessionItem(id: $0.id, title: $0.title, state: $0.state,
-                        projectID: $0.projectID, branch: $0.branch)
+                        projectID: $0.projectID, branch: $0.branch, badges: $0.badges)
         }
     }
 
@@ -1459,7 +1480,7 @@ public final class AppModel {
             tokenRegistry.register(token: token, session: record.id)
             sessions.append(SessionItem(id: record.id, title: record.title, state: .starting,
                                         projectID: record.projectID, branch: record.branch,
-                                        badge: record.badge))
+                                        badges: record.badges))
             interruptedSessions.removeAll { $0.id == record.id }
         } catch {
             startupError = String(describing: error)
