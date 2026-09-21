@@ -94,6 +94,9 @@ struct PRWorkspaceView: View {
     /// Review pane open: "Add to claude session" types the lines into the
     /// session's input (no submit — the user adds their question).
     var transcribeToSession: ((DiffSnippet) -> Void)?
+    /// The verdict bar's text, owned by the PR's tab: it follows the tab
+    /// across the app's tabs and across relaunches.
+    @Binding var reviewSummary: String
 
     @State private var prDetail: GitHubService.PRDetail?
     /// Parsed + row-paired ONCE when the diff arrives (off the main thread) —
@@ -114,7 +117,6 @@ struct PRWorkspaceView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var prTour: PRTour?
     @State private var tourLoading = false
-    @State private var reviewBody = ""
     @State private var prActionOutput: String?
     @State private var prActionBusy = false
     /// The comments drafted for this PR's review — mirrored from the model
@@ -532,7 +534,7 @@ struct PRWorkspaceView: View {
             }
             HStack(spacing: 8) {
                 TextField(draft?.isEmpty == false ? "Review summary…" : "Review comment…",
-                          text: $reviewBody, axis: .vertical)
+                          text: $reviewSummary, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .lineLimit(1...4)
@@ -679,7 +681,7 @@ struct PRWorkspaceView: View {
         let hasDrafts = draft?.isEmpty == false
         // GitHub's API refuses REQUEST_CHANGES and COMMENT without a body,
         // drafted comments or not: the summary is the one thing to write.
-        if verdict != .approve, reviewBody.trimmingCharacters(in: .whitespaces).isEmpty {
+        if verdict != .approve, reviewSummary.trimmingCharacters(in: .whitespaces).isEmpty {
             prActionOutput = hasDrafts ? "Write the review summary first — GitHub requires one with this verdict."
                                        : "Write the comment first."
             return
@@ -687,10 +689,10 @@ struct PRWorkspaceView: View {
         prActionBusy = true
         Task {
             let error = await model.submitPRReview(pr.number, verdict: verdict,
-                                                   body: reviewBody, in: project.id)
+                                                   body: reviewSummary, in: project.id)
             prActionOutput = error ?? (hasDrafts ? "Review sent with its comments ✓" : "Review sent ✓")
             if error == nil {
-                reviewBody = ""
+                reviewSummary = ""
                 draft = nil
                 // After a submission the cached conversation is stale.
                 await load(refresh: true)

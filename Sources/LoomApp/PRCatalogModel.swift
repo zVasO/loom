@@ -243,6 +243,68 @@ extension AppModel {
         searchError = nil
     }
 
+    // MARK: PR tabs — one per open pull request
+
+    /// A click in a list: previewed (the next click reuses the tab).
+    public func showPR(_ pr: GitHubService.PullRequest, in projectID: ProjectID) {
+        prTabs.show(pr, in: projectID)
+        savePRTabs()
+    }
+
+    /// Shown and pinned: a review starts, a row is double-clicked.
+    public func openPRTab(_ pr: GitHubService.PullRequest, in projectID: ProjectID) {
+        prTabs.open(pr, in: projectID)
+        savePRTabs()
+    }
+
+    public func pinPRTab(_ id: String) {
+        prTabs.pin(id)
+        savePRTabs()
+    }
+
+    public func closePRTab(_ id: String) {
+        prTabs.close(id)
+        savePRTabs()
+    }
+
+    public func closeOtherPRTabs(_ id: String) {
+        prTabs.closeOthers(id)
+        savePRTabs()
+    }
+
+    public func activatePRTab(_ id: String) {
+        prTabs.activate(id)
+        savePRTabs()
+    }
+
+    public func nextPRTab() {
+        prTabs.activateNext()
+        savePRTabs()
+    }
+
+    public func previousPRTab() {
+        prTabs.activatePrevious()
+        savePRTabs()
+    }
+
+    public func setPRTabDrawer(open: Bool, for id: String) {
+        guard prTabs.tab(id)?.drawerOpen != open else { return }
+        prTabs.setDrawer(open: open, for: id)
+        savePRTabs()
+    }
+
+    public func setPRTabSummary(_ summary: String, for id: String) {
+        guard prTabs.tab(id)?.reviewSummary != summary else { return }
+        prTabs.setSummary(summary, for: id)
+        savePRTabs()
+    }
+
+    func savePRTabs() {
+        let store = prTabsStore
+        let tabs = prTabs
+        Task.detached(priority: .utility) { store.save(tabs) }
+    }
+
     // MARK: Review drafts — comments that wait for the verdict
 
     public func reviewDraft(for number: Int, in projectID: ProjectID) -> ReviewDraft? {

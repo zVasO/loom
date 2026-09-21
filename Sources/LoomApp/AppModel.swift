@@ -302,6 +302,7 @@ public final class AppModel {
             loadPRListCache()
             reviewDrafts = reviewDraftStore.load()
             catalog = repoCatalogCache.load()
+            prTabs = prTabsStore.load()
             let store = try SessionStore(path: supportDirectory.appendingPathComponent("loom.sqlite").path)
             self.store = store
             try store.markLiveSessionsInterrupted()
@@ -390,6 +391,10 @@ public final class AppModel {
         applySavedProjectOrder()
         if selectedProject == nil { selectedProject = lastOpenedProject ?? projects.first?.id }
         resolveProjectRepoNames()
+        // A tab of a project removed since has nowhere to show.
+        let kept = prTabs
+        prTabs.keep(projects: Set(projects.map(\.id)))
+        if prTabs != kept { savePRTabs() }
     }
 
     // MARK: - v4: GitHub PR review through the user's authenticated gh
@@ -602,6 +607,16 @@ public final class AppModel {
     }
     /// The GitHub search's generation: only the latest one may paint.
     var searchGeneration = 0
+    /// The open PR tabs — the PRs tab's selection, drawer and summaries
+    /// live here, not in the view: the view is rebuilt every time the app's
+    /// tabs switch, and a relaunch reopens what was open.
+    public internal(set) var prTabs = PRTabs()
+    var prTabsStore: PRTabsStore { PRTabsStore(directory: supportDirectory) }
+    /// The PR list folded away (a review took the room) — kept while the
+    /// app runs, whichever tab is on screen.
+    public var prSidebarHidden = false
+    /// Projects unfolded in the PRs sidebar — gh is queried for those only.
+    public var expandedPRProjects: Set<ProjectID> = []
     /// The organizations' repositories, from disk at launch, then refreshed
     /// a day later or on demand.
     public internal(set) var catalog: RepoCatalogCache.Entry?
@@ -770,6 +785,10 @@ public final class AppModel {
         prFileViewsCache = prFileViewsCache.filter { !$0.key.hasPrefix(prefix) }
         prLists[key] = PRListCache.Entry(fetchedAt: Date(), prs: prs, query: filter.query)
         savePRListCache()
+        // The open tabs of this project take the fresh rows: title, head,
+        // checks, review state.
+        prTabs.refresh(from: prs, in: projectID)
+        savePRTabs()
     }
 
     public func isLaunchingReview(forPR number: Int, in projectID: ProjectID) -> Bool {

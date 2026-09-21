@@ -14,17 +14,30 @@ struct GlobalPRsView: View {
     /// Opens the session in the Sessions tab (used until the pane is embedded).
     let onOpenSession: (SessionID) -> Void
 
-    @State private var selectedProjectID: ProjectID?
-    @State private var selectedPR: GitHubService.PullRequest?
-    /// The embedded review session: shown in the right drawer, so the user
-    /// switches diff ↔ session without leaving the tab.
-    @State private var paneSessionID: SessionID?
-    @State private var paneOpen = false
-    /// Collapsed by default: gh is only queried when a project is EXPANDED —
-    /// opening the tab with many projects fires zero requests.
-    @State private var expandedProjects: Set<ProjectID> = []
-    /// The PR list steps aside when a review starts — toggle to bring it back.
-    @State private var sidebarHidden = false
+    // The selection, the drawer and the folded list are the MODEL's
+    // (`prTabs`, `prSidebarHidden`, `expandedPRProjects`): this view is
+    // rebuilt every time the app's tabs switch, and its @State with it.
+
+    /// The tab on screen — what the toolbar, workspace and drawer show.
+    private var activeTab: PRTab? { model.prTabs.active }
+
+    /// The active tab's review session, when it exists and is still around:
+    /// what the drawer embeds. Derived, so diff and conversation always
+    /// talk about the same PR.
+    private var paneSessionID: SessionID? {
+        guard let tab = activeTab,
+              let id = model.reviewSession(forPR: tab.pr.number, in: tab.projectID),
+              model.sessions.contains(where: { $0.id == id }) else { return nil }
+        return id
+    }
+
+    /// The drawer shows only when its tab asked for it AND a session exists.
+    private var paneOpen: Bool { (activeTab?.drawerOpen ?? false) && paneSessionID != nil }
+
+    private func setPaneOpen(_ open: Bool) {
+        guard let tab = activeTab else { return }
+        model.setPRTabDrawer(open: open, for: tab.id)
+    }
     /// What is typed in the search field: an instant filter over every list,
     /// a GitHub search (or a PR to open) on Return.
     @State private var query = ""
@@ -73,7 +86,7 @@ struct GlobalPRsView: View {
             .background(DefaultTheme.background)
         } else {
             HStack(spacing: 0) {
-                if !sidebarHidden {
+                if !model.prSidebarHidden {
                     sidebar
                     Divider().overlay(DefaultTheme.cardBorder)
                 }
@@ -85,13 +98,13 @@ struct GlobalPRsView: View {
         }
     }
 
-    /// A PR clicked in the project tab lands here: select it, expand its
-    /// project, warm the cache, clear the channel.
+    /// A PR clicked in the project tab, the inbox, a search or a pasted URL
+    /// lands here: previewed in a tab, its project unfolded, the cache
+    /// warmed, the channel cleared.
     private func consumePendingPR() {
         guard let pending = model.pendingPR else { return }
-        selectedProjectID = pending.projectID
-        selectedPR = pending.pr
-        expandedProjects.insert(pending.projectID)
+        model.showPR(pending.pr, in: pending.projectID)
+        model.expandedPRProjects.insert(pending.projectID)
         Task { await model.ensurePRs(for: pending.projectID) }
         model.pendingPR = nil
     }
@@ -105,7 +118,7 @@ struct GlobalPRsView: View {
             // on my review… Changing it refetches the expanded projects only.
             HStack(spacing: 8) {
                 PRFilterMenu(model: model,
-                             projectsToRefresh: { Array(expandedProjects) })
+                             projectsToRefresh: { Array(model.expandedPRProjects) })
                 Spacer()
                 if model.catalogLoading || model.inboxLoading {
                     ProgressView().controlSize(.mini)
@@ -339,7 +352,7 @@ struct GlobalPRsView: View {
     private func hitList(_ hits: [GitHubService.PRSearchHit]) -> some View {
         let groups = Dictionary(grouping: hits, by: \.repo)
             .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
-        let selectedRepo = selectedProjectID.flatMap { model.repoName(for: $0) } ?? ""
+        let selectedRepo = activeTab.flatMap { model.repoName(for: $0.projectID) } ?? ""
         return VStack(alignment: .leading, spacing: 6) {
             ForEach(groups, id: \.key) { group in
                 let repo = group.key
@@ -356,7 +369,7 @@ struct GlobalPRsView: View {
                 .help(cloned ? "Cloned as a project" : "Not cloned yet — opening a PR asks to clone it")
                 .padding(.leading, 2)
                 ForEach(hits) { hit in
-                    let selected = selectedPR?.number == hit.number
+                    let selected = activeTab?.pr.number == hit.number
                         && selectedRepo.caseInsensitiveCompare(hit.repo) == .orderedSame
                     PRHitRow(hit: hit, isSelected: selected) {
                         Task { await model.openPR(repo: hit.repo, number: hit.number) }
@@ -401,14 +414,14 @@ struct GlobalPRsView: View {
         }
         // A search opens every project with a match: what was typed is what
         // the user wants to see, not a chevron away.
-        let expanded = expandedProjects.contains(project.id) || (!query.isEmpty && !prs.isEmpty)
+        let expanded = model.expandedPRProjects.contains(project.id) || (!query.isEmpty && !prs.isEmpty)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Button {
                     if expanded {
-                        expandedProjects.remove(project.id)
+                        model.expandedPRProjects.remove(project.id)
                     } else {
-                        expandedProjects.insert(project.id)
+                        model.expandedPRProjects.insert(project.id)
                         Task { await model.ensurePRs(for: project.id) }
                     }
                 } label: {
@@ -463,16 +476,14 @@ struct GlobalPRsView: View {
                 }
                 ForEach(prs) { pr in
                     PRSidebarRow(pr: pr,
-                                 isSelected: selectedPR?.number == pr.number
-                                     && selectedProjectID == project.id,
+                                 isSelected: activeTab?.id == PRTab.key(project.id, pr.number),
+                                 isOpen: model.prTabs.contains(PRTab.key(project.id, pr.number)),
                                  hasSession: model.reviewSession(forPR: pr.number,
                                                                  in: project.id) != nil,
                                  launching: model.isLaunchingReview(forPR: pr.number,
                                                                     in: project.id),
-                                 onSelect: {
-                                     selectedProjectID = project.id
-                                     selectedPR = pr
-                                 },
+                                 onSelect: { model.showPR(pr, in: project.id) },
+                                 onOpen: { model.openPRTab(pr, in: project.id) },
                                  onStartReview: { startReview(pr, project: project) })
                 }
             }
@@ -565,16 +576,15 @@ struct GlobalPRsView: View {
     }
     private func startReview(_ pr: GitHubService.PullRequest, project: ProjectRecord) {
         guard !model.isLaunchingReview(forPR: pr.number, in: project.id) else { return }
-        selectedProjectID = project.id
-        selectedPR = pr
+        // A review pins its tab: browsing the list must not take it away.
+        model.openPRTab(pr, in: project.id)
         Task {
-            if let id = await model.launchPRReviewSession(pr, in: project.id) {
+            if await model.launchPRReviewSession(pr, in: project.id) != nil {
                 // Stay in the PR tab: the session opens in the drawer, and the
                 // PR list steps aside to give the diff room.
-                paneSessionID = id
                 withAnimation(.hover) {
-                    paneOpen = true
-                    sidebarHidden = true
+                    model.setPRTabDrawer(open: true, for: PRTab.key(project.id, pr.number))
+                    model.prSidebarHidden = true
                 }
             }
         }
@@ -584,9 +594,12 @@ struct GlobalPRsView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let pr = selectedPR,
-           let project = gitProjects.first(where: { $0.id == selectedProjectID }) {
+        if let tab = activeTab,
+           let project = gitProjects.first(where: { $0.id == tab.projectID }) {
+            let pr = tab.pr
             VStack(spacing: 0) {
+                PRTabStrip(model: model)
+                Divider().overlay(DefaultTheme.cardBorder)
                 toolbar(pr, project: project)
                 Divider().overlay(DefaultTheme.cardBorder)
                 GeometryReader { geometry in
@@ -612,13 +625,11 @@ struct GlobalPRsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .onChange(of: pr.number) { syncPane(pr, project: project) }
-            .onAppear { syncPane(pr, project: project) }
         } else {
             VStack(spacing: 8) {
                 Text("Pick a pull request")
                     .foregroundStyle(DefaultTheme.secondaryText)
-                Text("Every project's open PRs live in the sidebar — sparkles starts a review session.")
+                Text("A click previews a PR in a tab; a double-click, or sparkles, keeps the tab for a review.")
                     .font(.system(size: 12))
                     .foregroundStyle(DefaultTheme.mutedText)
             }
@@ -631,8 +642,8 @@ struct GlobalPRsView: View {
                          project: ProjectRecord) -> some View {
         HStack(spacing: 10) {
             HoverIconButton(systemImage: "sidebar.leading",
-                            help: sidebarHidden ? "Show the PR list" : "Hide the PR list") {
-                withAnimation(.hover) { sidebarHidden.toggle() }
+                            help: model.prSidebarHidden ? "Show the PR list" : "Hide the PR list") {
+                withAnimation(.hover) { model.prSidebarHidden.toggle() }
             }
             Text("#\(pr.number)")
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
@@ -733,7 +744,7 @@ struct GlobalPRsView: View {
             model.sessions.first { $0.id == id }?.state
         }
         return Button {
-            withAnimation(.hover) { paneOpen.toggle() }
+            withAnimation(.hover) { setPaneOpen(!paneOpen) }
         } label: {
             VStack(spacing: 5) {
                 Image(systemName: paneOpen ? "chevron.right" : "chevron.left")
@@ -760,33 +771,25 @@ struct GlobalPRsView: View {
 }
 
 extension GlobalPRsView {
-    /// The pane follows the SELECTED PR: its session when one exists, hidden
-    /// otherwise — diff and conversation always talk about the same PR.
-    fileprivate func syncPane(_ pr: GitHubService.PullRequest, project: ProjectRecord) {
-        if let existing = model.reviewSession(forPR: pr.number, in: project.id),
-           model.sessions.contains(where: { $0.id == existing }) {
-            paneSessionID = existing
-        } else {
-            paneOpen = false
-            paneSessionID = nil
-        }
-    }
-
     /// The shared PR workspace, wired once for both regions. `controlsInset`
     /// is what the drawer covers: the diff may pass under it, its buttons
-    /// may not.
+    /// may not. Keyed by the tab: switching tabs starts the workspace clean
+    /// (its loads come from the model's caches, so no gh call).
     fileprivate func workspace(_ pr: GitHubService.PullRequest,
                                project: ProjectRecord,
                                controlsInset: CGFloat) -> some View {
-        PRWorkspaceView(model: model, project: project, pr: pr, pane: pane,
+        let key = PRTab.key(project.id, pr.number)
+        return PRWorkspaceView(model: model, project: project, pr: pr, pane: pane,
                         controlsInset: controlsInset,
                         onOpenSession: onOpenSession,
                         sendToSession: { message in
+                            // A quick action pins the tab too: the answer lands
+                            // in a session the user will come back to.
+                            model.pinPRTab(key)
                             Task {
-                                if let id = await model.sendToPRReviewSession(
-                                    message, pr: pr, in: project.id) {
-                                    paneSessionID = id
-                                    withAnimation(.hover) { paneOpen = true }
+                                if await model.sendToPRReviewSession(
+                                    message, pr: pr, in: project.id) != nil {
+                                    withAnimation(.hover) { model.setPRTabDrawer(open: true, for: key) }
                                 }
                             }
                         },
@@ -801,7 +804,11 @@ extension GlobalPRsView {
 
                                 """, id: id)
                             }
-                        } : nil)
+                        } : nil,
+                        reviewSummary: Binding(
+                            get: { model.prTabs.tab(key)?.reviewSummary ?? "" },
+                            set: { model.setPRTabSummary($0, for: key) }))
+        .id(key)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -837,9 +844,13 @@ extension GlobalPRsView {
 private struct PRSidebarRow: View {
     let pr: GitHubService.PullRequest
     let isSelected: Bool
+    /// Has a tab (pinned or preview) — shown with a faint mark.
+    let isOpen: Bool
     let hasSession: Bool
     let launching: Bool
+    /// One click: preview in a tab. Two: keep the tab.
     let onSelect: () -> Void
+    let onOpen: () -> Void
     let onStartReview: () -> Void
     @State private var hovered = false
 
@@ -939,9 +950,13 @@ private struct PRSidebarRow: View {
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : DefaultTheme.surface,
                     in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(isSelected ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
+            .stroke(isSelected ? DefaultTheme.accent.opacity(0.6)
+                    : isOpen ? DefaultTheme.accent.opacity(0.25) : DefaultTheme.cardBorder,
                     lineWidth: 1))
         .contentShape(Rectangle())
+        // The double-tap is declared first so a second click is not two
+        // single ones.
+        .onTapGesture(count: 2, perform: onOpen)
         .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
