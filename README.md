@@ -49,7 +49,8 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
 Packages SPM aux frontières imposées (§6.1 du cahier des charges, ADR-0009) :
 `LoomCore` (états, réducteur) ← `LoomTerminal` (PTY, moteur, runtime) ·
 `LoomAgents` (adapter Claude Code, classification) · `LoomGit` · `LoomWeb` ·
-`LoomPersistence` (GRDB, transcripts) · `LoomIPC` (socket hooks) ←
+`LoomPersistence` (GRDB, transcripts) · `LoomAPI` (contrat de l'API agents) ·
+`LoomIPC` (socket hooks + requêtes) ←
 `LoomSessions` (SessionManager, orchestration) ← `LoomApp` (SwiftUI).
 Exécutable compagnon : `loom-hook`.
 

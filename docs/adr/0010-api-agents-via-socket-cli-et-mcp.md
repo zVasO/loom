@@ -11,6 +11,7 @@ L'API touche des métadonnées, jamais l'état. La machine à états ne connaît
 - Une session porte plusieurs badges (`sessionBadge`, migration v7) : `session.setBadges` remplace la liste entière, dans l'ordre donné ; le vocabulaire reste « badge », jamais « label » (CONTEXT.md).
 - Les définitions de badges (nom + couleur) ont quitté UserDefaults pour LoomPersistence (`badgeDefinition`, migration v8, import unique du catalogue sauvegardé) : l'app et le CLI lisent la même source, et `badge.create` a déjà son écriture (`addBadgeDefinition`, refus d'un nom pris).
 - Le protocole est versionné (`loom.version` répond la version du protocole) ; le CLI et le serveur MCP sont livrés dans le bundle et versionnés avec l'app, comme `loom-hook`.
-- `HookSocketServer` garde son contrat pour les hooks et gagne un chemin de réponse ; ses tests restent sur de vrais sockets, comme aujourd'hui.
-- Les mutations par l'API sont journalisées avec leur portée (token de session ou global) dans le journal existant, sans nouvelle source de transition.
+- `HookSocketServer` garde son contrat pour les hooks et gagne un chemin de réponse ; ses tests restent sur de vrais sockets, comme aujourd'hui. Un token inconnu sur une requête ferme la connexion : le client voit une fin de flux, jamais un message.
+- L'app répond sur le main actor avec les mêmes appels que l'UI (`renameSession`, `setBadges`, le catalogue) : une mutation par l'API et une mutation par clic sont le même chemin, et la vue suit sans rien de plus.
+- Le token global vit dans `api-token` (0600) à côté de la base ; l'agent reçoit le sien par `LOOM_SOCKET` et `LOOM_SESSION_TOKEN` dans son environnement, posés par l'adapter Claude Code au lancement et à la reprise.
 - Le serveur MCP est un client comme un autre : aucune logique métier n'y vit, il traduit outil ↔ méthode et rien d'autre.

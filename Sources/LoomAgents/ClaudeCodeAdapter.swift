@@ -1,3 +1,4 @@
+import LoomAPI
 import LoomCore
 import Foundation
 
@@ -43,7 +44,17 @@ public struct ClaudeCodeAdapter: Sendable {
         if let initialPrompt {
             arguments.append(initialPrompt)
         }
-        return Command(executable: executable, arguments: arguments)
+        return Command(executable: executable, arguments: arguments,
+                       environment: Self.apiEnvironment(wiring: hooks, token: hookToken))
+    }
+
+    /// The agents API (ADR-0010) reaches the agent through its environment:
+    /// the socket, and the token that scopes it to its own session. Nothing
+    /// when the session has no wiring — a bare claude gets a bare environment.
+    static func apiEnvironment(wiring: HookWiring?, token: String?) -> [String: String] {
+        guard let wiring, let token else { return [:] }
+        return [APIProtocol.socketEnvironmentKey: wiring.socket.path,
+                APIProtocol.sessionTokenEnvironmentKey: token]
     }
 
     /// Translates a hook payload (JSON stdin of the helper) into a reducer event.
@@ -82,7 +93,8 @@ public struct ClaudeCodeAdapter: Sendable {
            let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken) {
             arguments.append(contentsOf: ["--settings", settings])
         }
-        return Command(executable: executable, arguments: arguments)
+        return Command(executable: executable, arguments: arguments,
+                       environment: Self.apiEnvironment(wiring: hooks, token: hookToken))
     }
 
     private static func hookSettingsJSON(wiring: HookWiring, token: String) -> String? {

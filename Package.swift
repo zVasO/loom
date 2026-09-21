@@ -23,12 +23,15 @@ let package = Package(
     ],
     targets: [
         .target(name: "LoomCore"),
+        // Le contrat de l'API agents (ADR-0010) : enveloppes, méthodes, modèles, client socket.
+        // Ne dépend que de Core — servi par l'app, consommé par le CLI et le serveur MCP.
+        .target(name: "LoomAPI", dependencies: ["LoomCore"]),
         .target(name: "LoomTerminal", dependencies: ["LoomCore", .product(name: "SwiftTerm", package: "SwiftTerm")]),
-        .target(name: "LoomAgents", dependencies: ["LoomCore"]),
+        .target(name: "LoomAgents", dependencies: ["LoomCore", "LoomAPI"]),
         .target(name: "LoomGit", dependencies: ["LoomCore"]),
         .target(name: "LoomWeb", dependencies: ["LoomCore", "LoomUI"]),
         .target(name: "LoomPersistence", dependencies: ["LoomCore", "LoomTerminal", "LoomAgents", .product(name: "GRDB", package: "GRDB.swift")]),
-        .target(name: "LoomIPC", dependencies: ["LoomCore"]),
+        .target(name: "LoomIPC", dependencies: ["LoomCore", "LoomAPI"]),
         // Le helper appelé par les hooks des agents (ADR-0005) : stdin → socket, sans dépendance.
         .executableTarget(name: "loom-hook"),
         .target(name: "LoomSessions", dependencies: ["LoomCore", "LoomTerminal", "LoomAgents", "LoomPersistence", "LoomGit"]),
@@ -40,17 +43,18 @@ let package = Package(
         .executableTarget(
             name: "LoomApp",
             dependencies: [
-                "LoomCore", "LoomUI", "LoomTerminal", "LoomAgents",
+                "LoomCore", "LoomAPI", "LoomUI", "LoomTerminal", "LoomAgents",
                 "LoomGit", "LoomWeb", "LoomPersistence", "LoomIPC",
                 "LoomSessions",
             ],
             resources: [.process("Resources")]
         ),
         .testTarget(name: "LoomCoreTests", dependencies: ["LoomCore"]),
+        .testTarget(name: "LoomAPITests", dependencies: ["LoomAPI", "LoomCore"]),
         .testTarget(name: "LoomAgentsTests", dependencies: ["LoomAgents"]),
         .testTarget(name: "LoomTerminalTests", dependencies: ["LoomTerminal", "LoomTerminalTestSupport"]),
         .testTarget(name: "LoomSessionsTests", dependencies: ["LoomSessions", "LoomTerminalTestSupport"]),
-        .testTarget(name: "LoomIPCTests", dependencies: ["LoomIPC"]),
+        .testTarget(name: "LoomIPCTests", dependencies: ["LoomIPC", "LoomAPI", "LoomCore"]),
         .testTarget(name: "LoomGitTests", dependencies: ["LoomGit", "LoomCore"]),
         .testTarget(name: "LoomPersistenceTests", dependencies: ["LoomPersistence"]),
         .testTarget(name: "LoomWebTests", dependencies: ["LoomWeb"]),

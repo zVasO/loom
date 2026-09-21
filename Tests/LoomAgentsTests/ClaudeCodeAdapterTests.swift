@@ -22,6 +22,24 @@ struct ClaudeCodeAdapterTests {
         #expect(command.arguments.last == "fix the cache bug", "the initial prompt is passed as an argument")
     }
 
+    @Test("a wired session carries the API socket and its own token in its environment (ADR-0010)")
+    func environnementAPI() {
+        let wiring = ClaudeCodeAdapter.HookWiring(
+            helper: URL(fileURLWithPath: "/tmp/loom-hook"),
+            socket: URL(fileURLWithPath: "/tmp/loom.sock"))
+        let adapter = ClaudeCodeAdapter(hooks: wiring)
+
+        let launch = adapter.launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok-1")
+        #expect(launch.environment["LOOM_SOCKET"] == "/tmp/loom.sock")
+        #expect(launch.environment["LOOM_SESSION_TOKEN"] == "tok-1")
+
+        let resume = adapter.resumeCommand(session: SessionID(), hookToken: "tok-2")
+        #expect(resume.environment["LOOM_SESSION_TOKEN"] == "tok-2", "a resumed session is wired the same way")
+
+        let bare = ClaudeCodeAdapter().launchCommand(session: SessionID(), initialPrompt: nil)
+        #expect(bare.environment.isEmpty, "no wiring, no token: nothing leaks into the environment")
+    }
+
     @Test("hooks are injected via inline --settings, never into global settings (STA-01)")
     func hooksInjectesParSettings() throws {
         let wiring = ClaudeCodeAdapter.HookWiring(

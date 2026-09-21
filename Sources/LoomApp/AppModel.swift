@@ -1,4 +1,5 @@
 import LoomAgents
+import LoomAPI
 import LoomCore
 import LoomGit
 import LoomIPC
@@ -99,6 +100,14 @@ public final class AppModel {
         badgeDefinitions = ((try? store?.badgeDefinitions()) ?? nil) ?? BadgeDefinition.builtIn
     }
 
+    /// Appends to the catalog — false when the name is taken (the API's
+    /// `badge.create`, ADR-0010).
+    func addBadgeDefinition(_ definition: BadgeDefinition) -> Bool {
+        guard let store, (try? store.addBadgeDefinition(definition)) == true else { return false }
+        reloadBadgeDefinitions()
+        return true
+    }
+
     /// Before v8 the catalog lived in UserDefaults. A saved one is moved into
     /// the store once, over the seeded built-ins, and the key goes — so a
     /// later deletion of every badge is never undone by a stale import.
@@ -190,6 +199,12 @@ public final class AppModel {
     private var hookServer: HookSocketServer?
     private let supportDirectory: URL
     private var socketURL: URL { supportDirectory.appendingPathComponent("loom.sock") }
+
+    /// The agents API's global token (ADR-0010), read from `api-token` in the
+    /// support directory; nil when the file could not be created.
+    public private(set) var apiToken: String?
+    public var apiTokenURL: URL { supportDirectory.appendingPathComponent(Self.apiTokenFileName) }
+    public var apiSocketURL: URL { socketURL }
 
     /// The grid actually displayed, remembered at each view measurement: the
     /// next sessions are BORN at the right size — claude paints its banner
@@ -362,12 +377,27 @@ public final class AppModel {
             }
 
             let registry = tokenRegistry
+            let globalToken = Self.loadOrCreateAPIToken(in: supportDirectory)
+            apiToken = globalToken
             let server = HookSocketServer(
                 socketPath: socketURL,
                 validate: { token in registry.session(for: token) },
                 handler: { [weak self] session, payload in
                     guard let self else { return }
                     Task { await self.manager?.ingest(payload, for: session) }
+                },
+                // ADR-0010: the same socket answers requests. A session token
+                // reaches its session; the global token, every one of them.
+                authorize: { token in
+                    if let globalToken, token == globalToken { return .global }
+                    return registry.session(for: token).map { APIScope.session($0) }
+                },
+                requests: { [weak self] scope, request in
+                    guard let self else {
+                        return APIResponse(id: request.id, error: APIError(
+                            code: .internalError, message: "the app is shutting down"))
+                    }
+                    return await self.handleAPIRequest(scope, request)
                 })
             try server.start()
             hookServer = server
