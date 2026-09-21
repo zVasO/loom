@@ -43,13 +43,17 @@ public struct GitHubService: Sendable {
         /// The head commit (headRefOid) — what a line comment or a file-viewed
         /// mark must be anchored to.
         public let headSHA: String
+        /// Every CI signal on the head: GitHub Actions check runs and legacy
+        /// commit statuses alike. Empty for a row cached before they were kept.
+        public let checks: [Check]
 
         public init(number: Int, title: String, author: String, branch: String,
                     baseBranch: String, reviewDecision: String, checksPassing: Bool,
                     isDraft: Bool, updatedAt: String, url: String,
                     reviewers: [String] = [], assignees: [String] = [], labels: [Label] = [],
                     latestReviews: [ReviewSummary] = [], additions: Int = 0, deletions: Int = 0,
-                    changedFiles: Int = 0, mergeable: String = "", headSHA: String = "") {
+                    changedFiles: Int = 0, mergeable: String = "", headSHA: String = "",
+                    checks: [Check] = []) {
             self.number = number
             self.title = title
             self.author = author
@@ -69,6 +73,7 @@ public struct GitHubService: Sendable {
             self.changedFiles = changedFiles
             self.mergeable = mergeable
             self.headSHA = headSHA
+            self.checks = checks
         }
 
         /// Cached lists predate the enrichment: missing keys are defaults, not
@@ -95,9 +100,92 @@ public struct GitHubService: Sendable {
             changedFiles = try container.decodeIfPresent(Int.self, forKey: .changedFiles) ?? 0
             mergeable = try container.decodeIfPresent(String.self, forKey: .mergeable) ?? ""
             headSHA = try container.decodeIfPresent(String.self, forKey: .headSHA) ?? ""
+            checks = try container.decodeIfPresent([Check].self, forKey: .checks) ?? []
         }
 
         public var isConflicting: Bool { mergeable == "CONFLICTING" }
+        /// Something is still running — neither green nor red yet.
+        public var checksPending: Bool { checks.contains { $0.state == .pending } }
+        public var failingChecks: Int { checks.filter { $0.state == .failure }.count }
+        public var passingChecks: Int { checks.filter { $0.state == .success }.count }
+        public var pendingChecks: Int { checks.filter { $0.state == .pending }.count }
+    }
+
+    /// One CI signal on a PR head. GitHub reports two shapes — a check run
+    /// (Actions: status + conclusion) and a commit status (state) — folded
+    /// here into one state the UI can colour.
+    public struct Check: Sendable, Equatable, Codable, Hashable, Identifiable {
+        public enum State: String, Sendable, Codable {
+            case success, failure, pending, skipped, neutral, cancelled
+        }
+        public let name: String
+        public let state: State
+        /// The run's page, when GitHub gave one.
+        public let link: String
+        /// The workflow the check run belongs to; empty for a commit status.
+        public let workflow: String
+
+        public var id: String { workflow + "/" + name + "@" + link }
+
+        public init(name: String, state: State, link: String = "", workflow: String = "") {
+            self.name = name
+            self.state = state
+            self.link = link
+            self.workflow = workflow
+        }
+    }
+
+    /// A repository of the catalog — what `gh repo list` says about it.
+    public struct Repository: Sendable, Equatable, Codable, Identifiable, Hashable {
+        public var id: String { nameWithOwner }
+        public let nameWithOwner: String
+        public let description: String
+        public let isPrivate: Bool
+        public let isArchived: Bool
+        public let isFork: Bool
+        public let pushedAt: String
+
+        public init(nameWithOwner: String, description: String = "", isPrivate: Bool = false,
+                    isArchived: Bool = false, isFork: Bool = false, pushedAt: String = "") {
+            self.nameWithOwner = nameWithOwner
+            self.description = description
+            self.isPrivate = isPrivate
+            self.isArchived = isArchived
+            self.isFork = isFork
+            self.pushedAt = pushedAt
+        }
+
+        public var name: String { GitHubRepoName.name(of: nameWithOwner) }
+        public var owner: String { GitHubRepoName.owner(of: nameWithOwner) }
+    }
+
+    /// A PR found across repositories (`gh search prs`): lighter than a list
+    /// row — the search API knows neither the branch nor the checks. The
+    /// full row is fetched when the hit is opened.
+    public struct PRSearchHit: Sendable, Equatable, Codable, Identifiable, Hashable {
+        public var id: String { repo + "#" + String(number) }
+        /// `owner/name`
+        public let repo: String
+        public let number: Int
+        public let title: String
+        public let author: String
+        public let updatedAt: String
+        public let url: String
+        public let isDraft: Bool
+        public let labels: [Label]
+
+        public init(repo: String, number: Int, title: String, author: String,
+                    updatedAt: String = "", url: String = "", isDraft: Bool = false,
+                    labels: [Label] = []) {
+            self.repo = repo
+            self.number = number
+            self.title = title
+            self.author = author
+            self.updatedAt = updatedAt
+            self.url = url
+            self.isDraft = isDraft
+            self.labels = labels
+        }
     }
 
     public struct Label: Sendable, Equatable, Codable, Hashable {
@@ -220,6 +308,15 @@ public struct GitHubService: Sendable {
         case approve = "--approve"
         case requestChanges = "--request-changes"
         case comment = "--comment"
+
+        /// The REST `event` of the same verdict.
+        public var event: String {
+            switch self {
+            case .approve: "APPROVE"
+            case .requestChanges: "REQUEST_CHANGES"
+            case .comment: "COMMENT"
+            }
+        }
     }
 
     // MARK: - Pure parsing (the tested seam)
@@ -239,8 +336,8 @@ public struct GitHubService: Sendable {
         return rows.compactMap { row in
             guard let number = row["number"] as? Int,
                   let title = row["title"] as? String else { return nil }
-            let checks = row["statusCheckRollup"] as? [[String: Any]] ?? []
-            let failing = checks.contains { ($0["state"] as? String) == "FAILURE" }
+            let checks = parseChecks(row["statusCheckRollup"] as? [[String: Any]] ?? [])
+            let failing = checks.contains { $0.state == .failure }
             // A review request is a user ({login}) or a team ({slug}, {name}).
             let reviewers = (row["reviewRequests"] as? [[String: Any]] ?? []).compactMap { request -> String? in
                 if let login = request["login"] as? String { return login }
@@ -278,7 +375,94 @@ public struct GitHubService: Sendable {
                 deletions: row["deletions"] as? Int ?? 0,
                 changedFiles: row["changedFiles"] as? Int ?? 0,
                 mergeable: row["mergeable"] as? String ?? "",
-                headSHA: row["headRefOid"] as? String ?? "")
+                headSHA: row["headRefOid"] as? String ?? "",
+                checks: checks)
+        }
+    }
+
+    /// The rollup mixes two shapes. A check run (`__typename` CheckRun) has a
+    /// `status` (QUEUED, IN_PROGRESS, COMPLETED…) and, once completed, a
+    /// `conclusion`; a commit status (StatusContext) has one `state`. Before
+    /// this, only the commit-status shape was read, so a failing GitHub
+    /// Action left the PR looking green.
+    public static func parseChecks(_ rollup: [[String: Any]]) -> [Check] {
+        rollup.compactMap { entry in
+            if let state = entry["state"] as? String {
+                return Check(name: entry["context"] as? String ?? "", state: statusState(state),
+                             link: entry["targetUrl"] as? String ?? "")
+            }
+            let status = entry["status"] as? String ?? ""
+            let conclusion = entry["conclusion"] as? String ?? ""
+            guard status != "" || conclusion != "" || entry["name"] != nil else { return nil }
+            let name = entry["name"] as? String ?? ""
+            let state: Check.State = status == "COMPLETED" || !conclusion.isEmpty
+                ? conclusionState(conclusion) : .pending
+            return Check(name: name, state: state,
+                         link: entry["detailsUrl"] as? String ?? "",
+                         workflow: entry["workflowName"] as? String ?? "")
+        }
+    }
+
+    private static func statusState(_ state: String) -> Check.State {
+        switch state.uppercased() {
+        case "SUCCESS": .success
+        case "FAILURE", "ERROR": .failure
+        case "PENDING", "EXPECTED": .pending
+        default: .neutral
+        }
+    }
+
+    private static func conclusionState(_ conclusion: String) -> Check.State {
+        switch conclusion.uppercased() {
+        case "SUCCESS": .success
+        case "FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE": .failure
+        case "SKIPPED": .skipped
+        case "CANCELLED": .cancelled
+        case "NEUTRAL", "STALE": .neutral
+        case "": .pending
+        default: .neutral
+        }
+    }
+
+    /// The `--json` fields of `gh repo list`.
+    public static let repoFields = "nameWithOwner,description,isPrivate,isArchived,isFork,pushedAt"
+
+    public static func parseRepoList(_ data: Data) throws -> [Repository] {
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        return rows.compactMap { row in
+            guard let name = row["nameWithOwner"] as? String else { return nil }
+            return Repository(nameWithOwner: name,
+                              description: row["description"] as? String ?? "",
+                              isPrivate: row["isPrivate"] as? Bool ?? false,
+                              isArchived: row["isArchived"] as? Bool ?? false,
+                              isFork: row["isFork"] as? Bool ?? false,
+                              pushedAt: row["pushedAt"] as? String ?? "")
+        }
+    }
+
+    /// The `--json` fields of `gh search prs`.
+    public static let searchFields = "repository,number,title,author,updatedAt,url,isDraft,labels"
+
+    public static func parsePRSearch(_ data: Data) throws -> [PRSearchHit] {
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        return rows.compactMap { row in
+            guard let number = row["number"] as? Int, let title = row["title"] as? String,
+                  let repo = (row["repository"] as? [String: Any])?["nameWithOwner"] as? String
+            else { return nil }
+            let labels = (row["labels"] as? [[String: Any]] ?? []).compactMap { label -> Label? in
+                guard let name = label["name"] as? String else { return nil }
+                return Label(name: name, colorHex: label["color"] as? String ?? "")
+            }
+            return PRSearchHit(repo: repo, number: number, title: title,
+                               author: (row["author"] as? [String: Any])?["login"] as? String ?? "—",
+                               updatedAt: row["updatedAt"] as? String ?? "",
+                               url: row["url"] as? String ?? "",
+                               isDraft: row["isDraft"] as? Bool ?? false,
+                               labels: labels)
         }
     }
 
@@ -403,6 +587,26 @@ public struct GitHubService: Sendable {
         return payload
     }
 
+    /// The `pulls/{n}/reviews` payload: one review carrying the verdict, its
+    /// summary and every drafted line comment — what GitHub's own "Submit
+    /// review" sends. Same single-line rule as `lineCommentPayload`.
+    public static func reviewPayload(verdict: Verdict, body: String, sha: String,
+                                     comments: [DraftComment]) -> [String: Any] {
+        var payload: [String: Any] = ["event": verdict.event, "commit_id": sha]
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { payload["body"] = trimmed }
+        payload["comments"] = comments.map { comment -> [String: Any] in
+            var entry: [String: Any] = ["path": comment.path, "line": comment.lastLine,
+                                        "side": comment.side, "body": comment.body]
+            if comment.firstLine < comment.lastLine {
+                entry["start_line"] = comment.firstLine
+                entry["start_side"] = comment.side
+            }
+            return entry
+        }
+        return payload
+    }
+
     // MARK: - gh execution
 
     /// The PRs of the repo a project folder belongs to, narrowed by a filter
@@ -414,6 +618,99 @@ public struct GitHubService: Sendable {
         let data = try await run(["pr", "list"] + filter.ghArguments(limit: limit)
                                  + ["--json", Self.listFields], in: repo)
         return try Self.parsePRList(data)
+    }
+
+    /// One PR by number in a repository named `owner/name` — the full list
+    /// row, for a hit found by search or a pasted URL. `-R` makes the call
+    /// independent of the working directory.
+    public func pullRequest(_ number: Int, repo nameWithOwner: String,
+                            in directory: URL = FileManager.default.temporaryDirectory) async throws -> PullRequest? {
+        let data = try await run(["pr", "view", "\(number)", "-R", nameWithOwner,
+                                  "--json", Self.listFields], in: directory)
+        // pr view answers one object; the list parser reads an array of them.
+        let object = try JSONSerialization.jsonObject(with: data)
+        let wrapped = try JSONSerialization.data(withJSONObject: [object])
+        return try Self.parsePRList(wrapped).first
+    }
+
+    // MARK: Catalog — the gh account's organizations and their repositories
+
+    /// The login `gh` is authenticated as.
+    public func viewerLogin(in directory: URL = FileManager.default.temporaryDirectory) async throws -> String {
+        let data = try await run(["api", "user", "--jq", ".login"], in: directory)
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Every organization the account belongs to, one login per line.
+    public func organizations(in directory: URL = FileManager.default.temporaryDirectory) async throws -> [String] {
+        let data = try await run(["api", "user/orgs", "--paginate", "--jq", ".[].login"], in: directory)
+        return String(decoding: data, as: UTF8.self)
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// The repositories of one owner (organization or user), archived ones
+    /// left out — nobody reviews PRs on an archived repository.
+    public func repositories(owner: String, limit: Int = 500,
+                             in directory: URL = FileManager.default.temporaryDirectory) async throws -> [Repository] {
+        let data = try await run(["repo", "list", owner, "--limit", "\(limit)", "--no-archived",
+                                  "--json", Self.repoFields], in: directory)
+        return try Self.parseRepoList(data)
+    }
+
+    /// The arguments after `gh search prs`: free text, an owner filter per
+    /// organization, `review-requested:@me` as a qualifier (the search syntax
+    /// takes @me for sure; the flag's spelling varies across gh versions).
+    public static func searchArguments(text: String, owners: [String],
+                                       reviewRequestedToMe: Bool, limit: Int) -> [String] {
+        var arguments: [String] = []
+        var query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if reviewRequestedToMe { query = (query + " review-requested:@me").trimmingCharacters(in: .whitespaces) }
+        if !query.isEmpty { arguments.append(query) }
+        for owner in owners { arguments += ["--owner", owner] }
+        arguments += ["--state", "open", "--sort", "updated", "--limit", "\(limit)",
+                      "--json", searchFields]
+        return arguments
+    }
+
+    /// PRs across repositories: the inbox (review requested from me,
+    /// everywhere) and the sidebar's GitHub search (text, within the
+    /// visible organizations).
+    public func searchPRs(text: String, owners: [String] = [], reviewRequestedToMe: Bool = false,
+                          limit: Int = 100,
+                          in directory: URL = FileManager.default.temporaryDirectory) async throws -> [PRSearchHit] {
+        let data = try await run(["search", "prs"] + Self.searchArguments(
+            text: text, owners: owners, reviewRequestedToMe: reviewRequestedToMe, limit: limit),
+                                 in: directory)
+        return try Self.parsePRSearch(data)
+    }
+
+    /// Clones `owner/name` under `parent` (as `<parent>/<name>`) through gh —
+    /// its credentials, its protocol preference. Refuses an existing folder:
+    /// it may be the user's own checkout, and gh would fail on it anyway.
+    public func clone(_ nameWithOwner: String, into parent: URL) async throws -> URL {
+        let destination = parent.appendingPathComponent(GitHubRepoName.name(of: nameWithOwner))
+        if FileManager.default.fileExists(atPath: destination.path) {
+            throw GitHubError.commandFailed(
+                arguments: ["repo", "clone", nameWithOwner],
+                stderr: "\(destination.path) already exists — add that folder as a project instead.")
+        }
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        _ = try await run(["repo", "clone", nameWithOwner, destination.path], in: parent)
+        return destination
+    }
+
+    /// One review carrying the verdict, its summary and the drafted line
+    /// comments — GitHub's "Submit review". Anchored to `sha`, the PR head
+    /// the lines were read on.
+    public func submitReview(_ number: Int, verdict: Verdict, body: String,
+                             comments: [DraftComment], sha: String, in repo: URL) async throws {
+        let payload = Self.reviewPayload(verdict: verdict, body: body, sha: sha, comments: comments)
+        let json = try JSONSerialization.data(withJSONObject: payload)
+        _ = try await run(["api", "--method", "POST",
+                           "repos/{owner}/{repo}/pulls/\(number)/reviews",
+                           "--input", "-"], in: repo, stdin: json)
     }
 
     public func prDetail(_ number: Int, in repo: URL) async throws -> PRDetail {
