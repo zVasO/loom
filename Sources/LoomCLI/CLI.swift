@@ -128,8 +128,8 @@ public enum CLI {
         let parsed: (Command, Options)
         do {
             parsed = try parse(arguments)
-        } catch {
-            error("loom: \(error)\n")
+        } catch let parseError {
+            error("loom: \(parseError)\n")
             return 2
         }
         let (command, options) = parsed
@@ -147,8 +147,8 @@ public enum CLI {
         do {
             connection = try Connection.resolve(socket: options.socket, token: options.token,
                                                 global: options.global, environment: environment)
-        } catch {
-            error("loom: \(error)\n")
+        } catch let connectionError {
+            error("loom: \(connectionError)\n")
             return 2
         }
         if case .mcp = command {
@@ -168,8 +168,8 @@ public enum CLI {
         } catch let clientError as APIClient.ClientError {
             error("loom: \(describe(clientError))\n")
             return 3
-        } catch {
-            error("loom: \(error)\n")
+        } catch let otherError {
+            error("loom: \(otherError)\n")
             return 1
         }
     }
