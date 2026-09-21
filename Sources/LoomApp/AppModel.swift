@@ -387,14 +387,19 @@ public final class AppModel {
         historySessions = all.filter {
             [.completed, .failed, .archived].contains($0.state) && nativeSessionExists($0.id)
         }
-        projects = ((try? store?.activeProjects()) ?? nil) ?? []
+        let loadedProjects = (try? store?.activeProjects()) ?? nil
+        projects = loadedProjects ?? []
         applySavedProjectOrder()
         if selectedProject == nil { selectedProject = lastOpenedProject ?? projects.first?.id }
         resolveProjectRepoNames()
-        // A tab of a project removed since has nowhere to show.
-        let kept = prTabs
-        prTabs.keep(projects: Set(projects.map(\.id)))
-        if prTabs != kept { savePRTabs() }
+        // A tab of a project removed since has nowhere to show. Only when
+        // the query answered: a failed read is not an empty project list,
+        // and must not wipe the tabs from disk.
+        if let loadedProjects {
+            let kept = prTabs
+            prTabs.keep(projects: Set(loadedProjects.map(\.id)))
+            if prTabs != kept { savePRTabs() }
+        }
     }
 
     // MARK: - v4: GitHub PR review through the user's authenticated gh
@@ -612,6 +617,10 @@ public final class AppModel {
     /// tabs switch, and a relaunch reopens what was open.
     public internal(set) var prTabs = PRTabs()
     var prTabsStore: PRTabsStore { PRTabsStore(directory: supportDirectory) }
+    /// The pending, debounced write of the tabs (see `savePRTabs`).
+    @ObservationIgnored var prTabsSaveTask: Task<Void, Never>?
+    /// One serial queue: the writes land in the order they were asked.
+    static let prTabsWriteQueue = DispatchQueue(label: "loom.pr.tabs.write", qos: .utility)
     /// The PR list folded away (a review took the room) — kept while the
     /// app runs, whichever tab is on screen.
     public var prSidebarHidden = false

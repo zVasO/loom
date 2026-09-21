@@ -26,7 +26,6 @@ struct PRTabStrip: View {
                 }
                 .padding(.horizontal, 8).padding(.vertical, 6)
             }
-            shortcuts
         }
         .background(DefaultTheme.background)
     }
@@ -36,11 +35,16 @@ struct PRTabStrip: View {
         guard let id = model.reviewSession(forPR: tab.pr.number, in: tab.projectID) else { return nil }
         return model.sessions.first { $0.id == id }?.state
     }
+}
 
-    /// Invisible buttons carry the key equivalents; they exist only while a
-    /// tab is on screen, so ⌘W means "close the tab" here and nothing
-    /// elsewhere.
-    private var shortcuts: some View {
+/// Invisible buttons carrying the tab key equivalents. Mounted for the
+/// whole PRs tab, tabs open or not: once the last tab is closed, one ⌘W
+/// too many must land here (a no-op) and not on File › Close, which would
+/// close the only window — and the app with it.
+struct PRTabShortcuts: View {
+    let model: AppModel
+
+    var body: some View {
         Group {
             Button("Close tab") {
                 if let id = model.prTabs.activeID { model.closePRTab(id) }

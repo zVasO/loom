@@ -264,6 +264,9 @@ extension AppModel {
 
     public func closePRTab(_ id: String) {
         prTabs.close(id)
+        // The last tab gone, the folded list is the only thing left to
+        // click — and the toggle that unfolds it lives on the toolbar.
+        if prTabs.isEmpty { prSidebarHidden = false }
         savePRTabs()
     }
 
@@ -296,13 +299,24 @@ extension AppModel {
     public func setPRTabSummary(_ summary: String, for id: String) {
         guard prTabs.tab(id)?.reviewSummary != summary else { return }
         prTabs.setSummary(summary, for: id)
+        // Typing a summary is work: the tab is kept, so the next click in
+        // the list cannot replace it and throw the text away.
+        if !summary.isEmpty { prTabs.pin(id) }
         savePRTabs()
     }
 
+    /// Writes the tabs shortly after the last change, in order: the summary
+    /// field calls this on every keystroke, and two detached writes racing
+    /// could leave the older snapshot on disk.
     func savePRTabs() {
-        let store = prTabsStore
-        let tabs = prTabs
-        Task.detached(priority: .utility) { store.save(tabs) }
+        prTabsSaveTask?.cancel()
+        prTabsSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled, let self else { return }
+            let store = self.prTabsStore
+            let tabs = self.prTabs
+            Self.prTabsWriteQueue.async { store.save(tabs) }
+        }
     }
 
     // MARK: Review drafts — comments that wait for the verdict

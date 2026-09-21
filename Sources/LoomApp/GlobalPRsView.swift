@@ -91,6 +91,7 @@ struct GlobalPRsView: View {
                     Divider().overlay(DefaultTheme.cardBorder)
                 }
                 detail
+                PRTabShortcuts(model: model)
             }
             .background(DefaultTheme.background)
             .onAppear { consumePendingPR() }
@@ -632,6 +633,12 @@ struct GlobalPRsView: View {
                 Text("A click previews a PR in a tab; a double-click, or sparkles, keeps the tab for a review.")
                     .font(.system(size: 12))
                     .foregroundStyle(DefaultTheme.mutedText)
+                if model.prSidebarHidden {
+                    // No toolbar without a tab: the way back to the list is here.
+                    GhostButton("Show the PR list", systemImage: "sidebar.leading") {
+                        withAnimation(.hover) { model.prSidebarHidden = false }
+                    }
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DefaultTheme.contentBackground)
