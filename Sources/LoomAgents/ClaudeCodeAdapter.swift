@@ -8,12 +8,16 @@ public struct ClaudeCodeAdapter: Sendable {
 
     /// Wiring of the hooks to the app: helper binary (ADR-0005) and Unix socket.
     /// The token, on the other hand, is PER SESSION — it is passed to `launchCommand`.
+    /// `cli` is the `loom` binary (ADR-0010): when present, the session gets the
+    /// API as MCP tools; absent, it still has the socket and its token.
     public struct HookWiring: Sendable {
         public var helper: URL
         public var socket: URL
-        public init(helper: URL, socket: URL) {
+        public var cli: URL?
+        public init(helper: URL, socket: URL, cli: URL? = nil) {
             self.helper = helper
             self.socket = socket
+            self.cli = cli
         }
     }
 
@@ -40,6 +44,9 @@ public struct ClaudeCodeAdapter: Sendable {
         if let hooks, let hookToken,
            let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken) {
             arguments.append(contentsOf: ["--settings", settings])
+        }
+        if let hooks, let hookToken, let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken) {
+            arguments.append(contentsOf: ["--mcp-config", mcp])
         }
         if let initialPrompt {
             arguments.append(initialPrompt)
@@ -93,8 +100,33 @@ public struct ClaudeCodeAdapter: Sendable {
            let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken) {
             arguments.append(contentsOf: ["--settings", settings])
         }
+        if let hooks, let hookToken, let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken) {
+            arguments.append(contentsOf: ["--mcp-config", mcp])
+        }
         return Command(executable: executable, arguments: arguments,
                        environment: Self.apiEnvironment(wiring: hooks, token: hookToken))
+    }
+
+    /// The API as MCP tools (ADR-0010), through inline `--mcp-config` — the CLI
+    /// accepts a JSON string as well as a file, so nothing lands on disk. The
+    /// server runs `loom mcp` with the session's socket and token in its
+    /// environment; nil without a `loom` binary to run.
+    static func mcpConfigJSON(wiring: HookWiring, token: String) -> String? {
+        guard let cli = wiring.cli else { return nil }
+        let config: [String: Any] = [
+            "mcpServers": [
+                "loom": [
+                    "command": cli.path,
+                    "args": ["mcp"],
+                    "env": apiEnvironment(wiring: wiring, token: token),
+                ],
+            ],
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: config,
+                                                     options: [.sortedKeys, .withoutEscapingSlashes]) else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 
     private static func hookSettingsJSON(wiring: HookWiring, token: String) -> String? {

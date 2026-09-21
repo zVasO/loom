@@ -78,6 +78,26 @@ struct APIProtocolTests {
         #expect(!APIBadge.isValidColor("#GGGGGG"))
     }
 
+    @Test("the tool catalog covers every method, with MCP-legal unique names")
+    func catalogueDesOutils() {
+        let names = APIToolCatalog.all.map(\.name)
+        #expect(Set(names).count == names.count, "one name per tool")
+        for method in APIMethod.allCases {
+            #expect(APIToolCatalog.all.contains { $0.method == method }, "\(method.rawValue) has a tool")
+        }
+        for name in names {
+            #expect(name.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" },
+                    "\(name) fits an MCP tool name")
+            #expect(APIToolCatalog.spec(named: name)?.name == name)
+        }
+        #expect(APIToolCatalog.spec(named: "nope") == nil)
+        let docs = APIToolCatalog.markdown()
+        for method in APIMethod.allCases {
+            #expect(docs.contains("`\(method.rawValue)`"), "the reference names \(method.rawValue)")
+        }
+        #expect(docs.contains("(required)"), "required parameters are marked")
+    }
+
     @Test("the client finds its way from the environment Loom gives an agent")
     func clientDepuisLEnvironnement() {
         #expect(APIClient.fromEnvironment([:]) == nil, "outside Loom: no client")

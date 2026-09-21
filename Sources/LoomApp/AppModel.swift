@@ -289,23 +289,34 @@ public final class AppModel {
     public private(set) var claudePath: URL? = ClaudeLocator.locate()
     public var claudeSearchedLocations: [String] { ClaudeLocator.wellKnownLocations }
 
-    /// The adapter talks to the CLI with the full hooks wiring (ADR-0005).
+    /// The adapter talks to the CLI with the full hooks wiring (ADR-0005) and,
+    /// when the `loom` binary is around, the API as MCP tools (ADR-0010).
     private var adapter: ClaudeCodeAdapter {
         ClaudeCodeAdapter(executable: claudePath?.path ?? "claude",
                           hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
-                                       socket: socketURL))
+                                       socket: socketURL,
+                                       cli: Self.companionBinaryURL(named: "loom",
+                                                                    fallback: supportDirectory)))
     }
 
     /// In development, `loom-hook` is a sibling product of the app; packaged,
     /// it will live in the bundle and then be copied to Application Support.
     static func helperBinaryURL(fallback supportDirectory: URL) -> URL {
-        let sibling = Bundle.main.executableURL?
-            .deletingLastPathComponent()
-            .appendingPathComponent("loom-hook")
-        if let sibling, FileManager.default.isExecutableFile(atPath: sibling.path) {
-            return sibling
-        }
-        return supportDirectory.appendingPathComponent("loom-hook")
+        companionBinaryURL(named: "loom-hook", fallback: supportDirectory)
+            ?? supportDirectory.appendingPathComponent("loom-hook")
+    }
+
+    /// A companion executable, wherever it is: beside the app's own binary
+    /// (development, and the bundle's MacOS folder), else in the support
+    /// directory. nil when neither holds one — a caller that cannot do
+    /// without it says so; one that can, goes without.
+    static func companionBinaryURL(named name: String, fallback supportDirectory: URL) -> URL? {
+        let candidates = [
+            Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent(name),
+            supportDirectory.appendingPathComponent(name),
+        ]
+        return candidates.compactMap { $0 }
+            .first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 
     public init(supportDirectory: URL? = nil) {
