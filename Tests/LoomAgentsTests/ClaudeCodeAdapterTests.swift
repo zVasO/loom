@@ -59,10 +59,14 @@ struct ClaudeCodeAdapterTests {
         #expect(env["LOOM_SESSION_TOKEN"] == "tok", "the MCP server speaks with the session's own token")
         #expect(env["LOOM_SOCKET"] == "/tmp/loom.sock")
 
+        #expect(command.pathPrefix == ["/Applications/Loom.app/Contents/MacOS"],
+                "the agent's shell finds `loom` by name")
+
         let withoutCLI = ClaudeCodeAdapter(hooks: .init(helper: wiring.helper, socket: wiring.socket))
             .launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok")
         #expect(!withoutCLI.arguments.contains("--mcp-config"),
                 "no loom binary: no MCP server to point at, the socket and token still reach the agent")
+        #expect(withoutCLI.pathPrefix.isEmpty)
     }
 
     @Test("hooks are injected via inline --settings, never into global settings (STA-01)")

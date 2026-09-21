@@ -52,7 +52,14 @@ public struct ClaudeCodeAdapter: Sendable {
             arguments.append(initialPrompt)
         }
         return Command(executable: executable, arguments: arguments,
-                       environment: Self.apiEnvironment(wiring: hooks, token: hookToken))
+                       environment: Self.apiEnvironment(wiring: hooks, token: hookToken),
+                       pathPrefix: Self.pathPrefix(wiring: hooks))
+    }
+
+    /// `loom` by name, from the agent's shell: its directory leads the PATH.
+    static func pathPrefix(wiring: HookWiring?) -> [String] {
+        guard let cli = wiring?.cli else { return [] }
+        return [cli.deletingLastPathComponent().path]
     }
 
     /// The agents API (ADR-0010) reaches the agent through its environment:
@@ -104,7 +111,8 @@ public struct ClaudeCodeAdapter: Sendable {
             arguments.append(contentsOf: ["--mcp-config", mcp])
         }
         return Command(executable: executable, arguments: arguments,
-                       environment: Self.apiEnvironment(wiring: hooks, token: hookToken))
+                       environment: Self.apiEnvironment(wiring: hooks, token: hookToken),
+                       pathPrefix: Self.pathPrefix(wiring: hooks))
     }
 
     /// The API as MCP tools (ADR-0010), through inline `--mcp-config` — the CLI
