@@ -56,9 +56,13 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
 Packages SPM aux frontières imposées (§6.1 du cahier des charges, ADR-0009) :
 `LoomCore` (états, réducteur) ← `LoomTerminal` (PTY, moteur, runtime) ·
 `LoomAgents` (adapter Claude Code, classification) · `LoomGit` · `LoomWeb` ·
-`LoomPersistence` (GRDB, transcripts) · `LoomIPC` (socket hooks) ←
+`LoomPersistence` (GRDB, transcripts) · `LoomAPI` (contrat de l'API agents) ·
+`LoomIPC` (socket hooks + requêtes) ←
 `LoomSessions` (SessionManager, orchestration) ← `LoomApp` (SwiftUI).
-Exécutable compagnon : `loom-hook`.
+Exécutables compagnons : `loom-hook` (hooks) et `loom` (CLI + serveur MCP de
+l'API agents, ADR-0010 ; sa logique vit dans `LoomCLI`). Dans une session,
+`loom docs` imprime la référence de l'API ; `loom mcp` la sert en outils MCP,
+branché par `--mcp-config` au lancement.
 
 Aucun service ne dépend de l'UI ; l'UI ne voit que des valeurs (`TerminalScreen`),
 jamais le moteur. Tout accès moteur est confiné à la queue sérielle de sa session.

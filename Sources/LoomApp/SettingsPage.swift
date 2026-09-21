@@ -275,7 +275,7 @@ struct SettingsPage: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Badges")
             card {
-                Text("Right-click a session card (sidebar or Mission Control) to assign a badge.")
+                Text("Right-click a session card (sidebar or Mission Control) to assign badges — a session wears as many as you like.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
                 ForEach(model.badgeDefinitions) { definition in

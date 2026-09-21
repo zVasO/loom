@@ -1,4 +1,5 @@
 import LoomAgents
+import LoomAPI
 import LoomCore
 import LoomGit
 import LoomIPC
@@ -78,33 +79,47 @@ public final class AppModel {
         public var isShell: Bool = false
         /// Closed but not destroyed ("inactive"): clicking resumes the session.
         public var isDormant: Bool = false
-        /// Badge label — resolved to a color by the badge definitions.
-        public var badge: String?
+        /// Badges, in assignment order — each resolved to a color by the
+        /// badge definitions.
+        public var badges: [String] = []
     }
 
     // MARK: - Badges: user-defined labels with a color
 
-    public struct BadgeDefinition: Identifiable, Equatable, Codable {
-        public var id: String { name }
-        public var name: String
-        public var colorHex: String
-    }
+    public typealias BadgeDefinition = LoomPersistence.BadgeDefinition
 
-    public private(set) var badgeDefinitions: [BadgeDefinition] = {
-        if let data = UserDefaults.standard.data(forKey: "loom.badges"),
-           let saved = try? JSONDecoder().decode([BadgeDefinition].self, from: data) {
-            return saved
-        }
-        return [BadgeDefinition(name: "review", colorHex: "#4CC38A"),
-                BadgeDefinition(name: "wip", colorHex: "#E5B455"),
-                BadgeDefinition(name: "urgent", colorHex: "#E5646C")]
-    }()
+    /// The catalog, as the store holds it (v8) — empty until `start()`.
+    public private(set) var badgeDefinitions: [BadgeDefinition] = []
 
     public func saveBadgeDefinitions(_ definitions: [BadgeDefinition]) {
-        badgeDefinitions = definitions
-        if let data = try? JSONEncoder().encode(definitions) {
-            UserDefaults.standard.set(data, forKey: "loom.badges")
+        try? store?.saveBadgeDefinitions(definitions)
+        reloadBadgeDefinitions()
+    }
+
+    private func reloadBadgeDefinitions() {
+        badgeDefinitions = ((try? store?.badgeDefinitions()) ?? nil) ?? BadgeDefinition.builtIn
+    }
+
+    /// Appends to the catalog — false when the name is taken (the API's
+    /// `badge.create`, ADR-0010).
+    func addBadgeDefinition(_ definition: BadgeDefinition) -> Bool {
+        guard let store, (try? store.addBadgeDefinition(definition)) == true else { return false }
+        reloadBadgeDefinitions()
+        return true
+    }
+
+    /// Before v8 the catalog lived in UserDefaults. A saved one is moved into
+    /// the store once, over the seeded built-ins, and the key goes — so a
+    /// later deletion of every badge is never undone by a stale import.
+    private static let legacyBadgesKey = "loom.badges"
+
+    private func importLegacyBadgeDefinitions(into store: SessionStore) {
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: Self.legacyBadgesKey) else { return }
+        if let saved = try? JSONDecoder().decode([BadgeDefinition].self, from: data) {
+            try? store.saveBadgeDefinitions(saved)
         }
+        defaults.removeObject(forKey: Self.legacyBadgesKey)
     }
 
     /// Label → color: a defined badge uses its color; "PR …" labels get the
@@ -128,13 +143,33 @@ public final class AppModel {
                      blue: Double(number & 0xFF) / 255)
     }
 
-    /// Assigns (or clears) a session's badge — card, fleet, tabs and base follow.
-    public func setBadge(_ badge: String?, for id: SessionID) {
-        try? store?.setBadge(session: id, badge: badge)
+    /// The badges a session wears right now — live item first, record otherwise.
+    public func badges(of id: SessionID) -> [String] {
+        sessions.first { $0.id == id }?.badges
+            ?? allRecords.first { $0.id == id }?.badges
+            ?? []
+    }
+
+    /// Replaces a session's badges (empty = none) — card, fleet, tabs and base follow.
+    public func setBadges(_ badges: [String], for id: SessionID) {
+        let normalized = SessionRecord.normalizedBadges(badges)
+        try? store?.setBadges(session: id, badges: normalized)
         if let index = sessions.firstIndex(where: { $0.id == id }) {
-            sessions[index].badge = badge
+            sessions[index].badges = normalized
         }
         reloadPersistedSessions()
+    }
+
+    /// Adds the badge when the session lacks it, removes it otherwise — the
+    /// right-click menu's one gesture.
+    public func toggleBadge(_ name: String, for id: SessionID) {
+        var current = badges(of: id)
+        if let index = current.firstIndex(of: name) {
+            current.remove(at: index)
+        } else {
+            current.append(name)
+        }
+        setBadges(current, for: id)
     }
 
     public private(set) var sessions: [SessionItem] = []
@@ -164,6 +199,12 @@ public final class AppModel {
     private var hookServer: HookSocketServer?
     private let supportDirectory: URL
     private var socketURL: URL { supportDirectory.appendingPathComponent("loom.sock") }
+
+    /// The agents API's global token (ADR-0010), read from `api-token` in the
+    /// support directory; nil when the file could not be created.
+    public private(set) var apiToken: String?
+    public var apiTokenURL: URL { supportDirectory.appendingPathComponent(Self.apiTokenFileName) }
+    public var apiSocketURL: URL { socketURL }
 
     /// The grid actually displayed, remembered at each view measurement: the
     /// next sessions are BORN at the right size — claude paints its banner
@@ -248,23 +289,34 @@ public final class AppModel {
     public private(set) var claudePath: URL? = ClaudeLocator.locate()
     public var claudeSearchedLocations: [String] { ClaudeLocator.wellKnownLocations }
 
-    /// The adapter talks to the CLI with the full hooks wiring (ADR-0005).
+    /// The adapter talks to the CLI with the full hooks wiring (ADR-0005) and,
+    /// when the `loom` binary is around, the API as MCP tools (ADR-0010).
     private var adapter: ClaudeCodeAdapter {
         ClaudeCodeAdapter(executable: claudePath?.path ?? "claude",
                           hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
-                                       socket: socketURL))
+                                       socket: socketURL,
+                                       cli: Self.companionBinaryURL(named: "loom",
+                                                                    fallback: supportDirectory)))
     }
 
     /// In development, `loom-hook` is a sibling product of the app; packaged,
     /// it will live in the bundle and then be copied to Application Support.
     static func helperBinaryURL(fallback supportDirectory: URL) -> URL {
-        let sibling = Bundle.main.executableURL?
-            .deletingLastPathComponent()
-            .appendingPathComponent("loom-hook")
-        if let sibling, FileManager.default.isExecutableFile(atPath: sibling.path) {
-            return sibling
-        }
-        return supportDirectory.appendingPathComponent("loom-hook")
+        companionBinaryURL(named: "loom-hook", fallback: supportDirectory)
+            ?? supportDirectory.appendingPathComponent("loom-hook")
+    }
+
+    /// A companion executable, wherever it is: beside the app's own binary
+    /// (development, and the bundle's MacOS folder), else in the support
+    /// directory. nil when neither holds one — a caller that cannot do
+    /// without it says so; one that can, goes without.
+    static func companionBinaryURL(named name: String, fallback supportDirectory: URL) -> URL? {
+        let candidates = [
+            Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent(name),
+            supportDirectory.appendingPathComponent(name),
+        ]
+        return candidates.compactMap { $0 }
+            .first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 
     public init(supportDirectory: URL? = nil) {
@@ -306,6 +358,8 @@ public final class AppModel {
             let store = try SessionStore(path: supportDirectory.appendingPathComponent("loom.sqlite").path)
             self.store = store
             try store.markLiveSessionsInterrupted()
+            importLegacyBadgeDefinitions(into: store)
+            reloadBadgeDefinitions()
 
             let transcripts = try FileTranscriptSink(
                 directory: supportDirectory.appendingPathComponent("transcripts"))
@@ -337,12 +391,27 @@ public final class AppModel {
             }
 
             let registry = tokenRegistry
+            let globalToken = Self.loadOrCreateAPIToken(in: supportDirectory)
+            apiToken = globalToken
             let server = HookSocketServer(
                 socketPath: socketURL,
                 validate: { token in registry.session(for: token) },
                 handler: { [weak self] session, payload in
                     guard let self else { return }
                     Task { await self.manager?.ingest(payload, for: session) }
+                },
+                // ADR-0010: the same socket answers requests. A session token
+                // reaches its session; the global token, every one of them.
+                authorize: { token in
+                    if let globalToken, token == globalToken { return .global }
+                    return registry.session(for: token).map { APIScope.session($0) }
+                },
+                requests: { [weak self] scope, request in
+                    guard let self else {
+                        return APIResponse(id: request.id, error: APIError(
+                            code: .internalError, message: "the app is shutting down"))
+                    }
+                    return await self.handleAPIRequest(scope, request)
                 })
             try server.start()
             hookServer = server
@@ -888,7 +957,7 @@ public final class AppModel {
             spec.projectID = projectID
             spec.sessionID = sessionID
             spec.title = "PR #\(pr.number) · review"
-            spec.badge = "PR #\(pr.number)"
+            spec.badges = ["PR #\(pr.number)"]
             // The record must know it runs in a worktree: the git panel and
             // the ship actions read worktreePath, and a nil left them blind.
             spec.worktree = .existing(path: worktree, branch: pr.branch)
@@ -896,7 +965,7 @@ public final class AppModel {
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(pr.number) · review",
                                         state: .starting, projectID: projectID,
-                                        branch: pr.branch, badge: "PR #\(pr.number)"))
+                                        branch: pr.branch, badges: ["PR #\(pr.number)"]))
             rememberReviewSession(id, forPR: pr.number, in: projectID)
             reloadPersistedSessions()
             if reviewSetupCommandEnabled {
@@ -1034,13 +1103,13 @@ public final class AppModel {
             spec.projectID = projectID
             spec.sessionID = sessionID
             spec.title = "PR #\(number) · guide"
-            spec.badge = "PR #\(number)"
+            spec.badges = ["PR #\(number)"]
             spec.worktree = .existing(path: worktree, branch: nil)
             let id = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(number) · guide",
                                         state: .starting, projectID: projectID,
-                                        branch: nil, badge: "PR #\(number)"))
+                                        branch: nil, badges: ["PR #\(number)"]))
             reloadPersistedSessions()
             return id
         } catch {
@@ -1073,12 +1142,12 @@ public final class AppModel {
             spec.projectID = record.projectID
             spec.sessionID = sessionID
             spec.title = "Review · \(record.title)"
-            spec.badge = "review"
+            spec.badges = ["review"]
             let reviewID = try await manager.launch(spec)
             tokenRegistry.register(token: token, session: reviewID)
             sessions.append(SessionItem(id: reviewID, title: "Review · \(record.title)",
                                         state: .starting, projectID: record.projectID,
-                                        branch: record.branch, badge: "review"))
+                                        branch: record.branch, badges: ["review"]))
             reloadPersistedSessions()
             return reviewID
         } catch {
@@ -1275,7 +1344,7 @@ public final class AppModel {
         if let live = sessions.first(where: { $0.id == id }) { return live }
         return allRecords.first { $0.id == id }.map {
             SessionItem(id: $0.id, title: $0.title, state: $0.state,
-                        projectID: $0.projectID, branch: $0.branch)
+                        projectID: $0.projectID, branch: $0.branch, badges: $0.badges)
         }
     }
 
@@ -1560,7 +1629,7 @@ public final class AppModel {
             tokenRegistry.register(token: token, session: record.id)
             sessions.append(SessionItem(id: record.id, title: record.title, state: .starting,
                                         projectID: record.projectID, branch: record.branch,
-                                        badge: record.badge))
+                                        badges: record.badges))
             interruptedSessions.removeAll { $0.id == record.id }
         } catch {
             startupError = String(describing: error)
