@@ -188,7 +188,7 @@ public final class AppModel {
     public private(set) var interruptedSessions: [SessionRecord] = []
     /// SES-07: completed/failed/archived, browsable.
     public private(set) var historySessions: [SessionRecord] = []
-    public private(set) var startupError: String?
+    public internal(set) var startupError: String?
 
     public func clearError() {
         startupError = nil
@@ -352,6 +352,9 @@ public final class AppModel {
         do {
             try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
             loadPRListCache()
+            reviewDrafts = reviewDraftStore.load()
+            catalog = repoCatalogCache.load()
+            prTabs = prTabsStore.load()
             let store = try SessionStore(path: supportDirectory.appendingPathComponent("loom.sqlite").path)
             self.store = store
             try store.markLiveSessionsInterrupted()
@@ -453,14 +456,24 @@ public final class AppModel {
         historySessions = all.filter {
             [.completed, .failed, .archived].contains($0.state) && nativeSessionExists($0.id)
         }
-        projects = ((try? store?.activeProjects()) ?? nil) ?? []
+        let loadedProjects = (try? store?.activeProjects()) ?? nil
+        projects = loadedProjects ?? []
         applySavedProjectOrder()
         if selectedProject == nil { selectedProject = lastOpenedProject ?? projects.first?.id }
+        resolveProjectRepoNames()
+        // A tab of a project removed since has nowhere to show. Only when
+        // the query answered: a failed read is not an empty project list,
+        // and must not wipe the tabs from disk.
+        if let loadedProjects {
+            let kept = prTabs
+            prTabs.keep(projects: Set(loadedProjects.map(\.id)))
+            if prTabs != kept { savePRTabs() }
+        }
     }
 
     // MARK: - v4: GitHub PR review through the user's authenticated gh
 
-    private func projectRepo(_ id: ProjectID?) -> URL? {
+    func projectRepo(_ id: ProjectID?) -> URL? {
         project(id).map { URL(fileURLWithPath: $0.path) }
     }
 
@@ -501,11 +514,24 @@ public final class AppModel {
     }
 
     /// nil on success, error text otherwise — the panel reports the truth.
+    /// With a draft pending on the PR, the verdict, the summary and every
+    /// drafted comment leave as ONE review; the draft is gone once GitHub
+    /// has it.
     public func submitPRReview(_ number: Int, verdict: GitHubService.Verdict,
                                body: String, in projectID: ProjectID) async -> String? {
         guard let repo = projectRepo(projectID) else { return "No repo for this project" }
-        do { try await GitHubService().submitReview(number, verdict: verdict, body: body, in: repo); return nil }
-        catch { return Self.ghErrorText(error) }
+        let key = prKey(number, projectID)
+        do {
+            if let draft = reviewDrafts[key], !draft.isEmpty {
+                try await GitHubService().submitReview(number, verdict: verdict, body: body,
+                                                       comments: draft.comments, in: repo)
+                reviewDrafts[key] = nil
+                saveReviewDrafts()
+            } else {
+                try await GitHubService().submitReview(number, verdict: verdict, body: body, in: repo)
+            }
+            return nil
+        } catch { return Self.ghErrorText(error) }
     }
 
     /// Review comments anchored to code, cached like the diff.
@@ -590,7 +616,7 @@ public final class AppModel {
         catch { return Self.ghErrorText(error) }
     }
 
-    private static func ghErrorText(_ error: Error) -> String {
+    static func ghErrorText(_ error: Error) -> String {
         if case GitHubService.GitHubError.commandFailed(_, let stderr) = error, !stderr.isEmpty {
             return stderr
         }
@@ -631,6 +657,77 @@ public final class AppModel {
     private var prFileViewsCache: [String: GitHubService.FileViews] = [:]
     private var prListCache: PRListCache { PRListCache(directory: supportDirectory) }
     private var prFilterStore: PRFilterStore { PRFilterStore(directory: supportDirectory) }
+
+    // MARK: PRs tab beyond the projects: catalog, inbox, search, drafts
+
+    /// The GitHub repository (`owner/name`) each project clones, from its
+    /// `origin` remote. `""` once looked up and not a GitHub clone — the
+    /// lookup is a git process, not to be repeated at every reload.
+    public internal(set) var projectRepoNames: [ProjectID: String] = [:]
+    /// Projects whose remote is being read right now — one git process each.
+    var repoNameLookups: Set<ProjectID> = []
+    /// Where clones land (`<folder>/<name>`). Asked once, kept in Settings.
+    /// Stored (not computed over UserDefaults) so the views tracking it
+    /// repaint when it is chosen.
+    public var cloneDirectory: URL? = UserDefaults.standard
+        .string(forKey: "loom.clone.directory").map(URL.init(fileURLWithPath:)) {
+        didSet {
+            if let cloneDirectory {
+                UserDefaults.standard.set(cloneDirectory.path, forKey: "loom.clone.directory")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "loom.clone.directory")
+            }
+        }
+    }
+    /// The GitHub search's generation: only the latest one may paint.
+    var searchGeneration = 0
+    /// The open PR tabs — the PRs tab's selection, drawer and summaries
+    /// live here, not in the view: the view is rebuilt every time the app's
+    /// tabs switch, and a relaunch reopens what was open.
+    public internal(set) var prTabs = PRTabs()
+    var prTabsStore: PRTabsStore { PRTabsStore(directory: supportDirectory) }
+    /// The pending, debounced write of the tabs (see `savePRTabs`).
+    @ObservationIgnored var prTabsSaveTask: Task<Void, Never>?
+    /// One serial queue: the writes land in the order they were asked.
+    static let prTabsWriteQueue = DispatchQueue(label: "loom.pr.tabs.write", qos: .utility)
+    /// The PR list folded away (a review took the room) — kept while the
+    /// app runs, whichever tab is on screen.
+    public var prSidebarHidden = false
+    /// Projects unfolded in the PRs sidebar — gh is queried for those only.
+    public var expandedPRProjects: Set<ProjectID> = []
+    /// The organizations' repositories, from disk at launch, then refreshed
+    /// a day later or on demand.
+    public internal(set) var catalog: RepoCatalogCache.Entry?
+    public internal(set) var catalogLoading = false
+    public internal(set) var catalogError: String?
+    /// Organizations and repositories the user folded away, by login.
+    public internal(set) var hiddenOwners: Set<String> = Set(
+        UserDefaults.standard.stringArray(forKey: "loom.pr.hiddenOwners") ?? [])
+    public internal(set) var hiddenRepos: Set<String> = Set(
+        UserDefaults.standard.stringArray(forKey: "loom.pr.hiddenRepos") ?? [])
+    /// Every open PR waiting on the user's review, whatever the repository.
+    public internal(set) var inbox: [GitHubService.PRSearchHit] = []
+    public internal(set) var inboxLoading = false
+    public internal(set) var inboxError: String?
+    var inboxFetchedAt: Date?
+    /// The GitHub search's answer — nil when no search is showing.
+    public internal(set) var searchResults: [GitHubService.PRSearchHit]?
+    public internal(set) var searchLoading = false
+    public internal(set) var searchError: String?
+    /// Repositories being cloned right now (`owner/name`).
+    public internal(set) var cloning: Set<String> = []
+    /// A repository to clone before a PR can open: the view asks first.
+    public var pendingClone: PendingClone?
+    /// Drafted review comments by PR key — mirrored on disk.
+    var reviewDrafts: [String: ReviewDraft] = [:]
+    var reviewDraftStore: ReviewDraftStore { ReviewDraftStore(directory: supportDirectory) }
+    var repoCatalogCache: RepoCatalogCache { RepoCatalogCache(directory: supportDirectory) }
+
+    public struct PendingClone: Equatable {
+        public let repo: String
+        /// The PR to open once the clone is a project — nil for a bare add.
+        public let number: Int?
+    }
 
     // MARK: PR filters
 
@@ -766,13 +863,17 @@ public final class AppModel {
         prFileViewsCache = prFileViewsCache.filter { !$0.key.hasPrefix(prefix) }
         prLists[key] = PRListCache.Entry(fetchedAt: Date(), prs: prs, query: filter.query)
         savePRListCache()
+        // The open tabs of this project take the fresh rows: title, head,
+        // checks, review state.
+        prTabs.refresh(from: prs, in: projectID)
+        savePRTabs()
     }
 
     public func isLaunchingReview(forPR number: Int, in projectID: ProjectID) -> Bool {
         prReviewLaunching.contains(prKey(number, projectID))
     }
 
-    private func prKey(_ number: Int, _ projectID: ProjectID) -> String {
+    func prKey(_ number: Int, _ projectID: ProjectID) -> String {
         "\(projectID.rawValue.uuidString)#\(number)"
     }
 

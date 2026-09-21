@@ -37,6 +37,13 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   rotation 10 Mo.
 - **Git** : worktrees avec collisions départagées, status porcelain v2, diff
   (non-suivis compris), suppression refusée si travail non commité.
+- **Pull requests** : onglet PR sur le `gh` de l'utilisateur — projets locaux,
+  orgs du compte (repos ajoutés comme projets en un clic, clone via gh), inbox
+  « en attente de moi » tous repos confondus, recherche locale + GitHub, ouverture
+  par URL, diff côte à côte, checks CI détaillés, commentaires de ligne mis en
+  brouillon et envoyés en une seule review avec le verdict, session claude par PR,
+  un onglet par PR ouverte (aperçu réutilisé au clic, épinglé par la review),
+  conservés d'un onglet de l'app à l'autre et d'un lancement à l'autre.
 - **Navigateur** : WKWebView à data store persistant (cookies GitHub conservés),
   UA Safari, LRU d'onglets, historique avec suggestions.
 - **Persistance** : GRDB, migrations versionnées (v1→v4), journal des transitions

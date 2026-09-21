@@ -94,6 +94,9 @@ struct PRWorkspaceView: View {
     /// Review pane open: "Add to claude session" types the lines into the
     /// session's input (no submit — the user adds their question).
     var transcribeToSession: ((DiffSnippet) -> Void)?
+    /// The verdict bar's text, owned by the PR's tab: it follows the tab
+    /// across the app's tabs and across relaunches.
+    @Binding var reviewSummary: String
 
     @State private var prDetail: GitHubService.PRDetail?
     /// Parsed + row-paired ONCE when the diff arrives (off the main thread) —
@@ -114,9 +117,12 @@ struct PRWorkspaceView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var prTour: PRTour?
     @State private var tourLoading = false
-    @State private var reviewBody = ""
     @State private var prActionOutput: String?
     @State private var prActionBusy = false
+    /// The comments drafted for this PR's review — mirrored from the model
+    /// so the diff and the verdict bar read one value.
+    @State private var draft: ReviewDraft?
+    @State private var checksExpanded = false
     /// Diff layout, persisted: split (aligned old/new) or unified (one line
     /// per change, both gutters).
     @State private var unifiedDiff = UserDefaults.standard.bool(forKey: "loom.diff.unified")
@@ -192,7 +198,79 @@ struct PRWorkspaceView: View {
         VStack(alignment: .leading, spacing: 8) {
             authorLine
             peopleLine
+            checksLine
         }
+    }
+
+    /// Every CI signal on the head: the recap on one line, each check with
+    /// its state and link once unfolded. Nothing for a row cached before
+    /// checks were kept.
+    @ViewBuilder
+    private var checksLine: some View {
+        if !pr.checks.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    withAnimation(.hover) { checksExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: checksExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                        Circle().fill(PRChips.checksColor(pr)).frame(width: 7, height: 7)
+                        Text(pr.checks.count == 1 ? "1 check" : "\(pr.checks.count) checks")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(DefaultTheme.primaryText)
+                        Text(PRChips.checksSummary(pr))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if checksExpanded {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(pr.checks) { check in
+                            checkRow(check)
+                        }
+                    }
+                    .padding(8)
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+    }
+
+    private func checkRow(_ check: GitHubService.Check) -> some View {
+        let (symbol, color): (String, Color) = switch check.state {
+        case .success: ("checkmark.circle.fill", DefaultTheme.groupHeader)
+        case .failure: ("xmark.circle.fill", DefaultTheme.danger)
+        case .pending: ("circle.dotted", DefaultTheme.badgeColor(for: .needsInput))
+        case .skipped, .cancelled, .neutral: ("minus.circle", DefaultTheme.mutedText)
+        }
+        return HStack(spacing: 8) {
+            Image(systemName: symbol).font(.system(size: 11)).foregroundStyle(color)
+                .frame(width: 14)
+            Text(check.name.isEmpty ? "(unnamed)" : check.name)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(DefaultTheme.primaryText)
+                .lineLimit(1)
+            if !check.workflow.isEmpty {
+                Text(check.workflow)
+                    .font(.system(size: 10))
+                    .foregroundStyle(DefaultTheme.mutedText)
+                    .lineLimit(1)
+            }
+            Text(check.state.rawValue)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(color)
+            Spacer()
+            if let url = URL(string: check.link), !check.link.isEmpty {
+                HoverIconButton(systemImage: "arrow.up.forward.square", help: "Open the run") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     /// Reviewers with their last verdict, assignees, labels, size, conflicts.
@@ -385,6 +463,14 @@ struct PRWorkspaceView: View {
                                           prActionBusy = false
                                       }
                                   },
+                                  onDraftComment: { snippet, text, isSuggestion in
+                                      addDraft(snippet, text: text, isSuggestion: isSuggestion)
+                                  },
+                                  drafts: draft?.comments ?? [],
+                                  onRemoveDraft: { id in
+                                      model.removeDraftComment(id, for: pr.number, in: project.id)
+                                      draft = model.reviewDraft(for: pr.number, in: project.id)
+                                  },
                                   unified: unifiedDiff,
                                   highlights: highlights,
                                   viewed: progress.viewed,
@@ -443,8 +529,12 @@ struct PRWorkspaceView: View {
 
     private var verdictBar: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let draft, !draft.isEmpty {
+                pendingStrip(draft)
+            }
             HStack(spacing: 8) {
-                TextField("Review comment…", text: $reviewBody, axis: .vertical)
+                TextField(draft?.isEmpty == false ? "Review summary…" : "Review comment…",
+                          text: $reviewSummary, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .lineLimit(1...4)
@@ -475,12 +565,53 @@ struct PRWorkspaceView: View {
         .background(DefaultTheme.background)
     }
 
+    /// What the verdict will carry: how many drafted comments, a way to drop
+    /// them all, and a warning when the head moved under them.
+    private func pendingStrip(_ draft: ReviewDraft) -> some View {
+        let pending = DefaultTheme.badgeColor(for: .needsInput)
+        let count = draft.comments.count
+        return HStack(spacing: 8) {
+            Image(systemName: "tray.and.arrow.down").font(.system(size: 10)).foregroundStyle(pending)
+            Text(count == 1 ? "1 pending comment" : "\(count) pending comments")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(DefaultTheme.primaryText)
+            Text("— sent together with your verdict, as one review")
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.secondaryText)
+            if !pr.headSHA.isEmpty, !draft.headSHA.isEmpty, draft.headSHA != pr.headSHA {
+                Label("written against an older head — line numbers may have moved",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(pending)
+            }
+            Spacer()
+            GhostButton("Discard", systemImage: "trash", role: .destructive) {
+                model.discardDraft(for: pr.number, in: project.id)
+                self.draft = nil
+            }
+        }
+    }
+
+    /// Keeps a line comment (or suggestion) for the review.
+    private func addDraft(_ snippet: DiffSnippet, text: String, isSuggestion: Bool) {
+        let body = GitHubService.lineCommentBody(isSuggestion ? "" : text,
+                                                 suggestion: isSuggestion ? text : nil)
+        let comment = DraftComment(path: snippet.file, firstLine: snippet.firstLine,
+                                   lastLine: snippet.lastLine,
+                                   side: snippet.spans.first?.side ?? "RIGHT", body: body)
+        model.addDraftComment(comment, headSHA: pr.headSHA, for: pr.number, in: project.id)
+        draft = model.reviewDraft(for: pr.number, in: project.id)
+        let count = draft?.comments.count ?? 1
+        prActionOutput = "Added to your review — \(count) pending ✓"
+    }
+
     // MARK: Loading and actions
 
     /// Detail + diff (cached in the model unless refresh), then the heavy
     /// parse/pair work off the main thread.
     private func load(refresh: Bool) async {
         diffLoading = true
+        draft = model.reviewDraft(for: pr.number, in: project.id)
         prDetail = await model.prDetail(pr.number, in: project.id, refresh: refresh)
         lineComments = await model.reviewComments(pr.number, in: project.id, refresh: refresh)
         let result = await model.prDiff(pr.number, baseBranch: pr.baseBranch,
@@ -547,17 +678,22 @@ struct PRWorkspaceView: View {
     private func submitReview(_ pr: GitHubService.PullRequest,
                               _ verdict: GitHubService.Verdict,
                               _ project: ProjectRecord) {
-        if verdict != .approve, reviewBody.trimmingCharacters(in: .whitespaces).isEmpty {
-            prActionOutput = "Write the comment first."
+        let hasDrafts = draft?.isEmpty == false
+        // GitHub's API refuses REQUEST_CHANGES and COMMENT without a body,
+        // drafted comments or not: the summary is the one thing to write.
+        if verdict != .approve, reviewSummary.trimmingCharacters(in: .whitespaces).isEmpty {
+            prActionOutput = hasDrafts ? "Write the review summary first — GitHub requires one with this verdict."
+                                       : "Write the comment first."
             return
         }
         prActionBusy = true
         Task {
             let error = await model.submitPRReview(pr.number, verdict: verdict,
-                                                   body: reviewBody, in: project.id)
-            prActionOutput = error ?? "Review sent ✓"
+                                                   body: reviewSummary, in: project.id)
+            prActionOutput = error ?? (hasDrafts ? "Review sent with its comments ✓" : "Review sent ✓")
             if error == nil {
-                reviewBody = ""
+                reviewSummary = ""
+                draft = nil
                 // After a submission the cached conversation is stale.
                 await load(refresh: true)
             }

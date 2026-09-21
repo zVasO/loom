@@ -170,6 +170,152 @@ struct GitHubServiceTests {
         #expect(prs.first?.isDraft == true)
     }
 
+    // The rollup mixes GitHub Actions check runs and legacy commit statuses:
+    // both must colour the dot, and each keeps its name and link.
+    @Test("a failing check run turns the PR red — it used to pass for green")
+    func checkRunFailure() throws {
+        let json = """
+        [{"number": 1, "title": "t", "author": {"login": "a"}, "headRefName": "b",
+          "reviewDecision": "", "updatedAt": "", "url": "", "isDraft": false,
+          "statusCheckRollup": [
+            {"__typename": "CheckRun", "name": "build", "status": "COMPLETED",
+             "conclusion": "FAILURE", "detailsUrl": "https://ci/1", "workflowName": "CI"},
+            {"__typename": "CheckRun", "name": "lint", "status": "COMPLETED",
+             "conclusion": "SUCCESS", "detailsUrl": "https://ci/2", "workflowName": "CI"},
+            {"__typename": "CheckRun", "name": "e2e", "status": "IN_PROGRESS",
+             "conclusion": "", "detailsUrl": "https://ci/3", "workflowName": "Nightly"},
+            {"__typename": "StatusContext", "context": "codecov", "state": "SUCCESS",
+             "targetUrl": "https://cov"}]}]
+        """
+        let pr = try #require(try GitHubService.parsePRList(Data(json.utf8)).first)
+        #expect(pr.checksPassing == false)
+        #expect(pr.checksPending)
+        #expect(pr.checks.map(\.name) == ["build", "lint", "e2e", "codecov"])
+        #expect(pr.checks.map(\.state) == [.failure, .success, .pending, .success])
+        #expect(pr.checks[0].link == "https://ci/1")
+        #expect(pr.checks[0].workflow == "CI")
+        #expect(pr.checks[3].workflow == "")
+        #expect(pr.failingChecks == 1 && pr.passingChecks == 2 && pr.pendingChecks == 1)
+    }
+
+    @Test("check conclusions and status states fold into one scale")
+    func checkStates() {
+        let checks = GitHubService.parseChecks([
+            ["name": "a", "status": "COMPLETED", "conclusion": "SKIPPED"],
+            ["name": "b", "status": "COMPLETED", "conclusion": "CANCELLED"],
+            ["name": "c", "status": "COMPLETED", "conclusion": "TIMED_OUT"],
+            ["name": "d", "status": "QUEUED", "conclusion": ""],
+            ["name": "e", "status": "COMPLETED", "conclusion": "NEUTRAL"],
+            ["context": "f", "state": "ERROR"],
+            ["context": "g", "state": "PENDING"],
+            ["context": "h", "state": "EXPECTED"],
+        ])
+        #expect(checks.map(\.state) == [.skipped, .cancelled, .failure, .pending, .neutral,
+                                         .failure, .pending, .pending])
+    }
+
+    @Test("a check without a name still counts — its state is what matters")
+    func namelessCheck() {
+        let checks = GitHubService.parseChecks([["state": "FAILURE"], ["state": "SUCCESS"], [:]])
+        #expect(checks.map(\.state) == [.failure, .success])
+    }
+
+    @Test("a cached row without checks decodes to none")
+    func checksDecodeDefault() throws {
+        let json = """
+        {"number": 1, "title": "t", "author": "a", "branch": "b", "baseBranch": "main",
+         "reviewDecision": "", "checksPassing": true, "isDraft": false, "updatedAt": "", "url": ""}
+        """
+        let pr = try JSONDecoder().decode(GitHubService.PullRequest.self, from: Data(json.utf8))
+        #expect(pr.checks.isEmpty)
+        #expect(!pr.checksPending)
+    }
+
+    // The catalog: what `gh repo list` says about an organization's repositories.
+    @Test("a repository row carries its name, description, visibility and last push")
+    func parseRepoList() throws {
+        let json = """
+        [{"nameWithOwner": "acme/core", "description": "The API", "isPrivate": true,
+          "isArchived": false, "isFork": false, "pushedAt": "2026-09-01T10:00:00Z"},
+         {"nameWithOwner": "acme/web", "description": null, "isPrivate": false,
+          "isArchived": false, "isFork": true, "pushedAt": "2026-08-01T10:00:00Z"},
+         {"description": "no name"}]
+        """
+        let repos = try GitHubService.parseRepoList(Data(json.utf8))
+        #expect(repos.map(\.nameWithOwner) == ["acme/core", "acme/web"])
+        #expect(repos[0].description == "The API")
+        #expect(repos[0].isPrivate)
+        #expect(repos[1].description == "")
+        #expect(repos[1].isFork)
+        #expect(repos[0].name == "core" && repos[0].owner == "acme")
+        #expect(Set(GitHubService.repoFields.split(separator: ",").map(String.init))
+                == ["nameWithOwner", "description", "isPrivate", "isArchived", "isFork", "pushedAt"])
+    }
+
+    // Cross-repository search: the inbox and the sidebar's GitHub search.
+    @Test("a search hit names its repository, number, title, author and labels")
+    func parsePRSearch() throws {
+        let json = """
+        [{"repository": {"name": "core", "nameWithOwner": "acme/core"}, "number": 42,
+          "title": "Fix cache", "author": {"login": "vaso"}, "updatedAt": "2026-09-01T10:00:00Z",
+          "url": "https://github.com/acme/core/pull/42", "isDraft": true,
+          "labels": [{"name": "bug", "color": "d73a4a"}]},
+         {"repository": {"nameWithOwner": "acme/web"}, "number": 7, "title": "x"}]
+        """
+        let hits = try GitHubService.parsePRSearch(Data(json.utf8))
+        #expect(hits.map(\.id) == ["acme/core#42", "acme/web#7"])
+        #expect(hits[0].author == "vaso")
+        #expect(hits[0].isDraft)
+        #expect(hits[0].labels == [GitHubService.Label(name: "bug", colorHex: "d73a4a")])
+        #expect(hits[1].author == "—")
+        #expect(Set(GitHubService.searchFields.split(separator: ",").map(String.init))
+                == ["repository", "number", "title", "author", "updatedAt", "url", "isDraft", "labels"])
+    }
+
+    @Test("search arguments: text, one --owner per organization, @me as a qualifier")
+    func searchArguments() {
+        let inbox = GitHubService.searchArguments(text: "", owners: [], reviewRequestedToMe: true, limit: 100)
+        #expect(inbox.first == "review-requested:@me")
+        #expect(!inbox.contains("--owner"))
+        #expect(inbox.contains("--state") && inbox.contains("open"))
+        let search = GitHubService.searchArguments(text: " cache ", owners: ["acme", "beta"],
+                                                   reviewRequestedToMe: false, limit: 50)
+        #expect(search.prefix(5) == ["cache", "--owner", "acme", "--owner", "beta"])
+        #expect(search.suffix(4) == ["--limit", "50", "--json", GitHubService.searchFields])
+        let bare = GitHubService.searchArguments(text: "", owners: [], reviewRequestedToMe: false, limit: 10)
+        #expect(bare.first == "--state", "no text means no positional argument")
+    }
+
+    // One review for every drafted comment: the verdict, the summary and
+    // the anchored comments travel in a single POST.
+    @Test("a review payload carries the event, the head and every comment")
+    func reviewPayload() throws {
+        let payload = GitHubService.reviewPayload(
+            verdict: .requestChanges, body: " Two things. ", sha: "abc",
+            comments: [DraftComment(path: "a.swift", firstLine: 3, lastLine: 5, body: "why"),
+                       DraftComment(path: "b.swift", firstLine: 9, lastLine: 9, side: "LEFT", body: "gone")])
+        #expect(payload["event"] as? String == "REQUEST_CHANGES")
+        #expect(payload["commit_id"] as? String == "abc")
+        #expect(payload["body"] as? String == "Two things.")
+        let comments = try #require(payload["comments"] as? [[String: Any]])
+        #expect(comments.count == 2)
+        #expect(comments[0]["start_line"] as? Int == 3)
+        #expect(comments[0]["line"] as? Int == 5)
+        #expect(comments[0]["start_side"] as? String == "RIGHT")
+        #expect(comments[1]["start_line"] == nil, "a one-line comment must not span")
+        #expect(comments[1]["side"] as? String == "LEFT")
+        #expect(comments[1]["body"] as? String == "gone")
+    }
+
+    @Test("an empty summary is left out; a verdict maps to its REST event")
+    func reviewPayloadWithoutBody() {
+        let payload = GitHubService.reviewPayload(verdict: .approve, body: "  ", sha: "h", comments: [])
+        #expect(payload["body"] == nil)
+        #expect(payload["event"] as? String == "APPROVE")
+        #expect(GitHubService.Verdict.comment.event == "COMMENT")
+        #expect((payload["comments"] as? [[String: Any]])?.isEmpty == true)
+    }
+
     // Line-anchored review comments: GitHub renders a ```suggestion block as
     // a one-click "Apply", so the body must be built exactly.
     @Test("a plain line comment keeps the author's text untouched")
