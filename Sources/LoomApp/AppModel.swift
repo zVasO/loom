@@ -585,6 +585,23 @@ public final class AppModel {
     /// `origin` remote. `""` once looked up and not a GitHub clone — the
     /// lookup is a git process, not to be repeated at every reload.
     public internal(set) var projectRepoNames: [ProjectID: String] = [:]
+    /// Projects whose remote is being read right now — one git process each.
+    var repoNameLookups: Set<ProjectID> = []
+    /// Where clones land (`<folder>/<name>`). Asked once, kept in Settings.
+    /// Stored (not computed over UserDefaults) so the views tracking it
+    /// repaint when it is chosen.
+    public var cloneDirectory: URL? = UserDefaults.standard
+        .string(forKey: "loom.clone.directory").map(URL.init(fileURLWithPath:)) {
+        didSet {
+            if let cloneDirectory {
+                UserDefaults.standard.set(cloneDirectory.path, forKey: "loom.clone.directory")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "loom.clone.directory")
+            }
+        }
+    }
+    /// The GitHub search's generation: only the latest one may paint.
+    var searchGeneration = 0
     /// The organizations' repositories, from disk at launch, then refreshed
     /// a day later or on demand.
     public internal(set) var catalog: RepoCatalogCache.Entry?

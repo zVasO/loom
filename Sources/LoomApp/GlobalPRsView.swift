@@ -151,7 +151,10 @@ struct GlobalPRsView: View {
             titleVisibility: .visible
         ) {
             Button(model.pendingClone?.number == nil ? "Clone" : "Clone and open the PR") {
-                Task { await model.confirmPendingClone() }
+                // Read now: dismissing the dialog clears pendingClone before
+                // the task below gets to run.
+                let pending = model.pendingClone
+                Task { await model.confirmClone(pending) }
             }
             Button("Cancel", role: .cancel) { model.pendingClone = nil }
         } message: {

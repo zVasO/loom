@@ -13,12 +13,16 @@ extension AppModel {
     /// Looks up, once per project, the GitHub repository its `origin` names.
     /// Detached: a git process per project must not hold the reload.
     func resolveProjectRepoNames() {
-        let missing = projects.filter { projectRepoNames[$0.id] == nil }
+        let missing = projects.filter {
+            projectRepoNames[$0.id] == nil && !repoNameLookups.contains($0.id)
+        }
         guard !missing.isEmpty else { return }
+        repoNameLookups.formUnion(missing.map(\.id))
         Task {
             for project in missing {
                 let remote = await GitService().remoteURL(in: URL(fileURLWithPath: project.path))
                 projectRepoNames[project.id] = remote.flatMap(GitHubRepoName.parse(remoteURL:)) ?? ""
+                repoNameLookups.remove(project.id)
             }
         }
     }
@@ -102,18 +106,6 @@ extension AppModel {
 
     // MARK: Clone — a catalog repository becomes a project
 
-    /// Where clones land (`<folder>/<name>`). Asked once, kept in Settings.
-    public var cloneDirectory: URL? {
-        get { UserDefaults.standard.string(forKey: "loom.clone.directory").map(URL.init(fileURLWithPath:)) }
-        set {
-            if let newValue {
-                UserDefaults.standard.set(newValue.path, forKey: "loom.clone.directory")
-            } else {
-                UserDefaults.standard.removeObject(forKey: "loom.clone.directory")
-            }
-        }
-    }
-
     public func isCloning(_ nameWithOwner: String) -> Bool { cloning.contains(nameWithOwner) }
 
     /// Clones the repository through gh and registers the clone as a
@@ -144,9 +136,11 @@ extension AppModel {
     }
 
     /// The clone the view confirmed: clone, then open the PR it was for.
-    public func confirmPendingClone() async {
-        guard let pending = pendingClone else { return }
-        pendingClone = nil
+    /// Takes the value: the dialog's dismissal clears `pendingClone` before
+    /// any task started from its button runs.
+    public func confirmClone(_ pending: PendingClone?) async {
+        guard let pending else { return }
+        if pendingClone == pending { pendingClone = nil }
         guard let projectID = await addRepositoryAsProject(pending.repo) else { return }
         if let number = pending.number {
             await openPR(number, in: projectID, repo: pending.repo)
@@ -226,12 +220,19 @@ extension AppModel {
     public func searchPRs(_ text: String) async {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { clearSearch(); return }
+        // Two Returns in a row: only the latest search may paint — a slower
+        // earlier one must not overwrite it.
+        searchGeneration += 1
+        let generation = searchGeneration
         searchLoading = true
-        defer { searchLoading = false }
+        defer { if generation == searchGeneration { searchLoading = false } }
         do {
-            searchResults = try await GitHubService().searchPRs(text: query, owners: visibleOwners)
+            let results = try await GitHubService().searchPRs(text: query, owners: visibleOwners)
+            guard generation == searchGeneration else { return }
+            searchResults = results
             searchError = nil
         } catch {
+            guard generation == searchGeneration else { return }
             searchResults = []
             searchError = Self.ghErrorText(error)
         }

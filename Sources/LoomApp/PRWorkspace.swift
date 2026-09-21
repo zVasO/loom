@@ -450,14 +450,6 @@ struct PRWorkspaceView: View {
                                       }
                                   },
                                   comments: lineComments,
-                                  onDraftComment: { snippet, text, isSuggestion in
-                                      addDraft(snippet, text: text, isSuggestion: isSuggestion)
-                                  },
-                                  drafts: draft?.comments ?? [],
-                                  onRemoveDraft: { id in
-                                      model.removeDraftComment(id, for: pr.number, in: project.id)
-                                      draft = model.reviewDraft(for: pr.number, in: project.id)
-                                  },
                                   onReply: { commentID, text in
                                       prActionBusy = true
                                       Task {
@@ -468,6 +460,14 @@ struct PRWorkspaceView: View {
                                           if error == nil { await load(refresh: true) }
                                           prActionBusy = false
                                       }
+                                  },
+                                  onDraftComment: { snippet, text, isSuggestion in
+                                      addDraft(snippet, text: text, isSuggestion: isSuggestion)
+                                  },
+                                  drafts: draft?.comments ?? [],
+                                  onRemoveDraft: { id in
+                                      model.removeDraftComment(id, for: pr.number, in: project.id)
+                                      draft = model.reviewDraft(for: pr.number, in: project.id)
                                   },
                                   unified: unifiedDiff,
                                   highlights: highlights,
@@ -531,7 +531,7 @@ struct PRWorkspaceView: View {
                 pendingStrip(draft)
             }
             HStack(spacing: 8) {
-                TextField(draft?.isEmpty == false ? "Review summary (optional)…" : "Review comment…",
+                TextField(draft?.isEmpty == false ? "Review summary…" : "Review comment…",
                           text: $reviewBody, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
@@ -576,7 +576,7 @@ struct PRWorkspaceView: View {
             Text("— sent together with your verdict, as one review")
                 .font(.system(size: 11))
                 .foregroundStyle(DefaultTheme.secondaryText)
-            if !pr.headSHA.isEmpty, draft.headSHA != pr.headSHA {
+            if !pr.headSHA.isEmpty, !draft.headSHA.isEmpty, draft.headSHA != pr.headSHA {
                 Label("written against an older head — line numbers may have moved",
                       systemImage: "exclamationmark.triangle")
                     .font(.system(size: 10))
@@ -677,10 +677,11 @@ struct PRWorkspaceView: View {
                               _ verdict: GitHubService.Verdict,
                               _ project: ProjectRecord) {
         let hasDrafts = draft?.isEmpty == false
-        // A verdict needs something to say — unless the drafts say it.
-        if verdict != .approve, !hasDrafts,
-           reviewBody.trimmingCharacters(in: .whitespaces).isEmpty {
-            prActionOutput = "Write the comment first."
+        // GitHub's API refuses REQUEST_CHANGES and COMMENT without a body,
+        // drafted comments or not: the summary is the one thing to write.
+        if verdict != .approve, reviewBody.trimmingCharacters(in: .whitespaces).isEmpty {
+            prActionOutput = hasDrafts ? "Write the review summary first — GitHub requires one with this verdict."
+                                       : "Write the comment first."
             return
         }
         prActionBusy = true
