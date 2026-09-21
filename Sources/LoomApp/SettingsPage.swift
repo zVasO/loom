@@ -188,6 +188,39 @@ struct SettingsPage: View {
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
                 Divider().overlay(DefaultTheme.cardBorder)
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Clone repositories into")
+                            .font(.system(size: 13))
+                            .foregroundStyle(DefaultTheme.primaryText)
+                        Text(model.cloneDirectory?.path ?? "Not chosen yet — asked at the first clone")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer()
+                    GhostButton("Change…", systemImage: "folder") {
+                        if let folder = AppModel.pickFolder(title: "Clone repositories into…") {
+                            model.cloneDirectory = folder
+                        }
+                    }
+                }
+                Text("Where a repository added from the PRs tab is cloned (as <folder>/<name>) before it becomes a project.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                if model.hiddenCount > 0 {
+                    HStack {
+                        Text(model.hiddenCount == 1
+                             ? "1 organization or repository hidden in the PRs tab"
+                             : "\(model.hiddenCount) organizations or repositories hidden in the PRs tab")
+                            .font(.system(size: 12))
+                            .foregroundStyle(DefaultTheme.primaryText)
+                        Spacer()
+                        GhostButton("Show all", systemImage: "eye") { model.unhideAll() }
+                    }
+                }
+                Divider().overlay(DefaultTheme.cardBorder)
                 Toggle(isOn: Binding(
                     get: { model.reviewSetupCommandEnabled },
                     set: { model.reviewSetupCommandEnabled = $0 })) {

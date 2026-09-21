@@ -638,6 +638,9 @@ struct GlobalPRsView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(DefaultTheme.primaryText)
                 .lineLimit(1)
+            if !pr.checks.isEmpty {
+                PRChips.checksChip(pr)
+            }
             Spacer(minLength: 12)
             HStack(spacing: 4) {
                 ForEach(PRPane.allCases) { candidate in
