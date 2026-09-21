@@ -40,6 +40,10 @@ _Avoid_ : log, historique (« historique » = la liste des sessions passées)
 Relance d'une session `interrupted` via le mécanisme natif de l'agent (ex. `claude --resume <session native>`).
 _Avoid_ : restauration (les PTY ne survivent pas ; on reprend la conversation, pas le process)
 
+**Badge** :
+Étiquette courte et colorée portée par une session (`PR #42`, `review`, `wip`). Une session en porte zéro ou plusieurs, dans l'ordre d'attribution ; les définitions (nom + couleur) sont globales à l'app. Une métadonnée, jamais un état.
+_Avoid_ : label, tag
+
 ### États de session
 
 **working** :
