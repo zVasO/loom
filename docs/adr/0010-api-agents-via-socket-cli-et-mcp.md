@@ -9,7 +9,7 @@ L'API touche des métadonnées, jamais l'état. La machine à états ne connaît
 ## Consequences
 
 - Une session porte plusieurs badges (`sessionBadge`, migration v7) : `session.setBadges` remplace la liste entière, dans l'ordre donné ; le vocabulaire reste « badge », jamais « label » (CONTEXT.md).
-- Les définitions de badges (nom + couleur) quittent UserDefaults pour LoomPersistence (migration v8) avant que `badge.create` existe : l'app et le CLI doivent lire la même source.
+- Les définitions de badges (nom + couleur) ont quitté UserDefaults pour LoomPersistence (`badgeDefinition`, migration v8, import unique du catalogue sauvegardé) : l'app et le CLI lisent la même source, et `badge.create` a déjà son écriture (`addBadgeDefinition`, refus d'un nom pris).
 - Le protocole est versionné (`loom.version` répond la version du protocole) ; le CLI et le serveur MCP sont livrés dans le bundle et versionnés avec l'app, comme `loom-hook`.
 - `HookSocketServer` garde son contrat pour les hooks et gagne un chemin de réponse ; ses tests restent sur de vrais sockets, comme aujourd'hui.
 - Les mutations par l'API sont journalisées avec leur portée (token de session ou global) dans le journal existant, sans nouvelle source de transition.

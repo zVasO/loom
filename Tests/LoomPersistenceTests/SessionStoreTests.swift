@@ -62,6 +62,34 @@ struct SessionStoreTests {
         #expect(try store.session(id: other)?.badges == ["wip", "urgent"])
     }
 
+    @Test("the badge catalog starts with the built-ins, then belongs to the user (v8)")
+    func catalogueDeBadges() throws {
+        let store = try makeStore()
+        #expect(try store.badgeDefinitions() == BadgeDefinition.builtIn,
+                "a fresh database seeds the three built-ins, in order")
+
+        try store.saveBadgeDefinitions([
+            BadgeDefinition(name: "urgent", colorHex: "#E5646C"),
+            BadgeDefinition(name: " perf ", colorHex: "#4CC38A"),
+            BadgeDefinition(name: "urgent", colorHex: "#000000"),
+            BadgeDefinition(name: "", colorHex: "#FFFFFF"),
+        ])
+        #expect(try store.badgeDefinitions().map(\.name) == ["urgent", "perf"],
+                "a save replaces the catalog in the given order; blanks and repeats never land")
+        #expect(try store.badgeDefinitions().first?.colorHex == "#E5646C",
+                "the first occurrence of a name keeps its color")
+
+        #expect(try store.addBadgeDefinition(BadgeDefinition(name: "docs", colorHex: "#A78BFA")),
+                "a new name joins the catalog")
+        #expect(try !store.addBadgeDefinition(BadgeDefinition(name: "docs", colorHex: "#111111")),
+                "a taken name is refused")
+        #expect(try store.badgeDefinitions().map(\.name) == ["urgent", "perf", "docs"],
+                "an addition lands last, the refusal changes nothing")
+
+        try store.saveBadgeDefinitions([])
+        #expect(try store.badgeDefinitions().isEmpty, "the user may empty the catalog")
+    }
+
     @Test("the transition journal keeps the history, source included (STA-06)")
     func journalDesTransitions() throws {
         let store = try makeStore()

@@ -110,6 +110,22 @@ public final class SessionStore: Sendable {
                 """)
             try db.alter(table: "session") { $0.drop(column: "badge") }
         }
+        migrator.registerMigration("v8-badge-definitions") { db in
+            // The badge catalog (name + color) used to live in UserDefaults —
+            // the app alone could read it. Agents (ADR-0010) and the app now
+            // share one source. Seeded with the built-in three; the app
+            // imports a user's saved catalog on top, once.
+            try db.create(table: "badgeDefinition") { t in
+                t.primaryKey("name", .text)
+                t.column("colorHex", .text).notNull()
+                t.column("position", .integer).notNull()
+            }
+            for (position, definition) in BadgeDefinition.builtIn.enumerated() {
+                try db.execute(
+                    sql: "INSERT INTO badgeDefinition (name, colorHex, position) VALUES (?, ?, ?)",
+                    arguments: [definition.name, definition.colorHex, position])
+            }
+        }
         try migrator.migrate(database)
     }
 
@@ -242,6 +258,48 @@ public final class SessionStore: Sendable {
             var copy = record
             copy.badges = badges[record.id.rawValue.uuidString] ?? []
             return copy
+        }
+    }
+
+    // MARK: - Badge definitions (the catalog, v8)
+
+    /// The catalog, in display order.
+    public func badgeDefinitions() throws -> [BadgeDefinition] {
+        try database.read { db in
+            try Row.fetchAll(db, sql: "SELECT name, colorHex FROM badgeDefinition ORDER BY position")
+                .map { BadgeDefinition(name: $0["name"], colorHex: $0["colorHex"]) }
+        }
+    }
+
+    /// Replaces the whole catalog, in the given order — the Settings page's
+    /// gesture. A name appears once; the first occurrence wins.
+    public func saveBadgeDefinitions(_ definitions: [BadgeDefinition]) throws {
+        try database.write { db in
+            try db.execute(sql: "DELETE FROM badgeDefinition")
+            for (position, definition) in BadgeDefinition.normalized(definitions).enumerated() {
+                try db.execute(
+                    sql: "INSERT INTO badgeDefinition (name, colorHex, position) VALUES (?, ?, ?)",
+                    arguments: [definition.name, definition.colorHex, position])
+            }
+        }
+    }
+
+    /// Appends one definition to the catalog — the API's `badge.create`.
+    /// Returns false, and changes nothing, when the name is already taken.
+    @discardableResult
+    public func addBadgeDefinition(_ definition: BadgeDefinition) throws -> Bool {
+        guard let normalized = BadgeDefinition.normalized([definition]).first else { return false }
+        return try database.write { db -> Bool in
+            let taken = try Bool.fetchOne(
+                db, sql: "SELECT EXISTS (SELECT 1 FROM badgeDefinition WHERE name = ?)",
+                arguments: [normalized.name]) ?? false
+            guard !taken else { return false }
+            let next = try Int.fetchOne(
+                db, sql: "SELECT COALESCE(MAX(position), -1) + 1 FROM badgeDefinition") ?? 0
+            try db.execute(
+                sql: "INSERT INTO badgeDefinition (name, colorHex, position) VALUES (?, ?, ?)",
+                arguments: [normalized.name, normalized.colorHex, next])
+            return true
         }
     }
 
@@ -430,6 +488,36 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
         projectID = (row["projectID"] as String?).flatMap(UUID.init(uuidString:)).map(ProjectID.init)
         createdAt = row["createdAt"]
         endedAt = row["endedAt"]
+    }
+}
+
+/// One entry of the badge catalog: a name and the color its chips wear.
+/// Global to the app — sessions reference definitions by name.
+public struct BadgeDefinition: Codable, Equatable, Identifiable, Sendable {
+    public var id: String { name }
+    public var name: String
+    public var colorHex: String
+
+    public init(name: String, colorHex: String) {
+        self.name = name
+        self.colorHex = colorHex
+    }
+
+    /// The catalog a fresh database starts with.
+    public static let builtIn = [
+        BadgeDefinition(name: "review", colorHex: "#4CC38A"),
+        BadgeDefinition(name: "wip", colorHex: "#E5B455"),
+        BadgeDefinition(name: "urgent", colorHex: "#E5646C"),
+    ]
+
+    /// Trimmed names, none empty, each once — first occurrence wins.
+    public static func normalized(_ definitions: [BadgeDefinition]) -> [BadgeDefinition] {
+        var seen = Set<String>()
+        return definitions.compactMap { definition in
+            let name = definition.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seen.insert(name).inserted else { return nil }
+            return BadgeDefinition(name: name, colorHex: definition.colorHex)
+        }
     }
 }
 

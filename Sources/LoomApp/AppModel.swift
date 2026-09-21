@@ -85,27 +85,32 @@ public final class AppModel {
 
     // MARK: - Badges: user-defined labels with a color
 
-    public struct BadgeDefinition: Identifiable, Equatable, Codable {
-        public var id: String { name }
-        public var name: String
-        public var colorHex: String
-    }
+    public typealias BadgeDefinition = LoomPersistence.BadgeDefinition
 
-    public private(set) var badgeDefinitions: [BadgeDefinition] = {
-        if let data = UserDefaults.standard.data(forKey: "loom.badges"),
-           let saved = try? JSONDecoder().decode([BadgeDefinition].self, from: data) {
-            return saved
-        }
-        return [BadgeDefinition(name: "review", colorHex: "#4CC38A"),
-                BadgeDefinition(name: "wip", colorHex: "#E5B455"),
-                BadgeDefinition(name: "urgent", colorHex: "#E5646C")]
-    }()
+    /// The catalog, as the store holds it (v8) — empty until `start()`.
+    public private(set) var badgeDefinitions: [BadgeDefinition] = []
 
     public func saveBadgeDefinitions(_ definitions: [BadgeDefinition]) {
-        badgeDefinitions = definitions
-        if let data = try? JSONEncoder().encode(definitions) {
-            UserDefaults.standard.set(data, forKey: "loom.badges")
+        try? store?.saveBadgeDefinitions(definitions)
+        reloadBadgeDefinitions()
+    }
+
+    private func reloadBadgeDefinitions() {
+        badgeDefinitions = ((try? store?.badgeDefinitions()) ?? nil) ?? BadgeDefinition.builtIn
+    }
+
+    /// Before v8 the catalog lived in UserDefaults. A saved one is moved into
+    /// the store once, over the seeded built-ins, and the key goes — so a
+    /// later deletion of every badge is never undone by a stale import.
+    private static let legacyBadgesKey = "loom.badges"
+
+    private func importLegacyBadgeDefinitions(into store: SessionStore) {
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: Self.legacyBadgesKey) else { return }
+        if let saved = try? JSONDecoder().decode([BadgeDefinition].self, from: data) {
+            try? store.saveBadgeDefinitions(saved)
         }
+        defaults.removeObject(forKey: Self.legacyBadgesKey)
     }
 
     /// Label → color: a defined badge uses its color; "PR …" labels get the
@@ -324,6 +329,8 @@ public final class AppModel {
             let store = try SessionStore(path: supportDirectory.appendingPathComponent("loom.sqlite").path)
             self.store = store
             try store.markLiveSessionsInterrupted()
+            importLegacyBadgeDefinitions(into: store)
+            reloadBadgeDefinitions()
 
             let transcripts = try FileTranscriptSink(
                 directory: supportDirectory.appendingPathComponent("transcripts"))
