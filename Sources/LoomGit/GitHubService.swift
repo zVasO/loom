@@ -620,13 +620,14 @@ public struct GitHubService: Sendable {
         return try Self.parsePRList(data)
     }
 
-    /// One PR by number in a repository named `owner/name` — the full list
-    /// row, for a hit found by search or a pasted URL. `-R` makes the call
-    /// independent of the working directory.
-    public func pullRequest(_ number: Int, repo nameWithOwner: String,
+    /// One PR by number — the full list row, for a hit found by search or a
+    /// pasted URL. Named `owner/name`, the call is independent of the working
+    /// directory (`-R`); unnamed, gh resolves the repository from `directory`.
+    public func pullRequest(_ number: Int, repo nameWithOwner: String?,
                             in directory: URL = FileManager.default.temporaryDirectory) async throws -> PullRequest? {
-        let data = try await run(["pr", "view", "\(number)", "-R", nameWithOwner,
-                                  "--json", Self.listFields], in: directory)
+        var arguments = ["pr", "view", "\(number)"]
+        if let nameWithOwner { arguments += ["-R", nameWithOwner] }
+        let data = try await run(arguments + ["--json", Self.listFields], in: directory)
         // pr view answers one object; the list parser reads an array of them.
         let object = try JSONSerialization.jsonObject(with: data)
         let wrapped = try JSONSerialization.data(withJSONObject: [object])
@@ -702,10 +703,11 @@ public struct GitHubService: Sendable {
     }
 
     /// One review carrying the verdict, its summary and the drafted line
-    /// comments — GitHub's "Submit review". Anchored to `sha`, the PR head
-    /// the lines were read on.
+    /// comments — GitHub's "Submit review". Anchored to the PR head as it is
+    /// NOW (a stale one would render every comment outdated on arrival).
     public func submitReview(_ number: Int, verdict: Verdict, body: String,
-                             comments: [DraftComment], sha: String, in repo: URL) async throws {
+                             comments: [DraftComment], in repo: URL) async throws {
+        let sha = try await headSHA(number, in: repo)
         let payload = Self.reviewPayload(verdict: verdict, body: body, sha: sha, comments: comments)
         let json = try JSONSerialization.data(withJSONObject: payload)
         _ = try await run(["api", "--method", "POST",
@@ -798,10 +800,7 @@ public struct GitHubService: Sendable {
     /// several hunks and no single line range can carry it.
     public func commentOnFile(_ number: Int, path: String, note: String,
                               in repo: URL) async throws {
-        let head = try await run(["pr", "view", "\(number)", "--json", "headRefOid",
-                                  "--jq", ".headRefOid"], in: repo)
-        let sha = String(decoding: head, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let sha = try await headSHA(number, in: repo)
         let json = try JSONSerialization.data(
             withJSONObject: Self.fileCommentPayload(path: path, sha: sha, body: note))
         _ = try await run(["api", "--method", "POST",
@@ -814,10 +813,7 @@ public struct GitHubService: Sendable {
     public func commentOnLines(_ number: Int, path: String, firstLine: Int, lastLine: Int,
                                note: String, suggestion: String?, side: String = "RIGHT",
                                in repo: URL) async throws {
-        let head = try await run(["pr", "view", "\(number)", "--json", "headRefOid",
-                                  "--jq", ".headRefOid"], in: repo)
-        let sha = String(decoding: head, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let sha = try await headSHA(number, in: repo)
         let payload = Self.lineCommentPayload(
             path: path, firstLine: firstLine, lastLine: lastLine, sha: sha,
             body: Self.lineCommentBody(note, suggestion: suggestion), side: side)
@@ -827,6 +823,13 @@ public struct GitHubService: Sendable {
         _ = try await run(["api", "--method", "POST",
                            "repos/{owner}/{repo}/pulls/\(number)/comments",
                            "--input", "-"], in: repo, stdin: json)
+    }
+
+    /// The PR head right now — what a comment must be anchored to.
+    private func headSHA(_ number: Int, in repo: URL) async throws -> String {
+        let head = try await run(["pr", "view", "\(number)", "--json", "headRefOid",
+                                  "--jq", ".headRefOid"], in: repo)
+        return String(decoding: head, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Checks the PR branch out into a dedicated worktree (`<repo>-worktrees/pr-N`)

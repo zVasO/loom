@@ -25,6 +25,15 @@ struct GlobalPRsView: View {
     @State private var expandedProjects: Set<ProjectID> = []
     /// The PR list steps aside when a review starts — toggle to bring it back.
     @State private var sidebarHidden = false
+    /// What is typed in the search field: an instant filter over every list,
+    /// a GitHub search (or a PR to open) on Return.
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
+    /// Organizations whose repositories are unfolded — folded by default,
+    /// an organization can hold hundreds.
+    @State private var expandedOwners: Set<String> = []
+    @State private var addRepoShown = false
+    @State private var addRepoText = ""
     /// Which region of the workspace is showing. Persisted: whichever one you
     /// work in, you come back to it.
     @State private var pane = PRPane(rawValue: UserDefaults.standard
@@ -87,35 +96,309 @@ struct GlobalPRsView: View {
         model.pendingPR = nil
     }
 
-    // MARK: Sidebar — projects and their PRs
+    // MARK: Sidebar — search, inbox, projects, the organizations' catalog
 
     private var sidebar: some View {
         VStack(spacing: 0) {
+            searchBar
             // The question every list below answers: all open, mine, waiting
             // on my review… Changing it refetches the expanded projects only.
             HStack(spacing: 8) {
                 PRFilterMenu(model: model,
                              projectsToRefresh: { Array(expandedProjects) })
                 Spacer()
+                if model.catalogLoading || model.inboxLoading {
+                    ProgressView().controlSize(.mini)
+                }
+                HoverIconButton(systemImage: "arrow.clockwise",
+                                help: "Refresh the inbox and the organizations' repositories") {
+                    Task {
+                        async let inbox: Void = model.refreshInbox()
+                        async let catalog: Void = model.refreshCatalog()
+                        _ = await (inbox, catalog)
+                    }
+                }
             }
-            .padding(.horizontal, 12).padding(.vertical, 10)
+            .padding(.horizontal, 12).padding(.vertical, 8)
             Divider().overlay(DefaultTheme.cardBorder)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    ForEach(gitProjects, id: \.id) { project in
-                        projectGroup(project)
+                    if let results = model.searchResults {
+                        searchSection(results)
                     }
+                    inboxSection
+                    projectsSection
+                    ForEach(model.visibleOwners, id: \.self) { owner in
+                        ownerGroup(owner)
+                    }
+                    catalogFooter
                 }
                 .padding(12)
             }
         }
-        .frame(width: 300)
+        .frame(width: Self.sidebarWidth)
+        .background(DefaultTheme.background)
+        .task {
+            // Both come from disk first; gh is only asked past their TTL.
+            async let inbox: Void = model.ensureInbox()
+            async let catalog: Void = model.ensureCatalog()
+            _ = await (inbox, catalog)
+        }
+        .confirmationDialog(
+            "Clone \(model.pendingClone?.repo ?? "") and add it as a project?",
+            isPresented: Binding(get: { model.pendingClone != nil },
+                                 set: { if !$0 { model.pendingClone = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button(model.pendingClone?.number == nil ? "Clone" : "Clone and open the PR") {
+                Task { await model.confirmPendingClone() }
+            }
+            Button("Cancel", role: .cancel) { model.pendingClone = nil }
+        } message: {
+            Text(model.cloneDirectory.map { "The clone lands in \($0.path)." }
+                 ?? "You will be asked where clones should land.")
+        }
+    }
+
+    private static let sidebarWidth: CGFloat = 340
+
+    /// One field, two behaviours: typing narrows every list on screen; Return
+    /// asks GitHub — or opens the PR the text names (a pasted URL, `o/r#12`).
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.secondaryText)
+            TextField("Search PRs and repos, or paste a PR URL", text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .focused($searchFocused)
+                .onSubmit { submitSearch() }
+                .onExitCommand { clearQuery() }
+            if model.searchLoading {
+                ProgressView().controlSize(.mini)
+            } else if !query.isEmpty || model.searchResults != nil {
+                HoverIconButton(systemImage: "xmark.circle.fill", help: "Clear") { clearQuery() }
+            }
+            HoverIconButton(systemImage: "plus", help: "Add a repository by owner/name or URL") {
+                addRepoShown = true
+            }
+            .popover(isPresented: $addRepoShown, arrowEdge: .bottom) { addRepoPopover }
+            // ⌘F lands in the field; the button itself is never seen.
+            Button("") { searchFocused = true }
+                .keyboardShortcut("f", modifiers: .command)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8)
+            .stroke(searchFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
+                    lineWidth: 1))
+        .padding(.horizontal, 12).padding(.top, 10)
+    }
+
+    private func submitSearch() {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if let reference = PRReference.parse(text) {
+            Task { await model.openPR(reference: reference) }
+        } else {
+            Task { await model.searchPRs(text) }
+        }
+    }
+
+    private func clearQuery() {
+        query = ""
+        model.clearSearch()
+    }
+
+    /// `owner/name`, a repository URL, or a PR URL: the repository is cloned
+    /// and added as a project; a PR URL opens the PR once it is.
+    private var addRepoPopover: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Add a repository")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(DefaultTheme.primaryText)
+            TextField("owner/name, or a GitHub URL", text: $addRepoText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .onSubmit { submitAddRepo() }
+            Text("Cloned with gh into your clone folder, then added as a project — its PRs appear with the others. A PR URL opens that PR right after.")
+                .font(.system(size: 10))
+                .foregroundStyle(DefaultTheme.mutedText)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                GhostButton("Cancel") { addRepoShown = false }
+                AccentButton("Add") { submitAddRepo() }
+            }
+        }
+        .padding(14)
+        .frame(width: 340)
         .background(DefaultTheme.background)
     }
 
+    private func submitAddRepo() {
+        let text = addRepoText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        addRepoShown = false
+        addRepoText = ""
+        if let reference = PRReference.parse(text), reference.repo != nil {
+            Task { await model.openPR(reference: reference) }
+        } else if let repo = GitHubRepoName.parse(nameWithOwner: text)
+                    ?? GitHubRepoName.parse(remoteURL: text) {
+            model.pendingClone = .init(repo: repo, number: nil)
+        } else {
+            model.startupError = "“\(text)” is neither owner/name nor a GitHub URL."
+        }
+    }
+
+    // MARK: Sections
+
+    private func header(_ title: String, count: Int?, systemImage: String? = nil) -> some View {
+        HStack(spacing: 6) {
+            if let systemImage {
+                Image(systemName: systemImage).font(.system(size: 9, weight: .semibold))
+            }
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .kerning(0.8)
+            if let count, count > 0 {
+                Text("\(count)")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(DefaultTheme.surfaceRaised, in: Capsule())
+            }
+        }
+        .foregroundStyle(DefaultTheme.groupHeader)
+    }
+
+    /// GitHub's answer to the typed text, grouped by repository. A hit in a
+    /// repository nobody cloned yet offers the clone.
+    private func searchSection(_ results: [GitHubService.PRSearchHit]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                header("SEARCH RESULTS", count: results.count, systemImage: "magnifyingglass")
+                Spacer()
+                HoverIconButton(systemImage: "xmark", help: "Close the results") { clearQuery() }
+            }
+            .padding(.horizontal, 2)
+            if let error = model.searchError {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.danger)
+                    .textSelection(.enabled)
+            } else if results.isEmpty {
+                Text("Nothing open matches on GitHub.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.mutedText)
+                    .padding(.leading, 2)
+            }
+            hitList(results)
+        }
+    }
+
+    /// Every PR waiting on the user's review — all organizations, external
+    /// repositories included. Filtered by the typed text like the rest.
+    @ViewBuilder
+    private var inboxSection: some View {
+        let hits = model.inbox.filter { PRSidebarFilter.matches($0, query: query) }
+        if !hits.isEmpty || query.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    header("WAITING ON ME", count: hits.count, systemImage: "tray")
+                    Spacer()
+                    if model.inboxLoading { ProgressView().controlSize(.mini) }
+                }
+                .padding(.horizontal, 2)
+                if let error = model.inboxError {
+                    Text(error)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.danger)
+                        .textSelection(.enabled)
+                } else if hits.isEmpty && !model.inboxLoading {
+                    Text("No review requested from you.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                        .padding(.leading, 2)
+                }
+                hitList(hits)
+            }
+        }
+    }
+
+    /// Hits grouped by repository, repositories alphabetical.
+    private func hitList(_ hits: [GitHubService.PRSearchHit]) -> some View {
+        let groups = Dictionary(grouping: hits, by: \.repo)
+            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+        let selectedRepo = selectedProjectID.flatMap { model.repoName(for: $0) } ?? ""
+        return VStack(alignment: .leading, spacing: 6) {
+            ForEach(groups, id: \.key) { group in
+                let repo = group.key
+                let hits = group.value
+                let cloned = model.project(forRepo: repo) != nil
+                HStack(spacing: 5) {
+                    Image(systemName: cloned ? "folder" : "icloud.and.arrow.down")
+                        .font(.system(size: 9))
+                    Text(repo)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(DefaultTheme.mutedText)
+                .help(cloned ? "Cloned as a project" : "Not cloned yet — opening a PR asks to clone it")
+                .padding(.leading, 2)
+                ForEach(hits) { hit in
+                    let selected = selectedPR?.number == hit.number
+                        && selectedRepo.caseInsensitiveCompare(hit.repo) == .orderedSame
+                    PRHitRow(hit: hit, isSelected: selected) {
+                        Task { await model.openPR(repo: hit.repo, number: hit.number) }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The projects, each with its PRs. The typed text keeps a project when
+    /// its name matches (every PR shown) or when some of its PRs do (those).
+    @ViewBuilder
+    private var projectsSection: some View {
+        let visible = gitProjects.filter { project in
+            query.isEmpty
+                || PRSidebarFilter.matches(projectName: project.name,
+                                           repo: model.repoName(for: project.id), query: query)
+                || model.prs(for: project.id).contains { PRSidebarFilter.matches($0, query: query) }
+        }
+        if !visible.isEmpty || query.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                header("PROJECTS", count: visible.count, systemImage: "folder")
+                    .padding(.horizontal, 2)
+                if visible.isEmpty {
+                    Text("No project yet — add one from an organization below, or with +.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                        .padding(.leading, 2)
+                }
+                ForEach(visible, id: \.id) { project in
+                    projectGroup(project)
+                }
+            }
+        }
+    }
+
     private func projectGroup(_ project: ProjectRecord) -> some View {
-        let prs = model.prs(for: project.id)
-        let expanded = expandedProjects.contains(project.id)
+        let nameMatches = !query.isEmpty && PRSidebarFilter.matches(
+            projectName: project.name, repo: model.repoName(for: project.id), query: query)
+        let prs = model.prs(for: project.id).filter {
+            nameMatches || PRSidebarFilter.matches($0, query: query)
+        }
+        // A search opens every project with a match: what was typed is what
+        // the user wants to see, not a chevron away.
+        let expanded = expandedProjects.contains(project.id) || (!query.isEmpty && !prs.isEmpty)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Button {
@@ -130,9 +413,18 @@ struct GlobalPRsView: View {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 8, weight: .bold))
                             .rotationEffect(.degrees(expanded ? 0 : -90))
-                        Text(project.name.uppercased())
-                            .font(.system(size: 10, weight: .semibold))
-                            .kerning(0.8)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(project.name.uppercased())
+                                .font(.system(size: 10, weight: .semibold))
+                                .kerning(0.8)
+                            if let repo = model.repoName(for: project.id),
+                               repo.caseInsensitiveCompare(project.name) != .orderedSame {
+                                Text(repo)
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(DefaultTheme.mutedText)
+                                    .lineLimit(1)
+                            }
+                        }
                         if !prs.isEmpty {
                             Text("\(prs.count)")
                                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -159,7 +451,8 @@ struct GlobalPRsView: View {
             .padding(.horizontal, 2)
             if expanded {
                 if prs.isEmpty && !model.isLoadingPRs(for: project.id) {
-                    Text(model.selectedPRFilterID == PRFilter.all.id
+                    Text(!query.isEmpty ? "No loaded PR matches."
+                         : model.selectedPRFilterID == PRFilter.all.id
                          ? "No open PR" : "No PR matches “\(model.selectedPRFilter.name)”")
                         .font(.system(size: 11))
                         .foregroundStyle(DefaultTheme.mutedText)
@@ -183,6 +476,90 @@ struct GlobalPRsView: View {
         }
     }
 
+    /// One organization (or the account itself): its repositories that are
+    /// not projects yet, each one click from becoming one.
+    @ViewBuilder
+    private func ownerGroup(_ owner: String) -> some View {
+        let repos = model.catalogRepositories(of: owner)
+            .filter { PRSidebarFilter.matches($0, query: query) }
+        let isViewer = owner == model.catalog?.viewer
+        if !repos.isEmpty || query.isEmpty {
+            let expanded = expandedOwners.contains(owner) || (!query.isEmpty && !repos.isEmpty)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Button {
+                        if expanded { expandedOwners.remove(owner) } else { expandedOwners.insert(owner) }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
+                                .rotationEffect(.degrees(expanded ? 0 : -90))
+                            Image(systemName: isViewer ? "person" : "building.2")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text(owner.uppercased())
+                                .font(.system(size: 10, weight: .semibold))
+                                .kerning(0.8)
+                            if !repos.isEmpty {
+                                Text("\(repos.count)")
+                                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(DefaultTheme.secondaryText)
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(DefaultTheme.surfaceRaised, in: Capsule())
+                            }
+                        }
+                        .foregroundStyle(DefaultTheme.groupHeader)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(isViewer ? "Your own repositories" : "Organization — repositories not added as projects yet")
+                    Spacer()
+                }
+                .padding(.horizontal, 2)
+                .contextMenu {
+                    Button("Hide \(owner)") { model.hide(owner: owner) }
+                }
+                if expanded {
+                    if repos.isEmpty {
+                        Text("Every repository here is already a project.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(DefaultTheme.mutedText)
+                            .padding(.leading, 2)
+                    }
+                    ForEach(repos) { repo in
+                        CatalogRepoRow(repo: repo, cloning: model.isCloning(repo.nameWithOwner),
+                                       onAdd: { model.pendingClone = .init(repo: repo.nameWithOwner, number: nil) },
+                                       onHide: { model.hide(repo: repo.nameWithOwner) })
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var catalogFooter: some View {
+        if let error = model.catalogError {
+            Text(error)
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.danger)
+                .textSelection(.enabled)
+        } else if model.catalog == nil && !model.catalogLoading {
+            Text("Your organizations' repositories will show here once gh answers.")
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.mutedText)
+        }
+        if model.hiddenCount > 0 {
+            Button {
+                model.unhideAll()
+            } label: {
+                Text(model.hiddenCount == 1 ? "1 hidden — show" : "\(model.hiddenCount) hidden — show")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .underline()
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 2)
+        }
+    }
     private func startReview(_ pr: GitHubService.PullRequest, project: ProjectRecord) {
         guard !model.isLaunchingReview(forPR: pr.number, in: project.id) else { return }
         selectedProjectID = project.id
@@ -475,9 +852,10 @@ private struct PRSidebarRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Circle()
-                .fill(pr.checksPassing ? DefaultTheme.groupHeader : DefaultTheme.danger)
+                .fill(PRChips.checksColor(pr))
                 .frame(width: 6, height: 6)
                 .padding(.top, 4)
+                .help(PRChips.checksSummary(pr))
             Text("#\(pr.number)")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(DefaultTheme.accent)

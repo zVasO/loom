@@ -1381,8 +1381,9 @@ struct PRRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(pr.checksPassing ? DefaultTheme.groupHeader : DefaultTheme.danger)
+                .fill(PRChips.checksColor(pr))
                 .frame(width: 7, height: 7)
+                .help(PRChips.checksSummary(pr))
             Text("#\(pr.number)")
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .foregroundStyle(DefaultTheme.accent)

@@ -153,7 +153,7 @@ public final class AppModel {
     public private(set) var interruptedSessions: [SessionRecord] = []
     /// SES-07: completed/failed/archived, browsable.
     public private(set) var historySessions: [SessionRecord] = []
-    public private(set) var startupError: String?
+    public internal(set) var startupError: String?
 
     public func clearError() {
         startupError = nil
@@ -300,6 +300,8 @@ public final class AppModel {
         do {
             try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
             loadPRListCache()
+            reviewDrafts = reviewDraftStore.load()
+            catalog = repoCatalogCache.load()
             let store = try SessionStore(path: supportDirectory.appendingPathComponent("loom.sqlite").path)
             self.store = store
             try store.markLiveSessionsInterrupted()
@@ -387,11 +389,12 @@ public final class AppModel {
         projects = ((try? store?.activeProjects()) ?? nil) ?? []
         applySavedProjectOrder()
         if selectedProject == nil { selectedProject = lastOpenedProject ?? projects.first?.id }
+        resolveProjectRepoNames()
     }
 
     // MARK: - v4: GitHub PR review through the user's authenticated gh
 
-    private func projectRepo(_ id: ProjectID?) -> URL? {
+    func projectRepo(_ id: ProjectID?) -> URL? {
         project(id).map { URL(fileURLWithPath: $0.path) }
     }
 
@@ -432,11 +435,24 @@ public final class AppModel {
     }
 
     /// nil on success, error text otherwise — the panel reports the truth.
+    /// With a draft pending on the PR, the verdict, the summary and every
+    /// drafted comment leave as ONE review; the draft is gone once GitHub
+    /// has it.
     public func submitPRReview(_ number: Int, verdict: GitHubService.Verdict,
                                body: String, in projectID: ProjectID) async -> String? {
         guard let repo = projectRepo(projectID) else { return "No repo for this project" }
-        do { try await GitHubService().submitReview(number, verdict: verdict, body: body, in: repo); return nil }
-        catch { return Self.ghErrorText(error) }
+        let key = prKey(number, projectID)
+        do {
+            if let draft = reviewDrafts[key], !draft.isEmpty {
+                try await GitHubService().submitReview(number, verdict: verdict, body: body,
+                                                       comments: draft.comments, in: repo)
+                reviewDrafts[key] = nil
+                saveReviewDrafts()
+            } else {
+                try await GitHubService().submitReview(number, verdict: verdict, body: body, in: repo)
+            }
+            return nil
+        } catch { return Self.ghErrorText(error) }
     }
 
     /// Review comments anchored to code, cached like the diff.
@@ -521,7 +537,7 @@ public final class AppModel {
         catch { return Self.ghErrorText(error) }
     }
 
-    private static func ghErrorText(_ error: Error) -> String {
+    static func ghErrorText(_ error: Error) -> String {
         if case GitHubService.GitHubError.commandFailed(_, let stderr) = error, !stderr.isEmpty {
             return stderr
         }
@@ -562,6 +578,46 @@ public final class AppModel {
     private var prFileViewsCache: [String: GitHubService.FileViews] = [:]
     private var prListCache: PRListCache { PRListCache(directory: supportDirectory) }
     private var prFilterStore: PRFilterStore { PRFilterStore(directory: supportDirectory) }
+
+    // MARK: PRs tab beyond the projects: catalog, inbox, search, drafts
+
+    /// The GitHub repository (`owner/name`) each project clones, from its
+    /// `origin` remote. `""` once looked up and not a GitHub clone — the
+    /// lookup is a git process, not to be repeated at every reload.
+    public internal(set) var projectRepoNames: [ProjectID: String] = [:]
+    /// The organizations' repositories, from disk at launch, then refreshed
+    /// a day later or on demand.
+    public internal(set) var catalog: RepoCatalogCache.Entry?
+    public internal(set) var catalogLoading = false
+    public internal(set) var catalogError: String?
+    /// Organizations and repositories the user folded away, by login.
+    public internal(set) var hiddenOwners: Set<String> = Set(
+        UserDefaults.standard.stringArray(forKey: "loom.pr.hiddenOwners") ?? [])
+    public internal(set) var hiddenRepos: Set<String> = Set(
+        UserDefaults.standard.stringArray(forKey: "loom.pr.hiddenRepos") ?? [])
+    /// Every open PR waiting on the user's review, whatever the repository.
+    public internal(set) var inbox: [GitHubService.PRSearchHit] = []
+    public internal(set) var inboxLoading = false
+    public internal(set) var inboxError: String?
+    var inboxFetchedAt: Date?
+    /// The GitHub search's answer — nil when no search is showing.
+    public internal(set) var searchResults: [GitHubService.PRSearchHit]?
+    public internal(set) var searchLoading = false
+    public internal(set) var searchError: String?
+    /// Repositories being cloned right now (`owner/name`).
+    public internal(set) var cloning: Set<String> = []
+    /// A repository to clone before a PR can open: the view asks first.
+    public var pendingClone: PendingClone?
+    /// Drafted review comments by PR key — mirrored on disk.
+    var reviewDrafts: [String: ReviewDraft] = [:]
+    var reviewDraftStore: ReviewDraftStore { ReviewDraftStore(directory: supportDirectory) }
+    var repoCatalogCache: RepoCatalogCache { RepoCatalogCache(directory: supportDirectory) }
+
+    public struct PendingClone: Equatable {
+        public let repo: String
+        /// The PR to open once the clone is a project — nil for a bare add.
+        public let number: Int?
+    }
 
     // MARK: PR filters
 
@@ -703,7 +759,7 @@ public final class AppModel {
         prReviewLaunching.contains(prKey(number, projectID))
     }
 
-    private func prKey(_ number: Int, _ projectID: ProjectID) -> String {
+    func prKey(_ number: Int, _ projectID: ProjectID) -> String {
         "\(projectID.rawValue.uuidString)#\(number)"
     }
 
