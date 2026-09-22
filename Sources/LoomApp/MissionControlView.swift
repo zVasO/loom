@@ -54,6 +54,13 @@ private struct FleetCard: View {
     let item: AppModel.SessionItem
     let onOpen: () -> Void
     @State private var surface: TerminalSurface?
+
+    init(model: AppModel, item: AppModel.SessionItem, onOpen: @escaping () -> Void) {
+        self.model = model
+        self.item = item
+        self.onOpen = onOpen
+        _surface = State(initialValue: model.cachedSurface(for: item.id))
+    }
     @State private var hovered = false
     @State private var quickReply = ""
     @State private var usage: SessionUsageSummary?
@@ -133,7 +140,8 @@ private struct FleetCard: View {
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
         .task(id: item.nativeID) {
-            surface = await model.surface(for: item.id)
+            let fetched = await model.surface(for: item.id)
+            if fetched !== surface { surface = fetched }
             // P1 perf: the native .jsonl can be MBs — read only its tail, off
             // the main actor (the context figure lives in the LAST entry).
             // Keyed by the native id: a `/resume <id>` in the terminal

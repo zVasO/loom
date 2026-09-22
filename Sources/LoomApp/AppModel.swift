@@ -1032,6 +1032,7 @@ public final class AppModel {
             // the ship actions read worktreePath, and a nil left them blind.
             spec.worktree = .existing(path: worktree, branch: pr.branch)
             let id = try await manager.launch(spec)
+            await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(pr.number) · review",
                                         state: .starting, projectID: projectID,
@@ -1214,6 +1215,7 @@ public final class AppModel {
             spec.badges = ["PR #\(number)"]
             spec.worktree = .existing(path: worktree, branch: nil)
             let id = try await manager.launch(spec)
+            await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(number) · guide",
                                         state: .starting, projectID: projectID,
@@ -1252,6 +1254,7 @@ public final class AppModel {
             spec.title = "Review · \(record.title)"
             spec.badges = ["review"]
             let reviewID = try await manager.launch(spec)
+            await cacheSurface(for: reviewID)
             tokenRegistry.register(token: token, session: reviewID)
             sessions.append(SessionItem(id: reviewID, title: "Review · \(record.title)",
                                         state: .starting, projectID: record.projectID,
@@ -1452,6 +1455,7 @@ public final class AppModel {
         spec.projectID = parent.projectID
         do {
             let id = try await manager.launch(spec)
+            await cacheSurface(for: id)
             sessions.append(SessionItem(id: id, title: name, state: .starting,
                                         projectID: parent.projectID, branch: parent.branch,
                                         parentID: parent.id, isShell: true))
@@ -1793,6 +1797,7 @@ public final class AppModel {
             try await manager.resume(record, command: command, workingDirectory: directory,
                                      geometry: preferredGrid,
                                      samplingInterval: .milliseconds(500), hookToken: token)
+            await cacheSurface(for: record.id)
             tokenRegistry.register(token: token, session: record.id)
             sessions.append(SessionItem(id: record.id, title: record.title, state: .starting,
                                         projectID: record.projectID, branch: record.branch,
@@ -1853,6 +1858,7 @@ public final class AppModel {
                 sessions.removeAll { $0.id == closed }
                 tokenRegistry.unregister(session: closed)
                 nativeExistsCache.removeValue(forKey: closed)   // settled at close: rescan once
+                surfaceCache.removeValue(forKey: closed)
                 saveStackChildren()
                 // SES-07: a close the user asked for — the cross, or `exit`,
                 // which leaves through code 0 — archives on the spot. A session
@@ -1947,6 +1953,7 @@ public final class AppModel {
                 spec.worktree = .create(repo: directory, slug: Self.slug(from: initialPrompt ?? ""))
             }
             let id = try await manager.launch(spec)
+            await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
             let record = (try? store?.session(id: id)) ?? nil
             sessions.append(SessionItem(id: id, title: record?.title ?? "Session",
@@ -2080,7 +2087,23 @@ public final class AppModel {
         return GitPanelData(changes: changes, diff: diff)
     }
 
+    /// The surfaces of the live sessions, kept from the moment their runtime
+    /// exists: a pane reads them synchronously and paints the retained screen
+    /// in its first commit, where a hop to the session actor and back showed a
+    /// spinner first (audit 2026-09-22, hot path 9). Dropped at close.
+    @ObservationIgnored private var surfaceCache: [SessionID: TerminalSurface] = [:]
+
+    public func cachedSurface(for id: SessionID) -> TerminalSurface? { surfaceCache[id] }
+
+    private func cacheSurface(for id: SessionID) async {
+        guard let surface = await manager?.runtime(for: id)?.surface() else { return }
+        surfaceCache[id] = surface
+    }
+
     public func surface(for id: SessionID) async -> TerminalSurface? {
-        await manager?.runtime(for: id)?.surface()
+        if let cached = surfaceCache[id] { return cached }
+        guard let surface = await manager?.runtime(for: id)?.surface() else { return nil }
+        surfaceCache[id] = surface
+        return surface
     }
 }
