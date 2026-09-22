@@ -193,3 +193,33 @@ public struct MonoTag: View {
         .lineLimit(1)
     }
 }
+
+/// Context ring: a track that fills clockwise from the top as the session's
+/// window fills. `nil` draws the track alone — nothing recorded yet. The
+/// colour is the caller's: LoomUI knows neither the level nor the model.
+public struct ContextRing: View {
+    let fraction: Double?
+    let color: Color
+    let size: CGFloat
+    let lineWidth: CGFloat
+
+    public init(fraction: Double?, color: Color, size: CGFloat = 14, lineWidth: CGFloat = 2) {
+        self.fraction = fraction
+        self.color = color
+        self.size = size
+        self.lineWidth = lineWidth
+    }
+
+    public var body: some View {
+        ZStack {
+            Circle()
+                .stroke(DefaultTheme.cardBorder, lineWidth: lineWidth)
+            Circle()
+                .trim(from: 0, to: min(1, max(0, fraction ?? 0)))
+                .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 0.4), value: fraction)
+        }
+        .frame(width: size, height: size)
+    }
+}
