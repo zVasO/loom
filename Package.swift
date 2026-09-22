@@ -1,32 +1,32 @@
 // swift-tools-version: 5.10
 import PackageDescription
 
-// Frontières imposées par l'architecture (§6.1 du cahier des charges) :
-// les services ne dépendent jamais de LoomUI ; tout le monde peut dépendre de LoomCore.
+// Boundaries set by the architecture (spec §6.1):
+// services never depend on LoomUI; everyone may depend on LoomCore.
 let package = Package(
     name: "Loom",
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "LoomApp", targets: ["LoomApp"]),
         .executable(name: "loom-hook", targets: ["loom-hook"]),
-        // Le CLI et le serveur MCP de l'API agents (ADR-0010).
+        // The CLI and the MCP server of the agents API (ADR-0010).
         .executable(name: "loom", targets: ["loom"]),
         .library(name: "LoomCore", targets: ["LoomCore"]),
     ],
     dependencies: [
-        // Épinglé en minor : cadence de release rapide et refonte I/O annoncée
+        // Pinned to the minor: fast release cadence and an announced I/O rework
         // (docs/research/swiftterm-pty.md §1.6, recommandation 8).
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", .upToNextMinor(from: "1.18.0")),
-        // ADR-0002 : GRDB pour migrations contrôlées, FTS5, accès concurrents.
+        // ADR-0002: GRDB for controlled migrations, FTS5, concurrent access.
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
-        // Coloration syntaxique du diff : highlight.js sous JavaScriptCore,
-        // 190 langages. Épinglé en minor : le JS embarqué change à chaque mineure.
+        // Diff syntax colours: highlight.js under JavaScriptCore,
+        // 190 languages. Pinned to the minor: the embedded JS changes on every minor.
         .package(url: "https://github.com/raspu/Highlightr.git", .upToNextMinor(from: "2.3.0")),
     ],
     targets: [
         .target(name: "LoomCore"),
-        // Le contrat de l'API agents (ADR-0010) : enveloppes, méthodes, modèles, client socket.
-        // Ne dépend que de Core — servi par l'app, consommé par le CLI et le serveur MCP.
+        // The agents API contract (ADR-0010): envelopes, methods, models, socket client.
+        // Depends on Core only — served by the app, consumed by the CLI and the MCP server.
         .target(name: "LoomAPI", dependencies: ["LoomCore"]),
         .target(name: "LoomTerminal", dependencies: ["LoomCore", .product(name: "SwiftTerm", package: "SwiftTerm")]),
         .target(name: "LoomAgents", dependencies: ["LoomCore", "LoomAPI"]),
@@ -34,16 +34,16 @@ let package = Package(
         .target(name: "LoomWeb", dependencies: ["LoomCore", "LoomUI"]),
         .target(name: "LoomPersistence", dependencies: ["LoomCore", "LoomTerminal", "LoomAgents", .product(name: "GRDB", package: "GRDB.swift")]),
         .target(name: "LoomIPC", dependencies: ["LoomCore", "LoomAPI"]),
-        // Le helper appelé par les hooks des agents (ADR-0005) : stdin → socket, sans dépendance.
+        // The helper the agents' hooks call (ADR-0005): stdin → socket, no dependencies.
         .executableTarget(name: "loom-hook"),
-        // `loom` : le CLI et le serveur MCP, clients du contrat LoomAPI. La logique vit dans
-        // LoomCLI (testable) ; l'exécutable n'est qu'un point d'entrée.
+        // `loom`: the CLI and the MCP server, clients of the LoomAPI contract. The logic lives in
+        // LoomCLI (testable); the executable is only an entry point.
         .target(name: "LoomCLI", dependencies: ["LoomAPI", "LoomCore"]),
         .executableTarget(name: "loom", dependencies: ["LoomCLI"]),
         .target(name: "LoomSessions", dependencies: ["LoomCore", "LoomTerminal", "LoomAgents", "LoomPersistence", "LoomGit"]),
-        // Adapters de test du seam PTY, partagés par les cibles de test (jamais exposé en produit).
+        // Test adapters for the PTY seam, shared by the test targets (never shipped in the product).
         .target(name: "LoomTerminalTestSupport", dependencies: ["LoomCore", "LoomTerminal"]),
-        // LoomUI lit les valeurs de LoomGit (diff) pour les colorer : sens UI → service, jamais l'inverse.
+        // LoomUI reads LoomGit values (diff) to colour them: UI → service direction, never the reverse.
         .target(name: "LoomUI", dependencies: ["LoomCore", "LoomTerminal", "LoomGit",
                                                .product(name: "Highlightr", package: "Highlightr")]),
         .executableTarget(
