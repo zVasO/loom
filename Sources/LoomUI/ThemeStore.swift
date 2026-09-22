@@ -297,13 +297,16 @@ public final class ThemeStore {
     @ObservationIgnored private var contextProjectID: ProjectID?
 
     private init() {
-        systemIsDark = Self.currentSystemIsDark()
-        appearanceMode = AppearanceMode(rawValue: UserDefaults.standard
+        let isDark = Self.currentSystemIsDark()
+        let mode = AppearanceMode(rawValue: UserDefaults.standard
             .string(forKey: Self.appearanceKey) ?? "") ?? .system
         let saved = UserDefaults.standard.string(forKey: Self.globalKey) ?? ThemeFamily.loom.name
         let family = ThemeFamily.resolve(saved, in: ThemeFamily.builtins) ?? .loom
-        palette = family.palette(dark: Self.resolveIsDark(mode: appearanceMode,
-                                                          systemIsDark: systemIsDark))
+
+        systemIsDark = isDark
+        appearanceMode = mode
+        palette = family.palette(dark: Self.resolveIsDark(mode: mode,
+                                                          systemIsDark: isDark))
         // KVO on the app's effective appearance: what changes when the user
         // flips macOS (or its schedule does) while Loom runs.
         appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance,
