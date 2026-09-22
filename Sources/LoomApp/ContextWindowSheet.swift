@@ -63,7 +63,7 @@ struct ContextWindowSheet: View {
         }
         .frame(width: 620, height: 760)
         .background(DefaultTheme.surface)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(DefaultTheme.colorScheme)
         .task(id: state) { await refresh() }
     }
 

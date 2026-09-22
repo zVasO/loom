@@ -170,7 +170,7 @@ struct ContentView: View {
             }
         }
         .background(DefaultTheme.background)
-        .preferredColorScheme(ThemeStore.shared.palette.isLight ? .light : .dark)
+        .preferredColorScheme(DefaultTheme.colorScheme)
         .onAppear {
             model.start()
             applyTheme()
@@ -469,13 +469,24 @@ struct ContentView: View {
             })
         }
 
-        for palette in ThemePalette.all {
-            actions.append(PaletteAction(id: "theme.\(palette.name)", icon: "paintpalette",
-                                         title: "Set theme: \(palette.name)",
-                                         subtitle: "Global theme",
+        // Themes — quick-apply, filterable by name; and the appearance.
+        for family in ThemeStore.shared.families {
+            actions.append(PaletteAction(id: "theme.\(family.name)", icon: "paintpalette",
+                                         title: "Set theme: \(family.name)",
+                                         subtitle: "\(family.variantLightName) · \(family.variantDarkName)",
                                          section: "Theme") {
-                ThemeStore.shared.setGlobalTheme(palette.name)
+                ThemeStore.shared.setGlobalTheme(family.name)
                 NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
+            })
+        }
+        for mode in AppearanceMode.allCases {
+            actions.append(PaletteAction(id: "appearance.\(mode.rawValue)",
+                                         icon: mode == .system ? "circle.lefthalf.filled"
+                                             : mode == .light ? "sun.max" : "moon",
+                                         title: "Appearance: \(mode.label)",
+                                         subtitle: mode == .system ? "Follow macOS" : "Force \(mode.label.lowercased())",
+                                         section: "Theme") {
+                ThemeStore.shared.setAppearanceMode(mode)
             })
         }
 
@@ -2443,7 +2454,7 @@ struct SessionDetailView: View {
                 }
                 .padding(14)
                 .background(DefaultTheme.surface)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(DefaultTheme.colorScheme)
             }
             GhostButton("Git", systemImage: "arrow.triangle.branch") {
                 withAnimation(.hover) { gitShown.toggle() }
@@ -2559,7 +2570,7 @@ struct SessionDetailView: View {
         .padding(16)
         .frame(width: 520, alignment: .leading)
         .background(DefaultTheme.surface)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(DefaultTheme.colorScheme)
     }
 
     private func infoRow(_ label: String, _ value: String,

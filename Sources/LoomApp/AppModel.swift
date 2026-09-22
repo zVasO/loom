@@ -351,6 +351,7 @@ public final class AppModel {
     public func start() {
         do {
             try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
+            ThemeStore.shared.configure(themesDirectory: supportDirectory.appendingPathComponent("themes"))
             loadPRListCache()
             reviewDrafts = reviewDraftStore.load()
             catalog = repoCatalogCache.load()
