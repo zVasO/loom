@@ -352,6 +352,28 @@ public final class ThemeStore {
         apply(projectID: contextProjectID)
     }
 
+    /// A tweakcn theme, from what the user pasted: its CSS export, parsed
+    /// here; or a name / URL, fetched from tweakcn's registry. The family
+    /// comes back unsaved — the caller previews it, then `addFamily`.
+    public func importTweakcn(_ input: String) async throws -> ThemeFamily {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if TweakcnImport.looksLikeCSS(text) {
+            let (light, dark) = try TweakcnImport.parseCSS(text)
+            return TweakcnImport.family(named: "Imported theme", light: light, dark: dark)
+        }
+        guard let url = TweakcnImport.registryURL(for: text) else {
+            throw TweakcnImport.ImportError.badURL(text)
+        }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw TweakcnImport.ImportError.notFound(url.absoluteString)
+        }
+        let parsed = try TweakcnImport.parseRegistry(data)
+        let name = parsed.name == "Imported theme" ? TweakcnImport.themeName(from: url)
+                                                   : TweakcnImport.prettify(parsed.name)
+        return TweakcnImport.family(named: name, light: parsed.light, dark: parsed.dark)
+    }
+
     // MARK: Global theme and appearance
 
     /// The chosen family's name — an old palette name stored by a previous
