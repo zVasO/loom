@@ -16,6 +16,11 @@ struct SettingsPage: View {
     @AppStorage("loom.shortcut.newTab") private var keyNewTab = "t"
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
+    /// The family under the pointer in the grid — what the preview shows.
+    @State private var hoveredFamily: String?
+    /// Which variant the preview shows; starts on the app's, switchable.
+    @State private var previewDark = false
+    @State private var importShown = false
 
     var body: some View {
         ScrollView {
@@ -324,22 +329,88 @@ struct SettingsPage: View {
 
     // MARK: Themes
 
+    /// Appearance, the families, and a preview of whichever family the
+    /// pointer is on (else the chosen one) — in either variant.
     private var themesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let store = ThemeStore.shared
+        let previewFamily = hoveredFamily.flatMap { store.family(named: $0) }
+            ?? store.family(named: store.globalFamilyName) ?? .loom
+        return VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Theme")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)],
+            card {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Appearance")
+                            .font(.system(size: 13))
+                            .foregroundStyle(DefaultTheme.primaryText)
+                        Text(store.appearanceMode == .system
+                             ? "Following macOS — \(store.systemIsDark ? "dark" : "light") right now."
+                             : "Forced \(store.appearanceMode.label.lowercased()), whatever macOS says.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                    }
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { store.appearanceMode },
+                        set: { store.setAppearanceMode($0) })) {
+                        ForEach(AppearanceMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+            }
+            HStack {
+                Text("Every theme comes in light and dark; the appearance picks the variant.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                Spacer()
+                GhostButton("Import from tweakcn…", systemImage: "square.and.arrow.down") {
+                    importShown = true
+                }
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 12)],
                       alignment: .leading, spacing: 12) {
-                ForEach(ThemeStore.shared.families) { family in
-                    ThemeCard(palette: family.palette(dark: ThemeStore.shared.isDark),
-                              isActive: ThemeStore.shared.globalFamilyName == family.name) {
-                        ThemeStore.shared.setGlobalTheme(family.name)
-                        NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
+                ForEach(store.families) { family in
+                    ThemeCard(family: family,
+                              isActive: store.globalFamilyName == family.name,
+                              onSelect: {
+                                  store.setGlobalTheme(family.name)
+                                  NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
+                              },
+                              onHover: { inside in
+                                  if inside { hoveredFamily = family.name }
+                                  else if hoveredFamily == family.name { hoveredFamily = nil }
+                              })
+                    .contextMenu {
+                        if !family.isBuiltIn {
+                            Button("Delete “\(family.name)”", role: .destructive) {
+                                store.removeFamily(family)
+                                NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
+                            }
+                        }
                     }
                 }
             }
+            ThemePreview(family: previewFamily, dark: $previewDark, onUse: usePreviewAction(previewFamily))
+                .onAppear { previewDark = store.isDark }
             Text("The global theme. Projects below can override it — the app follows the project you are working in.")
                 .font(.system(size: 11))
                 .foregroundStyle(DefaultTheme.secondaryText)
+        }
+        .sheet(isPresented: $importShown) {
+            ThemeImportSheet()
+        }
+    }
+
+    /// "Use this theme" — absent when the previewed family is already the one.
+    private func usePreviewAction(_ family: ThemeFamily) -> (() -> Void)? {
+        guard family.name != ThemeStore.shared.globalFamilyName else { return nil }
+        return {
+            ThemeStore.shared.setGlobalTheme(family.name)
+            NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
         }
     }
 
@@ -385,46 +456,75 @@ struct SettingsPage: View {
     }
 }
 
-/// A theme in the picker grid: name + the palette's signature swatches on its
-/// own background — the card previews the theme it applies.
+/// A family in the picker grid: its two variants side by side — each half
+/// on its own background with its signature swatches — so the card shows
+/// what the theme looks like by day and by night.
 private struct ThemeCard: View {
-    let palette: ThemePalette
+    let family: ThemeFamily
     let isActive: Bool
     let onSelect: () -> Void
+    let onHover: (Bool) -> Void
     @State private var hovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
+                half(family.palette(dark: false))
+                half(family.palette(dark: true))
+            }
             HStack(spacing: 6) {
-                ForEach(Array([palette.accent, palette.groupHeader,
-                               palette.stateNeedsInput, palette.branch,
-                               palette.danger].enumerated()), id: \.offset) { _, swatch in
-                    Circle().fill(swatch).frame(width: 12, height: 12)
+                Text(family.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                if !family.isBuiltIn {
+                    Text("yours")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(DefaultTheme.surfaceRaised, in: Capsule())
                 }
                 Spacer()
                 if isActive {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 12))
-                        .foregroundStyle(palette.accent)
+                        .foregroundStyle(DefaultTheme.accent)
                 }
             }
-            Text(palette.name)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(palette.primaryText)
-            Text("The quick brown fox")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(palette.secondaryText)
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(DefaultTheme.surface)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.background, in: RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10)
-            .stroke(isActive ? palette.accent : (hovered ? palette.accent.opacity(0.5)
-                                                         : DefaultTheme.cardBorder),
+            .stroke(isActive ? DefaultTheme.accent : (hovered ? DefaultTheme.accent.opacity(0.5)
+                                                              : DefaultTheme.cardBorder),
                     lineWidth: isActive ? 1.5 : 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
-        .onHover { hovered = $0 }
+        .onHover { inside in
+            hovered = inside
+            onHover(inside)
+        }
         .animation(.hover, value: hovered)
+    }
+
+    private func half(_ palette: ThemePalette) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                ForEach(Array([palette.accent, palette.groupHeader, palette.stateNeedsInput,
+                               palette.branch, palette.danger].enumerated()), id: \.offset) { _, swatch in
+                    Circle().fill(swatch).frame(width: 9, height: 9)
+                }
+            }
+            Text(palette.isLight ? family.variantLightName : family.variantDarkName)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(palette.primaryText)
+                .lineLimit(1)
+            Text("Aa 0123")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(palette.secondaryText)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.background)
     }
 }
