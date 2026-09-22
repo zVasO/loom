@@ -159,7 +159,12 @@ private struct FleetCard: View {
     private var preview: some View {
         if let surface {
             MiniTerminalPreview(surface: surface)
-                .task { await surface.attached() }
+                // A preview's cadence: four frames a second are plenty for 7 pt
+                // text, where the pane's rate cost a snapshot, a main-actor hop
+                // and a pass of 22 rows per card per frame.
+                .task(id: ObjectIdentifier(surface)) {
+                    await surface.attached(cadence: .preview(.milliseconds(250)))
+                }
         } else {
             ProgressView().controlSize(.small)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

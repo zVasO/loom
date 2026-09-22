@@ -206,4 +206,30 @@ struct TerminalSurfaceTests {
         #expect(surface.screen.lines.first?.text.hasPrefix("hello world") == true)
         surface.detach()
     }
+
+    // P1-11: a preview asks for its own cadence — a burst that streams for
+    // half a second reaches it a handful of times, not sixty.
+    @Test("a preview watcher receives frames at its cadence, not the pane's")
+    func cadenceDApercu() async throws {
+        let pty = ScriptedPTYHost()
+        let runtime = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree"),
+                              geometry: TerminalGeometry(cols: 40, rows: 6)),
+            using: SessionRuntime.Dependencies(
+                ptyHost: pty, transcript: MemoryTranscriptSink(),
+                makeEngine: { geometry, _ in SwiftTermEngine(geometry: geometry, scrollback: 100) })
+        ).runtime
+        let surface = runtime.surface()
+        surface.attach(cadence: .preview(.milliseconds(200)))
+        for index in 0..<40 {
+            pty.emit("burst \(index)\r\n")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(surface.framesReceived <= 5,
+                "400 ms of burst at a 200 ms cadence: the attach frame, a leading edge and a trailing edge or two — saw \(surface.framesReceived)")
+        #expect(surface.screen.lines.contains { $0.text.hasPrefix("burst 39") }, "and the last frame is current")
+        surface.detach()
+    }
 }

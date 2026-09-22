@@ -38,11 +38,11 @@ public final class TerminalSurface {
         self.runtime = runtime
     }
 
-    /// Attach: frames keep arriving until detached. Idempotent.
-    public func attach() {
+    /// Attach: frames keep arriving until detached, at `cadence`. Idempotent.
+    public func attach(cadence: FrameCadence = .live) {
         guard !isAttached else { return }
         isAttached = true
-        runtime?.setAttachment(terminal, attached: true)
+        runtime?.setAttachment(terminal, attached: true, cadence: cadence)
     }
 
     /// Detach: no more frames are produced for this surface; `screen` keeps the
@@ -50,13 +50,13 @@ public final class TerminalSurface {
     public func detach() {
         guard isAttached else { return }
         isAttached = false
-        runtime?.setAttachment(terminal, attached: false)
+        runtime?.setAttachment(terminal, attached: false, cadence: .live)
     }
 
     /// The normal lifecycle path: `.task { await surface.attached() }`.
     /// Attaches on entry, detaches on cancellation — forgetting is unrepresentable.
-    public func attached() async {
-        attach()
+    public func attached(cadence: FrameCadence = .live) async {
+        attach(cadence: cadence)
         defer { detach() }
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in

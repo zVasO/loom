@@ -87,9 +87,10 @@ public final class SessionRuntime: @unchecked Sendable {
     var launchGeometry: TerminalGeometry { geometry }
     /// Shared projections, MainActor-confined (one per TerminalID).
     @MainActor var surfaces: [TerminalID: TerminalSurface] = [:]
-    /// Terminals with at least one attached surface — read on the queue for every byte
-    /// batch, protected by the lock (no rendering for sessions that are not visible).
-    private var attachedTerminals: Set<TerminalID> = []
+    /// Terminals with an attached surface and the cadence it asked for — read
+    /// on the queue for every byte batch, protected by the lock (no rendering
+    /// for sessions that are not visible, and a preview's rate for a preview).
+    private var attachedTerminals: [TerminalID: FrameCadence] = [:]
     /// Coalescing: at most one frame in flight (confined to the session queue).
     private var frameScheduled = false
     private let lock = NSLock()
@@ -211,12 +212,27 @@ public final class SessionRuntime: @unchecked Sendable {
 
     /// Called from the MainActor by the surfaces; attaching immediately paints the
     /// current screen (reattachment path < 100 ms, TRM-03).
-    func setAttachment(_ terminal: TerminalID, attached: Bool) {
+    func setAttachment(_ terminal: TerminalID, attached: Bool, cadence: FrameCadence) {
         lock.withLock {
-            if attached { attachedTerminals.insert(terminal) } else { attachedTerminals.remove(terminal) }
+            if attached { attachedTerminals[terminal] = cadence } else { attachedTerminals[terminal] = nil }
         }
         if attached {
             queue.async { self.deliverFrame(force: true) }
+        }
+    }
+
+    /// The interval the watchers ask for: a pane's frame rate when one is
+    /// live, otherwise the slowest a preview needs — a Mission Control card
+    /// at 7 pt text has no use for 60 snapshots a second (audit 2026-09-22,
+    /// hot path 10). Read under the lock.
+    private func watchedInterval() -> Duration? {
+        lock.withLock {
+            attachedTerminals.values.map { cadence -> Duration in
+                switch cadence {
+                case .live: frameInterval
+                case .preview(let interval): interval
+                }
+            }.min()
         }
     }
 
@@ -234,12 +250,11 @@ public final class SessionRuntime: @unchecked Sendable {
 
     /// On the session queue: schedules at most one frame delivery per interval.
     private func scheduleFrame() {
-        let anyoneWatching = lock.withLock { !attachedTerminals.isEmpty }
-        guard anyoneWatching, !frameScheduled else { return }
+        guard let interval = watchedInterval(), !frameScheduled else { return }
         frameScheduled = true
         let now = ContinuousClock().now
-        let sinceLast = lastFrameAt.map { now - $0 } ?? frameInterval
-        let remaining = frameInterval - sinceLast
+        let sinceLast = lastFrameAt.map { now - $0 } ?? interval
+        let remaining = interval - sinceLast
         let deliver = {
             self.frameScheduled = false
             self.lastFrameAt = ContinuousClock().now
@@ -271,7 +286,7 @@ public final class SessionRuntime: @unchecked Sendable {
     /// surfaces — unless nothing visible changed since the last delivery.
     /// `force`: an attach paints whatever is there.
     private func deliverFrame(force: Bool = false) {
-        let watching = lock.withLock { attachedTerminals }
+        let watching = lock.withLock { Array(attachedTerminals.keys) }
         guard !watching.isEmpty, let engine else { return }
         let key = FrameKey(revision: engine.revision, cursor: engine.cursor,
                            scrollbackRows: engine.scrollbackRows, modes: engine.modes,

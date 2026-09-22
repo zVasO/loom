@@ -87,6 +87,15 @@ public extension TerminalEngine {
     func setFocus(_ focused: Bool) {}
 }
 
+// MARK: - Watchers
+
+/// How often a watcher wants frames: a pane at the user's frame rate, a
+/// preview at a rate its tiny type can show.
+public enum FrameCadence: Sendable, Equatable {
+    case live
+    case preview(Duration)
+}
+
 // MARK: - Input modes
 
 /// The DEC private modes and keyboard protocol a program negotiates, read by
