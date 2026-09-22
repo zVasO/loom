@@ -28,6 +28,16 @@ public final class UsageIndex: Sendable {
                                                   options: [.skipsHiddenFiles]) else {
             return RefreshSummary(filesScanned: 0, turnsAdded: 0)
         }
+        // What is already consumed, read ONCE: a refresh walks thousands of
+        // files, and each used to cost a read transaction of its own before
+        // being skipped as unchanged.
+        let consumedFiles: [String: (bytes: UInt64, modifiedAt: Double)] = try database.read { db in
+            var map: [String: (bytes: UInt64, modifiedAt: Double)] = [:]
+            for row in try Row.fetchAll(db, sql: "SELECT path, bytesConsumed, modifiedAt FROM usageFile") {
+                map[row["path"]] = (UInt64(row["bytesConsumed"] as Int64), row["modifiedAt"] as Double)
+            }
+            return map
+        }
         var scanned = 0
         var added = 0
         for case let file as URL in enumerator where file.pathExtension == "jsonl" {
@@ -36,17 +46,15 @@ public final class UsageIndex: Sendable {
                   let modified = values.contentModificationDate else { continue }
             scanned += 1
             added += try consume(file: file, size: UInt64(size),
-                                 modifiedAt: modified.timeIntervalSince1970, calendar: calendar)
+                                 modifiedAt: modified.timeIntervalSince1970,
+                                 known: consumedFiles[file.path], calendar: calendar)
         }
         return RefreshSummary(filesScanned: scanned, turnsAdded: added)
     }
 
-    private func consume(file: URL, size: UInt64, modifiedAt: Double, calendar: Calendar) throws -> Int {
+    private func consume(file: URL, size: UInt64, modifiedAt: Double,
+                         known: (bytes: UInt64, modifiedAt: Double)?, calendar: Calendar) throws -> Int {
         let path = file.path
-        let known: (bytes: UInt64, modifiedAt: Double)? = try database.read { db in
-            try Row.fetchOne(db, sql: "SELECT bytesConsumed, modifiedAt FROM usageFile WHERE path = ?",
-                             arguments: [path]).map { (UInt64($0["bytesConsumed"] as Int64), $0["modifiedAt"] as Double) }
-        }
         if let known, known.bytes == size, known.modifiedAt == modifiedAt { return 0 }
         // A file that shrank was rewritten: start over (the primary key absorbs re-reads).
         let offset: UInt64 = (known.map { $0.bytes <= size ? $0.bytes : 0 }) ?? 0
