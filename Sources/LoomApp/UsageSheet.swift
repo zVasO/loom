@@ -58,7 +58,7 @@ struct UsageSheet: View {
         }
         .frame(width: 1000, height: 880)
         .background(DefaultTheme.surface)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(DefaultTheme.colorScheme)
         .task { await refresh() }
     }
 

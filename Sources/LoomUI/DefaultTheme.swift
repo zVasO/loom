@@ -14,6 +14,10 @@ public enum DefaultTheme {
     /// single call-site change.
     static var palette: ThemePalette { ThemeStore.shared.palette }
 
+    /// The colour scheme system controls (fields, pickers, sheets) should
+    /// take: the one the active palette was made for.
+    public static var colorScheme: ColorScheme { palette.isLight ? .light : .dark }
+
     // Backgrounds
     public static var background: Color { palette.background }
     public static var contentBackground: Color { palette.contentBackground }
@@ -75,7 +79,7 @@ public enum DefaultTheme {
         }
     }
 
-    static let ansiPalette: [Color] = [
+    public static let ansiPalette: [Color] = [
         Color(white: 0.1), Color(red: 0.8, green: 0.25, blue: 0.25),
         Color(red: 0.3, green: 0.75, blue: 0.4), Color(red: 0.85, green: 0.75, blue: 0.3),
         Color(red: 0.35, green: 0.55, blue: 0.9), Color(red: 0.75, green: 0.45, blue: 0.85),
