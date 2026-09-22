@@ -340,7 +340,8 @@ struct SessionRuntimeTests {
         surface.resize(cols: 88, rows: 45)   // the drawer widened
         surface.resize(cols: 88, rows: 45)   // the same pane measured twice
         surface.resize(cols: 88, rows: 46)   // the window grew
-        surface.resize(cols: 19, rows: 46)   // below the floor: refused
+        surface.resize(cols: 19, rows: 46)   // below the column floor: refused
+        surface.resize(cols: 88, rows: 4)    // below the row floor: refused
 
         #expect(await pollUntil { pty.resizes.count == 2 })
         #expect(pty.resizes == [TerminalGeometry(cols: 88, rows: 45),

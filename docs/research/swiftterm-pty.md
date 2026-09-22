@@ -1056,3 +1056,44 @@ qui font foi ici car liés à la révision analysée).
 **Apple** — `man 3 openpty` · `man 2 setsid` · `man 4 tty` ·
 `MacOSX.sdk/usr/include/sys/spawn.h` · `.../usr/include/spawn.h` ·
 `.../usr/include/sys/ttycom.h` · `.../usr/include/sys/signal.h`
+
+
+### 7.6 ⚠️ Le masque de signaux du thread qui forke — clôt §6.1 par la pratique
+
+`TIOCSWINSZ` envoie bien `SIGWINCH` (§6.1) : vérifié par test réel (`trap …
+WINCH` sous `sh`). Mais **l'agent ne le recevait pas**, et la cause est en
+amont de SwiftTerm.
+
+`SessionManager` est un acteur : le `forkpty` s'exécute sur un thread du pool
+coopératif Swift, c'est-à-dire un thread workqueue du noyau. XNU crée ces
+threads avec un masque qui bloque presque tout — `bsd/kern/kern_fork.c`,
+`uthread_init` :
+
+```c
+if (workq_thread) {
+        /* workq_thread threads will not inherit masks */
+        uth->uu_sigmask = ~workq_threadmask;
+}
+```
+
+avec, dans `bsd/sys/signal.h`, `workq_threadmask` ne laissant passer que
+SIGILL, SIGTRAP, SIGEMT, SIGFPE, SIGBUS, SIGSEGV, SIGSYS, SIGPIPE et SIGPROF.
+**SIGWINCH, SIGINT, SIGTERM, SIGHUP et SIGCHLD sont bloqués.** `fork` copie le
+masque du thread appelant vers l'enfant, `execve` le conserve (`execve(2)` :
+« Blocked signals remain blocked regardless of changes to the signal
+action »), et Bun — donc claude — ne le remet jamais à zéro au démarrage
+(Node le fait, bash, perl et python non, zsh seulement en interactif : d'où
+un claude qui suit le resize sous Terminal.app et pas sous Loom). Claude ne
+relit sa taille QUE dans son handler SIGWINCH (Bun met `stdout.columns/rows`
+en cache à la création du flux ; pas de polling ; Ctrl+L redessine à la
+taille en cache — anthropics/claude-code#86775).
+
+Le helper `PseudoTerminalHelpers.fork` de SwiftTerm 1.18–1.20 ne fait, dans
+l'enfant, que `chdir` + `execve` : aucun `sigprocmask`, aucun `sigaction`
+`SIG_DFL`, pas de `FD_CLOEXEC` sur le master (la branche `main` a ajouté le
+reset depuis, non publié). Loom porte donc son propre chemin (`PTYSpawn`,
+`ForkPTYHost.swift`) qui fait ce que font iTerm2, kitty et WezTerm entre
+`fork` et `execve` : dispositions par défaut, puis masque vide, puis `execve` ;
+et `FD_CLOEXEC` sur le master côté parent. Les tests `ForkPTYHostSignalTests`
+bloquent le signal sur le thread qui forke autour de `launch`, avec une sonde
+perl, qui ne nettoie pas son masque.
