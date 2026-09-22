@@ -130,16 +130,17 @@ public final class HookSocketServer: @unchecked Sendable {
         drainLines(from: client)
     }
 
+    /// Lines are cut out of the connection's buffer IN PLACE: the copy of
+    /// the whole buffer per 4 KB event, and the copy back, are gone.
     private func drainLines(from client: Int32) {
-        guard var buffer = connections[client]?.buffer else { return }
-        while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-            let line = buffer[buffer.startIndex..<newline]
-            buffer = buffer[buffer.index(after: newline)...]
-            deliver(Data(line), from: client)
-            // A rejected request dropped the connection: nothing more to read from it.
-            guard connections[client] != nil else { return }
+        while let buffer = connections[client]?.buffer,
+              let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
+            let line = buffer.subdata(in: buffer.startIndex..<newline)
+            connections[client]?.buffer.removeSubrange(buffer.startIndex...newline)
+            deliver(line, from: client)
+            // A rejected request dropped the connection: the loop's condition
+            // sees it gone and stops.
         }
-        connections[client]?.buffer = Data(buffer)
     }
 
     private func deliver(_ line: Data, from client: Int32) {
