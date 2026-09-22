@@ -920,14 +920,33 @@ public final class AppModel {
 
     /// Projects that no longer exist are dropped here rather than at load
     /// time, where `projects` has not been read from the database yet.
+    /// Coalesced like the tabs: a filter change refreshes every expanded
+    /// project, and each answer used to serialise and write the whole cache.
     private func savePRListCache() {
-        let known = Set(projects.map(\.id))
-        var lists: PRListCache.Lists = [:]
-        for (key, entry) in prLists where known.contains(key.projectID) {
-            lists[key.projectID, default: [:]][key.filterID] = entry
+        prListSaveTask?.cancel()
+        prListSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled, let self else { return }
+            let known = Set(self.projects.map(\.id))
+            var lists: PRListCache.Lists = [:]
+            for (key, entry) in self.prLists where known.contains(key.projectID) {
+                lists[key.projectID, default: [:]][key.filterID] = entry
+            }
+            let cache = self.prListCache
+            Task.detached(priority: .utility) { cache.save(lists) }
         }
-        let cache = prListCache
-        Task.detached(priority: .utility) { cache.save(lists) }
+    }
+
+    @ObservationIgnored private var prListSaveTask: Task<Void, Never>?
+
+    /// Several projects at once: the lists arrive together instead of one
+    /// gh process after another (audit 2026-09-22, secondary findings).
+    public func ensurePRs(for projectIDs: [ProjectID]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for projectID in projectIDs {
+                group.addTask { await self.ensurePRs(for: projectID) }
+            }
+        }
     }
 
     /// How old a project's cached list is — nil when nothing is cached.

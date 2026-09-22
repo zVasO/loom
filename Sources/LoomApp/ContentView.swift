@@ -1761,10 +1761,16 @@ struct RecentSessionRow: View {
         .onTapGesture(perform: onOpen)
     }
 
-    private static func relative(_ date: Date) -> String {
+    /// One formatter for every row — Foundation's formatters are expensive to
+    /// build, and one was made per row per pass.
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
+        return formatter
+    }()
+
+    private static func relative(_ date: Date) -> String {
+        relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
