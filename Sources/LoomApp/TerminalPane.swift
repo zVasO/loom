@@ -26,7 +26,7 @@ struct TerminalPane: View {
     /// default — it would take the AZERTY braces and the dead keys away.
     @AppStorage(KeyboardPreferences.userDefaultsKey) private var optionAsMeta = false
 
-    /// Below this the surface itself refuses the geometry (20 × 4 cells), so
+    /// Below this the surface itself refuses the geometry (20 × 5 cells), so
     /// there is nothing to apply — and the first layout pass measures zero.
     private static let minimumPaneSize = CGSize(width: 160, height: 60)
 

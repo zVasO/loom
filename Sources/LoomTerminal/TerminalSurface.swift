@@ -100,8 +100,9 @@ public final class TerminalSurface {
     /// TRM-02: the view announces its grid; engine and PTY follow (SIGWINCH on the
     /// agent side). Deduplicated by the runtime against the grid it actually
     /// applied — a memory kept here could disagree with it, and once did.
+    /// Floored at `TerminalGeometry.minimum`: a smaller grid is refused, not clamped.
     public func resize(cols: Int, rows: Int) {
-        guard cols >= 20, rows >= 4 else { return }
+        guard cols >= TerminalGeometry.minimum.cols, rows >= TerminalGeometry.minimum.rows else { return }
         runtime?.resize(to: TerminalGeometry(cols: cols, rows: rows))
     }
 

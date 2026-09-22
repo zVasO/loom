@@ -1,4 +1,5 @@
 import AppKit
+import LoomCore
 import LoomTerminal
 import SwiftUI
 
@@ -29,8 +30,8 @@ public enum TerminalMetrics {
                             insets: CGFloat = gridInset * 2) -> (cols: Int, rows: Int) {
         let cell = cellSize
         guard cell.width > 0, cell.height > 0 else { return (80, 24) }
-        return (max(20, Int((size.width - insets) / cell.width)),
-                max(4, Int((size.height - insets) / cell.height)))
+        return (max(TerminalGeometry.minimum.cols, Int((size.width - insets) / cell.width)),
+                max(TerminalGeometry.minimum.rows, Int((size.height - insets) / cell.height)))
     }
 
     /// Is the end of the content still at the bottom edge of the viewport?

@@ -107,6 +107,17 @@ public final class SessionRuntime: @unchecked Sendable {
             self.channel?.resize(to: geometry)
             Self.log.debug("resize applied: \(geometry.cols)×\(geometry.rows)")
             self.scheduleFrame()
+            // A live agent answers SIGWINCH by repainting. Silence after a
+            // resize is the one symptom of a signal that never arrived —
+            // worth a line in Console before anyone stares at a garbled pane.
+            // Not during the boot: an agent that has not painted yet owes nothing.
+            let bytesBefore = self.bytesReceived
+            guard bytesBefore > 0 else { return }
+            self.queue.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self, self.exitStatus == nil,
+                      self.appliedGeometry == geometry, self.bytesReceived == bytesBefore else { return }
+                Self.log.info("no output 1 s after the resize to \(geometry.cols)×\(geometry.rows): the agent may not have received SIGWINCH")
+            }
         }
     }
 

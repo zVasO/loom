@@ -32,6 +32,10 @@ public struct TerminalGeometry: Sendable, Equatable, Codable {
     /// Sizes the PTY before any view exists, so the agent never writes
     /// to an 80×24 screen that would have to be reflowed later.
     public static let `default` = TerminalGeometry(cols: 120, rows: 32)
+    /// The smallest grid a program is ever told about. Below it the grid means
+    /// nothing, and a Bun-built agent has crashed on PTY shrinks to a handful
+    /// of cells (oven-sh/bun#35010).
+    public static let minimum = TerminalGeometry(cols: 20, rows: 5)
 }
 
 /// What to execute — produced by an `AgentAdapter` (spec §6.2).
