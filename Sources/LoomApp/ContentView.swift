@@ -1991,15 +1991,16 @@ struct SessionsView: View {
                             isSelected: selected == .webPane(pane.id)) }
                     }
                 }
+                let dormant = model.dormantSessions
                 ForEach(model.projects, id: \.id) { project in
-                    let items = stackItems(for: project.id)
+                    let items = stackItems(for: project.id, dormant: dormant)
                     if !items.isEmpty {
                         group(project.name.uppercased(), projectID: project.id) {
                             projectStacks(items: items)
                         }
                     }
                 }
-                let orphans = stackItems(for: nil)
+                let orphans = stackItems(for: nil, dormant: dormant)
                 if !orphans.isEmpty {
                     group("NO PROJECT", projectID: nil) {
                         projectStacks(items: orphans)
@@ -2025,11 +2026,15 @@ struct SessionsView: View {
     /// Live + inactive (closed but not destroyed): the project's complete
     /// stack, name and tabs remembered — only claude sessions with no
     /// conversation at all are excluded (filtered upstream, in the model).
-    private func stackItems(for projectID: ProjectID?) -> [AppModel.SessionItem] {
+    /// `dormant`: the model's dormant sessions, computed ONCE by the caller for
+    /// the whole sidebar — the filter over every record per live session used
+    /// to run once per project group, six times a pass.
+    private func stackItems(for projectID: ProjectID?,
+                            dormant: [SessionRecord]) -> [AppModel.SessionItem] {
         let live = model.sessions.filter {
             projectID != nil ? $0.projectID == projectID : model.project($0.projectID) == nil
         }
-        let dormant = model.dormantSessions
+        let dormant = dormant
             .filter { projectID != nil ? $0.projectID == projectID
                                        : model.project($0.projectID) == nil }
             .map { record in
@@ -2102,6 +2107,7 @@ struct SessionsView: View {
                             Task { await model.stopSession(item.id) }
                         }
                 })
+                .equatable()
                 .stackChrome(isSelected: selected == .session(item.id))
             // Individual tabs live in the HORIZONTAL bar: the vertical
             // stack only shows one group row per type.
@@ -2815,7 +2821,7 @@ struct HoverIconButton: View {
 
 // MARK: - Stack parent card (icons on hover — terminal, browser)
 
-struct SidebarSessionCard: View {
+struct SidebarSessionCard: View, Equatable {
     let model: AppModel
     let item: AppModel.SessionItem
     let childCount: Int
@@ -2827,6 +2833,13 @@ struct SidebarSessionCard: View {
     let onArchive: () -> Void
     let onClose: () -> Void
     @State private var hovered = false
+
+    /// What the card SHOWS decides whether it re-runs; the actions capture
+    /// the same item and the same bindings either way. The sidebar rebuilds
+    /// on every session transition, and ~25 of these used to re-run each time.
+    static func == (lhs: SidebarSessionCard, rhs: SidebarSessionCard) -> Bool {
+        lhs.item == rhs.item && lhs.childCount == rhs.childCount && lhs.isSelected == rhs.isSelected
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
