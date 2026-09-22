@@ -23,6 +23,8 @@ public final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
 
     public private(set) var writtenBytes: [UInt8] = []
     public private(set) var receivedSignals: [SignalDelivery] = []
+    /// Every geometry the runtime pushed to the channel, in order.
+    public private(set) var resizes: [TerminalGeometry] = []
     public private(set) var openedEnvironment: [String: String] = [:]
     public private(set) var openedWorkingDirectory: URL?
     public private(set) var closeCount = 0
@@ -85,6 +87,12 @@ public final class ScriptedPTYHost: PTYHost, @unchecked Sendable {
         lock.unlock()
     }
 
+    fileprivate func record(resize geometry: TerminalGeometry) {
+        lock.lock()
+        resizes.append(geometry)
+        lock.unlock()
+    }
+
     fileprivate func record(signal: PTYSignal, scope: PTYSignalScope) {
         lock.lock()
         receivedSignals.append(SignalDelivery(signal: signal, scope: scope))
@@ -98,7 +106,7 @@ private final class ScriptedChannel: PTYChannel, @unchecked Sendable {
     private weak var host: ScriptedPTYHost?
     init(host: ScriptedPTYHost) { self.host = host }
     func write(_ bytes: ArraySlice<UInt8>) { host?.record(write: bytes) }
-    public func resize(to geometry: TerminalGeometry) {}
+    public func resize(to geometry: TerminalGeometry) { host?.record(resize: geometry) }
     func signal(_ signal: PTYSignal, scope: PTYSignalScope) { host?.record(signal: signal, scope: scope) }
     func close() {
         host?.releaseSink()

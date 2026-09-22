@@ -322,6 +322,70 @@ struct SessionRuntimeTests {
         return condition()
     }
 
+    // TRM-02: the runtime owns the dedup, against the grid it actually applied.
+    // A surface-side memory could disagree with the PTY — and a resize that
+    // never reaches the PTY leaves the agent drawing for a pane it no longer has.
+    @Test("resize: only a genuinely new geometry reaches the PTY, every new one does")
+    @MainActor
+    func resizeDedupliqueContreLaGrilleAppliquee() async throws {
+        let pty = ScriptedPTYHost()
+        let (runtime, _) = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree"),
+                              geometry: TerminalGeometry(cols: 53, rows: 45)),
+            using: SessionRuntime.Dependencies(ptyHost: pty, transcript: MemoryTranscriptSink()))
+        let surface = runtime.surface()
+
+        surface.resize(cols: 53, rows: 45)   // the launch grid: nothing to do
+        surface.resize(cols: 88, rows: 45)   // the drawer widened
+        surface.resize(cols: 88, rows: 45)   // the same pane measured twice
+        surface.resize(cols: 88, rows: 46)   // the window grew
+        surface.resize(cols: 19, rows: 46)   // below the floor: refused
+
+        #expect(await pollUntil { pty.resizes.count == 2 })
+        #expect(pty.resizes == [TerminalGeometry(cols: 88, rows: 45),
+                                TerminalGeometry(cols: 88, rows: 46)])
+        #expect(await runtime.currentGeometry() == TerminalGeometry(cols: 88, rows: 46))
+    }
+
+    // The readiness probe reads the runtime, not a surface: it must tell the
+    // truth with NO pane attached — the review drawer may not be open yet.
+    @Test("readiness: bytes, bracketed paste and the prompt line, with nobody watching")
+    func readinessSansSurfaceAttachee() async throws {
+        let pty = ScriptedPTYHost()
+        let (runtime, _) = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree"),
+                              geometry: TerminalGeometry(cols: 40, rows: 6)),
+            using: SessionRuntime.Dependencies(
+                ptyHost: pty,
+                transcript: MemoryTranscriptSink(),
+                makeEngine: { geometry, _ in SwiftTermEngine(geometry: geometry, scrollback: 100) }))
+
+        let blank = await runtime.readiness()
+        #expect(blank.bytesReceived == 0)
+        #expect(!blank.modes.bracketedPaste)
+        #expect(blank.visibleTail.isEmpty)
+        #expect(!AgentReadiness.isReady(blank))
+
+        pty.emit("\u{1B}[?2004hClaude Code v2.1\r\n> ")
+        #expect(await pollUntil2 { await runtime.readiness().bytesReceived > 0 })
+        try await Task.sleep(for: AgentReadiness.settleDuration)
+        let painted = await runtime.readiness()
+        #expect(painted.modes.bracketedPaste)
+        #expect(painted.visibleTail.last == ">")
+        #expect(painted.silence >= AgentReadiness.settleDuration)
+        #expect(AgentReadiness.isReady(painted))
+    }
+
+    private func pollUntil2(_ condition: () async -> Bool) async -> Bool {
+        for _ in 0..<200 {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return await condition()
+    }
+
 }
 
 /// An exec that fails instantly: the process is already gone when `open` returns,

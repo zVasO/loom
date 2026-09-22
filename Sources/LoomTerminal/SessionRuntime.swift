@@ -1,6 +1,7 @@
 import LoomCore
 import Dispatch
 import Foundation
+import os
 
 /// Everything alive in a session: the agent process on its PTY, the tee to the
 /// Transcript, the terminal engine, sampling, and the view surfaces.
@@ -71,8 +72,17 @@ public final class SessionRuntime: @unchecked Sendable {
     // Heuristic sampling (confined to `queue`).
     private var samplingTimer: DispatchSourceTimer?
     private var bytesSinceLastSample = 0
+    /// Every byte the PTY ever delivered (confined to `queue`): the agent has
+    /// painted only once this is non-zero — a resize bumps the engine's
+    /// revision on a blank screen, and used to pass for a first paint.
+    private var bytesReceived = 0
     private var lastByteAt: ContinuousClock.Instant?
     private let geometry: TerminalGeometry
+    /// The grid the engine AND the PTY currently have (confined to `queue`):
+    /// the one memory a resize is deduplicated against. A surface-side memory
+    /// could disagree with the runtime; this one cannot.
+    private var appliedGeometry: TerminalGeometry
+    private static let log = Logger(subsystem: "app.loom", category: "terminal")
     /// Launch geometry, readable by the surface factory (MainActor).
     var launchGeometry: TerminalGeometry { geometry }
     /// Shared projections, MainActor-confined (one per TerminalID).
@@ -86,13 +96,68 @@ public final class SessionRuntime: @unchecked Sendable {
 
     /// TRM-02: synchronized resize, view → engine → PTY (TIOCSWINSZ). One operation
     /// for the caller, two internally; the process receives SIGWINCH and repaints.
-    /// Last value wins, and a frame is pushed right away.
+    /// Last value wins, and a frame is pushed right away. Deduplicated HERE,
+    /// against the grid actually applied: only a genuinely new geometry reaches
+    /// the engine and the PTY (each one makes the agent repaint everything).
     func resize(to geometry: TerminalGeometry) {
         queue.async {
+            guard geometry != self.appliedGeometry else { return }
+            self.appliedGeometry = geometry
             self.engine?.resize(to: geometry)
             self.channel?.resize(to: geometry)
+            Self.log.debug("resize applied: \(geometry.cols)×\(geometry.rows)")
             self.scheduleFrame()
         }
+    }
+
+    /// The grid the engine and the PTY currently have.
+    public func currentGeometry() async -> TerminalGeometry {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: self.appliedGeometry) }
+        }
+    }
+
+    /// What an outside caller needs to know before typing into the agent
+    /// (`AgentReadiness`): read off the runtime itself, so it needs NO attached
+    /// view — a surface only mirrors frames while a pane watches it.
+    public struct ReadinessSample: Sendable, Equatable {
+        /// Every byte the PTY delivered so far; zero = the agent has not painted.
+        public let bytesReceived: Int
+        /// Since the last byte received (`.zero` before the first one).
+        public let silence: Duration
+        public let modes: TerminalModes
+        /// Last non-empty lines of the visible screen, trimmed, oldest first.
+        public let visibleTail: [String]
+        public init(bytesReceived: Int, silence: Duration, modes: TerminalModes,
+                    visibleTail: [String]) {
+            self.bytesReceived = bytesReceived
+            self.silence = silence
+            self.modes = modes
+            self.visibleTail = visibleTail
+        }
+    }
+
+    /// One hop onto the session queue, then a copy — never a window onto the engine.
+    public func readiness() async -> ReadinessSample {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                let now = ContinuousClock().now
+                continuation.resume(returning: ReadinessSample(
+                    bytesReceived: self.bytesReceived,
+                    silence: self.lastByteAt.map { now - $0 } ?? .zero,
+                    modes: self.engine?.modes ?? .none,
+                    visibleTail: self.visibleTail()))
+            }
+        }
+    }
+
+    /// On the session queue: the last non-empty visible lines, plain text only.
+    private func visibleTail(_ limit: Int = 12) -> [String] {
+        Array((engine?.snapshot().lines ?? [])
+            .map(\.text)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .suffix(limit))
     }
 
     /// Write to the terminal's PTY (keystrokes, quick message SES-05).
@@ -180,10 +245,11 @@ public final class SessionRuntime: @unchecked Sendable {
         let history = engine.historyTail(400)
         let base = engine.scrollbackRows - history.count
         let modes = engine.modes
+        let hasOutput = bytesReceived > 0
         Task { @MainActor in
             for terminal in watching {
                 self.surfaces[terminal]?.receive(snapshot, history: history, base: base,
-                                                 modes: modes)
+                                                 modes: modes, hasOutput: hasOutput)
             }
         }
     }
@@ -192,16 +258,11 @@ public final class SessionRuntime: @unchecked Sendable {
     /// decides no state — interpretation belongs to the session layer.
     private func emitSample(_ continuation: AsyncStream<Event>.Continuation) {
         let now = ContinuousClock().now
-        let tail = (engine?.snapshot().lines ?? [])
-            .map(\.text)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .suffix(12)
         continuation.yield(.activity(ActivitySample(
             at: now,
             bytesSinceLastSample: bytesSinceLastSample,
             silence: lastByteAt.map { now - $0 } ?? .zero,
-            visibleTail: Array(tail),
+            visibleTail: visibleTail(),
             cpuFraction: channel?.cpuFraction() ?? 0)))
         bytesSinceLastSample = 0
     }
@@ -233,6 +294,7 @@ public final class SessionRuntime: @unchecked Sendable {
     private init(queue: DispatchQueue, geometry: TerminalGeometry) {
         self.queue = queue
         self.geometry = geometry
+        self.appliedGeometry = geometry
     }
 
     /// Current visible screen of the primary terminal, with every byte received so far parsed.
@@ -391,6 +453,7 @@ public final class SessionRuntime: @unchecked Sendable {
                 dependencies.transcript.append(bytes[...], terminal: .primary)
                 runtime.engine?.feed(bytes[...])
                 runtime.bytesSinceLastSample += bytes.count
+                runtime.bytesReceived += bytes.count
                 runtime.lastByteAt = ContinuousClock().now
                 runtime.scheduleFrame()
             case .endOfFile:

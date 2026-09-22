@@ -23,6 +23,10 @@ public final class TerminalSurface {
     /// The input modes the program negotiated (mouse, bracketed paste, cursor
     /// keys, kitty keyboard flags) — what the key capture must honour.
     public private(set) var modes = TerminalModes.none
+    /// The program has written at least one byte. `screen.revision` cannot
+    /// tell: a resize bumps it on a blank screen, and the view's first fit
+    /// happens before the agent has booted.
+    public private(set) var hasOutput = false
     /// The agent tracks the mouse: the wheel belongs to IT, not to our ScrollView.
     public var mouseReporting: Bool { modes.mouseReporting }
 
@@ -94,19 +98,15 @@ public final class TerminalSurface {
     }
 
     /// TRM-02: the view announces its grid; engine and PTY follow (SIGWINCH on the
-    /// agent side). Coalesced at the call site: only a genuinely new geometry gets through.
+    /// agent side). Deduplicated by the runtime against the grid it actually
+    /// applied — a memory kept here could disagree with it, and once did.
     public func resize(cols: Int, rows: Int) {
         guard cols >= 20, rows >= 4 else { return }
-        let geometry = TerminalGeometry(cols: cols, rows: rows)
-        guard geometry != lastRequestedGeometry else { return }
-        lastRequestedGeometry = geometry
-        runtime?.resize(to: geometry)
+        runtime?.resize(to: TerminalGeometry(cols: cols, rows: rows))
     }
 
-    private var lastRequestedGeometry: TerminalGeometry?
-
     func receive(_ screen: TerminalScreen, history: [TerminalLine], base: Int = 0,
-                 modes: TerminalModes = .none) {
+                 modes: TerminalModes = .none, hasOutput: Bool = true) {
         guard isAttached else { return }
         self.screen = screen
         self.history = history
@@ -114,6 +114,7 @@ public final class TerminalSurface {
         // @Observable notifies on assignment, not on change: modes that flip once
         // per session must not invalidate the view at frame rate.
         if self.modes != modes { self.modes = modes }
+        if self.hasOutput != hasOutput { self.hasOutput = hasOutput }
     }
 
     private var lifecycleContinuation: CheckedContinuation<Void, Never>?
