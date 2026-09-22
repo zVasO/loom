@@ -571,6 +571,7 @@ struct ProjectsView: View {
     // P1 perf: filesystem scans live in .task, never in body.
     @State private var loadedSkills: [SkillEntry] = []
     @State private var loadedRules: [AppModel.RuleFile] = []
+    @State private var loadedFiles: [AppModel.FileEntry] = []
     @State private var projectTab: ProjectTab = .overview
     @State private var skillFilter: SkillFilter = .all
     @State private var viewedDocument: ViewedDocument?
@@ -580,6 +581,9 @@ struct ProjectsView: View {
         var path: URL
         var content: String
         var isText: Bool
+        /// Parsed ONCE when the document opens: the viewer used to re-parse
+        /// up to 200 KB of Markdown on every pass of the Projects view.
+        var rendered: AttributedString = AttributedString()
     }
 
     enum SkillFilter: String, CaseIterable {
@@ -703,12 +707,13 @@ struct ProjectsView: View {
         .onChange(of: projectTab) {
             viewedDocument = nil
         }
-        .task(id: "\(current?.id.rawValue.uuidString ?? "")-\(projectTab.rawValue)") {
+        .task(id: "\(current?.id.rawValue.uuidString ?? "")-\(projectTab.rawValue)-\(filesPath)") {
             guard let project = current else { return }
             switch projectTab {
             case .git: gitData = await model.projectGit(project.id)
-            case .skills: loadedSkills = model.skills(forProject: project.id)
+            case .skills: loadedSkills = await model.skillsDetached(forProject: project.id)
             case .rules: loadedRules = model.ruleFiles(for: project.id)
+            case .files: loadedFiles = await model.listFilesDetached(in: project.id, at: filesPath)
             default: break
             }
         }
@@ -777,7 +782,9 @@ struct ProjectsView: View {
     // MARK: Files tab — read-only navigation
 
     private func filesTab(_ project: ProjectRecord) -> some View {
-        let entries = model.listFiles(in: project.id, at: filesPath)
+        // Listed in the tab's task, off the main actor: a directory scan
+        // used to run here, on every pass of the Projects view.
+        let entries = loadedFiles
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 HoverIconButton(systemImage: "house", help: "Project root") { filesPath = "" }
@@ -791,7 +798,7 @@ struct ProjectsView: View {
                     NSWorkspace.shared.open(url)
                 }
             }
-            VStack(spacing: 1) {
+            LazyVStack(spacing: 1) {
                 if !filesPath.isEmpty {
                     fileRow(name: "..", isDirectory: true) {
                         filesPath = filesPath.contains("/")
@@ -868,9 +875,9 @@ struct ProjectsView: View {
     /// Opens a file INSIDE the app: text displayed in place, binary flagged.
     private func openDocument(at url: URL, title: String) {
         if let content = try? String(contentsOf: url, encoding: .utf8) {
-            viewedDocument = ViewedDocument(title: title, path: url,
-                                            content: String(content.prefix(200_000)),
-                                            isText: true)
+            let text = String(content.prefix(200_000))
+            viewedDocument = ViewedDocument(title: title, path: url, content: text, isText: true,
+                                            rendered: Self.render(text, path: url))
         } else {
             viewedDocument = ViewedDocument(title: title, path: url, content: "",
                                             isText: false)
@@ -924,11 +931,15 @@ struct ProjectsView: View {
     }
 
     private func renderedContent(_ document: ViewedDocument) -> AttributedString {
-        guard document.path.pathExtension.lowercased() == "md",
+        document.rendered
+    }
+
+    private static func render(_ content: String, path: URL) -> AttributedString {
+        guard path.pathExtension.lowercased() == "md",
               let markdown = try? AttributedString(
-                  markdown: document.content,
+                  markdown: content,
                   options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
-        else { return AttributedString(document.content) }
+        else { return AttributedString(content) }
         return markdown
     }
 

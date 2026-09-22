@@ -1748,6 +1748,29 @@ public final class AppModel {
     /// excluded (except .claude, useful for finding skills and rules).
     public func listFiles(in id: ProjectID, at relativePath: String) -> [FileEntry] {
         guard let rootPath = project(id)?.path else { return [] }
+        return Self.listFiles(root: rootPath, at: relativePath)
+    }
+
+    /// The listing stats every entry: off the main actor for the Files tab.
+    public func listFilesDetached(in id: ProjectID, at relativePath: String) async -> [FileEntry] {
+        guard let rootPath = project(id)?.path else { return [] }
+        return await Task.detached(priority: .userInitiated) {
+            Self.listFiles(root: rootPath, at: relativePath)
+        }.value
+    }
+
+    /// Skills scan two directory trees: off the main actor for the Skills tab.
+    public func skillsDetached(forProject id: ProjectID) async -> [SkillEntry] {
+        let projectDirectory = project(id).map {
+            URL(fileURLWithPath: $0.path).appendingPathComponent(".claude/skills")
+        }
+        return await Task.detached(priority: .userInitiated) {
+            SkillsCatalog.scan(globalDirectory: SkillsCatalog.defaultGlobalDirectory,
+                               projectDirectory: projectDirectory)
+        }.value
+    }
+
+    private nonisolated static func listFiles(root rootPath: String, at relativePath: String) -> [FileEntry] {
         let directory = URL(fileURLWithPath: rootPath).appendingPathComponent(relativePath)
         let contents = (try? FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
