@@ -136,7 +136,9 @@ struct GlobalPRsView: View {
             .padding(.horizontal, 12).padding(.vertical, 8)
             Divider().overlay(DefaultTheme.cardBorder)
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                // Lazy: an account with dozens of organizations builds the
+                // groups it shows, not every catalog row at once.
+                LazyVStack(alignment: .leading, spacing: 14) {
                     if let results = model.searchResults {
                         searchSection(results)
                     }
@@ -486,6 +488,7 @@ struct GlobalPRsView: View {
                                  onSelect: { model.showPR(pr, in: project.id) },
                                  onOpen: { model.openPRTab(pr, in: project.id) },
                                  onStartReview: { startReview(pr, project: project) })
+                        .equatable()
                 }
             }
         }
@@ -499,7 +502,12 @@ struct GlobalPRsView: View {
             .filter { PRSidebarFilter.matches($0, query: query) }
         let isViewer = owner == model.catalog?.viewer
         if !repos.isEmpty || query.isEmpty {
-            let expanded = expandedOwners.contains(owner) || (!query.isEmpty && !repos.isEmpty)
+            let pinnedOpen = expandedOwners.contains(owner)
+            let expanded = pinnedOpen || (!query.isEmpty && !repos.isEmpty)
+            // A search unfolds every owner with a match — capped: the first
+            // keystroke used to build hundreds of rows, each with its menu,
+            // its help and its gestures, for a large organization.
+            let shown = pinnedOpen ? repos : Array(repos.prefix(Self.searchUnfoldCap))
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
                     Button {
@@ -540,15 +548,29 @@ struct GlobalPRsView: View {
                             .foregroundStyle(DefaultTheme.mutedText)
                             .padding(.leading, 2)
                     }
-                    ForEach(repos) { repo in
+                    ForEach(shown) { repo in
                         CatalogRepoRow(repo: repo, cloning: model.isCloning(repo.nameWithOwner),
                                        onAdd: { model.pendingClone = .init(repo: repo.nameWithOwner, number: nil) },
                                        onHide: { model.hide(repo: repo.nameWithOwner) })
+                    }
+                    if shown.count < repos.count {
+                        Button {
+                            expandedOwners.insert(owner)
+                        } label: {
+                            Text("\(repos.count - shown.count) more…")
+                                .font(.system(size: 11))
+                                .foregroundStyle(DefaultTheme.secondaryText)
+                                .underline()
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.leading, 2)
                     }
                 }
             }
         }
     }
+
+    private static let searchUnfoldCap = 20
 
     @ViewBuilder
     private var catalogFooter: some View {
@@ -848,7 +870,7 @@ extension GlobalPRsView {
 
 /// A PR in the global sidebar: CI dot, number, title — sparkles quick action
 /// on hover starts (or reopens) its review session.
-private struct PRSidebarRow: View {
+private struct PRSidebarRow: View, Equatable {
     let pr: GitHubService.PullRequest
     let isSelected: Bool
     /// Has a tab (pinned or preview) — shown with a faint mark.
@@ -860,6 +882,14 @@ private struct PRSidebarRow: View {
     let onOpen: () -> Void
     let onStartReview: () -> Void
     @State private var hovered = false
+
+    /// What the row SHOWS decides whether it re-runs — every keystroke in the
+    /// search field re-evaluates the whole sidebar, and a row hosts a real
+    /// NSScrollView for its chips.
+    static func == (lhs: PRSidebarRow, rhs: PRSidebarRow) -> Bool {
+        lhs.pr == rhs.pr && lhs.isSelected == rhs.isSelected && lhs.isOpen == rhs.isOpen
+            && lhs.hasSession == rhs.hasSession && lhs.launching == rhs.launching
+    }
 
     private func chip(_ label: String, color: Color) -> some View {
         Text(label)

@@ -80,8 +80,11 @@ extension AppModel {
     /// An owner's repositories worth listing: not hidden, not already a
     /// project (those live in the projects list, with their PRs).
     public func catalogRepositories(of owner: String) -> [GitHubService.Repository] {
-        (catalog?.owners[owner] ?? []).filter {
-            !hiddenRepos.contains($0.nameWithOwner) && project(forRepo: $0.nameWithOwner) == nil
+        // The projects' repositories as one lowercased set: a compare per
+        // repository per project, per pass, was O(repos × projects).
+        let owned = Set(projects.compactMap { repoName(for: $0.id)?.lowercased() })
+        return (catalog?.owners[owner] ?? []).filter {
+            !hiddenRepos.contains($0.nameWithOwner) && !owned.contains($0.nameWithOwner.lowercased())
         }
     }
 
