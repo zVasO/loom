@@ -717,6 +717,44 @@ public final class AppModel {
     /// of re-running two gh processes. Invalidated by refreshPRs / submissions.
     private var prDetailCache: [String: GitHubService.PRDetail] = [:]
     private var prDiffCache: [String: String] = [:]
+
+    /// What the diff view paints, per PR: the products of `DiffPipeline`,
+    /// mirrored here so a workspace seeds its state SYNCHRONOUSLY in its init
+    /// and paints a coloured diff in its first frame on a revisit.
+    struct CachedDiff: Sendable {
+        var files: [DiffFileRows]
+        var highlights: DiffHighlights?
+    }
+    @ObservationIgnored private let diffPipeline = DiffPipeline()
+    @ObservationIgnored private var diffProducts: [String: CachedDiff] = [:]
+    @ObservationIgnored private var prTourCache: [String: PRTour] = [:]
+
+    func cachedDiff(pr number: Int, in projectID: ProjectID) -> CachedDiff? {
+        diffProducts[prKey(number, projectID)]
+    }
+
+    func cachedTour(pr number: Int, in projectID: ProjectID) -> PRTour? {
+        prTourCache[prKey(number, projectID)]
+    }
+
+    /// Parsed and paired rows for a diff — cached across tab switches.
+    func diffRows(pr number: Int, in projectID: ProjectID, diff: String) async -> DiffPipeline.Rows {
+        let key = prKey(number, projectID)
+        let rows = await diffPipeline.rows(for: key, diff: diff)
+        if diffProducts[key]?.files != rows.files {
+            diffProducts[key] = CachedDiff(files: rows.files, highlights: nil)
+        }
+        return rows
+    }
+
+    /// Colours for those rows in the given scheme — cached across tab switches.
+    func diffHighlights(pr number: Int, in projectID: ProjectID,
+                        rows: DiffPipeline.Rows, dark: Bool) async -> DiffHighlights {
+        let key = prKey(number, projectID)
+        let highlights = await diffPipeline.highlights(for: key, rows: rows, dark: dark)
+        diffProducts[key] = CachedDiff(files: rows.files, highlights: highlights)
+        return highlights
+    }
     private var prCommentsCache: [String: [GitHubService.ReviewComment]] = [:]
     private var prFileViewsCache: [String: GitHubService.FileViews] = [:]
     private var prListCache: PRListCache { PRListCache(directory: supportDirectory) }
@@ -923,6 +961,8 @@ public final class AppModel {
         let prefix = "\(projectID.rawValue.uuidString)#"
         prDetailCache = prDetailCache.filter { !$0.key.hasPrefix(prefix) }
         prDiffCache = prDiffCache.filter { !$0.key.hasPrefix(prefix) }
+        diffProducts = diffProducts.filter { !$0.key.hasPrefix(prefix) }
+        Task { await diffPipeline.evict(prefix: prefix) }
         prCommentsCache = prCommentsCache.filter { !$0.key.hasPrefix(prefix) }
         prFileViewsCache = prFileViewsCache.filter { !$0.key.hasPrefix(prefix) }
         prLists[key] = PRListCache.Entry(fetchedAt: Date(), prs: prs, query: filter.query)
@@ -1149,6 +1189,12 @@ public final class AppModel {
     /// into chapters + a playful risk gauge. Slow (an agent run) — call it from
     /// a task, show progress.
     public func generateTour(_ number: Int, in projectID: ProjectID) async -> PRTour? {
+        let tour = await generateTourUncached(number, in: projectID)
+        if let tour { prTourCache[prKey(number, projectID)] = tour }
+        return tour
+    }
+
+    private func generateTourUncached(_ number: Int, in projectID: ProjectID) async -> PRTour? {
         guard let repo = projectRepo(projectID), let claude = claudePath else { return nil }
         let diff = String((try? await GitHubService().prDiff(number, in: repo))?.prefix(40_000) ?? "")
         guard !diff.isEmpty else { return nil }
