@@ -14,9 +14,10 @@ let package = Package(
         .library(name: "LoomCore", targets: ["LoomCore"]),
     ],
     dependencies: [
-        // Pinned to the minor: fast release cadence and an announced I/O rework
+        // Pinned to the minor: fast release cadence, and 1.20.0 is release-noted
+        // as the last one before the announced breaking changes land
         // (docs/research/swiftterm-pty.md §1.6, recommandation 8).
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", .upToNextMinor(from: "1.18.0")),
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", .upToNextMinor(from: "1.20.0")),
         // ADR-0002: GRDB for controlled migrations, FTS5, concurrent access.
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
         // Diff syntax colours: highlight.js under JavaScriptCore,
