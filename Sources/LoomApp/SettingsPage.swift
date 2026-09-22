@@ -329,10 +329,10 @@ struct SettingsPage: View {
             sectionTitle("Theme")
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)],
                       alignment: .leading, spacing: 12) {
-                ForEach(ThemePalette.all, id: \.name) { palette in
-                    ThemeCard(palette: palette,
-                              isActive: ThemeStore.shared.globalThemeName == palette.name) {
-                        ThemeStore.shared.setGlobalTheme(palette.name)
+                ForEach(ThemeStore.shared.families) { family in
+                    ThemeCard(palette: family.palette(dark: ThemeStore.shared.isDark),
+                              isActive: ThemeStore.shared.globalFamilyName == family.name) {
+                        ThemeStore.shared.setGlobalTheme(family.name)
                         NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
                     }
                 }
@@ -372,8 +372,8 @@ struct SettingsPage: View {
                                 NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
                             })) {
                             Text("Global theme").tag("")
-                            ForEach(ThemePalette.all, id: \.name) { palette in
-                                Text(palette.name).tag(palette.name)
+                            ForEach(ThemeStore.shared.families) { family in
+                                Text(family.name).tag(family.name)
                             }
                         }
                         .labelsHidden()

@@ -14,6 +14,10 @@ public enum DefaultTheme {
     /// single call-site change.
     static var palette: ThemePalette { ThemeStore.shared.palette }
 
+    /// The colour scheme system controls (fields, pickers, sheets) should
+    /// take: the one the active palette was made for.
+    public static var colorScheme: ColorScheme { palette.isLight ? .light : .dark }
+
     // Backgrounds
     public static var background: Color { palette.background }
     public static var contentBackground: Color { palette.contentBackground }
