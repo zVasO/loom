@@ -138,7 +138,10 @@ struct TerminalPane: View {
                         badge = nil
                     }
                     .background(DefaultTheme.contentBackground)
-                    .task { await surface.attached() }
+                    // Keyed on the surface: a pane whose session changed (the PR
+                    // drawer switching tabs) attaches the NEW surface; an id-less
+                    // task ran once and left the newcomer detached.
+                    .task(id: ObjectIdentifier(surface)) { await surface.attached() }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
