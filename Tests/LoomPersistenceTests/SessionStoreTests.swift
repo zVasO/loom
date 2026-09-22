@@ -247,4 +247,49 @@ struct TranscriptSearchTests {
         let store = try SessionStore(path: ":memory:")
         #expect(try store.searchTranscripts(matching: "  \"\"  ").isEmpty)
     }
+
+    // The startup pass compares the transcript on disk with what the FTS row
+    // was built from, and re-indexes only on a change — replacing the row,
+    // never doubling it.
+    @Test("an index remembers its fingerprint, and a re-index replaces the FTS row")
+    func empreinteDIndex() throws {
+        let store = try makeStore()
+        let id = SessionID()
+        try store.insert(SessionRecord(id: id, title: "Payments", agentID: "claude-code",
+                                       state: .completed, createdAt: Date()))
+        #expect(try store.indexedFingerprint(session: id) == nil, "never indexed")
+
+        let first = SessionStore.IndexFingerprint(bytes: 120, modifiedAt: 1_700_000_000)
+        try store.indexForSearch(session: id, title: "Payments",
+                                 transcript: "the webhook signature was stale", fingerprint: first)
+        #expect(try store.indexedFingerprint(session: id) == first)
+
+        let second = SessionStore.IndexFingerprint(bytes: 240, modifiedAt: 1_700_000_100)
+        try store.indexForSearch(session: id, title: "Payments",
+                                 transcript: "the webhook signature was stale, then rotated", fingerprint: second)
+        #expect(try store.indexedFingerprint(session: id) == second)
+        let hits = try store.searchTranscripts(matching: "webhook")
+        #expect(hits.count == 1, "one FTS row per session, whatever the number of re-indexes")
+        #expect(hits.first?.snippet.contains("rotated") == true, "the row is the latest transcript")
+    }
+
+    @Test("the on-disk store reads while it writes (a WAL pool, not one serial connection)")
+    func lecturesPendantEcriture() throws {
+        let store = try makeStore()
+        let id = SessionID()
+        try store.insert(SessionRecord(id: id, title: "Long", agentID: "claude-code",
+                                       state: .completed, createdAt: Date()))
+        let transcript = String(repeating: "lorem ipsum dolor sit amet ", count: 40_000)
+        let writer = Thread {
+            for _ in 0..<5 {
+                try? store.indexForSearch(session: id, title: "Long", transcript: transcript)
+            }
+        }
+        writer.start()
+        // Reads land while the writer works; none may fail, none may block on it.
+        for _ in 0..<50 {
+            #expect(try store.session(id: id)?.title == "Long")
+        }
+        while !writer.isFinished { Thread.sleep(forTimeInterval: 0.01) }
+    }
 }

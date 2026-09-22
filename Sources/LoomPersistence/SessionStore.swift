@@ -7,10 +7,19 @@ import GRDB
 /// from v1 onward (DAT-02).
 public final class SessionStore: Sendable {
 
-    let database: DatabaseQueue
+    /// A WAL pool on disk: readers never wait on the writer — the startup
+    /// reindex, a transition being journaled by the session actor — where one
+    /// serial connection made every read (a tab switch, a popover, "+") queue
+    /// behind whatever was writing (audit 2026-09-22, hot path 3). In memory
+    /// there is no WAL to share: a queue, for the tests.
+    let database: any DatabaseWriter
 
     public init(path: String) throws {
-        database = try DatabaseQueue(path: path)
+        if path == ":memory:" {
+            database = try DatabaseQueue(path: path)
+        } else {
+            database = try DatabasePool(path: path)
+        }
         var migrator = DatabaseMigrator()
         migrator.registerMigration("v1-sessions") { db in
             try db.create(table: "session") { t in
@@ -133,6 +142,17 @@ public final class SessionStore: Sendable {
             // No foreign key: the target may be a conversation Loom never created.
             try db.alter(table: "session") { $0.add(column: "nativeSessionID", .text) }
         }
+        migrator.registerMigration("v10-session-index") { db in
+            // What the FTS row of a session was built from: the transcript's
+            // size and last write. The startup pass compares and skips; the
+            // FTS rowid lets a re-index delete by key instead of scanning.
+            try db.create(table: "sessionIndex") { t in
+                t.primaryKey("sessionID", .text)
+                t.column("ftsRowID", .integer).notNull()
+                t.column("bytes", .integer).notNull()
+                t.column("modifiedAt", .double).notNull()
+            }
+        }
         try migrator.migrate(database)
     }
 
@@ -159,13 +179,45 @@ public final class SessionStore: Sendable {
 
     // MARK: - Full-text search (SES-08)
 
-    /// Indexes (or re-indexes) a session: title + cleaned transcript.
-    public func indexForSearch(session id: SessionID, title: String, transcript: String) throws {
+    /// The transcript a session's FTS row was built from — size and last
+    /// write. Equal on disk means nothing to re-index.
+    public struct IndexFingerprint: Equatable, Sendable {
+        public let bytes: Int64
+        public let modifiedAt: Double
+        public init(bytes: Int64, modifiedAt: Double) {
+            self.bytes = bytes
+            self.modifiedAt = modifiedAt
+        }
+    }
+
+    public func indexedFingerprint(session id: SessionID) throws -> IndexFingerprint? {
+        try database.read { db in
+            try Row.fetchOne(db, sql: "SELECT bytes, modifiedAt FROM sessionIndex WHERE sessionID = ?",
+                             arguments: [id.rawValue.uuidString])
+                .map { IndexFingerprint(bytes: $0["bytes"], modifiedAt: $0["modifiedAt"]) }
+        }
+    }
+
+    /// Indexes (or re-indexes) a session: title + cleaned transcript, and the
+    /// fingerprint of what was read so the next pass can skip it.
+    public func indexForSearch(session id: SessionID, title: String, transcript: String,
+                               fingerprint: IndexFingerprint? = nil) throws {
         try database.write { db in
-            try db.execute(sql: "DELETE FROM sessionFTS WHERE sessionID = ?",
-                           arguments: [id.rawValue.uuidString])
+            let key = id.rawValue.uuidString
+            if let previous = try Int64.fetchOne(db, sql: "SELECT ftsRowID FROM sessionIndex WHERE sessionID = ?",
+                                                 arguments: [key]) {
+                try db.execute(sql: "DELETE FROM sessionFTS WHERE rowid = ?", arguments: [previous])
+            } else {
+                // Indexed before v10: no rowid on record, one scan to clear it.
+                try db.execute(sql: "DELETE FROM sessionFTS WHERE sessionID = ?", arguments: [key])
+            }
             try db.execute(sql: "INSERT INTO sessionFTS (sessionID, title, transcript) VALUES (?, ?, ?)",
-                           arguments: [id.rawValue.uuidString, title, transcript])
+                           arguments: [key, title, transcript])
+            try db.execute(sql: """
+                INSERT OR REPLACE INTO sessionIndex (sessionID, ftsRowID, bytes, modifiedAt)
+                VALUES (?, ?, ?, ?)
+                """, arguments: [key, db.lastInsertedRowID,
+                                 fingerprint?.bytes ?? 0, fingerprint?.modifiedAt ?? 0])
         }
     }
 

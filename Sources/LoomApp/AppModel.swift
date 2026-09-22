@@ -1290,11 +1290,40 @@ public final class AppModel {
         let plain = files.filter { $0.pathExtension == "txt" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         var text = ""
-        for file in plain {
-            if let chunk = try? String(contentsOf: file, encoding: .utf8) { text += chunk }
-            if text.count > 2_000_000 { break }   // FTS does not need more to be useful
+        // Capped by bytes READ: a rotated 10 MB file used to be loaded whole
+        // before the cap was even looked at. FTS does not need more to be useful.
+        var remaining = Self.indexedTranscriptCap
+        for file in plain where remaining > 0 {
+            guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
+            defer { try? handle.close() }
+            guard let data = try? handle.read(upToCount: remaining), !data.isEmpty else { continue }
+            text += String(decoding: data, as: UTF8.self)
+            remaining -= data.count
         }
         return text.isEmpty ? nil : text
+    }
+
+    private static let indexedTranscriptCap = 2_000_000
+
+    /// Size and last write of a session's transcript files — what the FTS row
+    /// is compared against before anything is read. nil = no transcript.
+    private nonisolated static func transcriptFingerprint(root: URL, id: SessionID)
+        -> SessionStore.IndexFingerprint? {
+        let directory = root.appendingPathComponent(id.rawValue.uuidString)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])
+        else { return nil }
+        var bytes: Int64 = 0
+        var modifiedAt: Double = 0
+        var found = false
+        for file in files where file.pathExtension == "txt" {
+            guard let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            else { continue }
+            found = true
+            bytes += Int64(values.fileSize ?? 0)
+            modifiedAt = max(modifiedAt, values.contentModificationDate?.timeIntervalSince1970 ?? 0)
+        }
+        return found ? SessionStore.IndexFingerprint(bytes: bytes, modifiedAt: modifiedAt) : nil
     }
 
     func indexSessionForSearch(_ id: SessionID) {
@@ -1303,21 +1332,29 @@ public final class AppModel {
         Task.detached(priority: .utility) {
             guard let record = (try? store.session(id: id)) ?? nil,
                   let text = Self.transcriptText(root: root, id: id) else { return }
-            try? store.indexForSearch(session: id, title: record.title, transcript: text)
+            try? store.indexForSearch(session: id, title: record.title, transcript: text,
+                                      fingerprint: Self.transcriptFingerprint(root: root, id: id))
         }
     }
 
-    /// Startup pass: (re)index every known session that has a transcript —
-    /// idempotent, off the main actor (P1 perf: MBs of file reads).
+    /// Startup pass: index every known session whose transcript CHANGED since
+    /// it was last indexed — a stat per session, no read and no write for the
+    /// rest. It used to re-read and re-tokenise every transcript ever written
+    /// at each launch, one write transaction each, on the one connection every
+    /// read then waited on (audit 2026-09-22, hot path 3). Off the main actor.
     private func reindexAllSessions() {
         guard let store else { return }
         let root = supportDirectory.appendingPathComponent("transcripts")
         let ids = allRecords.map(\.id)
         Task.detached(priority: .utility) {
             for id in ids {
+                guard let fingerprint = Self.transcriptFingerprint(root: root, id: id) else { continue }
+                if let indexed = (try? store.indexedFingerprint(session: id)) ?? nil,
+                   indexed == fingerprint { continue }
                 guard let record = (try? store.session(id: id)) ?? nil,
                       let text = Self.transcriptText(root: root, id: id) else { continue }
-                try? store.indexForSearch(session: id, title: record.title, transcript: text)
+                try? store.indexForSearch(session: id, title: record.title, transcript: text,
+                                          fingerprint: fingerprint)
             }
         }
     }
@@ -1949,7 +1986,12 @@ public final class AppModel {
             guard !Task.isCancelled else { return }
             self?.saveStackChildren()
         }
-        try? store?.recordVisit(url: url, title: title, at: Date())
+        // A page load is not worth a synchronous write on the main actor.
+        guard let store else { return }
+        let visitedAt = Date()
+        Task.detached(priority: .utility) {
+            try? store.recordVisit(url: url, title: title, at: visitedAt)
+        }
     }
 
     /// Sessions whose tab was optimistically removed while the shutdown

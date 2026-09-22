@@ -15,7 +15,7 @@ public final class UsageIndex: Sendable {
         public let turnsAdded: Int
     }
 
-    private let database: DatabaseQueue
+    private let database: any DatabaseWriter
 
     public init(store: SessionStore) {
         database = store.database
