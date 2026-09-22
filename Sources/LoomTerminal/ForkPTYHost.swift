@@ -225,8 +225,15 @@ final class ForkPTYChannel: PTYChannel, @unchecked Sendable {
             return
         }
         if kill(-pid, SIGWINCH) != 0 {
-            let error = String(cString: strerror(errno))
-            Self.log.error("SIGWINCH to process group \(self.pid) failed: \(error)")
+            let code = errno
+            if code == ESRCH {
+                // The group is empty: the agent exited, the master is still
+                // open (EOF pending, or an orphan holding the slave). Normal.
+                Self.log.debug("SIGWINCH: process group \(self.pid) is gone")
+            } else {
+                let error = String(cString: strerror(code))
+                Self.log.error("SIGWINCH to process group \(self.pid) failed: \(error)")
+            }
         }
     }
 

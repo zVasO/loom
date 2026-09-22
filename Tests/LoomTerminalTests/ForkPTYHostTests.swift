@@ -1,6 +1,6 @@
 import Testing
 import LoomCore
-import LoomTerminal
+@testable import LoomTerminal
 import LoomTerminalTestSupport
 import Foundation
 
@@ -152,23 +152,41 @@ struct ForkPTYHostSignalTests {
     }
 
     /// SIG_IGN survives execve: a child that reports DEFAULT proves the reset.
+    /// Saved and restored as a full `sigaction`, flags included.
     private func withSignalIgnored<T>(_ number: Int32, _ body: () throws -> T) rethrows -> T {
-        let previous = signal(number, SIG_IGN)
-        defer { _ = signal(number, previous) }
+        var ignore = sigaction()
+        ignore.__sigaction_u.__sa_handler = SIG_IGN
+        sigemptyset(&ignore.sa_mask)
+        ignore.sa_flags = 0
+        var previous = sigaction()
+        sigaction(number, &ignore, &previous)
+        defer { sigaction(number, &previous, nil) }
         return try body()
+    }
+
+    /// The probe prints `ready` once its handler is installed: the signal
+    /// goes out after that, never on a timer's guess.
+    private func waitForReady(_ transcript: MemoryTranscriptSink) async -> Bool {
+        for _ in 0..<200 {   // 5 s
+            if transcript.text.contains("ready") { return true }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        return false
     }
 
     @Test("born from a thread that blocks SIGWINCH, the child's mask is empty",
           .enabled(if: perlAvailable))
     func masqueVideDansLEnfant() async throws {
         let transcript = MemoryTranscriptSink()
+        // SIGWINCH is not a POSIX signal: perl's POSIX module does not export
+        // it, so the number comes from Config (28 on Darwin).
         let (_, events) = try withSignalBlocked(SIGWINCH) {
-            try launch(perl(#"use POSIX; $| = 1; my $old = POSIX::SigSet->new; POSIX::sigprocmask(SIG_BLOCK, POSIX::SigSet->new, $old); print $old->ismember(SIGWINCH) ? "mask-blocked" : "mask-clear""#),
+            try launch(perl(#"use strict; use warnings; use POSIX; use Config; $| = 1; my %sig; @sig{split " ", $Config{sig_name}} = split " ", $Config{sig_num}; my $old = POSIX::SigSet->new; POSIX::sigprocmask(SIG_BLOCK, POSIX::SigSet->new, $old); my $member = $old->ismember($sig{WINCH}); print $member == 1 ? "mask-blocked" : $member == 0 ? "mask-clear" : "mask-error""#),
                        transcript: transcript)
         }
         var iterator = events.makeAsyncIterator()
-        guard case .started = await iterator.next() else { return }
-        guard case .terminated = await iterator.next() else { return }
+        guard case .started = await iterator.next() else { Issue.record("no .started"); return }
+        guard case .terminated = await iterator.next() else { Issue.record("no .terminated"); return }
         #expect(transcript.text.contains("mask-clear") && !transcript.text.contains("mask-blocked"),
                 "the child must not inherit the forking thread's mask — saw: \(transcript.text)")
     }
@@ -179,17 +197,17 @@ struct ForkPTYHostSignalTests {
     func sigwinchAtteintLEnfant() async throws {
         let transcript = MemoryTranscriptSink()
         let (runtime, events) = try withSignalBlocked(SIGWINCH) {
-            try launch(perl(#"$| = 1; $SIG{WINCH} = sub { system("stty size"); exit 0 }; sleep 8; exit 9"#),
+            try launch(perl(#"$| = 1; $SIG{WINCH} = sub { system("stty size"); exit 0 }; print "ready\n"; sleep 8; exit 9"#),
                        transcript: transcript)
         }
         var iterator = events.makeAsyncIterator()
-        guard case .started = await iterator.next() else { return }
-        try await Task.sleep(for: .milliseconds(400))   // let perl install its handler
+        guard case .started = await iterator.next() else { Issue.record("no .started"); return }
+        guard await waitForReady(transcript) else { Issue.record("perl never got ready"); return }
         let sentAt = ContinuousClock().now
 
         runtime.surface().resize(cols: 90, rows: 30)
 
-        guard case .terminated(let report) = await iterator.next() else { return }
+        guard case .terminated(let report) = await iterator.next() else { Issue.record("no .terminated"); return }
         #expect(report.exitStatus.code == 0, "the handler exited 0; the 8 s sleep was never reached")
         #expect(ContinuousClock().now - sentAt < .seconds(4), "the handler ran on the signal, not on the timer")
         #expect(transcript.text.contains("30 90"),
@@ -201,11 +219,12 @@ struct ForkPTYHostSignalTests {
     func sigintAtteintLEnfant() async throws {
         let transcript = MemoryTranscriptSink()
         let (runtime, events) = try withSignalBlocked(SIGINT) {
-            try launch(perl(#"$| = 1; $SIG{INT} = sub { exit 3 }; sleep 8; exit 9"#), transcript: transcript)
+            try launch(perl(#"$| = 1; $SIG{INT} = sub { exit 3 }; print "ready\n"; sleep 8; exit 9"#),
+                       transcript: transcript)
         }
         var iterator = events.makeAsyncIterator()
-        guard case .started = await iterator.next() else { return }
-        try await Task.sleep(for: .milliseconds(400))
+        guard case .started = await iterator.next() else { Issue.record("no .started"); return }
+        guard await waitForReady(transcript) else { Issue.record("perl never got ready"); return }
         let sentAt = ContinuousClock().now
 
         let report = await runtime.stop(.graceful)
@@ -223,39 +242,29 @@ struct ForkPTYHostSignalTests {
                        transcript: transcript)
         }
         var iterator = events.makeAsyncIterator()
-        guard case .started = await iterator.next() else { return }
-        guard case .terminated = await iterator.next() else { return }
+        guard case .started = await iterator.next() else { Issue.record("no .started"); return }
+        guard case .terminated = await iterator.next() else { Issue.record("no .terminated"); return }
         #expect(transcript.text.contains("usr1-DEFAULT"),
                 "SIG_IGN survives execve unless the child resets it — saw: \(transcript.text)")
     }
 
-    @Test("a session's master is not inherited by the next session's child")
-    func masterNonHerite() async throws {
-        // The baseline: what a child sees with nothing else alive.
-        let alone = try await fileDescriptorCount()
-        // Something alive, whose master would leak into the next fork.
-        let (bystander, bystanderEvents) = try launch(
-            SessionLaunchPlan(command: Command(executable: "/bin/sh", arguments: ["-c", "sleep 5"]),
-                              workingDirectory: FileManager.default.temporaryDirectory),
-            transcript: MemoryTranscriptSink())
-        var iterator = bystanderEvents.makeAsyncIterator()
-        guard case .started = await iterator.next() else { return }
-        let withBystander = try await fileDescriptorCount()
-        _ = await bystander.stop(.graceful)
-        #expect(withBystander == alone,
-                "the bystander's master leaked into the child: \(withBystander) descriptors vs \(alone)")
-    }
-
-    /// How many descriptors a fresh child finds open (its own 0-2 included).
-    private func fileDescriptorCount() async throws -> Int {
-        let transcript = MemoryTranscriptSink()
-        let (_, events) = try launch(
-            SessionLaunchPlan(command: Command(executable: "/bin/sh", arguments: ["-c", "ls /dev/fd | wc -l"]),
-                              workingDirectory: FileManager.default.temporaryDirectory),
-            transcript: transcript)
-        var iterator = events.makeAsyncIterator()
-        guard case .started = await iterator.next() else { return -1 }
-        guard case .terminated = await iterator.next() else { return -1 }
-        return Int(transcript.text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? -1
+    @Test("a session's master is not inherited by the next session's child: it is close-on-exec")
+    func masterNonHerite() throws {
+        // The property itself, not a descriptor count that every other suite
+        // running in the same process would disturb.
+        var size = winsize(ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0)
+        let spawned = PTYSpawn.forkExec(executable: "/bin/sh",
+                                        argv: ["/bin/sh", "-c", "exit 0"],
+                                        env: ["PATH=/usr/bin:/bin"],
+                                        currentDirectory: nil,
+                                        windowSize: &size)
+        let child = try #require(spawned)
+        defer {
+            var status: Int32 = 0
+            waitpid(child.pid, &status, 0)
+            close(child.master)
+        }
+        #expect(fcntl(child.master, F_GETFD) & FD_CLOEXEC != 0,
+                "the master must be FD_CLOEXEC, or the next fork hands it to a stranger")
     }
 }
