@@ -397,14 +397,13 @@ public final class AppModel {
             importLegacyBadgeDefinitions(into: store)
             reloadBadgeDefinitions()
 
-            let transcripts = try FileTranscriptSink(
-                directory: supportDirectory.appendingPathComponent("transcripts"))
             // v2 (search): one sink per session, in its own directory — this is
-            // what makes transcripts indexable per session.
+            // what makes transcripts indexable per session. The dependency's
+            // sink is only the fallback when a session's own cannot be made.
             let transcriptsRoot = supportDirectory.appendingPathComponent("transcripts")
             let manager = SessionManager(
                 runtimeDependencies: SessionRuntime.Dependencies(ptyHost: ForkPTYHost(),
-                                                                 transcript: transcripts),
+                                                                 transcript: NullTranscriptSink()),
                 store: store,
                 notifier: UserNotificationsNotifier(),
                 transcriptFactory: { id in
