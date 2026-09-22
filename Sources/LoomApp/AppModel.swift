@@ -481,6 +481,19 @@ public final class AppModel {
         return exists
     }
 
+    /// Fills the memo for every record it does not cover yet from ONE walk of
+    /// `~/.claude/projects`. A cold launch used to walk it once per persisted
+    /// session, on the main thread, before the first frame — and both the
+    /// session table and the project slugs only ever grow.
+    private func seedNativeExistsCache(for records: [SessionRecord]) {
+        let uncached = records.filter { nativeExistsCache[$0.id] == nil }
+        guard !uncached.isEmpty else { return }
+        let index = ClaudeNativeSessions.index()
+        for record in uncached {
+            nativeExistsCache[record.id] = ClaudeNativeSessions.contains(index, record.resolvedNativeSessionID)
+        }
+    }
+
     /// The conversation a session serves — live item first, then its record,
     /// else the Loom id itself. The one read path for the ring, the info
     /// panel, the context sheet and Mission Control.
@@ -493,6 +506,9 @@ public final class AppModel {
     private func reloadPersistedSessions() {
         let all = ((try? store?.allSessions()) ?? nil) ?? []
         allRecords = all
+        seedNativeExistsCache(for: all.filter {
+            [.interrupted, .completed, .failed, .archived].contains($0.state)
+        })
         // A closed session with no persisted conversation has nothing to show or
         // to resume: it doesn't clutter the lists (pre-fix identifier wrecks
         // disappear at the same time).
@@ -1722,7 +1738,7 @@ public final class AppModel {
         // The conversation to pick up is the NATIVE one — the imposed UUID,
         // unless a `/resume <id>` in the terminal moved the session elsewhere.
         let native = record.resolvedNativeSessionID
-        let command = ClaudeNativeSessions.exists(native)
+        let command = nativeSessionExists(record)
             ? adapter.resumeCommand(session: native, hookToken: token)
             : adapter.launchCommand(session: record.id, initialPrompt: nil, hookToken: token)
         guard let directory = workingDirectory(worktreePath: record.worktreePath,
