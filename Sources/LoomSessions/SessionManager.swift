@@ -64,7 +64,12 @@ public actor SessionManager {
     /// Per-session IPC token (ADR-0005): issued at birth, verified on every payload.
     private var tokens: [String: SessionID] = [:]
     private var tokensBySession: [SessionID: String] = [:]
+    /// The native conversation each live process serves: the imposed UUID at
+    /// launch, then whatever `SessionStart` last reported (the agent switches
+    /// conversation under the same process on `/resume <id>`, `/clear`, a fork).
+    private var nativeIDs: [SessionID: SessionID] = [:]
     private var stateContinuation: AsyncStream<StateUpdate>.Continuation?
+    private var identityContinuation: AsyncStream<IdentityUpdate>.Continuation?
     private let clock = ContinuousClock()
 
     public struct StateUpdate: Sendable, Equatable {
@@ -79,6 +84,31 @@ public actor SessionManager {
                                                             bufferingPolicy: .bufferingNewest(256))
         stateContinuation = continuation
         return stream
+    }
+
+    /// A session whose process now serves another native conversation.
+    public struct IdentityUpdate: Sendable, Equatable {
+        public let id: SessionID
+        public let nativeSessionID: SessionID
+        public init(id: SessionID, nativeSessionID: SessionID) {
+            self.id = id
+            self.nativeSessionID = nativeSessionID
+        }
+    }
+
+    /// Stream of native conversation switches — identity, not state, so it
+    /// stays out of `stateUpdates()`. Single-consumer, buffered like it.
+    public func identityUpdates() -> AsyncStream<IdentityUpdate> {
+        let (stream, continuation) = AsyncStream.makeStream(of: IdentityUpdate.self,
+                                                            bufferingPolicy: .bufferingNewest(64))
+        identityContinuation = continuation
+        return stream
+    }
+
+    /// The conversation the session's process serves; `nil` for a session the
+    /// manager does not hold.
+    public func nativeSessionID(of id: SessionID) -> SessionID? {
+        nativeIDs[id]
     }
 
     /// P0 perf: the user's terminal refresh setting, applied to every runtime.
@@ -163,6 +193,7 @@ public actor SessionManager {
         runtimes[id] = runtime
         finished.remove(id)   // a relaunch after a crash: this runtime is live again
         states[id] = StateEngine.State(session: .starting)
+        nativeIDs[id] = id   // the imposed UUID — until SessionStart says otherwise
         let token = spec.hookToken ?? UUID().uuidString
         tokens[token] = id
         tokensBySession[id] = token
@@ -202,6 +233,7 @@ public actor SessionManager {
         runtimes[id] = runtime
         finished.remove(id)   // a relaunch after a crash: this runtime is live again
         states[id] = StateEngine.State(session: .interrupted)
+        nativeIDs[id] = record.resolvedNativeSessionID
         let token = hookToken ?? UUID().uuidString
         tokens[token] = id
         tokensBySession[id] = token
@@ -282,8 +314,25 @@ public actor SessionManager {
 
     /// Variant for when the session is already authenticated (the server validated the token).
     public func ingest(_ payload: Data, for id: SessionID) {
-        guard states[id] != nil, let event = ClaudeCodeAdapter.interpret(payload) else { return }
+        guard states[id] != nil else { return }
+        // Identity first: a SessionStart carries no state, but it is the one
+        // place the agent tells us WHICH conversation the process now serves.
+        if let start = ClaudeCodeAdapter.sessionStart(from: payload) {
+            adoptNativeSession(start.nativeSessionID, for: id)
+        }
+        guard let event = ClaudeCodeAdapter.interpret(payload) else { return }
         apply(event, to: id)
+    }
+
+    /// The process switched conversation (`/resume <id>` in the terminal,
+    /// `/clear`, a fork): the record follows, then the UI hears about it. The
+    /// same UUID again — `startup`, `compact` — is noise: nothing written.
+    private func adoptNativeSession(_ native: SessionID, for id: SessionID) {
+        guard nativeIDs[id] != native else { return }
+        nativeIDs[id] = native
+        // Store FIRST, announce second — the same rule as apply().
+        try? store?.updateNativeSession(session: id, to: native == id ? nil : native)
+        identityContinuation?.yield(IdentityUpdate(id: id, nativeSessionID: native))
     }
 
     public func state(of id: SessionID) -> SessionState? {
@@ -329,5 +378,6 @@ public actor SessionManager {
         guard finished.contains(id), states[id]?.session == .archived else { return }
         finished.remove(id)
         runtimes[id] = nil
+        nativeIDs[id] = nil
     }
 }

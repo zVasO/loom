@@ -57,6 +57,7 @@ Conclusion : la frontière tranchée dans `CONTEXT.md` (« termine par une quest
 - **`--resume <session-id-or-name>`** : cherche « the current project directory and its git worktrees, then every other project on this machine » (≥ v2.1.223) — compatible avec nos worktrees.
 - **`--fork-session`** : reprendre en créant un nouvel ID — utile pour « dupliquer la configuration » (SES-05) à partir d'une session existante.
 - **`--continue`** : dernière conversation du répertoire courant — repli si l'ID est perdu.
+- **`/resume <id>` tapé dans le terminal** change la session native *sans relancer le process* (même PTY, même token de hook) ; `SessionStart` (source `resume`, aussi `clear`/`fork`) porte le nouveau `session_id`. Loom le suit comme `nativeSessionID` sur l'enregistrement de session (migration v9), distinct de l'id Loom imposé au lancement : la Reprise, l'anneau de contexte et le panneau d'info lisent la conversation réellement servie, l'id Loom reste la clé de tout le reste.
 
 ## Non vérifié / à valider empiriquement
 

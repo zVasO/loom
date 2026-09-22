@@ -100,7 +100,35 @@ public struct ClaudeCodeAdapter: Sendable {
         }
     }
 
-    /// UC-7: since the UUID was imposed at launch, Resume is a simple `--resume`.
+    /// What `SessionStart` says about identity: the conversation the process
+    /// serves from now on. The agent can switch conversation without leaving
+    /// its process (`/resume <id>` typed in the terminal, `/clear`, a fork) —
+    /// this is the only signal that the UUID imposed at launch no longer holds.
+    public struct SessionStart: Sendable, Equatable {
+        public let nativeSessionID: SessionID
+        /// `startup` / `resume` / `clear` / `compact` / `fork` (research §2), if given.
+        public let source: String?
+        public init(nativeSessionID: SessionID, source: String?) {
+            self.nativeSessionID = nativeSessionID
+            self.source = source
+        }
+    }
+
+    /// `nil` unless the payload is a `SessionStart` carrying a valid UUID. It
+    /// reports; whether the id is new is the manager's call, not the adapter's.
+    public static func sessionStart(from payload: Data) -> SessionStart? {
+        guard let object = try? JSONSerialization.jsonObject(with: payload),
+              let fields = object as? [String: Any],
+              fields["hook_event_name"] as? String == "SessionStart",
+              let raw = fields["session_id"] as? String,
+              let uuid = UUID(uuidString: raw) else {
+            return nil
+        }
+        return SessionStart(nativeSessionID: SessionID(uuid), source: fields["source"] as? String)
+    }
+
+    /// UC-7: Resume is a simple `--resume` of the NATIVE session — the imposed
+    /// UUID unless the agent switched conversation since (`SessionRecord.nativeSessionID`).
     public func resumeCommand(session: SessionID, hookToken: String? = nil) -> Command {
         var arguments = ["--resume", session.rawValue.uuidString]
         if let hooks, let hookToken,

@@ -103,6 +103,40 @@ struct ClaudeCodeAdapterTests {
         let command = ClaudeCodeAdapter().resumeCommand(session: id)
         #expect(command.executable == "claude")
         #expect(command.arguments == ["--resume", id.rawValue.uuidString])
+
+        // A session that switched conversation (`/resume <id>` in the terminal)
+        // resumes THAT conversation — the Loom id never reaches the CLI.
+        let native = SessionID()
+        #expect(ClaudeCodeAdapter().resumeCommand(session: native).arguments
+                == ["--resume", native.rawValue.uuidString])
+    }
+
+    @Test("SessionStart reports the native conversation the process now serves")
+    func sessionStartLivreLIdNatif() throws {
+        func payload(_ fields: [String: Any]) -> Data {
+            try! JSONSerialization.data(withJSONObject: fields)
+        }
+        let native = SessionID()
+        let resumed = payload(["hook_event_name": "SessionStart", "source": "resume",
+                               "session_id": native.rawValue.uuidString, "cwd": "/tmp"])
+        let start = try #require(ClaudeCodeAdapter.sessionStart(from: resumed))
+        #expect(start.nativeSessionID == native)
+        #expect(start.source == "resume")
+        #expect(ClaudeCodeAdapter.interpret(resumed) == nil,
+                "identity is not state: SessionStart never moves the state machine")
+
+        let startup = payload(["hook_event_name": "SessionStart", "source": "startup",
+                               "session_id": native.rawValue.uuidString.lowercased()])
+        #expect(ClaudeCodeAdapter.sessionStart(from: startup)?.nativeSessionID == native,
+                "the adapter reports every SessionStart; deciding it is new is the manager's job")
+
+        #expect(ClaudeCodeAdapter.sessionStart(from: payload([
+            "hook_event_name": "Stop", "session_id": native.rawValue.uuidString,
+        ])) == nil, "only SessionStart speaks about identity")
+        #expect(ClaudeCodeAdapter.sessionStart(from: payload([
+            "hook_event_name": "SessionStart", "session_id": "abc",
+        ])) == nil, "an id that is not a UUID is noise, never an identity")
+        #expect(ClaudeCodeAdapter.sessionStart(from: Data("not json".utf8)) == nil)
     }
 
     @Test("Resume re-injects the hooks: the resumed session stays observed")

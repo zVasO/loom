@@ -1868,7 +1868,8 @@ struct SessionsView: View {
                 AppModel.SessionItem(id: record.id, title: record.title, state: record.state,
                                      projectID: record.projectID, branch: record.branch,
                                      parentID: nil, isShell: false, isDormant: true,
-                                     badges: record.badges)
+                                     badges: record.badges,
+                                     nativeSessionID: record.nativeSessionID)
             }
     }
 
@@ -2035,7 +2036,8 @@ struct SessionsView: View {
                 AppModel.SessionItem(id: record.id, title: record.title, state: record.state,
                                      projectID: record.projectID, branch: record.branch,
                                      parentID: nil, isShell: false, isDormant: true,
-                                     badges: record.badges)
+                                     badges: record.badges,
+                                     nativeSessionID: record.nativeSessionID)
             }
         return live + dormant
     }
@@ -2366,6 +2368,17 @@ struct SessionDetailView: View {
         model.sessions.first { $0.id == sessionID }
     }
 
+    /// The conversation the process serves: the Loom id, unless a `/resume
+    /// <id>` typed in the terminal moved it — the ring and the info panel
+    /// follow the conversation, not the imposed UUID.
+    private var nativeID: SessionID { model.nativeSessionID(for: sessionID) }
+
+    /// What restarts `watchUsage`: a turn boundary, or another native file to read.
+    private struct UsageKey: Equatable {
+        var state: SessionState?
+        var native: SessionID
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             breadcrumb
@@ -2467,7 +2480,7 @@ struct SessionDetailView: View {
         .padding(.horizontal, 14)
         .frame(height: 42)
         .background(DefaultTheme.background)
-        .task(id: item?.state) { await watchUsage() }
+        .task(id: UsageKey(state: item?.state, native: nativeID)) { await watchUsage() }
     }
 
     /// The ring fills as the window does; a click opens the context sheet.
@@ -2491,7 +2504,7 @@ struct SessionDetailView: View {
     /// entry) off the main actor. Runs once per state change; while the agent
     /// works, polls every few seconds so the ring moves during a long turn.
     private func watchUsage() async {
-        let id = sessionID
+        let id = nativeID
         repeat {
             let latest = await Task.detached(priority: .utility) {
                 ClaudeNativeSessions.usage(for: id, tailBytes: 65_536)
@@ -2527,11 +2540,22 @@ struct SessionDetailView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(DefaultTheme.secondaryText)
             Divider().overlay(DefaultTheme.cardBorder).padding(.vertical, 2)
-            infoRow("Session ID", record?.id.rawValue.uuidString.lowercased() ?? "—") {
+            // The native conversation — what `claude --resume` accepts, so the
+            // one worth copying. The Loom id only shows when it differs.
+            infoRow("Session ID", nativeID.rawValue.uuidString.lowercased()) {
                 HoverIconButton(systemImage: "doc.on.doc", help: "Copy identifier") {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(record?.id.rawValue.uuidString.lowercased() ?? "",
+                    NSPasteboard.general.setString(nativeID.rawValue.uuidString.lowercased(),
                                                    forType: .string)
+                }
+            }
+            if nativeID != sessionID {
+                infoRow("Loom ID", sessionID.rawValue.uuidString.lowercased()) {
+                    HoverIconButton(systemImage: "doc.on.doc", help: "Copy Loom identifier") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(sessionID.rawValue.uuidString.lowercased(),
+                                                       forType: .string)
+                    }
                 }
             }
             infoRow("Working directory", workingDir ?? "—") {

@@ -270,7 +270,7 @@ struct ContextWindowSheet: View {
     private func refresh() async {
         refreshing = true
         defer { refreshing = false; loaded = true }
-        let id = sessionID
+        let id = model.nativeSessionID(for: sessionID)   // the conversation, not the Loom id
         // The whole file: the cumulative figures need every turn, and the
         // megabytes never stall the UI from a detached utility task.
         usage = await Task.detached(priority: .utility) {

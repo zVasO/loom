@@ -132,11 +132,13 @@ private struct FleetCard: View {
         }
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
-        .task {
+        .task(id: item.nativeID) {
             surface = await model.surface(for: item.id)
             // P1 perf: the native .jsonl can be MBs — read only its tail, off
             // the main actor (the context figure lives in the LAST entry).
-            let id = item.id
+            // Keyed by the native id: a `/resume <id>` in the terminal
+            // changes which file to read.
+            let id = item.nativeID
             usage = await Task.detached(priority: .utility) {
                 ClaudeNativeSessions.usage(for: id, tailBytes: 65_536)
             }.value
