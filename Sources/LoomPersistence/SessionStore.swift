@@ -447,6 +447,14 @@ public final class SessionStore: Sendable {
         }
     }
 
+    /// The last moment a session's state moved — one row, not the journal.
+    public func lastTransitionDate(session id: SessionID) throws -> Date? {
+        try database.read { db in
+            try Date.fetchOne(db, sql: "SELECT at FROM stateTransition WHERE sessionID = ? ORDER BY at DESC LIMIT 1",
+                              arguments: [id.rawValue.uuidString])
+        }
+    }
+
     public func transitions(session id: SessionID) throws -> [TransitionRecord] {
         try database.read { db in
             try TransitionRecord

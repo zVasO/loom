@@ -1458,9 +1458,21 @@ public final class AppModel {
     /// process ended — "last activity" in the session info. Nil before any
     /// transition was journaled.
     public func lastActivity(of id: SessionID) -> Date? {
-        let transition = ((try? store?.transitions(session: id)) ?? nil)?.last?.at
+        let transition = (try? store?.lastTransitionDate(session: id)) ?? nil
         let ended = sessionInfo(id)?.endedAt
         return [transition, ended].compactMap { $0 }.max()
+    }
+
+    /// What the session info panel shows, read off the main actor in one go:
+    /// its body used to run three store reads per pass, one fetching the
+    /// whole transition journal to take its last row.
+    public func sessionInfoSnapshot(_ id: SessionID) async -> (record: SessionRecord?, lastActivity: Date?) {
+        guard let store else { return (nil, nil) }
+        return await Task.detached(priority: .userInitiated) {
+            let record = (try? store.session(id: id)) ?? nil
+            let transition = (try? store.lastTransitionDate(session: id)) ?? nil
+            return (record, [transition, record?.endedAt].compactMap { $0 }.max())
+        }.value
     }
 
     /// Removes the project from the app (archived in the database): the local

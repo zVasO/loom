@@ -2363,6 +2363,8 @@ struct SessionDetailView: View {
     /// v3 — opens the reviewer session that the Ship panel just launched.
     var selectedAfterReview: ((SessionID) -> Void)?
     @State private var infoShown = false
+    @State private var infoRecord: SessionRecord?
+    @State private var infoLastActivity: Date?
     @State private var gitShown = false
     @State private var gitData: AppModel.GitPanelData?
     @State private var shipMessage = ""
@@ -2409,6 +2411,12 @@ struct SessionDetailView: View {
             }
         }
         .background(DefaultTheme.contentBackground)
+        .task(id: infoShown) {
+            guard infoShown else { return }
+            let snapshot = await model.sessionInfoSnapshot(sessionID)
+            infoRecord = snapshot.record
+            infoLastActivity = snapshot.lastActivity
+        }
     }
 
     private var breadcrumb: some View {
@@ -2531,10 +2539,12 @@ struct SessionDetailView: View {
     /// identity, worktree, agent, dates — under its window, read from
     /// claude's own records. Nothing invented.
     private var sessionInfoPanel: some View {
-        let record = model.sessionInfo(sessionID)
+        // Loaded once when the panel opens (see the task on the body): no
+        // store read in a body pass.
+        let record = infoRecord
         let workingDir = record?.worktreePath
             ?? model.project(item?.projectID ?? record?.projectID)?.path
-        let lastActivity = model.lastActivity(of: sessionID)
+        let lastActivity = infoLastActivity
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Context Usage")
