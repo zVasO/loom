@@ -1,6 +1,6 @@
 import Testing
 import LoomCore
-import LoomTerminal
+@testable import LoomTerminal
 import LoomTerminalTestSupport
 import Foundation
 
@@ -173,5 +173,37 @@ struct TerminalSurfaceTests {
             try? await Task.sleep(for: .milliseconds(10))
         }
         return condition()
+    }
+
+    // P1-5: a chunk that moves no visible cell — a DSR reply, a mode toggle —
+    // never becomes a frame: nothing crosses to the main actor, nothing
+    // invalidates the watchers.
+    @Test("a frame carrying no visible change is not delivered")
+    func frameSansChangementNonLivree() async throws {
+        let pty = ScriptedPTYHost()
+        let runtime = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree"),
+                              geometry: TerminalGeometry(cols: 40, rows: 6)),
+            using: SessionRuntime.Dependencies(
+                ptyHost: pty, transcript: MemoryTranscriptSink(),
+                makeEngine: { geometry, _ in SwiftTermEngine(geometry: geometry, scrollback: 100) })
+        ).runtime
+        let surface = runtime.surface()
+        surface.attach()
+        pty.emit("hello")
+        #expect(await pollUntil { surface.screen.lines.first?.text.hasPrefix("hello") == true })
+        let delivered = surface.framesReceived
+
+        pty.emit("\u{1B}[6n")   // DSR: answered on the PTY, nothing on screen
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(surface.framesReceived == delivered, "no visible change, no frame")
+        #expect(String(decoding: pty.writtenBytes, as: UTF8.self).contains("\u{1B}[1;6R"),
+                "the reply still went out")
+
+        pty.emit(" world")
+        #expect(await pollUntil { surface.framesReceived > delivered })
+        #expect(surface.screen.lines.first?.text.hasPrefix("hello world") == true)
+        surface.detach()
     }
 }

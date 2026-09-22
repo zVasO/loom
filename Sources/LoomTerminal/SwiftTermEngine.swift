@@ -95,10 +95,23 @@ public final class SwiftTermEngine: TerminalEngine {
         invalidateTailCache()   // the scrollback reflows: cached lines are stale
     }
 
+    /// The lines of the last snapshot: a row the emulator did not touch since
+    /// (SwiftTerm's own update range, kept in `dirtyRows`) is handed back as
+    /// is — the O(cols × rows) copy per frame only pays for what changed.
+    /// A scroll, a clear, an alternate-screen switch and a resize all mark
+    /// every row, as SwiftTerm's own view relies on.
+    private var lineCache: [TerminalLine] = []
+
     public func snapshot() -> TerminalScreen {
+        let dirty = takeDirtyRows()
+        let reusable = lineCache.count == geometry.rows
         var lines: [TerminalLine] = []
         lines.reserveCapacity(geometry.rows)
         for row in 0..<geometry.rows {
+            if reusable, !dirty.contains(row) {
+                lines.append(lineCache[row])
+                continue
+            }
             var cells: [TerminalCell] = []
             cells.reserveCapacity(geometry.cols)
             for col in 0..<geometry.cols {
@@ -108,6 +121,7 @@ public final class SwiftTermEngine: TerminalEngine {
             lines.append(TerminalLine(cells: cells,
                                       isWrapped: terminal.getLine(row: row)?.isWrapped ?? false))
         }
+        lineCache = lines
         let cursor = terminal.getCursorLocation()
         return TerminalScreen(geometry: geometry,
                               lines: lines,
@@ -202,6 +216,8 @@ public final class SwiftTermEngine: TerminalEngine {
         tailCachedRows = 0
     }
 
+    /// Consumed by `snapshot()`: a caller taking them itself would hand the
+    /// next snapshot stale rows.
     public func takeDirtyRows() -> IndexSet {
         defer { dirtyRows.removeAll() }
         return dirtyRows

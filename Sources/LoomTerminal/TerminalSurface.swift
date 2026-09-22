@@ -106,14 +106,23 @@ public final class TerminalSurface {
         runtime?.resize(to: TerminalGeometry(cols: cols, rows: rows))
     }
 
+    /// Frames that reached this surface — what a test counts to prove that a
+    /// frame carrying no visible change never got here.
+    private(set) var framesReceived = 0
+
     func receive(_ screen: TerminalScreen, history: [TerminalLine], base: Int = 0,
                  modes: TerminalModes = .none, hasOutput: Bool = true) {
         guard isAttached else { return }
-        self.screen = screen
-        self.history = history
-        self.historyBase = base
-        // @Observable notifies on assignment, not on change: modes that flip once
-        // per session must not invalidate the view at frame rate.
+        framesReceived += 1
+        // @Observable notifies on assignment, not on change: only what moved
+        // is assigned. The history shares its buffers with the engine's tail
+        // cache, so an unchanged tail compares by identity.
+        if self.screen.revision != screen.revision || self.screen.cursor != screen.cursor
+            || self.screen.geometry != screen.geometry || self.screen.lines.count != screen.lines.count {
+            self.screen = screen
+        }
+        if self.history != history { self.history = history }
+        if self.historyBase != base { self.historyBase = base }
         if self.modes != modes { self.modes = modes }
         if self.hasOutput != hasOutput { self.hasOutput = hasOutput }
     }

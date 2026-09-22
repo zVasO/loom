@@ -216,7 +216,7 @@ public final class SessionRuntime: @unchecked Sendable {
             if attached { attachedTerminals.insert(terminal) } else { attachedTerminals.remove(terminal) }
         }
         if attached {
-            queue.async { self.deliverFrame() }
+            queue.async { self.deliverFrame(force: true) }
         }
     }
 
@@ -255,10 +255,29 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
-    /// On the session queue: copies the screen and delivers it to the attached surfaces.
-    private func deliverFrame() {
+    /// What the last delivered frame showed. Equal again means nothing to
+    /// redraw: a DSR reply, a mode toggle, a chunk that moved no cell used to
+    /// cross to the main actor and invalidate every watcher all the same.
+    private struct FrameKey: Equatable {
+        let revision: UInt64
+        let cursor: CursorPosition
+        let scrollbackRows: Int
+        let modes: TerminalModes
+        let hasOutput: Bool
+    }
+    private var lastDelivered: FrameKey?
+
+    /// On the session queue: copies the screen and delivers it to the attached
+    /// surfaces — unless nothing visible changed since the last delivery.
+    /// `force`: an attach paints whatever is there.
+    private func deliverFrame(force: Bool = false) {
         let watching = lock.withLock { attachedTerminals }
         guard !watching.isEmpty, let engine else { return }
+        let key = FrameKey(revision: engine.revision, cursor: engine.cursor,
+                           scrollbackRows: engine.scrollbackRows, modes: engine.modes,
+                           hasOutput: bytesReceived > 0)
+        if !force, key == lastDelivered { return }
+        lastDelivered = key
         let snapshot = engine.snapshot()
         let history = engine.historyTail(400)
         let base = engine.scrollbackRows - history.count
