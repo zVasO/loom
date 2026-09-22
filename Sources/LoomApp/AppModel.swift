@@ -1554,7 +1554,7 @@ public final class AppModel {
         }
         for record in payload.panes {
             let pane = BrowserPane(title: record.title, parentID: record.parentID)
-            for url in record.urls { pane.controller.openTab(urlString: url) }
+            pane.controller.restoreTabs(urlStrings: record.urls)   // model only, until shown
             browserPanes.append(pane)
         }
     }

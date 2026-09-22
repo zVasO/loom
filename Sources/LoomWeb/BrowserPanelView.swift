@@ -62,7 +62,10 @@ public struct BrowserPanelView: View {
                 Spacer()
             }
         }
-        .onAppear { controller.onVisit = onVisit }
+        .onAppear {
+            controller.onVisit = onVisit
+            controller.materialize()
+        }
         .onChange(of: controller.activeWebView?.url) { _, url in
             if let url { address = url.absoluteString }
         }
