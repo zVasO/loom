@@ -226,6 +226,7 @@ APP=dist/Loom.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/LoomApp "$APP/Contents/MacOS/Loom"
 cp .build/release/loom-hook "$APP/Contents/MacOS/loom-hook"
+cp .build/release/loom "$APP/Contents/MacOS/loom"
 VERSION=$(git describe --tags --always 2>/dev/null || echo "0.1.0")
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -246,6 +247,7 @@ pause
 # ── Stage 5 : signature Hardened Runtime ──────────────────────────────────
 stage "Signature (Hardened Runtime, ADR-0004)"
 codesign --force --options runtime --sign "$LOOM_SIGN_IDENTITY" "$APP/Contents/MacOS/loom-hook"
+codesign --force --options runtime --sign "$LOOM_SIGN_IDENTITY" "$APP/Contents/MacOS/loom"
 codesign --force --options runtime --sign "$LOOM_SIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP" && say "✓ signature vérifiée"
 pause

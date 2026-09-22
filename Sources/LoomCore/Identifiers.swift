@@ -41,10 +41,17 @@ public struct TerminalGeometry: Sendable, Equatable, Codable {
 public struct Command: Sendable, Equatable {
     public var executable: String
     public var arguments: [String]
+    /// Session overlay: wins every collision with the inherited environment.
     public var environment: [String: String]
-    public init(executable: String, arguments: [String] = [], environment: [String: String] = [:]) {
+    /// Directories put IN FRONT of the child's PATH, in this order — the way
+    /// to make a companion binary (`loom`, ADR-0010) callable by name without
+    /// replacing the PATH the user's shell resolved.
+    public var pathPrefix: [String]
+    public init(executable: String, arguments: [String] = [], environment: [String: String] = [:],
+                pathPrefix: [String] = []) {
         self.executable = executable
         self.arguments = arguments
         self.environment = environment
+        self.pathPrefix = pathPrefix
     }
 }

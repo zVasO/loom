@@ -1,3 +1,4 @@
+import LoomAPI
 import LoomCore
 import Foundation
 
@@ -7,12 +8,16 @@ public struct ClaudeCodeAdapter: Sendable {
 
     /// Wiring of the hooks to the app: helper binary (ADR-0005) and Unix socket.
     /// The token, on the other hand, is PER SESSION — it is passed to `launchCommand`.
+    /// `cli` is the `loom` binary (ADR-0010): when present, the session gets the
+    /// API as MCP tools; absent, it still has the socket and its token.
     public struct HookWiring: Sendable {
         public var helper: URL
         public var socket: URL
-        public init(helper: URL, socket: URL) {
+        public var cli: URL?
+        public init(helper: URL, socket: URL, cli: URL? = nil) {
             self.helper = helper
             self.socket = socket
+            self.cli = cli
         }
     }
 
@@ -40,10 +45,30 @@ public struct ClaudeCodeAdapter: Sendable {
            let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken) {
             arguments.append(contentsOf: ["--settings", settings])
         }
+        if let hooks, let hookToken, let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken) {
+            arguments.append(contentsOf: ["--mcp-config", mcp])
+        }
         if let initialPrompt {
             arguments.append(initialPrompt)
         }
-        return Command(executable: executable, arguments: arguments)
+        return Command(executable: executable, arguments: arguments,
+                       environment: Self.apiEnvironment(wiring: hooks, token: hookToken),
+                       pathPrefix: Self.pathPrefix(wiring: hooks))
+    }
+
+    /// `loom` by name, from the agent's shell: its directory leads the PATH.
+    static func pathPrefix(wiring: HookWiring?) -> [String] {
+        guard let cli = wiring?.cli else { return [] }
+        return [cli.deletingLastPathComponent().path]
+    }
+
+    /// The agents API (ADR-0010) reaches the agent through its environment:
+    /// the socket, and the token that scopes it to its own session. Nothing
+    /// when the session has no wiring — a bare claude gets a bare environment.
+    static func apiEnvironment(wiring: HookWiring?, token: String?) -> [String: String] {
+        guard let wiring, let token else { return [:] }
+        return [APIProtocol.socketEnvironmentKey: wiring.socket.path,
+                APIProtocol.sessionTokenEnvironmentKey: token]
     }
 
     /// Translates a hook payload (JSON stdin of the helper) into a reducer event.
@@ -82,7 +107,34 @@ public struct ClaudeCodeAdapter: Sendable {
            let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken) {
             arguments.append(contentsOf: ["--settings", settings])
         }
-        return Command(executable: executable, arguments: arguments)
+        if let hooks, let hookToken, let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken) {
+            arguments.append(contentsOf: ["--mcp-config", mcp])
+        }
+        return Command(executable: executable, arguments: arguments,
+                       environment: Self.apiEnvironment(wiring: hooks, token: hookToken),
+                       pathPrefix: Self.pathPrefix(wiring: hooks))
+    }
+
+    /// The API as MCP tools (ADR-0010), through inline `--mcp-config` — the CLI
+    /// accepts a JSON string as well as a file, so nothing lands on disk. The
+    /// server runs `loom mcp` with the session's socket and token in its
+    /// environment; nil without a `loom` binary to run.
+    static func mcpConfigJSON(wiring: HookWiring, token: String) -> String? {
+        guard let cli = wiring.cli else { return nil }
+        let config: [String: Any] = [
+            "mcpServers": [
+                "loom": [
+                    "command": cli.path,
+                    "args": ["mcp"],
+                    "env": apiEnvironment(wiring: wiring, token: token),
+                ],
+            ],
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: config,
+                                                     options: [.sortedKeys, .withoutEscapingSlashes]) else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 
     private static func hookSettingsJSON(wiring: HookWiring, token: String) -> String? {

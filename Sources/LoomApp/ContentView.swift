@@ -25,27 +25,61 @@ struct BadgeChip: View {
     }
 }
 
-/// The right-click "Badge" submenu, shared by cards and strip tabs.
+/// The right-click "Badges" submenu, shared by cards and strip tabs: each
+/// badge toggles on its own, so a session wears as many as it needs.
 struct BadgeMenu: View {
     let model: AppModel
     let sessionID: SessionID
-    let current: String?
+    let current: [String]
+
+    /// Badges the session wears that no definition covers any more (a deleted
+    /// definition, a "PR #42" set by the app): still removable one by one.
+    private var orphans: [String] {
+        current.filter { name in !model.badgeDefinitions.contains { $0.name == name } }
+    }
 
     var body: some View {
-        Menu("Badge") {
-            Button("None") { model.setBadge(nil, for: sessionID) }
+        Menu("Badges") {
+            Button("Remove all") { model.setBadges([], for: sessionID) }
+                .disabled(current.isEmpty)
             Divider()
             ForEach(model.badgeDefinitions) { definition in
-                Button {
-                    model.setBadge(definition.name, for: sessionID)
-                } label: {
-                    if current == definition.name {
-                        Label(definition.name, systemImage: "checkmark")
-                    } else {
-                        Text(definition.name)
-                    }
+                toggle(definition.name)
+            }
+            if !orphans.isEmpty {
+                Divider()
+                ForEach(orphans, id: \.self) { name in toggle(name) }
+            }
+        }
+    }
+
+    private func toggle(_ name: String) -> some View {
+        Button {
+            model.toggleBadge(name, for: sessionID)
+        } label: {
+            if current.contains(name) {
+                Label(name, systemImage: "checkmark")
+            } else {
+                Text(name)
+            }
+        }
+    }
+}
+
+/// The badges of a session card, side by side. Rigid: a narrow column
+/// truncates the title, never squashes a chip.
+struct BadgeRow: View {
+    let model: AppModel
+    let badges: [String]
+
+    var body: some View {
+        if !badges.isEmpty {
+            HStack(spacing: 4) {
+                ForEach(badges, id: \.self) { name in
+                    BadgeChip(label: name, color: model.badgeColor(for: name))
                 }
             }
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 }
@@ -1203,8 +1237,8 @@ struct StackTab: View {
     let title: String
     let isActive: Bool
     var isDormant: Bool = false
-    /// Badge shown as a colored dot; right-click assigns via `badgeMenu`.
-    var badge: (label: String, color: Color)?
+    /// Badges shown as colored dots; right-click assigns via `badgeMenu`.
+    var badges: [(label: String, color: Color)] = []
     var badgeMenu: BadgeMenu?
     let onSelect: () -> Void
     let onClose: () -> Void
@@ -1216,7 +1250,7 @@ struct StackTab: View {
                 .font(.system(size: 9))
                 .foregroundStyle(isDormant ? DefaultTheme.mutedText
                                  : isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
-            if let badge {
+            ForEach(Array(badges.enumerated()), id: \.offset) { _, badge in
                 Circle().fill(badge.color).frame(width: 5, height: 5)
                     .help(badge.label)
             }
@@ -1350,8 +1384,9 @@ struct PRRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(pr.checksPassing ? DefaultTheme.groupHeader : DefaultTheme.danger)
+                .fill(PRChips.checksColor(pr))
                 .frame(width: 7, height: 7)
+                .help(PRChips.checksSummary(pr))
             Text("#\(pr.number)")
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .foregroundStyle(DefaultTheme.accent)
@@ -1821,7 +1856,8 @@ struct SessionsView: View {
             ?? model.dormantSessions.first { $0.id == id }.map { record in
                 AppModel.SessionItem(id: record.id, title: record.title, state: record.state,
                                      projectID: record.projectID, branch: record.branch,
-                                     parentID: nil, isShell: false, isDormant: true)
+                                     parentID: nil, isShell: false, isDormant: true,
+                                     badges: record.badges)
             }
     }
 
@@ -1987,7 +2023,8 @@ struct SessionsView: View {
             .map { record in
                 AppModel.SessionItem(id: record.id, title: record.title, state: record.state,
                                      projectID: record.projectID, branch: record.branch,
-                                     parentID: nil, isShell: false, isDormant: true)
+                                     parentID: nil, isShell: false, isDormant: true,
+                                     badges: record.badges)
             }
         return live + dormant
     }
@@ -2708,8 +2745,6 @@ struct SidebarSessionCard: View {
     let onClose: () -> Void
     @State private var hovered = false
 
-    private func badgeColor(_ label: String) -> Color { model.badgeColor(for: label) }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -2717,9 +2752,7 @@ struct SidebarSessionCard: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(DefaultTheme.primaryText)
                     .lineLimit(1)
-                if let badge = item.badge {
-                    BadgeChip(label: badge, color: badgeColor(badge))
-                }
+                BadgeRow(model: model, badges: item.badges)
                 Spacer()
                 if hovered {
                     // Same cluster as the stack rows: identical spacing
@@ -2760,7 +2793,7 @@ struct SidebarSessionCard: View {
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
         .contextMenu {
-            BadgeMenu(model: model, sessionID: item.id, current: item.badge)
+            BadgeMenu(model: model, sessionID: item.id, current: item.badges)
             Button("Rename…", action: onRename)
             Button("New terminal", action: onNewTerminal)
             Button("Dedicated browser", action: onOpenBrowser)

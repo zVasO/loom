@@ -374,7 +374,8 @@ public final class SessionRuntime: @unchecked Sendable {
         let channel = try dependencies.ptyHost.open(
             command: plan.command,
             workingDirectory: plan.workingDirectory,
-            environment: Self.childEnvironment(overlay: plan.command.environment),
+            environment: Self.childEnvironment(overlay: plan.command.environment,
+                                               pathPrefix: plan.command.pathPrefix),
             geometry: plan.geometry,
             deliveringOn: queue
         ) { event in
@@ -420,14 +421,22 @@ extension SessionRuntime {
     /// environment — research §7.3), then the session overlay, which wins every
     /// collision. PATH resolution from the login shell (GIT-06) will come with the
     /// EnvironmentResolver; until then, app inheritance + system fallback.
-    static func childEnvironment(overlay: [String: String]) -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
+    static func childEnvironment(overlay: [String: String], pathPrefix: [String] = [],
+                                 base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var environment = base
         environment["TERM"] = "xterm-256color"
         environment["COLORTERM"] = "truecolor"
         if environment["PATH"]?.isEmpty != false {
             environment["PATH"] = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         }
         environment.merge(overlay) { _, session in session }
+        // The prefix goes in front of whatever PATH won above — once each,
+        // never doubling a directory already there.
+        let existing = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
+        let fresh = pathPrefix.filter { !$0.isEmpty && !existing.contains($0) }
+        if !fresh.isEmpty {
+            environment["PATH"] = (fresh + existing).joined(separator: ":")
+        }
         return environment
     }
 }

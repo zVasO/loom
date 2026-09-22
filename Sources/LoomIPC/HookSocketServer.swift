@@ -1,3 +1,4 @@
+import LoomAPI
 import LoomCore
 import Dispatch
 import Foundation
@@ -6,25 +7,43 @@ import Foundation
 /// line `{token, payload}` per hook. The token is verified BEFORE any delivery —
 /// a payload with an unknown token never gets past the server (NFR-S).
 ///
+/// The same socket serves the agents API (ADR-0010): a line carrying `request`
+/// instead of `payload` is answered with one response line on the same
+/// connection. Its token is checked first too — an unknown one gets the
+/// connection closed, never an answer.
+///
 /// BSD sockets + DispatchSource implementation, deliberately dependency-free:
 /// a local line-by-line stream justifies neither SwiftNIO nor Network.framework.
 public final class HookSocketServer: @unchecked Sendable {
 
     public typealias Validate = @Sendable (_ token: String) -> SessionID?
     public typealias Handler = @Sendable (_ session: SessionID, _ payload: Data) -> Void
+    /// The scope a token opens for the API — `nil` = unknown token. Without
+    /// one, session tokens (`validate`) open their session's scope and no
+    /// token is global.
+    public typealias Authorize = @Sendable (_ token: String) -> APIScope?
+    /// Answers a request under its scope. Runs off the IPC queue — on
+    /// whatever actor the handler needs — and its answer goes back to the
+    /// connection that asked, if it is still there.
+    public typealias RequestHandler = @Sendable (_ scope: APIScope, _ request: APIRequest) async -> APIResponse
 
     private let socketPath: URL
     private let validate: Validate
     private let handler: Handler
+    private let authorize: Authorize?
+    private let requests: RequestHandler?
     private let queue = DispatchQueue(label: "app.loom.ipc")
     private var listeningDescriptor: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var connections: [Int32: (source: DispatchSourceRead, buffer: Data)] = [:]
 
-    public init(socketPath: URL, validate: @escaping Validate, handler: @escaping Handler) {
+    public init(socketPath: URL, validate: @escaping Validate, handler: @escaping Handler,
+                authorize: Authorize? = nil, requests: RequestHandler? = nil) {
         self.socketPath = socketPath
         self.validate = validate
         self.handler = handler
+        self.authorize = authorize
+        self.requests = requests
     }
 
     public func start() throws {
@@ -116,21 +135,76 @@ public final class HookSocketServer: @unchecked Sendable {
         while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
             let line = buffer[buffer.startIndex..<newline]
             buffer = buffer[buffer.index(after: newline)...]
-            deliver(Data(line))
+            deliver(Data(line), from: client)
+            // A rejected request dropped the connection: nothing more to read from it.
+            guard connections[client] != nil else { return }
         }
         connections[client]?.buffer = Data(buffer)
     }
 
-    private func deliver(_ line: Data) {
+    private func deliver(_ line: Data, from client: Int32) {
         guard let object = try? JSONSerialization.jsonObject(with: line),
               let fields = object as? [String: Any],
-              let token = fields["token"] as? String,
-              let payload = fields["payload"],
-              let session = validate(token),
-              let payloadData = try? JSONSerialization.data(withJSONObject: payload) else {
-            return   // unknown token or corrupted line: silence, never a delivery
+              let token = fields[APIEnvelope.tokenKey] as? String else {
+            return   // corrupted line: silence, never a delivery
         }
-        handler(session, payloadData)
+        if let payload = fields[APIEnvelope.hookPayloadKey] {
+            guard let session = validate(token),
+                  let payloadData = try? JSONSerialization.data(withJSONObject: payload) else {
+                return   // unknown token: silence, never a delivery
+            }
+            handler(session, payloadData)
+        } else if let request = fields[APIEnvelope.requestKey] {
+            answer(request, token: token, from: client)
+        }
+    }
+
+    // MARK: - Requests (ADR-0010)
+
+    private func scope(for token: String) -> APIScope? {
+        if let authorize { return authorize(token) }
+        return validate(token).map { APIScope.session($0) }
+    }
+
+    private func answer(_ request: Any, token: String, from client: Int32) {
+        // The token first, the request never before: an unknown token is not
+        // told what went wrong — the connection just ends (NFR-S).
+        guard let requests, let scope = scope(for: token) else {
+            drop(client)
+            return
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: request),
+              let decoded = try? JSONDecoder().decode(APIRequest.self, from: data) else {
+            let id = (request as? [String: Any])?["id"] as? String ?? ""
+            reply(APIResponse(id: id, error: APIError(code: .invalidRequest,
+                                                      message: "not a request: {id, method, params}")),
+                  to: client)
+            return
+        }
+        Task { [weak self] in
+            let response = await requests(scope, decoded)
+            self?.queue.async { self?.reply(response, to: client) }
+        }
+    }
+
+    /// On the IPC queue. A client gone since it asked gets nothing — its
+    /// descriptor may already belong to someone else.
+    private func reply(_ response: APIResponse, to client: Int32) {
+        guard connections[client] != nil,
+              let line = try? APIEnvelope.responseLine(response) else { return }
+        line.withUnsafeBytes { buffer in
+            var offset = 0
+            while offset < buffer.count {
+                let written = write(client, buffer.baseAddress! + offset, buffer.count - offset)
+                guard written > 0 else { return }
+                offset += written
+            }
+        }
+    }
+
+    private func drop(_ client: Int32) {
+        connections[client]?.source.cancel()
+        connections[client] = nil
     }
 }
 

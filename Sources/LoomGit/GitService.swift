@@ -68,6 +68,14 @@ public struct GitService: Sendable {
         }
     }
 
+    /// The URL a remote points at (`origin` by default) — nil when the folder
+    /// has no such remote, or is not a repository at all.
+    public func remoteURL(_ remote: String = "origin", in repo: URL) async -> String? {
+        guard let output = try? await run(["remote", "get-url", remote], in: repo),
+              !output.isEmpty else { return nil }
+        return output
+    }
+
     /// PRJ-01: the repo's current branch at the time the project was added.
     public func currentBranch(in repo: URL) async throws -> String {
         try await run(["rev-parse", "--abbrev-ref", "HEAD"], in: repo)

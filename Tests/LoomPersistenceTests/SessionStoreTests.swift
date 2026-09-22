@@ -29,15 +29,65 @@ struct SessionStoreTests {
         #expect(try store.allSessions().count == 1)
     }
 
-    @Test("the badge of a session persists and reads back")
-    func allerRetourBadge() throws {
+    @Test("a session wears several badges, in assignment order, and reads them back")
+    func plusieursBadges() throws {
         let store = try makeStore()
         let id = SessionID()
-        try store.insert(SessionRecord(id: id, title: "Review", agentID: "claude-code",
-                                       state: .working, createdAt: Date(timeIntervalSince1970: 1000),
-                                       badge: "PR #42"))
+        try store.insert(SessionRecord(id: id, title: "t", agentID: "claude-code",
+                                       state: .working, createdAt: Date(),
+                                       badges: ["PR #42", "review"]))
+        #expect(try store.session(id: id)?.badges == ["PR #42", "review"],
+                "badges land with the insert and come back in order")
+        #expect(try store.allSessions().first?.badges == ["PR #42", "review"],
+                "the list query carries them too")
 
-        #expect(try store.session(id: id)?.badge == "PR #42")
+        try store.setBadges(session: id, badges: ["review", " urgent ", "review", ""])
+        #expect(try store.session(id: id)?.badges == ["review", "urgent"],
+                "a replacement keeps its order; duplicates and blanks never land")
+
+        try store.setBadges(session: id, badges: [])
+        #expect(try store.session(id: id)?.badges == [], "an empty list clears them")
+    }
+
+    @Test("each session reads only its own badges")
+    func badgesParSession() throws {
+        let store = try makeStore()
+        let kept = SessionID(), other = SessionID()
+        try store.insert(SessionRecord(id: kept, title: "kept", agentID: "claude-code",
+                                       state: .working, createdAt: Date(), badges: ["wip"]))
+        try store.insert(SessionRecord(id: other, title: "other", agentID: "claude-code",
+                                       state: .working, createdAt: Date(), badges: ["wip", "urgent"]))
+        #expect(try store.session(id: kept)?.badges == ["wip"],
+                "each session reads only its own badges")
+        #expect(try store.session(id: other)?.badges == ["wip", "urgent"])
+    }
+
+    @Test("the badge catalog starts with the built-ins, then belongs to the user (v8)")
+    func catalogueDeBadges() throws {
+        let store = try makeStore()
+        #expect(try store.badgeDefinitions() == BadgeDefinition.builtIn,
+                "a fresh database seeds the three built-ins, in order")
+
+        try store.saveBadgeDefinitions([
+            BadgeDefinition(name: "urgent", colorHex: "#E5646C"),
+            BadgeDefinition(name: " perf ", colorHex: "#4CC38A"),
+            BadgeDefinition(name: "urgent", colorHex: "#000000"),
+            BadgeDefinition(name: "", colorHex: "#FFFFFF"),
+        ])
+        #expect(try store.badgeDefinitions().map(\.name) == ["urgent", "perf"],
+                "a save replaces the catalog in the given order; blanks and repeats never land")
+        #expect(try store.badgeDefinitions().first?.colorHex == "#E5646C",
+                "the first occurrence of a name keeps its color")
+
+        #expect(try store.addBadgeDefinition(BadgeDefinition(name: "docs", colorHex: "#A78BFA")),
+                "a new name joins the catalog")
+        #expect(try !store.addBadgeDefinition(BadgeDefinition(name: "docs", colorHex: "#111111")),
+                "a taken name is refused")
+        #expect(try store.badgeDefinitions().map(\.name) == ["urgent", "perf", "docs"],
+                "an addition lands last, the refusal changes nothing")
+
+        try store.saveBadgeDefinitions([])
+        #expect(try store.badgeDefinitions().isEmpty, "the user may empty the catalog")
     }
 
     @Test("the transition journal keeps the history, source included (STA-06)")

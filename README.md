@@ -37,6 +37,13 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   rotation 10 Mo.
 - **Git** : worktrees avec collisions départagées, status porcelain v2, diff
   (non-suivis compris), suppression refusée si travail non commité.
+- **Pull requests** : onglet PR sur le `gh` de l'utilisateur — projets locaux,
+  orgs du compte (repos ajoutés comme projets en un clic, clone via gh), inbox
+  « en attente de moi » tous repos confondus, recherche locale + GitHub, ouverture
+  par URL, diff côte à côte, checks CI détaillés, commentaires de ligne mis en
+  brouillon et envoyés en une seule review avec le verdict, session claude par PR,
+  un onglet par PR ouverte (aperçu réutilisé au clic, épinglé par la review),
+  conservés d'un onglet de l'app à l'autre et d'un lancement à l'autre.
 - **Navigateur** : WKWebView à data store persistant (cookies GitHub conservés),
   UA Safari, LRU d'onglets, historique avec suggestions.
 - **Persistance** : GRDB, migrations versionnées (v1→v4), journal des transitions
@@ -49,9 +56,13 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
 Packages SPM aux frontières imposées (§6.1 du cahier des charges, ADR-0009) :
 `LoomCore` (états, réducteur) ← `LoomTerminal` (PTY, moteur, runtime) ·
 `LoomAgents` (adapter Claude Code, classification) · `LoomGit` · `LoomWeb` ·
-`LoomPersistence` (GRDB, transcripts) · `LoomIPC` (socket hooks) ←
+`LoomPersistence` (GRDB, transcripts) · `LoomAPI` (contrat de l'API agents) ·
+`LoomIPC` (socket hooks + requêtes) ←
 `LoomSessions` (SessionManager, orchestration) ← `LoomApp` (SwiftUI).
-Exécutable compagnon : `loom-hook`.
+Exécutables compagnons : `loom-hook` (hooks) et `loom` (CLI + serveur MCP de
+l'API agents, ADR-0010 ; sa logique vit dans `LoomCLI`). Dans une session,
+`loom docs` imprime la référence de l'API ; `loom mcp` la sert en outils MCP,
+branché par `--mcp-config` au lancement.
 
 Aucun service ne dépend de l'UI ; l'UI ne voit que des valeurs (`TerminalScreen`),
 jamais le moteur. Tout accès moteur est confiné à la queue sérielle de sa session.

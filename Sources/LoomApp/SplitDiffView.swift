@@ -57,6 +57,12 @@ struct SplitDiffView: View {
     var comments: [GitHubService.ReviewComment] = []
     /// Replies inside a thread (thread's root comment id, text).
     var onReply: ((Int, String) -> Void)?
+    /// Keeps the comment for the review instead of posting it now — GitHub's
+    /// "Start a review". nil hides the button. Same shape as `onComment`.
+    var onDraftComment: ((DiffSnippet, String, Bool) -> Void)?
+    /// Drafted comments, shown pending under the lines they hang on.
+    var drafts: [DraftComment] = []
+    var onRemoveDraft: ((UUID) -> Void)?
     /// Unified layout: one full-width column (deletions then additions) —
     /// whole lines stay readable; split keeps old/new aligned side by side.
     var unified = false
@@ -342,15 +348,38 @@ struct SplitDiffView: View {
                 .onSubmit { submitComposer(snippet) }
             HStack(spacing: 8) {
                 if composer == .suggestion {
-                    Text("Posted as a GitHub suggestion — one click to apply.")
+                    Text("A GitHub suggestion — one click to apply.")
                         .font(.system(size: 10))
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
                 Spacer()
                 GhostButton("Cancel") { composer = .none; draft = "" }
-                AccentButton(composer == .ask ? "Send" : "Post") { submitComposer(snippet) }
+                if canDraft {
+                    // The review is the default destination: a comment
+                    // posted alone lands in the author's inbox on its own,
+                    // before the verdict it belongs to.
+                    GhostButton("Post now") { submitComposer(snippet) }
+                    AccentButton("Add to review", systemImage: "tray.and.arrow.down") {
+                        draftComposer(snippet)
+                    }
+                } else {
+                    AccentButton(composer == .ask ? "Send" : "Post") { submitComposer(snippet) }
+                }
             }
         }
+    }
+
+    /// Line comments and suggestions can wait for the verdict; a question to
+    /// claude or a file-level comment cannot.
+    private var canDraft: Bool {
+        onDraftComment != nil && (composer == .comment || composer == .suggestion)
+    }
+
+    private func draftComposer(_ snippet: DiffSnippet) {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        onDraftComment?(snippet, composer == .suggestion ? draft : text, composer == .suggestion)
+        clearSelection()
     }
 
     private func submitComposer(_ snippet: DiffSnippet) {
@@ -517,8 +546,23 @@ struct SplitDiffView: View {
                     ForEach(threads(file: file, row: row), id: \.root.id) { thread in
                         CommentThreadView(thread: thread, onReply: onReply)
                     }
+                    // Then what the reviewer drafted here, still unsent.
+                    ForEach(draftComments(file: file, row: row)) { comment in
+                        DraftCommentView(comment: comment, onRemove: onRemoveDraft)
+                    }
                 }
             }
+        }
+    }
+
+    /// The drafts hanging under a diff row — matched like the threads, on
+    /// the last line of their range, on their side.
+    private func draftComments(file: String, row: DiffParser.SplitRow) -> [DraftComment] {
+        guard !drafts.isEmpty else { return [] }
+        return drafts.filter { comment in
+            guard comment.path == file else { return false }
+            let number = comment.side == "LEFT" ? row.left?.oldNumber : row.right?.newNumber
+            return number == comment.lastLine
         }
     }
 
@@ -660,6 +704,52 @@ struct SplitDiffView: View {
             result.append(AttributedString(line.text))
         }
         return result
+    }
+}
+
+/// A comment drafted for the review, shown where it will land once sent —
+/// amber, "pending", and a way to take it back.
+private struct DraftCommentView: View {
+    let comment: DraftComment
+    let onRemove: ((UUID) -> Void)?
+
+    private var pending: Color { DefaultTheme.badgeColor(for: .needsInput) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: "tray.and.arrow.down")
+                    .font(.system(size: 10))
+                    .foregroundStyle(pending)
+                Text("pending")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(pending)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(pending.opacity(0.15), in: Capsule())
+                if comment.firstLine < comment.lastLine {
+                    Text("L\(comment.firstLine)–L\(comment.lastLine)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                }
+                Text("leaves with your verdict")
+                    .font(.system(size: 10))
+                    .foregroundStyle(DefaultTheme.mutedText)
+                Spacer()
+                if let onRemove {
+                    HoverIconButton(systemImage: "trash", help: "Remove from the review") {
+                        onRemove(comment.id)
+                    }
+                }
+            }
+            MarkdownBlockView(comment.body)
+                .textSelection(.enabled)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DefaultTheme.surface)
+        .overlay(alignment: .leading) {
+            Rectangle().fill(pending.opacity(0.8)).frame(width: 3)
+        }
     }
 }
 

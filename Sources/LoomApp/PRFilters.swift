@@ -318,6 +318,44 @@ enum PRChips {
         .fixedSize(horizontal: true, vertical: false)
     }
 
+    /// Red when a check failed, amber while one still runs, green otherwise
+    /// (no check at all is green: no signal is not a failure).
+    static func checksColor(_ pr: GitHubService.PullRequest) -> Color {
+        if !pr.checksPassing { return DefaultTheme.danger }
+        if pr.checksPending { return DefaultTheme.badgeColor(for: .needsInput) }
+        return DefaultTheme.groupHeader
+    }
+
+    /// "4 passing · 1 failing · 2 pending" — only the non-zero parts.
+    static func checksSummary(_ pr: GitHubService.PullRequest) -> String {
+        guard !pr.checks.isEmpty else { return "No CI check reported" }
+        var parts: [String] = []
+        if pr.passingChecks > 0 { parts.append("\(pr.passingChecks) passing") }
+        if pr.failingChecks > 0 { parts.append("\(pr.failingChecks) failing") }
+        if pr.pendingChecks > 0 { parts.append("\(pr.pendingChecks) pending") }
+        let other = pr.checks.count - pr.passingChecks - pr.failingChecks - pr.pendingChecks
+        if other > 0 { parts.append("\(other) skipped") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The toolbar's CI recap: a dot and the one number that matters —
+    /// failing first, then pending, else "CI ✓".
+    static func checksChip(_ pr: GitHubService.PullRequest) -> some View {
+        let text = pr.failingChecks > 0 ? "\(pr.failingChecks) failing"
+                 : pr.pendingChecks > 0 ? "\(pr.pendingChecks) pending"
+                 : "CI ✓"
+        return HStack(spacing: 5) {
+            Circle().fill(checksColor(pr)).frame(width: 6, height: 6)
+            Text(text)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(checksColor(pr))
+        }
+        .padding(.horizontal, 7).padding(.vertical, 2)
+        .background(DefaultTheme.surfaceRaised, in: Capsule())
+        .fixedSize()
+        .help(checksSummary(pr))
+    }
+
     /// `@a, @b, team/core` — the people the PR is waiting on.
     static func reviewers(_ pr: GitHubService.PullRequest, limit: Int = 3) -> String {
         let shown = pr.reviewers.prefix(limit).map { $0.hasPrefix("team/") ? $0 : "@" + $0 }

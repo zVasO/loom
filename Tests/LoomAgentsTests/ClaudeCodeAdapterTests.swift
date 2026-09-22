@@ -22,6 +22,53 @@ struct ClaudeCodeAdapterTests {
         #expect(command.arguments.last == "fix the cache bug", "the initial prompt is passed as an argument")
     }
 
+    @Test("a wired session carries the API socket and its own token in its environment (ADR-0010)")
+    func environnementAPI() {
+        let wiring = ClaudeCodeAdapter.HookWiring(
+            helper: URL(fileURLWithPath: "/tmp/loom-hook"),
+            socket: URL(fileURLWithPath: "/tmp/loom.sock"))
+        let adapter = ClaudeCodeAdapter(hooks: wiring)
+
+        let launch = adapter.launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok-1")
+        #expect(launch.environment["LOOM_SOCKET"] == "/tmp/loom.sock")
+        #expect(launch.environment["LOOM_SESSION_TOKEN"] == "tok-1")
+
+        let resume = adapter.resumeCommand(session: SessionID(), hookToken: "tok-2")
+        #expect(resume.environment["LOOM_SESSION_TOKEN"] == "tok-2", "a resumed session is wired the same way")
+
+        let bare = ClaudeCodeAdapter().launchCommand(session: SessionID(), initialPrompt: nil)
+        #expect(bare.environment.isEmpty, "no wiring, no token: nothing leaks into the environment")
+    }
+
+    @Test("with a loom binary, the session gets the API as MCP tools through inline --mcp-config (ADR-0010)")
+    func mcpConfigInline() throws {
+        let wiring = ClaudeCodeAdapter.HookWiring(
+            helper: URL(fileURLWithPath: "/tmp/loom-hook"),
+            socket: URL(fileURLWithPath: "/tmp/loom.sock"),
+            cli: URL(fileURLWithPath: "/Applications/Loom.app/Contents/MacOS/loom"))
+        let command = ClaudeCodeAdapter(hooks: wiring)
+            .launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok")
+        let flagIndex = try #require(command.arguments.firstIndex(of: "--mcp-config"))
+        let json = try #require(command.arguments[flagIndex + 1].data(using: .utf8))
+        let config = try #require(try JSONSerialization.jsonObject(with: json) as? [String: Any])
+        let servers = try #require(config["mcpServers"] as? [String: Any])
+        let loom = try #require(servers["loom"] as? [String: Any])
+        #expect(loom["command"] as? String == "/Applications/Loom.app/Contents/MacOS/loom")
+        #expect(loom["args"] as? [String] == ["mcp"])
+        let env = try #require(loom["env"] as? [String: String])
+        #expect(env["LOOM_SESSION_TOKEN"] == "tok", "the MCP server speaks with the session's own token")
+        #expect(env["LOOM_SOCKET"] == "/tmp/loom.sock")
+
+        #expect(command.pathPrefix == ["/Applications/Loom.app/Contents/MacOS"],
+                "the agent's shell finds `loom` by name")
+
+        let withoutCLI = ClaudeCodeAdapter(hooks: .init(helper: wiring.helper, socket: wiring.socket))
+            .launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok")
+        #expect(!withoutCLI.arguments.contains("--mcp-config"),
+                "no loom binary: no MCP server to point at, the socket and token still reach the agent")
+        #expect(withoutCLI.pathPrefix.isEmpty)
+    }
+
     @Test("hooks are injected via inline --settings, never into global settings (STA-01)")
     func hooksInjectesParSettings() throws {
         let wiring = ClaudeCodeAdapter.HookWiring(
