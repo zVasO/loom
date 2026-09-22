@@ -282,4 +282,41 @@ extension SwiftTermEngineTests {
             #expect(after == fresh.historyTail(400))
         }
     }
+
+    // P1-6: the sampler and the readiness probe read a tail twice a second
+    // per session; a cheap walk must answer exactly what a snapshot did.
+    @Test("the visible tail walks the rows bottom-up and matches the snapshot-derived tail")
+    func queueVisibleSansSnapshot() {
+        let engine = makeEngine(cols: 20, rows: 6)
+        queue.sync {
+            engine.feed(ArraySlice("first line\r\n\r\n  padded  \r\nwide 日本\r\n> ".utf8))
+            let expected = Array(engine.snapshot().lines
+                .map(\.text)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .suffix(12))
+            #expect(engine.visibleTail(12) == expected)
+            #expect(engine.visibleTail(12) == ["first line", "padded", "wide 日本", ">"])
+            #expect(engine.visibleTail(2) == ["wide 日本", ">"], "the limit keeps the LAST lines")
+            #expect(engine.visibleTail(0).isEmpty)
+        }
+    }
+
+    @Test("the history tail is primed with what is asked, and grows to a larger ask")
+    func amorcageDuTail() {
+        let engine = makeEngine(cols: 20, rows: 4)
+        queue.sync {
+            for index in 0..<50 { engine.feed(ArraySlice("line \(index)\r\n".utf8)) }
+            let small = engine.historyTail(5)
+            #expect(small.count == 5)
+            #expect(small.last?.text.hasPrefix("line 45") == true || small.last?.text.hasPrefix("line 46") == true)
+            let large = engine.historyTail(30)
+            #expect(large.count == 30, "a larger window re-primes instead of answering short")
+            #expect(large.suffix(5) == small, "the same lines, in the same order")
+            engine.feed(ArraySlice("line 50\r\n".utf8))
+            let grown = engine.historyTail(30)
+            #expect(grown.count == 30)
+            #expect(grown.last?.text.hasPrefix("line 4") == true)
+        }
+    }
 }

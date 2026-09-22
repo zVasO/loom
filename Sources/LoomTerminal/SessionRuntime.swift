@@ -162,14 +162,21 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
-    /// On the session queue: the last non-empty visible lines, plain text only.
+    /// On the session queue: the last non-empty visible lines, plain text
+    /// only. Memoized on what could change them — bytes received, grid — so
+    /// the sampler's two reads a second and a readiness poll cost nothing
+    /// while the agent is quiet.
     private func visibleTail(_ limit: Int = 12) -> [String] {
-        Array((engine?.snapshot().lines ?? [])
-            .map(\.text)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .suffix(limit))
+        if let memo = tailMemo, memo.bytes == bytesReceived, memo.geometry == appliedGeometry,
+           memo.limit == limit {
+            return memo.tail
+        }
+        let tail = engine?.visibleTail(limit) ?? []
+        tailMemo = (bytesReceived, appliedGeometry, limit, tail)
+        return tail
     }
+
+    private var tailMemo: (bytes: Int, geometry: TerminalGeometry, limit: Int, tail: [String])?
 
     /// Write to the terminal's PTY (keystrokes, quick message SES-05).
     /// Non-blocking: one hop onto the session queue, then the channel.

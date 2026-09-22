@@ -27,6 +27,16 @@ public protocol TerminalEngine: AnyObject {
     /// Rows above the screen — absolute base giving history lines a stable identity.
     var scrollbackRows: Int { get }
 
+    /// The last `limit` non-empty visible lines, trimmed, oldest first — what
+    /// the state heuristic and the readiness probe read. A cheap walk, never
+    /// a full snapshot: it runs twice a second per session, watched or not.
+    func visibleTail(_ limit: Int) -> [String]
+
+    /// Bumped by every feed that changed the screen and by every resize —
+    /// equal means nothing to redraw, before any snapshot is taken.
+    var revision: UInt64 { get }
+    var cursor: CursorPosition { get }
+
     /// The terminal's own voice back to the program: DA/DSR replies, mouse reports.
     /// Set once by the runtime, invoked on the session queue like everything else.
     var onUpstream: ((ArraySlice<UInt8>) -> Void)? { get set }
@@ -56,6 +66,17 @@ public protocol TerminalEngine: AnyObject {
 public extension TerminalEngine {
     /// Adapters without a scrollback (test line engines) sit at base zero.
     var scrollbackRows: Int { 0 }
+
+    /// Adapters without a cheaper path derive the tail from a snapshot.
+    func visibleTail(_ limit: Int) -> [String] {
+        Array(snapshot().lines
+            .map(\.text)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .suffix(limit))
+    }
+    var revision: UInt64 { snapshot().revision }
+    var cursor: CursorPosition { snapshot().cursor }
 
     /// Adapters that parse no mode switching sit in the legacy defaults.
     var modes: TerminalModes { .none }
