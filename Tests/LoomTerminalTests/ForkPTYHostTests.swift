@@ -87,4 +87,28 @@ extension ForkPTYHostTests {
         #expect(transcript.text.contains("30 90"),
                 "stty must see 30 rows × 90 cols after TIOCSWINSZ — saw: \(transcript.text)")
     }
+
+    // The ioctl alone proves the kernel knows the grid; the agent must also be
+    // TOLD. A process that only prints on SIGWINCH shows whether the signal
+    // reaches it — the review drawer's agent kept drawing for its old width.
+    @Test("resize signals the process: a SIGWINCH handler sees the new grid")
+    @MainActor
+    func resizeSignaleLeProcess() async throws {
+        let transcript = MemoryTranscriptSink()
+        let (runtime, events) = try SessionRuntime.launch(
+            plan("trap 'stty size; exit 0' WINCH; sleep 8 & wait"),
+            using: SessionRuntime.Dependencies(ptyHost: ForkPTYHost(), transcript: transcript))
+        var iterator = events.makeAsyncIterator()
+        guard case .started = await iterator.next() else { return }
+        try await Task.sleep(for: .milliseconds(300))   // let sh install its trap
+
+        runtime.surface().resize(cols: 90, rows: 30)
+
+        guard case .terminated = await iterator.next() else {
+            Issue.record("the process never heard SIGWINCH: it ran to its 8 s sleep")
+            return
+        }
+        #expect(transcript.text.contains("30 90"),
+                "the handler must run with the new grid — saw: \(transcript.text)")
+    }
 }

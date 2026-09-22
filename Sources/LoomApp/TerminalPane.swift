@@ -10,9 +10,13 @@ import SwiftUI
 struct TerminalPane: View {
     let model: AppModel
     let sessionID: SessionID
+    /// Where this pane lives — the grid it measures is remembered per role.
+    var role: TerminalPaneRole = .session
     @State private var surface: TerminalSurface?
     @State private var paneSize: CGSize = .zero
-    @State private var firstResizeDone = false
+    /// The surface the last fit went to: its first fit is immediate, the
+    /// following ones are debounced.
+    @State private var fittedSurface: ObjectIdentifier?
     @State private var selection = TerminalSelection.empty
     /// One transient badge slot, shared by everything worth flashing: the grid
     /// applied by a resize, the characters a copy took. Two badges in the same
@@ -46,17 +50,21 @@ struct TerminalPane: View {
                     // animation on purpose: every resize that reaches the PTY
                     // makes the agent repaint its whole conversation, and a
                     // slide that resized it three times left three copies.
-                    .task(id: paneSize) {
+                    // Keyed on the SURFACE too: a new session in the same pane
+                    // (another PR tab) is fitted at once, not left at its
+                    // launch grid until the pane happens to move.
+                    .task(id: FitKey(size: paneSize, surface: ObjectIdentifier(surface))) {
                         guard paneSize.width >= Self.minimumPaneSize.width,
                               paneSize.height >= Self.minimumPaneSize.height else { return }
-                        if firstResizeDone {
+                        if fittedSurface != ObjectIdentifier(surface) {
+                            fittedSurface = ObjectIdentifier(surface)
+                        } else {
                             try? await Task.sleep(for: .milliseconds(220))
                             guard !Task.isCancelled else { return }
                         }
-                        firstResizeDone = true
                         let grid = TerminalMetrics.grid(fitting: paneSize)
                         surface.resize(cols: grid.cols, rows: grid.rows)
-                        model.noteTerminalGrid(cols: grid.cols, rows: grid.rows)
+                        model.noteTerminalGrid(cols: grid.cols, rows: grid.rows, role: role)
                         badge = "\(grid.cols)×\(grid.rows)"
                     }
                     // Keystrokes go to the agent's field (first responder).
@@ -90,8 +98,10 @@ struct TerminalPane: View {
                                          screen: surface.screen)
                     }
                     // claude's boot takes seconds — never a silent black screen.
+                    // Gated on real output: the pane's own first fit bumps the
+                    // screen revision before the agent has printed a byte.
                     .overlay {
-                        if surface.screen.revision == 0 {
+                        if !surface.hasOutput {
                             VStack(spacing: 10) {
                                 ProgressView().controlSize(.small)
                                 Text("claude is starting…")
@@ -144,6 +154,12 @@ struct TerminalPane: View {
 /// ⌘C, or a silent copy-on-select, actually took something.
 private func copiedBadge(_ characters: Int) -> String {
     characters == 1 ? "1 character copied" : "\(characters.formatted()) characters copied"
+}
+
+/// What a fit depends on: the pane's size and the surface it goes to.
+private struct FitKey: Equatable {
+    let size: CGSize
+    let surface: ObjectIdentifier
 }
 
 private struct PaneSizeKey: PreferenceKey {

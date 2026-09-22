@@ -23,12 +23,9 @@ public struct HeuristicInterpreter: Sendable {
         self.promptPatterns = promptPatterns
     }
 
-    /// Line endings typical of a shell or an agent waiting for input.
-    public static let defaultPromptPatterns = [
-        #"[$%>❯]\s*$"#,          // shell prompts: $, %, >, ❯
-        #"\(y/n\)\s*$"#,         // confirmations
-        #"\?\s*$"#,              // question displayed on screen
-    ]
+    /// Line endings typical of a shell or an agent waiting for input — the
+    /// one list `AgentReadiness` reads too.
+    public static let defaultPromptPatterns = AgentReadiness.promptPatterns
 
     public func propose(_ sample: SessionRuntime.ActivitySample) -> StateEngine.Event? {
         if sample.bytesSinceLastSample > 0 { return .heuristic(.working) }

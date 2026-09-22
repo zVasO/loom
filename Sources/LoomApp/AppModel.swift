@@ -12,6 +12,7 @@ import Foundation
 import Observation
 import SwiftUI
 import UserNotifications
+import os
 
 /// STA-04: system notification when a session needs input.
 /// Second adapter of the SessionNotifier seam (the test spy is the first).
@@ -209,11 +210,32 @@ public final class AppModel {
     /// The grid actually displayed, remembered at each view measurement: the
     /// next sessions are BORN at the right size — claude paints its banner
     /// directly for the real grid, no more mangling reflow at startup.
-    public private(set) var preferredGrid: TerminalGeometry = {
-        let cols = UserDefaults.standard.integer(forKey: "loom.terminal.cols")
-        let rows = UserDefaults.standard.integer(forKey: "loom.terminal.rows")
-        return cols >= 40 && rows >= 10 ? TerminalGeometry(cols: cols, rows: rows) : .default
-    }()
+    /// One memory per pane role: the review drawer is a different shape from
+    /// the Sessions tab, and a session born at the other one's grid is
+    /// resized while it boots — the one moment a resize can be missed.
+    public private(set) var preferredGrid: TerminalGeometry =
+        AppModel.storedGrid(role: .session) ?? .default
+    private var preferredReviewGrid: TerminalGeometry? = AppModel.storedGrid(role: .review)
+
+    private static func storedGrid(role: TerminalPaneRole) -> TerminalGeometry? {
+        let cols = UserDefaults.standard.integer(forKey: role.colsKey)
+        let rows = UserDefaults.standard.integer(forKey: role.rowsKey)
+        return cols >= 40 && rows >= 10 ? TerminalGeometry(cols: cols, rows: rows) : nil
+    }
+
+    /// The launch grid for a pane role. A drawer never measured yet is
+    /// estimated from its default width and the Sessions grid's height.
+    public func preferredGrid(for role: TerminalPaneRole) -> TerminalGeometry {
+        switch role {
+        case .session:
+            return preferredGrid
+        case .review:
+            if let preferredReviewGrid { return preferredReviewGrid }
+            let cols = TerminalMetrics.grid(fitting: CGSize(width: TerminalPaneRole.defaultReviewDrawerWidth,
+                                                            height: 0)).cols
+            return TerminalGeometry(cols: cols, rows: max(10, preferredGrid.rows - 2))
+        }
+    }
 
     /// Review worktrees are read-only (guard hooks) unless the user opts out —
     /// absent key means true: safe by default.
@@ -274,14 +296,18 @@ public final class AppModel {
         Task { await manager?.setFrameInterval(interval) }
     }
 
-    public func noteTerminalGrid(cols: Int, rows: Int) {
+    public func noteTerminalGrid(cols: Int, rows: Int, role: TerminalPaneRole = .session) {
         // Only a grid plausible for a real window is remembered: a transient
         // measurement (layout in progress) must never poison the launch
         // geometry of the next sessions.
         guard cols >= 40, rows >= 10 else { return }
-        preferredGrid = TerminalGeometry(cols: cols, rows: rows)
-        UserDefaults.standard.set(cols, forKey: "loom.terminal.cols")
-        UserDefaults.standard.set(rows, forKey: "loom.terminal.rows")
+        let grid = TerminalGeometry(cols: cols, rows: rows)
+        switch role {
+        case .session: preferredGrid = grid
+        case .review: preferredReviewGrid = grid
+        }
+        UserDefaults.standard.set(cols, forKey: role.colsKey)
+        UserDefaults.standard.set(rows, forKey: role.rowsKey)
     }
 
     /// UIX-06: the claude binary located at launch (GUI apps don't see the
@@ -910,8 +936,12 @@ public final class AppModel {
     public func launchPRReviewSession(_ pr: GitHubService.PullRequest,
                                       in projectID: ProjectID) async -> SessionID? {
         if let existing = reviewSession(forPR: pr.number, in: projectID) {
-            if sessions.contains(where: { $0.id == existing }) { return existing }
-            await resumeDormant(existing)
+            if !sessions.contains(where: { $0.id == existing }) {
+                await resumeDormant(existing)
+            }
+            // A review whose command never went in (a boot too slow for the
+            // old gate, the app quit meanwhile) gets it now — once.
+            scheduleReviewSetupIfNeeded(for: existing, number: pr.number)
             return existing
         }
         guard let manager, let repo = projectRepo(projectID) else { return nil }
@@ -952,7 +982,9 @@ public final class AppModel {
                 command: adapter.launchCommand(session: sessionID, initialPrompt: nil,
                                                hookToken: token),
                 workingDirectory: worktree,
-                geometry: preferredGrid,
+                // Born at the drawer's grid: the first fit is then a no-op,
+                // and nothing resizes claude while it boots.
+                geometry: preferredGrid(for: .review),
                 samplingInterval: .milliseconds(500),
                 hookToken: token)
             spec.projectID = projectID
@@ -969,14 +1001,7 @@ public final class AppModel {
                                         branch: pr.branch, badges: ["PR #\(pr.number)"]))
             rememberReviewSession(id, forPR: pr.number, in: projectID)
             reloadPersistedSessions()
-            if reviewSetupCommandEnabled {
-                // First launch only — a resumed session already carries the
-                // brief in its context. Detached from the caller: the PR tab
-                // must not wait seconds for claude to paint. Remembered, so a
-                // quick action fired meanwhile queues BEHIND it.
-                let invocation = PRReviewCommand.invocation(number: pr.number)
-                pendingReviewSetup[id] = Task { await self.submitWhenPainted(invocation, to: id) }
-            }
+            scheduleReviewSetupIfNeeded(for: id, number: pr.number)
             return id
         } catch {
             startupError = String(describing: error)
@@ -984,8 +1009,40 @@ public final class AppModel {
         }
     }
 
-    /// The setup command still on its way to a fresh review session.
+    /// The setup command still on its way to a review session.
     @ObservationIgnored private var pendingReviewSetup: [SessionID: Task<Void, Never>] = [:]
+
+    /// Types `/setup-pr-review` into a review session that never had it, when
+    /// the setting says so. Detached from the caller: the PR tab must not wait
+    /// seconds for claude to boot. Remembered, so a quick action fired
+    /// meanwhile queues BEHIND it. A session that already received it — this
+    /// launch or a previous one, the brief lives in its native context — is
+    /// left alone.
+    private func scheduleReviewSetupIfNeeded(for id: SessionID, number: Int) {
+        guard reviewSetupCommandEnabled, pendingReviewSetup[id] == nil,
+              !reviewSetupSubmitted.contains(id.rawValue.uuidString),
+              sessions.contains(where: { $0.id == id }) else { return }
+        let invocation = PRReviewCommand.invocation(number: number)
+        pendingReviewSetup[id] = Task { [weak self] in
+            guard let self else { return }
+            if await self.submitWhenReady(invocation, to: id) {
+                self.rememberReviewSetupSubmitted(id)
+            }
+            self.pendingReviewSetup[id] = nil
+        }
+    }
+
+    /// Review sessions that actually received their setup command, across
+    /// launches: `loom.review.setupSubmitted`, session UUIDs.
+    @ObservationIgnored private lazy var reviewSetupSubmitted: Set<String> =
+        Set(UserDefaults.standard.stringArray(forKey: Self.reviewSetupSubmittedKey) ?? [])
+    private static let reviewSetupSubmittedKey = "loom.review.setupSubmitted"
+
+    private func rememberReviewSetupSubmitted(_ id: SessionID) {
+        reviewSetupSubmitted.insert(id.rawValue.uuidString)
+        UserDefaults.standard.set(Array(reviewSetupSubmitted).sorted(),
+                                  forKey: Self.reviewSetupSubmittedKey)
+    }
 
     /// Waits for the setup command to have been submitted, when one is pending:
     /// what a quick action must do before it speaks, or the two collide.
@@ -995,20 +1052,32 @@ public final class AppModel {
         pendingReviewSetup[id] = nil
     }
 
-    /// Submits a line to a session once claude has painted (fresh sessions
-    /// boot for seconds; sending into the void helps nobody). Pasted, not
-    /// typed: a paste never opens the slash-command menu, so the Return that
-    /// follows submits instead of picking a suggestion.
-    private func submitWhenPainted(_ line: String, to id: SessionID) async {
-        guard let surface = await surface(for: id) else { return }
-        for _ in 0..<60 where surface.screen.revision == 0 {
-            try? await Task.sleep(for: .milliseconds(500))
+    private static let log = Logger(subsystem: "app.loom", category: "review")
+
+    /// Submits a line to a session once the agent is READY for it — painted,
+    /// bracketed paste negotiated, prompt on screen, output settled
+    /// (`AgentReadiness`), read off the runtime so no pane needs to be
+    /// watching. A plugin-heavy claude boots for a long while: the wait is
+    /// generous, and a miss is logged rather than typed into the void.
+    /// Pasted, not typed: a paste never opens the slash-command menu, so the
+    /// Return that follows submits instead of picking a suggestion.
+    /// Returns whether the line went in.
+    private func submitWhenReady(_ line: String, to id: SessionID,
+                                 timeout: Duration = .seconds(120)) async -> Bool {
+        guard let runtime = await manager?.runtime(for: id) else { return false }
+        let surface = runtime.surface()
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+        while clock.now < deadline, !Task.isCancelled {
+            let sample = await runtime.readiness()
+            if AgentReadiness.isReady(sample) {
+                surface.send(KeyTranslator.paste(line, bracketed: true) + "\r")
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(250))
         }
-        guard surface.screen.revision != 0 else { return }
-        // A first paint is a prompt, not a prompt READY for input: claude
-        // still negotiates its terminal modes for a beat after it.
-        try? await Task.sleep(for: .milliseconds(400))
-        surface.send(KeyTranslator.paste(line, bracketed: surface.modes.bracketedPaste) + "\r")
+        Self.log.warning("session \(id.rawValue.uuidString, privacy: .public) never became ready: line not submitted")
+        return false
     }
 
     /// Types text into a session's input WITHOUT submitting — the same path as
@@ -1029,11 +1098,12 @@ public final class AppModel {
         // A fresh session first loads the PR: the question waits its turn, or
         // claude answers it while the setup command lands mid-sentence.
         await awaitReviewSetup(for: id)
-        guard let surface = await surface(for: id) else { return id }
-        for _ in 0..<40 where surface.screen.revision == 0 {
-            try? await Task.sleep(for: .milliseconds(500))
+        let submitted = await submitWhenReady(message, to: id)
+        if !submitted {
+            // The user asked for this one: past the wait, it goes in anyway.
+            guard let surface = await surface(for: id) else { return id }
+            surface.send(KeyTranslator.paste(message, bracketed: surface.modes.bracketedPaste) + "\r")
         }
-        surface.send(message + "\r")
         return id
     }
 

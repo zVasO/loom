@@ -3,6 +3,7 @@ import Darwin
 import Dispatch
 import Foundation
 import SwiftTerm
+import os
 
 /// Production adapter for the PTY seam: `forkpty` + `DispatchIO` + `NOTE_EXIT`.
 /// Every pitfall encoded here is documented by the research (swiftterm-pty.md §3):
@@ -92,11 +93,24 @@ final class ForkPTYChannel: PTYChannel, @unchecked Sendable {
         io.write(offset: 0, data: data, queue: queue) { _, _, _ in }
     }
 
+    private static let log = Logger(subsystem: "app.loom", category: "pty")
+
+    /// TIOCSWINSZ on the master, then SIGWINCH to the child's group OURSELVES.
+    /// The kernel signals the tty's foreground group when the size changes;
+    /// an agent that missed that one (a group of its own, a handler installed
+    /// late) still hears this one, and a duplicate costs it a re-read of a
+    /// size it already has.
     func resize(to geometry: TerminalGeometry) {
         var windowSize = winsize(ws_row: UInt16(geometry.rows), ws_col: UInt16(geometry.cols),
                                  ws_xpixel: 0, ws_ypixel: 0)
-        _ = PseudoTerminalHelpers.setWinSize(masterPtyDescriptor: masterDescriptor,
-                                             windowSize: &windowSize)
+        let result = PseudoTerminalHelpers.setWinSize(masterPtyDescriptor: masterDescriptor,
+                                                      windowSize: &windowSize)
+        if result != 0 {
+            let error = String(cString: strerror(errno))
+            Self.log.error("TIOCSWINSZ \(geometry.cols)×\(geometry.rows) failed on pid \(self.pid): \(error)")
+            return
+        }
+        kill(-pid, SIGWINCH)
     }
 
     func signal(_ signal: PTYSignal, scope: PTYSignalScope) {

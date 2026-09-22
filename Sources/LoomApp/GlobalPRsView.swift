@@ -55,7 +55,7 @@ struct GlobalPRsView: View {
     /// a width the user chose.
     @State private var drawerWidth: CGFloat = {
         let stored = UserDefaults.standard.double(forKey: GlobalPRsView.drawerWidthKey)
-        return stored > 0 ? stored : 420
+        return stored > 0 ? stored : TerminalPaneRole.defaultReviewDrawerWidth
     }()
     /// A drag reports its translation from where it started, not since the
     /// last frame: the width it started from has to be remembered.
@@ -841,7 +841,7 @@ extension GlobalPRsView {
             .padding(.horizontal, 12).padding(.vertical, 8)
             .background(DefaultTheme.background)
             Divider().overlay(DefaultTheme.cardBorder)
-            TerminalPane(model: model, sessionID: sessionID)
+            TerminalPane(model: model, sessionID: sessionID, role: .review)
         }
     }
 }
