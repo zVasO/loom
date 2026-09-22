@@ -223,6 +223,13 @@ struct SessionStoreTests {
 @Suite("Full-text transcript search (v2)")
 struct TranscriptSearchTests {
 
+    /// On disk, like the app: a WAL pool, not the in-memory queue.
+    private func makeStore() throws -> SessionStore {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loom-fts-\(UUID().uuidString.prefix(8)).sqlite")
+        return try SessionStore(path: url.path)
+    }
+
     @Test("a word in a transcript yields the session with a highlighted snippet")
     func snippetSearch() throws {
         let store = try SessionStore(path: ":memory:")

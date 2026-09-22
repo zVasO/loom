@@ -490,6 +490,12 @@ public final class AppModel {
     private func seedNativeExistsCache(for records: [SessionRecord]) {
         let uncached = records.filter { nativeExistsCache[$0.id] == nil }
         guard !uncached.isEmpty else { return }
+        // One record (a close, an identity change): the per-session lookup
+        // stops at the first slug that holds it. The walk pays off past that.
+        if uncached.count == 1, let record = uncached.first {
+            nativeExistsCache[record.id] = ClaudeNativeSessions.exists(record.resolvedNativeSessionID)
+            return
+        }
         let index = ClaudeNativeSessions.index()
         for record in uncached {
             nativeExistsCache[record.id] = ClaudeNativeSessions.contains(index, record.resolvedNativeSessionID)
@@ -1381,10 +1387,14 @@ public final class AppModel {
         guard let store else { return }
         let root = supportDirectory.appendingPathComponent("transcripts")
         Task.detached(priority: .utility) {
+            // Stat BEFORE reading: a flush landing between the two would stamp
+            // the row with more content than it holds, and the next launch
+            // would skip that tail for good. Older than the file, it re-indexes.
+            let fingerprint = Self.transcriptFingerprint(root: root, id: id)
             guard let record = (try? store.session(id: id)) ?? nil,
                   let text = Self.transcriptText(root: root, id: id) else { return }
             try? store.indexForSearch(session: id, title: record.title, transcript: text,
-                                      fingerprint: Self.transcriptFingerprint(root: root, id: id))
+                                      fingerprint: fingerprint)
         }
     }
 
