@@ -217,7 +217,7 @@ public final class SessionRuntime: @unchecked Sendable {
     // snapshot + history extraction). The cap coalesces them: leading edge
     // immediate, trailing edge scheduled — at most 1000/interval frames per
     // second regardless of the output rate. Confined to the session queue.
-    private var frameInterval: Duration = .milliseconds(33)
+    private var frameInterval: Duration = .milliseconds(16)
     private var lastFrameAt: ContinuousClock.Instant?
 
     /// The user's refresh-rate setting (30/60/120 fps). Applied on the queue.

@@ -112,7 +112,7 @@ public actor SessionManager {
     }
 
     /// P0 perf: the user's terminal refresh setting, applied to every runtime.
-    private var frameInterval: Duration = .milliseconds(33)
+    private var frameInterval: Duration = .milliseconds(16)
 
     public func setFrameInterval(_ interval: Duration) {
         frameInterval = interval

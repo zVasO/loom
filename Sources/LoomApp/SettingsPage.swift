@@ -8,7 +8,7 @@ import SwiftUI
 struct SettingsPage: View {
     let model: AppModel
 
-    @AppStorage("loom.terminal.fps") private var fps = 30
+    @AppStorage("loom.terminal.fps") private var fps = 60
     @AppStorage("loom.terminal.copyOnSelect") private var copyOnSelect = false
     @AppStorage(KeyboardPreferences.userDefaultsKey) private var optionAsMeta = false
     @AppStorage("loom.session.restoreOnLaunch") private var restoreOnLaunch = true
@@ -82,7 +82,7 @@ struct SettingsPage: View {
                         NotificationCenter.default.post(name: .loomFrameRateChanged, object: nil)
                     }
                 }
-                Text("Caps how often terminal frames are produced during streaming. 30 fps is fluid everywhere; 60/120 for fast Macs. The first frame of any burst is always immediate.")
+                Text("Caps how often terminal frames are produced during streaming. 60 fps is the default; 30 spares the battery or an older Mac; 120 is for a ProMotion display. The first frame of any burst is always immediate.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
                 Divider().overlay(DefaultTheme.cardBorder)

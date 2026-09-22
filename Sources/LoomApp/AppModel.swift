@@ -291,10 +291,12 @@ public final class AppModel {
         UserDefaults.standard.set(map, forKey: "loom.worktree.projects")
     }
 
-    /// P0 perf — the Settings refresh rate as a frame interval (default 30 fps).
+    /// P0 perf — the Settings refresh rate as a frame interval. 60 by default:
+    /// with rows that survive a frame and gated deliveries, any supported Mac
+    /// affords it, and at 30 the echo of a keystroke landed up to 33 ms late.
     public static func preferredFrameInterval() -> Duration {
         let fps = UserDefaults.standard.integer(forKey: "loom.terminal.fps")
-        let clamped = [30, 60, 120].contains(fps) ? fps : 30
+        let clamped = [30, 60, 120].contains(fps) ? fps : 60
         return .milliseconds(1000 / clamped)
     }
 
