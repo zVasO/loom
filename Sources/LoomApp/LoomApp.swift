@@ -34,7 +34,6 @@ struct LoomApp: App {
         WindowGroup {
             ContentView()
                 .frame(minWidth: 980, minHeight: 620)
-                .preferredColorScheme(.dark)
         }
         // The custom navbar occupies the top of the window, like the reference:
         // title bar hidden, the traffic lights float on top of it.

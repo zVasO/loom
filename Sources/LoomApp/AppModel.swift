@@ -377,6 +377,7 @@ public final class AppModel {
     public func start() {
         do {
             try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
+            ThemeStore.shared.configure(themesDirectory: supportDirectory.appendingPathComponent("themes"))
             loadPRListCache()
             reviewDrafts = reviewDraftStore.load()
             catalog = repoCatalogCache.load()
@@ -1299,6 +1300,15 @@ public final class AppModel {
     /// A session's record for the info panel (breadcrumb chevron).
     public func sessionInfo(_ id: SessionID) -> SessionRecord? {
         (try? store?.session(id: id)) ?? nil
+    }
+
+    /// The last moment the session's state moved (journal, STA-06) or its
+    /// process ended — "last activity" in the session info. Nil before any
+    /// transition was journaled.
+    public func lastActivity(of id: SessionID) -> Date? {
+        let transition = ((try? store?.transitions(session: id)) ?? nil)?.last?.at
+        let ended = sessionInfo(id)?.endedAt
+        return [transition, ended].compactMap { $0 }.max()
     }
 
     /// Removes the project from the app (archived in the database): the local

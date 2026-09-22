@@ -37,21 +37,12 @@ public enum ClaudeNativeSessions {
 
     // MARK: - v3: real token counters, read from claude's own records
 
-    public struct SessionUsage: Equatable, Sendable {
-        /// The LAST turn's full input window (input + cache read + cache creation):
-        /// what "context" actually means for the next exchange.
-        public let contextTokens: Int
-        /// Output tokens accumulated across all assistant turns.
-        public let outputTokens: Int
-    }
-
     /// Parses claude's native JSONL. Pure — the seam the tests contract against.
     /// Built on `UsageLedger`: duplicates (one line per content block) count once.
-    public static func usage(fromJSONL text: String) -> SessionUsage? {
-        let turns = UsageLedger.turns(fromJSONL: text)
-        guard let last = turns.last else { return nil }
-        return SessionUsage(contextTokens: last.contextTokens,
-                            outputTokens: turns.reduce(0) { $0 + $1.output })
+    /// The summary's context is the LAST turn's full input window (input +
+    /// cache read + cache creation): what "context" means for the next exchange.
+    public static func usage(fromJSONL text: String) -> SessionUsageSummary? {
+        SessionUsageSummary(turns: UsageLedger.turns(fromJSONL: text))
     }
 
     /// Disk convenience: locate the native file and parse it. `tailBytes` reads
@@ -60,7 +51,7 @@ public enum ClaudeNativeSessions {
     /// by default: these files reach megabytes. Pass nil for the whole file.
     public static func usage(for id: SessionID,
                              projectsDirectory: URL = defaultProjectsDirectory,
-                             tailBytes: Int? = 65_536) -> SessionUsage? {
+                             tailBytes: Int? = 65_536) -> SessionUsageSummary? {
         guard let file = path(for: id, projectsDirectory: projectsDirectory) else { return nil }
         let text: String
         if let tailBytes,

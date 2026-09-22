@@ -48,8 +48,10 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   UA Safari, LRU d'onglets, historique avec suggestions.
 - **Persistance** : GRDB, migrations versionnées (v1→v4), journal des transitions
   avec source, marquage `interrupted` au relancement.
-- **Thèmes** : format JSON à deux espaces, résolution en cascade app→projet,
-  4 thèmes intégrés, sémantique des badges invariante.
+- **Thèmes** : 9 familles intégrées, chacune en clair et en sombre ; apparence
+  Système / Clair / Sombre (suivi de macOS en direct) ; override par projet ;
+  import d'un thème tweakcn/shadcn (nom, URL ou CSS collé) ; aperçu sur des
+  composants factices avec bascule clair/sombre ; sémantique des badges invariante.
 
 ## Architecture
 
