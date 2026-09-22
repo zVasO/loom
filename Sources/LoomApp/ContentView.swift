@@ -2356,7 +2356,11 @@ struct SessionDetailView: View {
     @State private var shipBusy = false
     @State private var followUpShown = false
     @State private var followUpDraft = ""
-    @State private var infoUsage: ClaudeNativeSessions.SessionUsage?
+    /// The session's window, read from claude's own records: shared by the
+    /// ring, the info popover and the context sheet. Refreshed at every state
+    /// transition (a turn boundary) and every few seconds while working.
+    @State private var usage: SessionUsageSummary?
+    @State private var contextShown = false
 
     private var item: AppModel.SessionItem? {
         model.sessions.first { $0.id == sessionID }
@@ -2403,6 +2407,7 @@ struct SessionDetailView: View {
                 infoShown.toggle()
             }
             .popover(isPresented: $infoShown, arrowEdge: .bottom) { sessionInfoPanel }
+            contextRing
             if let state = item?.state {
                 StatusLabel(state)
             }
@@ -2462,15 +2467,66 @@ struct SessionDetailView: View {
         .padding(.horizontal, 14)
         .frame(height: 42)
         .background(DefaultTheme.background)
+        .task(id: item?.state) { await watchUsage() }
+    }
+
+    /// The ring fills as the window does; a click opens the context sheet.
+    private var contextRing: some View {
+        Button { contextShown = true } label: {
+            ContextRing(fraction: usage?.fraction,
+                        color: usage?.level.color ?? DefaultTheme.mutedText)
+                .padding(3)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(usage.map {
+            "Context \(ContextWindowSheet.percent($0.fraction)) · \(UsageSheet.tokens($0.contextTokens)) / \(UsageSheet.tokens($0.windowTokens))"
+        } ?? "Context window — nothing recorded yet")
+        .sheet(isPresented: $contextShown) {
+            ContextWindowSheet(model: model, sessionID: sessionID) { contextShown = false }
+        }
+    }
+
+    /// Re-reads the tail of the native file (the context lives in the LAST
+    /// entry) off the main actor. Runs once per state change; while the agent
+    /// works, polls every few seconds so the ring moves during a long turn.
+    private func watchUsage() async {
+        let id = sessionID
+        repeat {
+            let latest = await Task.detached(priority: .utility) {
+                ClaudeNativeSessions.usage(for: id, tailBytes: 65_536)
+            }.value
+            if latest != usage { usage = latest }
+            guard item?.state == .working else { return }
+            try? await Task.sleep(for: .seconds(5))
+        } while !Task.isCancelled
     }
 
     /// The session's record (Xirp reference): what we actually know —
-    /// identity, worktree, agent, dates. Nothing invented.
+    /// identity, worktree, agent, dates — under its window, read from
+    /// claude's own records. Nothing invented.
     private var sessionInfoPanel: some View {
         let record = model.sessionInfo(sessionID)
         let workingDir = record?.worktreePath
             ?? model.project(item?.projectID ?? record?.projectID)?.path
+        let lastActivity = model.lastActivity(of: sessionID)
         return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Context Usage")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                Spacer()
+                Text(usage.map { ContextWindowSheet.percent($0.fraction) } ?? "—")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(usage?.level.color ?? DefaultTheme.mutedText)
+            }
+            ContextBar(fraction: usage?.fraction ?? 0,
+                       color: usage?.level.color ?? DefaultTheme.mutedText, height: 7)
+            Text(usage.map { "\(UsageSheet.tokens($0.contextTokens)) / \(UsageSheet.tokens($0.windowTokens))" }
+                 ?? "No turn recorded yet")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(DefaultTheme.secondaryText)
+            Divider().overlay(DefaultTheme.cardBorder).padding(.vertical, 2)
             infoRow("Session ID", record?.id.rawValue.uuidString.lowercased() ?? "—") {
                 HoverIconButton(systemImage: "doc.on.doc", help: "Copy identifier") {
                     NSPasteboard.general.clearContents()
@@ -2487,13 +2543,9 @@ struct SessionDetailView: View {
             }
             if let branch = record?.branch { infoRow("Branch", branch) }
             infoRow("Agent", record?.agentID ?? "claude-code")
-            // v3 — real counters, read from claude's own native records.
-            if let usage = infoUsage {
-                infoRow("Context", "\(Self.tokens(usage.contextTokens)) tokens (last turn)")
-                infoRow("Output", "\(Self.tokens(usage.outputTokens)) tokens total")
-            }
+            infoRow("Model", usage?.model ?? "—")
             HStack(spacing: 10) {
-                Text("State")
+                Text("Status")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .frame(width: 110, alignment: .leading)
@@ -2502,23 +2554,23 @@ struct SessionDetailView: View {
             if let created = record?.createdAt {
                 infoRow("Created", Self.infoDate.string(from: created))
             }
+            infoRow("Last activity", lastActivity.map { Self.infoDate.string(from: $0) } ?? "—")
+            infoRow("Last message", usage.map { Self.infoDate.string(from: $0.lastTurnAt) } ?? "—")
             if let code = record?.exitCode {
                 infoRow("Exit code", "\(code)")
             }
+            HStack {
+                Spacer()
+                GhostButton("Context window details", systemImage: "cylinder") {
+                    infoShown = false
+                    contextShown = true
+                }
+            }
         }
         .padding(16)
-        .frame(width: 400, alignment: .leading)
+        .frame(width: 520, alignment: .leading)
         .background(DefaultTheme.surface)
         .preferredColorScheme(DefaultTheme.colorScheme)
-        .task(id: sessionID) {
-            // The whole file, not the default tail: this panel states the
-            // session's lifetime output, and a tail would only total the end
-            // of it. Off the main actor, so the megabytes never stall the UI.
-            let id = sessionID
-            infoUsage = await Task.detached(priority: .utility) {
-                ClaudeNativeSessions.usage(for: id, tailBytes: nil)
-            }.value
-        }
     }
 
     private func infoRow(_ label: String, _ value: String,
@@ -2538,13 +2590,9 @@ struct SessionDetailView: View {
         }
     }
 
-    static func tokens(_ count: Int) -> String {
-        count >= 10_000 ? String(format: "%.1fk", Double(count) / 1000) : "\(count)"
-    }
-
     private static let infoDate: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "dd/MM/yyyy HH:mm"
+        formatter.dateFormat = "dd/MM/yyyy HH:mm:ss"
         return formatter
     }()
 

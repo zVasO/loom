@@ -161,6 +161,9 @@ struct NativeUsageTests {
         let usage = ClaudeNativeSessions.usage(fromJSONL: jsonl)
         #expect(usage?.contextTokens == 195, "5 + 30 + 160 — the last turn's real window")
         #expect(usage?.outputTokens == 35, "10 + 25 accumulated")
+        #expect(usage?.model == "claude-opus-5")
+        #expect(usage?.windowTokens == 1_000_000)
+        #expect(usage?.turnCount == 2)
     }
 
     @Test("one assistant line per content block: output is counted once per turn")

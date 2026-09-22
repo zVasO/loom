@@ -56,7 +56,7 @@ private struct FleetCard: View {
     @State private var surface: TerminalSurface?
     @State private var hovered = false
     @State private var quickReply = ""
-    @State private var usage: ClaudeNativeSessions.SessionUsage?
+    @State private var usage: SessionUsageSummary?
 
     private var borderColor: Color {
         if item.state == .needsInput { return DefaultTheme.badgeColor(for: .needsInput).opacity(0.8) }
@@ -114,9 +114,9 @@ private struct FleetCard: View {
                     }
                     Spacer()
                     if let usage {
-                        MonoTag("ctx \(SessionDetailView.tokens(usage.contextTokens))",
+                        MonoTag("ctx \(UsageSheet.tokens(usage.contextTokens)) · \(ContextWindowSheet.percent(usage.fraction))",
                                 systemImage: "gauge.with.needle",
-                                color: DefaultTheme.mutedText)
+                                color: usage.level == .normal ? DefaultTheme.mutedText : usage.level.color)
                     }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 7)

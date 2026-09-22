@@ -1232,6 +1232,15 @@ public final class AppModel {
         (try? store?.session(id: id)) ?? nil
     }
 
+    /// The last moment the session's state moved (journal, STA-06) or its
+    /// process ended — "last activity" in the session info. Nil before any
+    /// transition was journaled.
+    public func lastActivity(of id: SessionID) -> Date? {
+        let transition = ((try? store?.transitions(session: id)) ?? nil)?.last?.at
+        let ended = sessionInfo(id)?.endedAt
+        return [transition, ended].compactMap { $0 }.max()
+    }
+
     /// Removes the project from the app (archived in the database): the local
     /// folder and the session records stay intact.
     public func removeProject(_ id: ProjectID) {
