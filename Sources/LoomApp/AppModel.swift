@@ -83,6 +83,13 @@ public final class AppModel {
         /// Badges, in assignment order — each resolved to a color by the
         /// badge definitions.
         public var badges: [String] = []
+        /// The native conversation the process serves when it is not the
+        /// imposed one (`/resume <id>` typed in the terminal). Last stored
+        /// property: every memberwise call site keeps compiling.
+        public var nativeSessionID: SessionID? = nil
+
+        /// The id the native `.jsonl` is named after and `claude --resume` accepts.
+        public var nativeID: SessionID { nativeSessionID ?? id }
     }
 
     // MARK: - Badges: user-defined labels with a color
@@ -444,6 +451,7 @@ public final class AppModel {
             hookServer = server
 
             Task { await self.observeStates(of: manager) }
+            Task { await self.observeIdentities(of: manager) }
             reloadPersistedSessions()
             restoreStackChildren()
             reindexAllSessions()
@@ -464,11 +472,22 @@ public final class AppModel {
     /// need invalidation right when a session closes.
     private var nativeExistsCache: [SessionID: Bool] = [:]
 
-    private func nativeSessionExists(_ id: SessionID) -> Bool {
-        if let cached = nativeExistsCache[id] { return cached }
-        let exists = ClaudeNativeSessions.exists(id)
-        nativeExistsCache[id] = exists
+    /// Keyed by the RECORD (its Loom id); the file looked up is the native
+    /// conversation's — the same UUID unless the agent switched since.
+    private func nativeSessionExists(_ record: SessionRecord) -> Bool {
+        if let cached = nativeExistsCache[record.id] { return cached }
+        let exists = ClaudeNativeSessions.exists(record.resolvedNativeSessionID)
+        nativeExistsCache[record.id] = exists
         return exists
+    }
+
+    /// The conversation a session serves — live item first, then its record,
+    /// else the Loom id itself. The one read path for the ring, the info
+    /// panel, the context sheet and Mission Control.
+    public func nativeSessionID(for id: SessionID) -> SessionID {
+        sessions.first { $0.id == id }?.nativeID
+            ?? allRecords.first { $0.id == id }?.resolvedNativeSessionID
+            ?? id
     }
 
     private func reloadPersistedSessions() {
@@ -478,10 +497,10 @@ public final class AppModel {
         // to resume: it doesn't clutter the lists (pre-fix identifier wrecks
         // disappear at the same time).
         interruptedSessions = all.filter {
-            $0.state == .interrupted && nativeSessionExists($0.id)
+            $0.state == .interrupted && nativeSessionExists($0)
         }
         historySessions = all.filter {
-            [.completed, .failed, .archived].contains($0.state) && nativeSessionExists($0.id)
+            [.completed, .failed, .archived].contains($0.state) && nativeSessionExists($0)
         }
         let loadedProjects = (try? store?.activeProjects()) ?? nil
         projects = loadedProjects ?? []
@@ -1404,9 +1423,13 @@ public final class AppModel {
     /// Claude sessions closed but not destroyed ("inactive"): they stay in
     /// their stack with their tabs — only those without a conversation (never
     /// a single message) disappear, via the ClaudeNativeSessions.exists filter.
+    /// Compared by NATIVE conversation: a live session that adopted another
+    /// record's conversation (`/resume <id>` in its terminal) hides that
+    /// record — two claude processes must never resume the same conversation.
     public var dormantSessions: [SessionRecord] {
         (interruptedSessions + historySessions).filter { record in
-            record.state != .archived && !sessions.contains { $0.id == record.id }
+            record.state != .archived
+                && !sessions.contains { $0.id == record.id || $0.nativeID == record.resolvedNativeSessionID }
         }
     }
 
@@ -1430,7 +1453,8 @@ public final class AppModel {
         if let live = sessions.first(where: { $0.id == id }) { return live }
         return allRecords.first { $0.id == id }.map {
             SessionItem(id: $0.id, title: $0.title, state: $0.state,
-                        projectID: $0.projectID, branch: $0.branch, badges: $0.badges)
+                        projectID: $0.projectID, branch: $0.branch, badges: $0.badges,
+                        nativeSessionID: $0.nativeSessionID)
         }
     }
 
@@ -1695,8 +1719,11 @@ public final class AppModel {
     public func resumeSession(_ record: SessionRecord) async {
         guard let manager else { return }
         let token = UUID().uuidString
-        let command = ClaudeNativeSessions.exists(record.id)
-            ? adapter.resumeCommand(session: record.id, hookToken: token)
+        // The conversation to pick up is the NATIVE one — the imposed UUID,
+        // unless a `/resume <id>` in the terminal moved the session elsewhere.
+        let native = record.resolvedNativeSessionID
+        let command = ClaudeNativeSessions.exists(native)
+            ? adapter.resumeCommand(session: native, hookToken: token)
             : adapter.launchCommand(session: record.id, initialPrompt: nil, hookToken: token)
         guard let directory = workingDirectory(worktreePath: record.worktreePath,
                                                project: project(record.projectID))
@@ -1714,7 +1741,8 @@ public final class AppModel {
             tokenRegistry.register(token: token, session: record.id)
             sessions.append(SessionItem(id: record.id, title: record.title, state: .starting,
                                         projectID: record.projectID, branch: record.branch,
-                                        badges: record.badges))
+                                        badges: record.badges,
+                                        nativeSessionID: record.nativeSessionID))
             interruptedSessions.removeAll { $0.id == record.id }
         } catch {
             startupError = String(describing: error)
@@ -1788,6 +1816,21 @@ public final class AppModel {
             } else if let index {
                 sessions[index].state = update.state
             }
+        }
+    }
+
+    /// The process of a live session switched conversation: its item and its
+    /// record follow, and the "does it have a conversation" memo of that
+    /// record is stale — the file to look for is another one now.
+    private func observeIdentities(of manager: SessionManager) async {
+        let updates = await manager.identityUpdates()
+        for await update in updates {
+            if let index = sessions.firstIndex(where: { $0.id == update.id }) {
+                sessions[index].nativeSessionID =
+                    update.nativeSessionID == update.id ? nil : update.nativeSessionID
+            }
+            nativeExistsCache.removeValue(forKey: update.id)
+            reloadPersistedSessions()
         }
     }
 

@@ -29,6 +29,34 @@ struct SessionStoreTests {
         #expect(try store.allSessions().count == 1)
     }
 
+    @Test("a session references at most one native conversation — the imposed one by default")
+    func sessionNativeAllerRetour() throws {
+        let store = try makeStore()
+        let id = SessionID()
+        try store.insert(SessionRecord(id: id, title: "t", agentID: "claude-code",
+                                       state: .working, createdAt: Date()))
+        let fresh = try #require(try store.session(id: id))
+        #expect(fresh.nativeSessionID == nil, "nothing switched: the column stays NULL")
+        #expect(fresh.resolvedNativeSessionID == id, "NULL resolves to the imposed UUID")
+
+        let native = SessionID()
+        try store.updateNativeSession(session: id, to: native)
+        #expect(try store.session(id: id)?.nativeSessionID == native)
+        #expect(try store.session(id: id)?.resolvedNativeSessionID == native)
+        #expect(try store.allSessions().first?.nativeSessionID == native,
+                "the list query carries it too")
+
+        try store.updateNativeSession(session: id, to: nil)
+        #expect(try store.session(id: id)?.nativeSessionID == nil,
+                "nil restores the imposed conversation")
+
+        let seeded = SessionRecord(id: SessionID(), title: "u", agentID: "claude-code",
+                                   state: .interrupted, createdAt: Date(timeIntervalSince1970: 2000),
+                                   nativeSessionID: native)
+        try store.insert(seeded)
+        #expect(try store.session(id: seeded.id) == seeded, "the record round-trips with its native id")
+    }
+
     @Test("a session wears several badges, in assignment order, and reads them back")
     func plusieursBadges() throws {
         let store = try makeStore()

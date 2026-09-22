@@ -298,12 +298,13 @@ struct SessionManagerTests {
             store: store)
 
         let id = SessionID()
+        let native = SessionID()   // the conversation a `/resume <id>` moved it to, last time
         let record = SessionRecord(id: id, title: "resume-me", agentID: "claude-code",
-                                   state: .interrupted, createdAt: Date())
+                                   state: .interrupted, createdAt: Date(), nativeSessionID: native)
         try store.insert(record)
 
         let command = Command(executable: "claude",
-                              arguments: ["--resume", id.rawValue.uuidString])
+                              arguments: ["--resume", native.rawValue.uuidString])
         try await manager.resume(record, command: command,
                                  workingDirectory: URL(fileURLWithPath: "/tmp/worktree"))
 
@@ -311,6 +312,61 @@ struct SessionManagerTests {
                 "same identifier: the history stays one continuous thread")
         #expect(await manager.state(of: id) == .starting)
         #expect(try store.session(id: id)?.state == .starting, "the database follows the resume")
+        #expect(await manager.nativeSessionID(of: id) == native,
+                "the manager picks the resume up where the record left it: on the native conversation")
+    }
+
+    @Test("`/resume <id>` in the terminal: SessionStart moves the session onto another native conversation")
+    func resumeNatifDepuisLeTerminal() async throws {
+        let dbURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loom-native-\(UUID().uuidString.prefix(8)).sqlite")
+        let store = try SessionStore(path: dbURL.path)
+        let manager = makeManagerWithStore(store: store, pty: ScriptedPTYHost())
+        let updates = await manager.identityUpdates()
+
+        let imposed = SessionID()
+        var spec = spec()
+        spec.sessionID = imposed
+        let id = try await manager.launch(spec)
+        let token = try #require(await manager.hookToken(for: id))
+        #expect(await manager.nativeSessionID(of: id) == imposed, "at birth, the imposed UUID")
+
+        func sessionStart(_ native: SessionID, source: String) -> Data {
+            try! JSONSerialization.data(withJSONObject: [
+                "hook_event_name": "SessionStart", "source": source,
+                "session_id": native.rawValue.uuidString, "cwd": "/tmp",
+            ])
+        }
+
+        // The first SessionStart of a fresh launch: the UUID we imposed — noise.
+        await manager.ingestHookPayload(sessionStart(imposed, source: "startup"), token: token)
+        #expect(try store.session(id: id)?.nativeSessionID == nil)
+
+        // The user types `/resume <other>`: same process, another conversation.
+        let other = SessionID()
+        await manager.ingestHookPayload(sessionStart(other, source: "resume"), token: token)
+        #expect(await manager.nativeSessionID(of: id) == other)
+        #expect(try store.session(id: id)?.nativeSessionID == other,
+                "the record follows: the next Resume must replay THIS conversation")
+        #expect(await manager.state(of: id) == .starting, "identity is not state")
+        var iterator = updates.makeAsyncIterator()
+        let announced = await iterator.next()
+        #expect(announced == SessionManager.IdentityUpdate(id: id, nativeSessionID: other),
+                "the UI hears about the switch — ring, info panel and lists follow")
+
+        // `compact` repeats the current id: nothing written, nothing announced.
+        await manager.ingestHookPayload(sessionStart(other, source: "compact"), token: token)
+        #expect(try store.session(id: id)?.nativeSessionID == other)
+
+        // Back on the imposed conversation: the column returns to NULL.
+        await manager.ingestHookPayload(sessionStart(imposed, source: "resume"), token: token)
+        #expect(try store.session(id: id)?.nativeSessionID == nil)
+        let restored = await iterator.next()
+        #expect(restored == SessionManager.IdentityUpdate(id: id, nativeSessionID: imposed),
+                "one announcement per switch: compact was silent, the way back is not")
+
+        await manager.ingestHookPayload(sessionStart(SessionID(), source: "resume"), token: "forged")
+        #expect(await manager.nativeSessionID(of: id) == imposed, "a forged token moves nothing")
     }
 
     @Test("archiving via the manager: state + database (SES-07)")

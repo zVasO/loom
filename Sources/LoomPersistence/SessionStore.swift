@@ -126,6 +126,13 @@ public final class SessionStore: Sendable {
                     arguments: [definition.name, definition.colorHex, position])
             }
         }
+        migrator.registerMigration("v9-native-session") { db in
+            // A Loom session references at most one native session (CONTEXT.md).
+            // NULL = the imposed one (same UUID as `id`); set when `/resume` typed
+            // inside the terminal switches the process to another conversation.
+            // No foreign key: the target may be a conversation Loom never created.
+            try db.alter(table: "session") { $0.add(column: "nativeSessionID", .text) }
+        }
         try migrator.migrate(database)
     }
 
@@ -355,6 +362,15 @@ public final class SessionStore: Sendable {
         }
     }
 
+    /// The native conversation the session now references — `nil` restores
+    /// "same as id", the imposed one (see `SessionRecord.nativeSessionID`).
+    public func updateNativeSession(session id: SessionID, to native: SessionID?) throws {
+        try database.write { db in
+            try db.execute(sql: "UPDATE session SET nativeSessionID = ? WHERE id = ?",
+                           arguments: [native?.rawValue.uuidString, id.rawValue.uuidString])
+        }
+    }
+
     /// NFR-R / UC-7: on relaunch, any session still "live" in the database is in
     /// fact dead along with the app — it becomes a candidate for Resume.
     @discardableResult
@@ -409,11 +425,20 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
     /// badge definitions. Stored in `sessionBadge`, not in the session row:
     /// the record carries them, the store loads and writes them.
     public var badges: [String] = []
+    /// The native conversation this session references (CONTEXT.md: at most
+    /// one). `nil` = the one Loom imposed at launch, whose UUID IS `id`. Set
+    /// when the agent switches conversation under the same process (`/resume
+    /// <id>` typed in the terminal, `/clear`, a fork) — `SessionStart` reports it.
+    public var nativeSessionID: SessionID? = nil
+
+    /// The id `claude --resume` accepts and the native `.jsonl` is named after.
+    public var resolvedNativeSessionID: SessionID { nativeSessionID ?? id }
 
     public init(id: SessionID, title: String, agentID: String, state: SessionState,
                 branch: String? = nil, worktreePath: String? = nil, initialPrompt: String? = nil,
                 exitCode: Int32? = nil, projectID: ProjectID? = nil,
-                createdAt: Date, endedAt: Date? = nil, badges: [String] = []) {
+                createdAt: Date, endedAt: Date? = nil, badges: [String] = [],
+                nativeSessionID: SessionID? = nil) {
         self.id = id
         self.title = title
         self.agentID = agentID
@@ -426,6 +451,7 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
         self.createdAt = createdAt
         self.endedAt = endedAt
         self.badges = Self.normalizedBadges(badges)
+        self.nativeSessionID = nativeSessionID
     }
 
     /// The badges a session may wear: trimmed, non-empty, each name once,
@@ -441,7 +467,7 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
 
     enum CodingKeys: String, CodingKey {
         case id, title, agentID, state, branch, worktreePath, initialPrompt, exitCode, projectID,
-             createdAt, endedAt
+             createdAt, endedAt, nativeSessionID
     }
 
     public func encode(to container: inout PersistenceContainer) throws {
@@ -456,6 +482,7 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
         container["projectID"] = projectID?.rawValue.uuidString
         container["createdAt"] = createdAt
         container["endedAt"] = endedAt
+        container["nativeSessionID"] = nativeSessionID?.rawValue.uuidString
     }
 
     public init(row: Row) throws {
@@ -473,6 +500,8 @@ public struct SessionRecord: Codable, Equatable, Sendable, FetchableRecord, Pers
         projectID = (row["projectID"] as String?).flatMap(UUID.init(uuidString:)).map(ProjectID.init)
         createdAt = row["createdAt"]
         endedAt = row["endedAt"]
+        nativeSessionID = (row["nativeSessionID"] as String?)
+            .flatMap(UUID.init(uuidString:)).map(SessionID.init)
     }
 }
 
