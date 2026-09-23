@@ -43,6 +43,7 @@ extension AppModel {
 
     /// Fetches only when nothing is cached or the cache is a day old.
     public func ensureCatalog() async {
+        await awaitPRCaches()   // the disk copy may still be decoding at launch
         if let catalog, !catalog.isStale() { return }
         await refreshCatalog()
     }

@@ -387,9 +387,8 @@ public final class AppModel {
         do {
             try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
             ThemeStore.shared.configure(themesDirectory: supportDirectory.appendingPathComponent("themes"))
-            loadPRListCache()
+            loadPRCaches()
             reviewDrafts = reviewDraftStore.load()
-            catalog = repoCatalogCache.load()
             prTabs = prTabsStore.load()
             let store = try SessionStore(path: supportDirectory.appendingPathComponent("loom.sqlite").path)
             self.store = store
@@ -714,6 +713,9 @@ public final class AppModel {
 
     /// Every list ever fetched, by project and filter — the cache on disk mirrors it.
     private var prLists: [PRListKey: PRListCache.Entry] = [:]
+    /// The disk decode of the PR lists and the catalog, in flight from
+    /// launch until it lands — see `loadPRCaches`.
+    @ObservationIgnored private var prCacheLoad: Task<Void, Never>?
     public private(set) var prLoading: Set<PRListKey> = []
     /// PRs whose review session is being prepared (worktree fetch + launch) —
     /// the UI shows progress instead of feeling frozen during the network fetch.
@@ -918,15 +920,40 @@ public final class AppModel {
         prLoading.contains(prKey(projectID))
     }
 
-    /// Seeds every list from disk: after a relaunch the tab paints its lists,
-    /// and their counts, without a single `gh` call.
-    private func loadPRListCache() {
+    /// Seeds every list and the catalog from disk, so a relaunch paints the
+    /// PRs tab without a single `gh` call — decoded OFF the main actor: the
+    /// two files run to megabytes on a busy account and were parsed before
+    /// the first frame (audit 2026-09-22, hot path 11). Whoever reads or
+    /// writes them first awaits the load; a list fetched meanwhile keeps
+    /// its place when it is the fresher of the two.
+    private func loadPRCaches() {
         customPRFilters = prFilterStore.load()
-        for (projectID, lists) in prListCache.load() {
-            for (filterID, entry) in lists {
-                prLists[PRListKey(projectID: projectID, filterID: filterID)] = entry
+        let listCache = prListCache
+        let catalogCache = repoCatalogCache
+        prCacheLoad = Task { [weak self] in
+            let loaded = await Task.detached(priority: .userInitiated) {
+                (lists: listCache.load(), catalog: catalogCache.load())
+            }.value
+            guard let self else { return }
+            for (projectID, lists) in loaded.lists {
+                for (filterID, entry) in lists {
+                    let key = PRListKey(projectID: projectID, filterID: filterID)
+                    if let live = self.prLists[key], live.fetchedAt >= entry.fetchedAt { continue }
+                    self.prLists[key] = entry
+                }
+            }
+            if let stored = loaded.catalog,
+               self.catalog.map({ $0.fetchedAt < stored.fetchedAt }) ?? true {
+                self.catalog = stored
             }
         }
+    }
+
+    /// Done once the lists and the catalog read at launch are in memory:
+    /// a fetch decided before that would ask `gh` for a list the disk holds,
+    /// and a save would write the few lists in memory over the whole file.
+    func awaitPRCaches() async {
+        await prCacheLoad?.value
     }
 
     /// Projects that no longer exist are dropped here rather than at load
@@ -938,6 +965,8 @@ public final class AppModel {
         prListSaveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled, let self else { return }
+            await self.awaitPRCaches()   // never write a partial cache over the whole one
+            guard !Task.isCancelled else { return }
             let known = Set(self.projects.map(\.id))
             var lists: PRListCache.Lists = [:]
             for (key, entry) in self.prLists where known.contains(key.projectID) {
@@ -979,12 +1008,14 @@ public final class AppModel {
     /// longer ago than the TTL, or stored for a filter edited since. What
     /// visiting a project, or picking a filter, calls.
     public func ensurePRs(for projectID: ProjectID) async {
+        await awaitPRCaches()
         if let entry = prLists[prKey(projectID)], !entry.isStale(for: selectedPRFilter) { return }
         await refreshPRs(for: projectID)
     }
 
     /// Fetches whatever the cache's age — the refresh button.
     public func refreshPRs(for projectID: ProjectID) async {
+        await awaitPRCaches()
         let filter = selectedPRFilter
         let key = PRListKey(projectID: projectID, filterID: filter.id)
         guard !prLoading.contains(key) else { return }
