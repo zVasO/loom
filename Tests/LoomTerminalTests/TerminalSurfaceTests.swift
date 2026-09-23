@@ -131,11 +131,11 @@ struct TerminalSurfaceTests {
         let pty = ScriptedPTYHost()
         let runtime = try makeRuntime(pty: pty)
         let surface = runtime.surface()
-        surface.attach()
+        let watcher = surface.attach()
         pty.emit("first")
         _ = await pollUntil { surface.screen.lines[0].text.hasPrefix("first") }
 
-        surface.detach()
+        surface.detach(watcher)
         pty.emit(" second")
         try await Task.sleep(for: .milliseconds(80))
         #expect(surface.screen.lines[0].text.hasPrefix("first"),
@@ -190,7 +190,7 @@ struct TerminalSurfaceTests {
                 makeEngine: { geometry, _ in SwiftTermEngine(geometry: geometry, scrollback: 100) })
         ).runtime
         let surface = runtime.surface()
-        surface.attach()
+        let watcher = surface.attach()
         pty.emit("hello")
         #expect(await pollUntil { surface.screen.lines.first?.text.hasPrefix("hello") == true })
         let delivered = surface.framesReceived
@@ -204,7 +204,7 @@ struct TerminalSurfaceTests {
         pty.emit(" world")
         #expect(await pollUntil { surface.framesReceived > delivered })
         #expect(surface.screen.lines.first?.text.hasPrefix("hello world") == true)
-        surface.detach()
+        surface.detach(watcher)
     }
 
     // P1-11: a preview asks for its own cadence — a burst that streams for
@@ -221,7 +221,7 @@ struct TerminalSurfaceTests {
                 makeEngine: { geometry, _ in SwiftTermEngine(geometry: geometry, scrollback: 100) })
         ).runtime
         let surface = runtime.surface()
-        surface.attach(cadence: .preview(.milliseconds(200)))
+        let watcher = surface.attach(cadence: .preview(.milliseconds(200)))
         for index in 0..<40 {
             pty.emit("burst \(index)\r\n")
             try await Task.sleep(for: .milliseconds(10))
@@ -230,6 +230,32 @@ struct TerminalSurfaceTests {
         #expect(surface.framesReceived <= 5,
                 "400 ms of burst at a 200 ms cadence: the attach frame, a leading edge and a trailing edge or two — saw \(surface.framesReceived)")
         #expect(surface.screen.lines.contains { $0.text.hasPrefix("burst 39") }, "and the last frame is current")
-        surface.detach()
+        surface.detach(watcher)
+    }
+
+    // A pane and a Mission Control card share one surface; at a tab switch the
+    // newcomer attaches in the same commit that cancels the other. With one
+    // flag per surface the survivor ended up detached — frozen on its last
+    // screen for as long as the tab stayed open.
+    @Test("two watchers overlap: the second keeps frames when the first leaves")
+    func deuxObservateursSeChevauchent() async throws {
+        let pty = ScriptedPTYHost()
+        let runtime = try makeRuntime(pty: pty)
+        let surface = runtime.surface()
+
+        let card = Task { await surface.attached(cadence: .preview(.milliseconds(250))) }
+        #expect(await pollUntil { surface.isAttached })
+        let pane = Task { await surface.attached() }
+        try await Task.sleep(for: .milliseconds(20))
+        card.cancel()
+        _ = await card.value
+        #expect(surface.isAttached, "the pane still watches")
+
+        pty.emit("after the switch")
+        #expect(await pollUntil { surface.screen.lines[0].text.hasPrefix("after the switch") },
+                "frames keep flowing to the watcher that stayed")
+
+        pane.cancel()
+        #expect(await pollUntil { !surface.isAttached }, "the last to leave detaches")
     }
 }

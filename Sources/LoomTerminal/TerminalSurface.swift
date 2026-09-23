@@ -19,7 +19,30 @@ public final class TerminalSurface {
     public private(set) var history: [TerminalLine] = []
     /// Absolute scrollback index of history[0]: stable identity for the view diff.
     public private(set) var historyBase = 0
-    public private(set) var isAttached = false
+    /// Somebody watches: frames flow. Per WATCHER, not per surface — a pane
+    /// and a Mission Control card of the same session share this surface,
+    /// and at a tab switch the newcomer attaches in the same commit that
+    /// cancels the other; a single flag left the survivor detached, frozen
+    /// on its last screen. The last to leave detaches.
+    public var isAttached: Bool { !watchers.isEmpty }
+
+    private struct Watcher {
+        var cadence: FrameCadence
+        var continuation: CheckedContinuation<Void, Never>?
+    }
+    private var watchers: [UUID: Watcher] = [:]
+
+    /// The fastest cadence any watcher asked for; nil when nobody watches.
+    private var watchedCadence: FrameCadence? {
+        var slowest: Duration?
+        for watcher in watchers.values {
+            switch watcher.cadence {
+            case .live: return .live
+            case .preview(let interval): slowest = min(slowest ?? interval, interval)
+            }
+        }
+        return slowest.map { .preview($0) }
+    }
     /// The input modes the program negotiated (mouse, bracketed paste, cursor
     /// keys, kitty keyboard flags) — what the key capture must honour.
     public private(set) var modes = TerminalModes.none
@@ -38,38 +61,42 @@ public final class TerminalSurface {
         self.runtime = runtime
     }
 
-    /// Attach: frames keep arriving until detached, at `cadence`. Idempotent.
-    public func attach(cadence: FrameCadence = .live) {
-        guard !isAttached else { return }
-        isAttached = true
-        runtime?.setAttachment(terminal, attached: true, cadence: cadence)
+    /// Attach one watcher: frames keep arriving until IT detaches, at
+    /// `cadence` (the fastest of all watchers wins). Returns its token.
+    @discardableResult
+    public func attach(cadence: FrameCadence = .live) -> UUID {
+        let token = UUID()
+        watchers[token] = Watcher(cadence: cadence, continuation: nil)
+        runtime?.setAttachment(terminal, cadence: watchedCadence)
+        return token
     }
 
-    /// Detach: no more frames are produced for this surface; `screen` keeps the
-    /// last known screen. Parsing and transcript carry on (TRM-03).
-    public func detach() {
-        guard isAttached else { return }
-        isAttached = false
-        runtime?.setAttachment(terminal, attached: false, cadence: .live)
+    /// Detach one watcher. Once the last is gone no more frames are produced
+    /// for this surface; `screen` keeps the last known screen. Parsing and
+    /// transcript carry on (TRM-03).
+    public func detach(_ token: UUID) {
+        guard watchers.removeValue(forKey: token) != nil else { return }
+        runtime?.setAttachment(terminal, cadence: watchedCadence)
     }
 
     /// The normal lifecycle path: `.task { await surface.attached() }`.
     /// Attaches on entry, detaches on cancellation — forgetting is unrepresentable.
     public func attached(cadence: FrameCadence = .live) async {
-        attach(cadence: cadence)
-        defer { detach() }
+        let token = attach(cadence: cadence)
+        defer { detach(token) }
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 if Task.isCancelled {
                     continuation.resume()
                     return
                 }
-                lifecycleContinuation = continuation
+                watchers[token]?.continuation = continuation
             }
         } onCancel: {
             Task { @MainActor [weak self] in
-                self?.lifecycleContinuation?.resume()
-                self?.lifecycleContinuation = nil
+                guard let self, let continuation = self.watchers[token]?.continuation else { return }
+                self.watchers[token]?.continuation = nil
+                continuation.resume()
             }
         }
     }
@@ -126,8 +153,6 @@ public final class TerminalSurface {
         if self.modes != modes { self.modes = modes }
         if self.hasOutput != hasOutput { self.hasOutput = hasOutput }
     }
-
-    private var lifecycleContinuation: CheckedContinuation<Void, Never>?
 }
 
 extension SessionRuntime {

@@ -210,13 +210,13 @@ public final class SessionRuntime: @unchecked Sendable {
         channel?.write(bytes)
     }
 
-    /// Called from the MainActor by the surfaces; attaching immediately paints the
-    /// current screen (reattachment path < 100 ms, TRM-03).
-    func setAttachment(_ terminal: TerminalID, attached: Bool, cadence: FrameCadence) {
-        lock.withLock {
-            if attached { attachedTerminals[terminal] = cadence } else { attachedTerminals[terminal] = nil }
-        }
-        if attached {
+    /// Called from the MainActor by the surfaces with the cadence their
+    /// watchers need — nil once nobody watches. A watched terminal is painted
+    /// at once, so a newcomer sees the current screen even when another
+    /// watcher already had it attached (reattachment path < 100 ms, TRM-03).
+    func setAttachment(_ terminal: TerminalID, cadence: FrameCadence?) {
+        lock.withLock { attachedTerminals[terminal] = cadence }
+        if cadence != nil {
             queue.async { self.deliverFrame(force: true) }
         }
     }
