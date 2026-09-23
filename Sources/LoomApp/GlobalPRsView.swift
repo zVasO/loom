@@ -884,8 +884,7 @@ private struct PRSidebarRow: View, Equatable {
     @State private var hovered = false
 
     /// What the row SHOWS decides whether it re-runs — every keystroke in the
-    /// search field re-evaluates the whole sidebar, and a row hosts a real
-    /// NSScrollView for its chips.
+    /// search field re-evaluates the whole sidebar.
     static func == (lhs: PRSidebarRow, rhs: PRSidebarRow) -> Bool {
         lhs.pr == rhs.pr && lhs.isSelected == rhs.isSelected && lhs.isOpen == rhs.isOpen
             && lhs.hasSession == rhs.hasSession && lhs.launching == rhs.launching
@@ -929,30 +928,31 @@ private struct PRSidebarRow: View, Equatable {
                 }
                 // One more line at most: who it waits on, what it is tagged,
                 // how big it is, whether it still merges. The chips are rigid,
-                // so the line can be wider than the row; a disabled horizontal
-                // ScrollView takes exactly the proposed width and clips the
-                // rest — a plain frame(maxWidth:) would grow to fit the child
-                // and push the whole sidebar past its 300 pt.
+                // so the line can be wider than the row: the stack keeps its
+                // ideal width, the frame takes exactly the proposed one and
+                // clips the rest. A disabled horizontal ScrollView did the
+                // same at the price of an NSScrollView per row — hundreds of
+                // them on the first keystroke of a search.
                 if !pr.reviewers.isEmpty || !pr.labels.isEmpty || pr.additions + pr.deletions > 0
                     || pr.isConflicting {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            if !pr.reviewers.isEmpty {
-                                Label(PRChips.reviewers(pr, limit: 2), systemImage: "person.2")
-                                    .font(.system(size: 9, design: .monospaced))
-                                    .foregroundStyle(DefaultTheme.mutedText)
-                                    .lineLimit(1)
-                            }
-                            ForEach(pr.labels.prefix(2), id: \.name) { PRChips.label($0) }
-                            if pr.additions + pr.deletions > 0 { PRChips.size(pr) }
-                            if pr.isConflicting {
-                                Text("conflicts")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .foregroundStyle(DefaultTheme.danger)
-                            }
+                    HStack(spacing: 6) {
+                        if !pr.reviewers.isEmpty {
+                            Label(PRChips.reviewers(pr, limit: 2), systemImage: "person.2")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(DefaultTheme.mutedText)
+                                .lineLimit(1)
+                        }
+                        ForEach(pr.labels.prefix(2), id: \.name) { PRChips.label($0) }
+                        if pr.additions + pr.deletions > 0 { PRChips.size(pr) }
+                        if pr.isConflicting {
+                            Text("conflicts")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(DefaultTheme.danger)
                         }
                     }
-                    .scrollDisabled(true)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    .clipped()
                 }
             }
             // The column takes every point the trailing chips leave — safe now
