@@ -986,6 +986,7 @@ public final class AppModel {
         prDetailCache = prDetailCache.filter { !$0.key.hasPrefix(prefix) }
         prDiffCache = prDiffCache.filter { !$0.key.hasPrefix(prefix) }
         diffProducts = diffProducts.filter { !$0.key.hasPrefix(prefix) }
+        prTourCache = prTourCache.filter { !$0.key.hasPrefix(prefix) }
         Task { await diffPipeline.evict(prefix: prefix) }
         prCommentsCache = prCommentsCache.filter { !$0.key.hasPrefix(prefix) }
         prFileViewsCache = prFileViewsCache.filter { !$0.key.hasPrefix(prefix) }
