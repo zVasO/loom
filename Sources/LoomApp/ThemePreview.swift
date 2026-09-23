@@ -16,16 +16,19 @@ struct ThemePreview: View {
     /// components read it some sixty times per pass.
     @State private var cache = PaletteCache()
 
+    /// Keyed on the whole family, not its name: a re-imported or replaced
+    /// family keeps its name and changes its tokens, and comparing two token
+    /// structs is far cheaper than the palette it would otherwise rebuild.
     private final class PaletteCache {
-        var family: String?
+        var family: ThemeFamily?
         var dark: Bool?
         var palette: ThemePalette?
     }
 
     private var palette: ThemePalette {
-        if let cached = cache.palette, cache.family == family.name, cache.dark == dark { return cached }
+        if let cached = cache.palette, cache.family == family, cache.dark == dark { return cached }
         let built = family.palette(dark: dark)
-        cache.family = family.name
+        cache.family = family
         cache.dark = dark
         cache.palette = built
         return built
