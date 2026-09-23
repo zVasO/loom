@@ -1,6 +1,6 @@
 import Testing
 import LoomCore
-import LoomPersistence
+@testable import LoomPersistence
 import Foundation
 
 // Seam: SessionStore's public interface, on a real SQLite database in a
@@ -223,11 +223,18 @@ struct SessionStoreTests {
 @Suite("Full-text transcript search (v2)")
 struct TranscriptSearchTests {
 
-    /// On disk, like the app: a WAL pool, not the in-memory queue.
-    private func makeStore() throws -> SessionStore {
+    /// On disk, like the app: a WAL pool, not the in-memory queue. The
+    /// database (and its -wal/-shm) is removed once the body returns — these
+    /// tests index megabytes, which used to accumulate in the temp folder.
+    private func withStore(_ body: (SessionStore) throws -> Void) throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("loom-fts-\(UUID().uuidString.prefix(8)).sqlite")
-        return try SessionStore(path: url.path)
+        defer {
+            for suffix in ["", "-wal", "-shm"] {
+                try? FileManager.default.removeItem(atPath: url.path + suffix)
+            }
+        }
+        try body(try SessionStore(path: url.path))
     }
 
     @Test("a word in a transcript yields the session with a highlighted snippet")
@@ -260,43 +267,70 @@ struct TranscriptSearchTests {
     // never doubling it.
     @Test("an index remembers its fingerprint, and a re-index replaces the FTS row")
     func empreinteDIndex() throws {
-        let store = try makeStore()
-        let id = SessionID()
-        try store.insert(SessionRecord(id: id, title: "Payments", agentID: "claude-code",
-                                       state: .completed, createdAt: Date()))
-        #expect(try store.indexedFingerprint(session: id) == nil, "never indexed")
+        try withStore { store in
+            let id = SessionID()
+            try store.insert(SessionRecord(id: id, title: "Payments", agentID: "claude-code",
+                                           state: .completed, createdAt: Date()))
+            #expect(try store.indexedFingerprint(session: id) == nil, "never indexed")
 
-        let first = SessionStore.IndexFingerprint(bytes: 120, modifiedAt: 1_700_000_000)
-        try store.indexForSearch(session: id, title: "Payments",
-                                 transcript: "the webhook signature was stale", fingerprint: first)
-        #expect(try store.indexedFingerprint(session: id) == first)
+            let first = SessionStore.IndexFingerprint(bytes: 120, modifiedAt: 1_700_000_000)
+            try store.indexForSearch(session: id, title: "Payments",
+                                     transcript: "the webhook signature was stale", fingerprint: first)
+            #expect(try store.indexedFingerprint(session: id) == first)
 
-        let second = SessionStore.IndexFingerprint(bytes: 240, modifiedAt: 1_700_000_100)
-        try store.indexForSearch(session: id, title: "Payments",
-                                 transcript: "the webhook signature was stale, then rotated", fingerprint: second)
-        #expect(try store.indexedFingerprint(session: id) == second)
-        let hits = try store.searchTranscripts(matching: "webhook")
-        #expect(hits.count == 1, "one FTS row per session, whatever the number of re-indexes")
-        #expect(hits.first?.snippet.contains("rotated") == true, "the row is the latest transcript")
+            let second = SessionStore.IndexFingerprint(bytes: 240, modifiedAt: 1_700_000_100)
+            try store.indexForSearch(session: id, title: "Payments",
+                                     transcript: "the webhook signature was stale, then rotated", fingerprint: second)
+            #expect(try store.indexedFingerprint(session: id) == second)
+            let hits = try store.searchTranscripts(matching: "webhook")
+            #expect(hits.count == 1, "one FTS row per session, whatever the number of re-indexes")
+            #expect(hits.first?.snippet.contains("rotated") == true, "the row is the latest transcript")
+        }
     }
 
-    @Test("the on-disk store reads while it writes (a WAL pool, not one serial connection)")
+    // The property the on-disk store claims: a reader never queues behind
+    // the writer. Proved by holding a write open and reading through it —
+    // fifty reads racing five writes passed on a serial queue too.
+    @Test("the on-disk store reads while a write is held open (a WAL pool, not one serial connection)")
     func lecturesPendantEcriture() throws {
-        let store = try makeStore()
-        let id = SessionID()
-        try store.insert(SessionRecord(id: id, title: "Long", agentID: "claude-code",
-                                       state: .completed, createdAt: Date()))
-        let transcript = String(repeating: "lorem ipsum dolor sit amet ", count: 40_000)
-        let writer = Thread {
-            for _ in 0..<5 {
-                try? store.indexForSearch(session: id, title: "Long", transcript: transcript)
+        try withStore { store in
+            let id = SessionID()
+            try store.insert(SessionRecord(id: id, title: "Long", agentID: "claude-code",
+                                           state: .completed, createdAt: Date()))
+            let held = DispatchSemaphore(value: 0)      // the writer is parked inside its transaction
+            let release = DispatchSemaphore(value: 0)   // the test lets it commit
+            let writer = Thread {
+                _ = try? store.database.write { _ in
+                    held.signal()
+                    release.wait()
+                }
             }
+            writer.start()
+            defer {
+                release.signal()
+                while !writer.isFinished { Thread.sleep(forTimeInterval: 0.005) }
+            }
+            #expect(held.wait(timeout: .now() + 5) == .success, "the writer never entered its transaction")
+
+            // On a WAL pool the read comes back at once, from a reader
+            // connection; on a serial queue it would wait for the parked
+            // writer — so it runs on its own thread, against a deadline.
+            let read = ReadSlot()
+            let done = DispatchSemaphore(value: 0)
+            let reader = Thread {
+                read.title = try? store.session(id: id)?.title
+                done.signal()
+            }
+            reader.start()
+            #expect(done.wait(timeout: .now() + 2) == .success,
+                    "the read waited for the held write: one serial connection, not a WAL pool")
+            #expect(read.title == "Long")
         }
-        writer.start()
-        // Reads land while the writer works; none may fail, none may block on it.
-        for _ in 0..<50 {
-            #expect(try store.session(id: id)?.title == "Long")
-        }
-        while !writer.isFinished { Thread.sleep(forTimeInterval: 0.01) }
     }
+}
+
+/// A slot a reader thread fills: a captured `var` cannot be written from a
+/// `@Sendable` closure, a class can.
+private final class ReadSlot: @unchecked Sendable {
+    var title: String?
 }
