@@ -15,6 +15,16 @@ struct PaletteAction: Identifiable {
     let run: () -> Void
 }
 
+/// `run` is a closure and cannot be compared; the fields a row shows and the
+/// ranking reads are what decides whether the sections must be rebuilt.
+extension PaletteAction: Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id && lhs.icon == rhs.icon && lhs.title == rhs.title
+            && lhs.subtitle == rhs.subtitle && lhs.section == rhs.section
+            && lhs.shortcut == rhs.shortcut
+    }
+}
+
 /// The ⌘K action palette (Raycast-style): search across commands, settings,
 /// projects and sessions; ↑↓ to navigate, Enter to run, Esc to close.
 /// With an empty query only Navigation + Actions show — the launcher pose.
@@ -85,7 +95,7 @@ struct ActionPaletteView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(DefaultTheme.cardBorder, lineWidth: 1))
         .onChange(of: query, initial: true) { sections = computeSections() }
-        .onChange(of: actions.map(\.id)) { sections = computeSections() }
+        .onChange(of: actions) { sections = computeSections() }
         .task(id: query) {
             selection = 0
             let searched = query
