@@ -392,24 +392,34 @@ Applied on this branch, one commit per item (`git log aad37d7..HEAD`):
 | P1-5 frame gate + incremental snapshot, memoized `visibleTail` | `651fe7c`, `42f8e79` |
 | P1-6 60 fps default | `504bd24` |
 | P1-7 PR sidebar: lazy stack, capped unfold, comparable rows, one formatter | `56c3136` |
-| P1-8 chips: `ScrollView` per row **not replaced** (hover/scroll semantics untested here) | — |
+| P1-8 chips clipped by a frame, no `NSScrollView` per row | `3232495` |
 | P1-9 diff parsed/paired/coloured once, cached per PR and scheme | `2387e8e`, `7bf8e01` |
 | P1-10 session switch from the cached surface | `2cb4d07`, `dd86dc4`, `1a08037` |
 | P1-11 preview cadence for Mission Control | `d469c9e`, `0c50cbb` |
-| P1-12 restored browser tabs stay model-only until shown (JSON decode off main: **not done**) | `076ea3d` |
+| P1-12 restored browser tabs stay model-only until shown; PR lists and catalog decoded off main | `076ea3d`, `9ba587b` |
 | P1-13 sidebar: dormant read once, comparable cards | `caf8f23` |
 | P2-14 session info reads off main, once per open/transition | `822bc80`, `5d1a9d0` |
 | P2-15 files/skills listings off main, cancellation-safe | `c79a9bd`, `ebe7f94` |
-| P2-16 `GoalFieldView` extraction: **not done** | — |
+| P2-16 `GoalFieldView` owns the goal text | `27944c4` |
 | P2-17 palette sections computed on change | `ec9f015`, `be10e7f` |
 | P2-18 PR filters refresh together, list cache saved once | `043ccd9` |
 | P2-19 theme preview palette memo | `a70e364`, `cf99b85` |
-| P2-20 Settings theme gallery child view: **not done** | — |
+| P2-20 `ThemeGallery` owns the hovered family | `d78a9b9` |
 | P2-21 usage index: table read once, batched writes | `2c08e43`, `ae2ad10` |
 | P2-22 hook socket lines cut in place, scan resumes | `575ab34`, `65d4c40` |
 | P2-23 shared transcript sink removed | `4814336` |
 
 Two adversarial reviews (P0 batch, then P1/P2 batch) ran over the commits;
-their confirmed findings are the fix commits listed above. The regression
-guard probes in this document are still to be written. Nothing here was
-compiled: build and run `swift test` on a Mac before merging.
+their confirmed findings are the fix commits listed above.
+
+Regression guard (`a3f8b4e`): `PerfProbes` asserts the streaming frame, the
+one-row snapshot (with equality after scroll, IL/DL, alternate screen and
+resize), the re-primed tail, the walked visible tail and the hermetic native
+index; `TerminalRowProbes` (LoomUITests) the eight-run row build;
+`DiffRowsProbes` (LoomGitTests) the 5,000-line parse and the row comparisons.
+Bounds are the targets above widened 10× in debug, 3× in release. Not
+written: the `reindexAllSessions` zero-write check and the `DiffRowView ==`
+timing — both live in `LoomApp`, an executable target with no test target;
+the store-level fingerprint round trip and the `SplitRow` comparisons stand
+in for them. Nothing here was compiled: build and run `swift test` on a Mac
+before merging.
