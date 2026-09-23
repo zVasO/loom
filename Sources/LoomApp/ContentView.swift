@@ -563,11 +563,8 @@ struct ProjectsView: View {
     let onOpenSession: (SessionID) -> Void
     /// Clicking a PR in the project tab opens it in the global PRs tab.
     let onOpenPR: (ProjectID, GitHubService.PullRequest) -> Void
-    @State private var goal = ""
-    @FocusState private var goalFocused: Bool
     @State private var draggedProject: ProjectID?
     @State private var removalTarget: ProjectRecord?
-    @State private var fanOut = 1
     // P1 perf: filesystem scans live in .task, never in body.
     @State private var loadedSkills: [SkillEntry] = []
     @State private var loadedRules: [AppModel.RuleFile] = []
@@ -681,7 +678,7 @@ struct ProjectsView: View {
                     } else {
                         switch projectTab {
                         case .overview:
-                            goalField(project)
+                            GoalFieldView(model: model, project: project, onOpenSession: onOpenSession)
                             activeSection(project)
                             recentSection(project)
                         case .git: gitTab(project)
@@ -1010,110 +1007,6 @@ struct ProjectsView: View {
             }
             Spacer()
             GhostButton("Sessions", systemImage: "arrow.right") { onOpenSessions(project.id) }
-        }
-    }
-
-    /// The reference's central gesture: describing the goal HERE launches the
-    /// session — the prompt goes straight into the agent's terminal.
-    private func goalField(_ project: ProjectRecord) -> some View {
-        HStack(spacing: 10) {
-            TextField("What are we building? Describe your goal — Enter starts a session…",
-                      text: $goal)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .foregroundStyle(DefaultTheme.primaryText)
-                .focused($goalFocused)
-                .onSubmit { submitGoal(project) }
-            // Worktree isolation is a per-project choice (default: off — the
-            // session works in the project folder).
-            Button {
-                model.setWorktreeEnabled(!model.worktreeEnabled(for: project.id), for: project.id)
-            } label: {
-                let enabled = model.worktreeEnabled(for: project.id)
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("worktree")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .foregroundStyle(enabled ? DefaultTheme.accentText : DefaultTheme.secondaryText)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(enabled ? DefaultTheme.accent : DefaultTheme.surfaceRaised,
-                            in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .help("On: each session gets an isolated git worktree on its own branch. Off: sessions work directly in the project folder.")
-            // v3 — fan-out: the same goal, N parallel sessions, N worktrees.
-            Menu {
-                ForEach(1...4, id: \.self) { count in
-                    Button("×\(count)\(count > 1 ? " parallel sessions" : " session")") {
-                        fanOut = count
-                    }
-                }
-            } label: {
-                Text("×\(fanOut)")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(fanOut > 1 ? DefaultTheme.accent : DefaultTheme.secondaryText)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Launch the goal in N parallel sessions, each where the placement says")
-            // Launch = Enter, with the project's default placement. The menu
-            // beside it launches THIS goal the other way, once, without
-            // flipping the project's default.
-            HStack(spacing: 2) {
-                AccentButton("Launch") { submitGoal(project) }
-                Menu {
-                    Button {
-                        submitGoal(project, placement: .projectFolder)
-                    } label: {
-                        Label("In the project folder", systemImage: "folder")
-                    }
-                    Button {
-                        submitGoal(project, placement: .newWorktree)
-                    } label: {
-                        Label("In a new worktree", systemImage: "arrow.triangle.branch")
-                    }
-                    .disabled(!model.isGitRepository(project.id))
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(DefaultTheme.accentText)
-                        .frame(width: 22, height: 30)
-                        .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 7))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Launch this goal in the folder or on a worktree, whatever the default")
-            }
-        }
-        .padding(.horizontal, 18).padding(.vertical, 17)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12)
-            .stroke(goalFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
-                    lineWidth: 1))
-        .animation(.hover, value: goalFocused)
-    }
-
-    private func submitGoal(_ project: ProjectRecord,
-                            placement: AppModel.LaunchPlacement? = nil) {
-        let trimmed = goal.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        goal = ""
-        let count = fanOut
-        Task {
-            var first: SessionID?
-            for _ in 0..<count {
-                if let id = await model.launchSession(prompt: trimmed, in: project.id,
-                                                      placement: placement) {
-                    if first == nil { first = id }
-                }
-            }
-            if let first { onOpenSession(first) }
         }
     }
 
@@ -2943,6 +2836,123 @@ struct SidebarSessionCard: View, Equatable {
             Button("New terminal", action: onNewTerminal)
             Button("Dedicated browser", action: onOpenBrowser)
             Button("Archive", action: onArchive)
+        }
+    }
+}
+
+// MARK: - Goal field
+
+/// The goal field with its launch controls, owning the typed text: every
+/// keystroke used to re-render the whole Projects view (audit 2026-09-22,
+/// P2-16). The text survives a project switch, as it did in the parent.
+struct GoalFieldView: View {
+    let model: AppModel
+    let project: ProjectRecord
+    let onOpenSession: (SessionID) -> Void
+    @State private var goal = ""
+    @FocusState private var goalFocused: Bool
+    @State private var fanOut = 1
+
+    /// The reference's central gesture: describing the goal HERE launches the
+    /// session — the prompt goes straight into the agent's terminal.
+    var body: some View {
+        HStack(spacing: 10) {
+            TextField("What are we building? Describe your goal — Enter starts a session…",
+                      text: $goal)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .foregroundStyle(DefaultTheme.primaryText)
+                .focused($goalFocused)
+                .onSubmit { submitGoal() }
+            // Worktree isolation is a per-project choice (default: off — the
+            // session works in the project folder).
+            Button {
+                model.setWorktreeEnabled(!model.worktreeEnabled(for: project.id), for: project.id)
+            } label: {
+                let enabled = model.worktreeEnabled(for: project.id)
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("worktree")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundStyle(enabled ? DefaultTheme.accentText : DefaultTheme.secondaryText)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(enabled ? DefaultTheme.accent : DefaultTheme.surfaceRaised,
+                            in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .help("On: each session gets an isolated git worktree on its own branch. Off: sessions work directly in the project folder.")
+            // v3 — fan-out: the same goal, N parallel sessions, N worktrees.
+            Menu {
+                ForEach(1...4, id: \.self) { count in
+                    Button("×\(count)\(count > 1 ? " parallel sessions" : " session")") {
+                        fanOut = count
+                    }
+                }
+            } label: {
+                Text("×\(fanOut)")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(fanOut > 1 ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Launch the goal in N parallel sessions, each where the placement says")
+            // Launch = Enter, with the project's default placement. The menu
+            // beside it launches THIS goal the other way, once, without
+            // flipping the project's default.
+            HStack(spacing: 2) {
+                AccentButton("Launch") { submitGoal() }
+                Menu {
+                    Button {
+                        submitGoal(placement: .projectFolder)
+                    } label: {
+                        Label("In the project folder", systemImage: "folder")
+                    }
+                    Button {
+                        submitGoal(placement: .newWorktree)
+                    } label: {
+                        Label("In a new worktree", systemImage: "arrow.triangle.branch")
+                    }
+                    .disabled(!model.isGitRepository(project.id))
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(DefaultTheme.accentText)
+                        .frame(width: 22, height: 30)
+                        .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 7))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Launch this goal in the folder or on a worktree, whatever the default")
+            }
+        }
+        .padding(.horizontal, 18).padding(.vertical, 17)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12)
+            .stroke(goalFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
+                    lineWidth: 1))
+        .animation(.hover, value: goalFocused)
+    }
+
+    private func submitGoal(placement: AppModel.LaunchPlacement? = nil) {
+        let trimmed = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        goal = ""
+        let count = fanOut
+        Task {
+            var first: SessionID?
+            for _ in 0..<count {
+                if let id = await model.launchSession(prompt: trimmed, in: project.id,
+                                                      placement: placement) {
+                    if first == nil { first = id }
+                }
+            }
+            if let first { onOpenSession(first) }
         }
     }
 }
