@@ -36,6 +36,9 @@ struct DiffRowsProbes {
                 }
             }
         }
+        // No trailing newline: the parser reads a final empty element as one
+        // more context line (its own quirk, not this probe's subject).
+        text.removeLast()
         return text
     }
 

@@ -49,9 +49,10 @@ struct PerfProbes {
         return (clock.now - start) / iterations
     }
 
-    // P0 (August) frame cap + incremental tail, P1-5 incremental snapshot:
-    // at steady stream a frame is one new row extracted, not 4,000 cells
-    // copied and 400 history lines rebuilt.
+    // P0 (August) incremental tail: at steady stream the history tail
+    // extracts one new scrollback row, not 400. The snapshot is still a
+    // full copy on a scrolled frame — SwiftTerm marks scrollTop…scrollBottom
+    // on every scroll — so the row cache is guarded by `snapshotDirtyCost`.
     @Test("streaming frame: one line in, snapshot + historyTail(400) out, under a millisecond")
     func frameCostStreaming() {
         let engine = filledEngine()
@@ -65,7 +66,7 @@ struct PerfProbes {
             }
         }
         print("PERF streaming frame (100x40, tail 400): \(perFrame) per frame")
-        #expect(perFrame < Self.bound(1), "a frame at steady stream costs \(perFrame): a cache is gone")
+        #expect(perFrame < Self.bound(1), "a frame at steady stream costs \(perFrame): the tail cache is gone")
     }
 
     // P1-5: a row the emulator did not touch is handed back as is.
@@ -83,6 +84,20 @@ struct PerfProbes {
         }
         print("PERF one-row snapshot (100x40): \(perSnapshot)")
         #expect(perSnapshot < Self.bound(0.5), "a one-row change re-copied the screen: \(perSnapshot)")
+
+        // The same build's full copy — a scroll marks every row — for scale:
+        // whatever the machine, the one-row snapshot is a fraction of it.
+        let full = filledEngine()
+        queue.sync { _ = full.snapshot() }
+        let perFullCopy = queue.sync {
+            measure(30) {
+                full.feed(ArraySlice("\u{1B}[40;1H\r\n".utf8))   // scroll: rows 0…39 dirty
+                _ = full.snapshot()
+            }
+        }
+        print("PERF full-copy snapshot (100x40): \(perFullCopy)")
+        #expect(perSnapshot * 4 < perFullCopy,
+                "a one-row change cost \(perSnapshot) against \(perFullCopy) for a full copy: the row cache is gone")
 
         // Whatever moved every row — a scroll, insert/delete line, the
         // alternate screen, a resize — the incremental rows equal a

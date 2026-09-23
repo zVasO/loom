@@ -31,12 +31,23 @@ struct TerminalRowProbes {
             }
             return TerminalLine(cells: cells)
         }
+        // Prime what is not row work: the lazy statics (the fonts, the ANSI
+        // palette) and Foundation's first use of the SwiftUI attribute keys.
+        _ = TerminalRow.attributed(lines[0])
         let clock = ContinuousClock()
-        let start = clock.now
-        var characters = 0
-        for line in lines { characters += TerminalRow.attributed(line).characters.count }
-        let elapsed = clock.now - start
-        print("PERF TerminalRow.attributed x40 (8 runs each): \(elapsed)")
+        var built: [AttributedString] = []
+        built.reserveCapacity(lines.count)
+        // Best of three: a one-shot timing shares the machine with every
+        // other suite `swift test` runs alongside.
+        var elapsed: Duration = .seconds(1)
+        for _ in 0..<3 {
+            built.removeAll(keepingCapacity: true)
+            let start = clock.now
+            for line in lines { built.append(TerminalRow.attributed(line)) }
+            elapsed = min(elapsed, clock.now - start)
+        }
+        let characters = built.reduce(0) { $0 + $1.characters.count }
+        print("PERF TerminalRow.attributed x40 (8 runs each), best of 3: \(elapsed)")
         #expect(characters == 40 * 96)
         #expect(elapsed < .milliseconds(1 * Self.slack),
                 "40 rows of 8 runs took \(elapsed): the run batching is gone")
