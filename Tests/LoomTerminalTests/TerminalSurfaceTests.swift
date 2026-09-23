@@ -222,13 +222,20 @@ struct TerminalSurfaceTests {
         ).runtime
         let surface = runtime.surface()
         let watcher = surface.attach(cadence: .preview(.milliseconds(200)))
+        let clock = ContinuousClock()
+        let start = clock.now
         for index in 0..<40 {
             pty.emit("burst \(index)\r\n")
             try await Task.sleep(for: .milliseconds(10))
         }
+        let burst = clock.now - start
         try await Task.sleep(for: .milliseconds(250))
-        #expect(surface.framesReceived <= 5,
-                "400 ms of burst at a 200 ms cadence: the attach frame, a leading edge and a trailing edge or two — saw \(surface.framesReceived)")
+        // The attach frame, the leading edge, then one trailing edge per
+        // 200 ms the burst lasted (rounded up) — however long a loaded
+        // machine took to run it; a fixed count flaked under load.
+        let budget = 2 + Int(burst / .milliseconds(200)) + 1
+        #expect(surface.framesReceived <= budget,
+                "\(burst) of burst at a 200 ms cadence: the attach frame, a leading edge and a trailing edge per interval — saw \(surface.framesReceived)")
         #expect(surface.screen.lines.contains { $0.text.hasPrefix("burst 39") }, "and the last frame is current")
         surface.detach(watcher)
     }
