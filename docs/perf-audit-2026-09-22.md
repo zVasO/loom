@@ -379,3 +379,37 @@ session switch paints the retained screen in the first commit; cold launch
 before first frame < 100 ms independent of session count; the diff scroll
 never re-runs `SplitDiffView.body`; a PR tab revisit paints coloured in its
 first frame.
+## Implementation status — 2026-09-23
+
+Applied on this branch, one commit per item (`git log aad37d7..HEAD`):
+
+| Item | Commit(s) |
+|------|-----------|
+| P0-1 terminal rows: absolute identity, `TerminalRow: Equatable` | `7f29267` |
+| P0-2 native conversations indexed in one walk | `019e0e0`, `d0d0b04` |
+| P0-3 WAL pool on disk, fingerprinted incremental reindex | `150b1b6`, `d0d0b04` |
+| P0-4 split diff: value rows, indexed threads, geometry off state | `8b7e19f` |
+| P1-5 frame gate + incremental snapshot, memoized `visibleTail` | `651fe7c`, `42f8e79` |
+| P1-6 60 fps default | `504bd24` |
+| P1-7 PR sidebar: lazy stack, capped unfold, comparable rows, one formatter | `56c3136` |
+| P1-8 chips: `ScrollView` per row **not replaced** (hover/scroll semantics untested here) | — |
+| P1-9 diff parsed/paired/coloured once, cached per PR and scheme | `2387e8e`, `7bf8e01` |
+| P1-10 session switch from the cached surface | `2cb4d07`, `dd86dc4`, `1a08037` |
+| P1-11 preview cadence for Mission Control | `d469c9e`, `0c50cbb` |
+| P1-12 restored browser tabs stay model-only until shown (JSON decode off main: **not done**) | `076ea3d` |
+| P1-13 sidebar: dormant read once, comparable cards | `caf8f23` |
+| P2-14 session info reads off main, once per open/transition | `822bc80`, `5d1a9d0` |
+| P2-15 files/skills listings off main, cancellation-safe | `c79a9bd`, `ebe7f94` |
+| P2-16 `GoalFieldView` extraction: **not done** | — |
+| P2-17 palette sections computed on change | `ec9f015`, `be10e7f` |
+| P2-18 PR filters refresh together, list cache saved once | `043ccd9` |
+| P2-19 theme preview palette memo | `a70e364`, `cf99b85` |
+| P2-20 Settings theme gallery child view: **not done** | — |
+| P2-21 usage index: table read once, batched writes | `2c08e43`, `ae2ad10` |
+| P2-22 hook socket lines cut in place, scan resumes | `575ab34`, `65d4c40` |
+| P2-23 shared transcript sink removed | `4814336` |
+
+Two adversarial reviews (P0 batch, then P1/P2 batch) ran over the commits;
+their confirmed findings are the fix commits listed above. The regression
+guard probes in this document are still to be written. Nothing here was
+compiled: build and run `swift test` on a Mac before merging.
