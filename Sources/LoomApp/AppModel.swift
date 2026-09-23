@@ -727,8 +727,12 @@ public final class AppModel {
     /// mirrored here so a workspace seeds its state SYNCHRONOUSLY in its init
     /// and paints a coloured diff in its first frame on a revisit.
     struct CachedDiff: Sendable {
+        /// `DiffPipeline.Rows.hash` of the diff text these came from.
+        var hash: Int
         var files: [DiffFileRows]
-        var highlights: DiffHighlights?
+        /// Per scheme (dark: true): a revisit after an appearance change
+        /// paints its own palette, never the other one's greys.
+        var highlights: [Bool: DiffHighlights] = [:]
     }
     @ObservationIgnored private let diffPipeline = DiffPipeline()
     @ObservationIgnored private var diffProducts: [String: CachedDiff] = [:]
@@ -746,8 +750,12 @@ public final class AppModel {
     func diffRows(pr number: Int, in projectID: ProjectID, diff: String) async -> DiffPipeline.Rows {
         let key = prKey(number, projectID)
         let rows = await diffPipeline.rows(for: key, diff: diff)
-        if diffProducts[key]?.files != rows.files {
-            diffProducts[key] = CachedDiff(files: rows.files, highlights: nil)
+        // A refresh during the parse evicted the project's raw diffs: the
+        // products of a diff the model no longer holds are not mirrored back,
+        // or the next workspace would seed itself from the previous head.
+        guard prDiffCache[key] == diff else { return rows }
+        if diffProducts[key]?.hash != rows.hash {
+            diffProducts[key] = CachedDiff(hash: rows.hash, files: rows.files)
         }
         return rows
     }
@@ -757,7 +765,11 @@ public final class AppModel {
                         rows: DiffPipeline.Rows, dark: Bool) async -> DiffHighlights {
         let key = prKey(number, projectID)
         let highlights = await diffPipeline.highlights(for: key, rows: rows, dark: dark)
-        diffProducts[key] = CachedDiff(files: rows.files, highlights: highlights)
+        // Attached only to the rows the mirror still holds: nil after an
+        // eviction, another hash after a refresh landed meanwhile.
+        if diffProducts[key]?.hash == rows.hash {
+            diffProducts[key]?.highlights[dark] = highlights
+        }
         return highlights
     }
     private var prCommentsCache: [String: [GitHubService.ReviewComment]] = [:]
@@ -1923,11 +1935,11 @@ public final class AppModel {
     public func archiveSession(_ id: SessionID) async {
         await manager?.archive(id)
         sessions.removeAll { $0.id == id }
-        reloadPersistedSessions()
         // A live session archived from its card exits through `.archived`, a
         // terminal state the reducer never leaves: no `.completed` follows,
         // so the close path in observeStates never drops its surface.
         surfaceCache.removeValue(forKey: id)
+        reloadPersistedSessions()
     }
 
     /// The IPC server validates SYNCHRONOUSLY on its own queue: the token

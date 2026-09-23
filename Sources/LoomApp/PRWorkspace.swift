@@ -111,10 +111,15 @@ struct PRWorkspaceView: View {
     /// GitHub's "Viewed" boxes over the diff's files — the recap and the
     /// checkboxes read it; a toggle flips it before GitHub answers.
     @State private var progress = FileReviewProgress.empty
-    /// Syntax colours, computed after the diff off the main thread: the
-    /// diff paints plain first, then coloured.
-    @State private var highlights = DiffHighlights.none
+    /// Syntax colours per scheme (dark: true), computed after the diff off
+    /// the main thread: the diff paints plain first, then coloured. Both
+    /// palettes are kept, so an appearance flip never paints light colours
+    /// on a dark background while the other scheme computes.
+    @State private var highlights: [Bool: DiffHighlights] = [:]
     @Environment(\.colorScheme) private var colorScheme
+    /// The PR the state below was reset for: the load task is also keyed on
+    /// the scheme, and a scheme flip must not blank the detail.
+    @State private var loadedNumber: Int?
     @State private var prTour: PRTour?
     @State private var tourLoading = false
     @State private var prActionOutput: String?
@@ -145,7 +150,7 @@ struct PRWorkspaceView: View {
         self._reviewSummary = reviewSummary
         let cached = model.cachedDiff(pr: pr.number, in: project.id)
         _diffFiles = State(initialValue: cached?.files ?? [])
-        _highlights = State(initialValue: cached?.highlights ?? .none)
+        _highlights = State(initialValue: cached?.highlights ?? [:])
         _prTour = State(initialValue: model.cachedTour(pr: pr.number, in: project.id))
     }
 
@@ -159,13 +164,18 @@ struct PRWorkspaceView: View {
             verdictBar
         }
         .background(DefaultTheme.background)
-        .task(id: pr.number) {
-            prDetail = nil
-            progress = .empty
-            if model.cachedDiff(pr: pr.number, in: project.id) == nil {
-                diffFiles = []
-                highlights = .none
+        .task(id: "\(pr.number)#\(colorScheme == .dark)") {
+            if loadedNumber != pr.number {
+                loadedNumber = pr.number
+                prDetail = nil
+                progress = .empty
+                if model.cachedDiff(pr: pr.number, in: project.id) == nil {
+                    diffFiles = []
+                    highlights = [:]
+                }
             }
+            // A scheme flip lands here too: the detail, comments, diff and
+            // rows are cache hits, only the missing palette computes.
             await load(refresh: false)
         }
     }
@@ -494,7 +504,7 @@ struct PRWorkspaceView: View {
                                       draft = model.reviewDraft(for: pr.number, in: project.id)
                                   },
                                   unified: unifiedDiff,
-                                  highlights: highlights,
+                                  highlights: highlights[colorScheme == .dark] ?? .none,
                                   viewed: progress.viewed,
                                   changedSinceViewed: progress.changedSinceViewed,
                                   onToggleViewed: { path, on in
@@ -649,7 +659,7 @@ struct PRWorkspaceView: View {
         // and highlight.js over a big PR takes a moment.
         let dark = colorScheme == .dark
         let coloured = await model.diffHighlights(pr: pr.number, in: project.id, rows: rows, dark: dark)
-        if highlights != coloured { highlights = coloured }
+        if highlights[dark] != coloured { highlights[dark] = coloured }
         // GitHub's viewed boxes, after the diff: the files on screen are the
         // universe the recap counts.
         let views = await model.fileViews(pr.number, in: project.id, refresh: refresh)
