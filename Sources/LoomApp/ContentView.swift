@@ -713,7 +713,10 @@ struct ProjectsView: View {
             case .git: gitData = await model.projectGit(project.id)
             case .skills: loadedSkills = await model.skillsDetached(forProject: project.id)
             case .rules: loadedRules = model.ruleFiles(for: project.id)
-            case .files: loadedFiles = await model.listFilesDetached(in: project.id, at: filesPath)
+            case .files:
+                let entries = await model.listFilesDetached(in: project.id, at: filesPath)
+                guard !Task.isCancelled else { return }
+                loadedFiles = entries
             default: break
             }
         }
