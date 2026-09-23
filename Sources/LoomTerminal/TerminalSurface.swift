@@ -34,14 +34,14 @@ public final class TerminalSurface {
 
     /// The fastest cadence any watcher asked for; nil when nobody watches.
     private var watchedCadence: FrameCadence? {
-        var slowest: Duration?
+        var fastest: Duration?
         for watcher in watchers.values {
             switch watcher.cadence {
             case .live: return .live
-            case .preview(let interval): slowest = min(slowest ?? interval, interval)
+            case .preview(let interval): fastest = min(fastest ?? interval, interval)
             }
         }
-        return slowest.map { .preview($0) }
+        return fastest.map { .preview($0) }
     }
     /// The input modes the program negotiated (mouse, bracketed paste, cursor
     /// keys, kitty keyboard flags) — what the key capture must honour.

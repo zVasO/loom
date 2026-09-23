@@ -504,7 +504,7 @@ struct PRWorkspaceView: View {
                                       draft = model.reviewDraft(for: pr.number, in: project.id)
                                   },
                                   unified: unifiedDiff,
-                                  highlights: highlights[colorScheme == .dark] ?? .none,
+                                  highlights: highlights[colorScheme == .dark] ?? DiffHighlights.none,
                                   viewed: progress.viewed,
                                   changedSinceViewed: progress.changedSinceViewed,
                                   onToggleViewed: { path, on in
