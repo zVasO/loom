@@ -1923,6 +1923,10 @@ public final class AppModel {
         await manager?.archive(id)
         sessions.removeAll { $0.id == id }
         reloadPersistedSessions()
+        // A live session archived from its card exits through `.archived`, a
+        // terminal state the reducer never leaves: no `.completed` follows,
+        // so the close path in observeStates never drops its surface.
+        surfaceCache.removeValue(forKey: id)
     }
 
     /// The IPC server validates SYNCHRONOUSLY on its own queue: the token
