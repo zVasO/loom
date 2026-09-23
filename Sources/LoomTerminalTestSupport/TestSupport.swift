@@ -122,15 +122,20 @@ private final class ScriptedChannel: PTYChannel, @unchecked Sendable {
 public final class LineEngine: TerminalEngine {
     private let geometry: TerminalGeometry
     private var text = ""
-    private var revision: UInt64 = 0
+    /// Not `revision`: that name is the protocol's public witness below, and
+    /// a private stored property of the same name would be matched to it.
+    private var revisionCounter: UInt64 = 0
     public var onUpstream: ((ArraySlice<UInt8>) -> Void)?
 
     public init(geometry: TerminalGeometry) { self.geometry = geometry }
 
     public func feed(_ bytes: ArraySlice<UInt8>) {
         text += String(decoding: bytes, as: UTF8.self)
-        revision += 1
+        revisionCounter += 1
     }
+
+    /// Cheap witness: the default would re-parse the buffer on every read.
+    public var revision: UInt64 { revisionCounter }
 
     public func snapshot() -> TerminalScreen {
         let lines = text
@@ -140,7 +145,7 @@ public final class LineEngine: TerminalEngine {
         return TerminalScreen(geometry: geometry,
                               lines: lines,
                               cursor: CursorPosition(col: 0, row: max(0, lines.count - 1)),
-                              revision: revision)
+                              revision: revisionCounter)
     }
 
     public func resize(to geometry: TerminalGeometry) {}
