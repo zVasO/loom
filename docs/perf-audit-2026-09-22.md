@@ -400,7 +400,7 @@ Applied on this branch, one commit per item (`git log aad37d7..HEAD`):
 | P1-13 sidebar: dormant read once, comparable cards | `caf8f23` |
 | P2-14 session info reads off main, once per open/transition | `822bc80`, `5d1a9d0` |
 | P2-15 files/skills listings off main, cancellation-safe | `c79a9bd`, `ebe7f94` |
-| P2-16 `GoalFieldView` owns the goal text | `27944c4` |
+| P2-16 `GoalFieldView` owns the goal text, the draft outlives a tab switch | `27944c4`, `6f32799` |
 | P2-17 palette sections computed on change | `ec9f015`, `be10e7f` |
 | P2-18 PR filters refresh together, list cache saved once | `043ccd9` |
 | P2-19 theme preview palette memo | `a70e364`, `cf99b85` |
@@ -412,7 +412,7 @@ Applied on this branch, one commit per item (`git log aad37d7..HEAD`):
 Two adversarial reviews (P0 batch, then P1/P2 batch) ran over the commits;
 their confirmed findings are the fix commits listed above.
 
-Regression guard (`a3f8b4e`): `PerfProbes` asserts the streaming frame, the
+Regression guard (`a3f8b4e`, `9f93291`): `PerfProbes` asserts the streaming frame, the
 one-row snapshot (with equality after scroll, IL/DL, alternate screen and
 resize), the re-primed tail, the walked visible tail and the hermetic native
 index; `TerminalRowProbes` (LoomUITests) the eight-run row build;
