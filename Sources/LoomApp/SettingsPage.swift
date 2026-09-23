@@ -16,10 +16,6 @@ struct SettingsPage: View {
     @AppStorage("loom.shortcut.newTab") private var keyNewTab = "t"
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
-    /// The family under the pointer in the grid — what the preview shows.
-    @State private var hoveredFamily: String?
-    /// Which variant the preview shows; starts on the app's, switchable.
-    @State private var previewDark = false
     @State private var importShown = false
 
     var body: some View {
@@ -333,8 +329,6 @@ struct SettingsPage: View {
     /// pointer is on (else the chosen one) — in either variant.
     private var themesSection: some View {
         let store = ThemeStore.shared
-        let previewFamily = hoveredFamily.flatMap { store.family(named: $0) }
-            ?? store.family(named: store.globalFamilyName) ?? .loom
         return VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Theme")
             card {
@@ -371,46 +365,13 @@ struct SettingsPage: View {
                     importShown = true
                 }
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 12)],
-                      alignment: .leading, spacing: 12) {
-                ForEach(store.families) { family in
-                    ThemeCard(family: family,
-                              isActive: store.globalFamilyName == family.name,
-                              onSelect: {
-                                  store.setGlobalTheme(family.name)
-                                  NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
-                              },
-                              onHover: { inside in
-                                  if inside { hoveredFamily = family.name }
-                                  else if hoveredFamily == family.name { hoveredFamily = nil }
-                              })
-                    .contextMenu {
-                        if !family.isBuiltIn {
-                            Button("Delete “\(family.name)”", role: .destructive) {
-                                store.removeFamily(family)
-                                NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
-                            }
-                        }
-                    }
-                }
-            }
-            ThemePreview(family: previewFamily, dark: $previewDark, onUse: usePreviewAction(previewFamily))
-                .onAppear { previewDark = store.isDark }
+            ThemeGallery()
             Text("The global theme. Projects below can override it — the app follows the project you are working in.")
                 .font(.system(size: 11))
                 .foregroundStyle(DefaultTheme.secondaryText)
         }
         .sheet(isPresented: $importShown) {
             ThemeImportSheet()
-        }
-    }
-
-    /// "Use this theme" — absent when the previewed family is already the one.
-    private func usePreviewAction(_ family: ThemeFamily) -> (() -> Void)? {
-        guard family.name != ThemeStore.shared.globalFamilyName else { return nil }
-        return {
-            ThemeStore.shared.setGlobalTheme(family.name)
-            NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
         }
     }
 
@@ -526,5 +487,57 @@ private struct ThemeCard: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.background)
+    }
+}
+
+/// The theme grid and the preview of whichever family the pointer is on:
+/// owning `hoveredFamily` here keeps a card hover from re-rendering the
+/// whole Settings page (audit 2026-09-22, P2-20).
+private struct ThemeGallery: View {
+    /// The family under the pointer in the grid — what the preview shows.
+    @State private var hoveredFamily: String?
+    /// Which variant the preview shows; starts on the app's, switchable.
+    @State private var previewDark = false
+
+    var body: some View {
+        let store = ThemeStore.shared
+        let previewFamily = hoveredFamily.flatMap { store.family(named: $0) }
+            ?? store.family(named: store.globalFamilyName) ?? .loom
+        return VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 12)],
+                      alignment: .leading, spacing: 12) {
+                ForEach(store.families) { family in
+                    ThemeCard(family: family,
+                              isActive: store.globalFamilyName == family.name,
+                              onSelect: {
+                                  store.setGlobalTheme(family.name)
+                                  NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
+                              },
+                              onHover: { inside in
+                                  if inside { hoveredFamily = family.name }
+                                  else if hoveredFamily == family.name { hoveredFamily = nil }
+                              })
+                    .contextMenu {
+                        if !family.isBuiltIn {
+                            Button("Delete “\(family.name)”", role: .destructive) {
+                                store.removeFamily(family)
+                                NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
+                            }
+                        }
+                    }
+                }
+            }
+            ThemePreview(family: previewFamily, dark: $previewDark, onUse: usePreviewAction(previewFamily))
+                .onAppear { previewDark = store.isDark }
+        }
+    }
+
+    /// "Use this theme" — absent when the previewed family is already the one.
+    private func usePreviewAction(_ family: ThemeFamily) -> (() -> Void)? {
+        guard family.name != ThemeStore.shared.globalFamilyName else { return nil }
+        return {
+            ThemeStore.shared.setGlobalTheme(family.name)
+            NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
+        }
     }
 }
