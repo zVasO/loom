@@ -16,6 +16,32 @@ public enum ClaudeNativeSessions {
         path(for: id, projectsDirectory: projectsDirectory) != nil
     }
 
+    /// Every conversation on disk in ONE walk: the lowercased UUIDs of the
+    /// `<uuid>.jsonl` files under every project slug. A launch with N persisted
+    /// sessions asks `exists` N times, each walking every slug on a miss; the
+    /// index costs one walk however many sessions ask (audit 2026-09-22, P0-2).
+    public static func index(projectsDirectory: URL = defaultProjectsDirectory) -> Set<String> {
+        let manager = FileManager.default
+        guard let projects = try? manager.contentsOfDirectory(at: projectsDirectory,
+                                                              includingPropertiesForKeys: nil) else {
+            return []
+        }
+        var ids = Set<String>()
+        for project in projects {
+            let files = (try? manager.contentsOfDirectory(at: project,
+                                                          includingPropertiesForKeys: nil)) ?? []
+            for file in files where file.pathExtension.lowercased() == "jsonl" {
+                ids.insert(file.deletingPathExtension().lastPathComponent.lowercased())
+            }
+        }
+        return ids
+    }
+
+    /// `index()` membership for a session id.
+    public static func contains(_ index: Set<String>, _ id: SessionID) -> Bool {
+        index.contains(id.rawValue.uuidString.lowercased())
+    }
+
     /// The native `<uuid>.jsonl` on disk, wherever its project slug lives.
     public static func path(for id: SessionID,
                             projectsDirectory: URL = defaultProjectsDirectory) -> URL? {

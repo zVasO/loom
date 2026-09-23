@@ -54,6 +54,13 @@ private struct FleetCard: View {
     let item: AppModel.SessionItem
     let onOpen: () -> Void
     @State private var surface: TerminalSurface?
+
+    init(model: AppModel, item: AppModel.SessionItem, onOpen: @escaping () -> Void) {
+        self.model = model
+        self.item = item
+        self.onOpen = onOpen
+        _surface = State(initialValue: model.cachedSurface(for: item.id))
+    }
     @State private var hovered = false
     @State private var quickReply = ""
     @State private var usage: SessionUsageSummary?
@@ -133,7 +140,8 @@ private struct FleetCard: View {
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
         .task(id: item.nativeID) {
-            surface = await model.surface(for: item.id)
+            let fetched = await model.surface(for: item.id)
+            if fetched !== surface { surface = fetched }
             // P1 perf: the native .jsonl can be MBs — read only its tail, off
             // the main actor (the context figure lives in the LAST entry).
             // Keyed by the native id: a `/resume <id>` in the terminal
@@ -151,7 +159,12 @@ private struct FleetCard: View {
     private var preview: some View {
         if let surface {
             MiniTerminalPreview(surface: surface)
-                .task { await surface.attached() }
+                // A preview's cadence: four frames a second are plenty for 7 pt
+                // text, where the pane's rate cost a snapshot, a main-actor hop
+                // and a pass of 22 rows per card per frame.
+                .task(id: ObjectIdentifier(surface)) {
+                    await surface.attached(cadence: .preview(.milliseconds(250)))
+                }
         } else {
             ProgressView().controlSize(.small)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

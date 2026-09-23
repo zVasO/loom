@@ -12,7 +12,27 @@ struct ThemePreview: View {
     /// "Use this theme" — nil when the family is already the global one.
     var onUse: (() -> Void)?
 
-    private var palette: ThemePalette { family.palette(dark: dark) }
+    /// Built once per (family, variant), not once per read: the mock
+    /// components read it some sixty times per pass.
+    @State private var cache = PaletteCache()
+
+    /// Keyed on the whole family, not its name: a re-imported or replaced
+    /// family keeps its name and changes its tokens, and comparing two token
+    /// structs is far cheaper than the palette it would otherwise rebuild.
+    private final class PaletteCache {
+        var family: ThemeFamily?
+        var dark: Bool?
+        var palette: ThemePalette?
+    }
+
+    private var palette: ThemePalette {
+        if let cached = cache.palette, cache.family == family, cache.dark == dark { return cached }
+        let built = family.palette(dark: dark)
+        cache.family = family
+        cache.dark = dark
+        cache.palette = built
+        return built
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

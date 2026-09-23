@@ -1,6 +1,6 @@
 import Testing
 import LoomCore
-import LoomTerminal
+@testable import LoomTerminal
 import LoomTerminalTestSupport
 import Foundation
 
@@ -131,11 +131,11 @@ struct TerminalSurfaceTests {
         let pty = ScriptedPTYHost()
         let runtime = try makeRuntime(pty: pty)
         let surface = runtime.surface()
-        surface.attach()
+        let watcher = surface.attach()
         pty.emit("first")
         _ = await pollUntil { surface.screen.lines[0].text.hasPrefix("first") }
 
-        surface.detach()
+        surface.detach(watcher)
         pty.emit(" second")
         try await Task.sleep(for: .milliseconds(80))
         #expect(surface.screen.lines[0].text.hasPrefix("first"),
@@ -173,5 +173,96 @@ struct TerminalSurfaceTests {
             try? await Task.sleep(for: .milliseconds(10))
         }
         return condition()
+    }
+
+    // P1-5: a chunk that moves no visible cell — a DSR reply, a mode toggle —
+    // never becomes a frame: nothing crosses to the main actor, nothing
+    // invalidates the watchers.
+    @Test("a frame carrying no visible change is not delivered")
+    func frameSansChangementNonLivree() async throws {
+        let pty = ScriptedPTYHost()
+        let runtime = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree"),
+                              geometry: TerminalGeometry(cols: 40, rows: 6)),
+            using: SessionRuntime.Dependencies(
+                ptyHost: pty, transcript: MemoryTranscriptSink(),
+                makeEngine: { geometry, _ in SwiftTermEngine(geometry: geometry, scrollback: 100) })
+        ).runtime
+        let surface = runtime.surface()
+        let watcher = surface.attach()
+        pty.emit("hello")
+        #expect(await pollUntil { surface.screen.lines.first?.text.hasPrefix("hello") == true })
+        let delivered = surface.framesReceived
+
+        pty.emit("\u{1B}[6n")   // DSR: answered on the PTY, nothing on screen
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(surface.framesReceived == delivered, "no visible change, no frame")
+        #expect(String(decoding: pty.writtenBytes, as: UTF8.self).contains("\u{1B}[1;6R"),
+                "the reply still went out")
+
+        pty.emit(" world")
+        #expect(await pollUntil { surface.framesReceived > delivered })
+        #expect(surface.screen.lines.first?.text.hasPrefix("hello world") == true)
+        surface.detach(watcher)
+    }
+
+    // P1-11: a preview asks for its own cadence — a burst that streams for
+    // half a second reaches it a handful of times, not sixty.
+    @Test("a preview watcher receives frames at its cadence, not the pane's")
+    func cadenceDApercu() async throws {
+        let pty = ScriptedPTYHost()
+        let runtime = try SessionRuntime.launch(
+            SessionLaunchPlan(command: Command(executable: "/fake/claude"),
+                              workingDirectory: URL(fileURLWithPath: "/tmp/worktree"),
+                              geometry: TerminalGeometry(cols: 40, rows: 6)),
+            using: SessionRuntime.Dependencies(
+                ptyHost: pty, transcript: MemoryTranscriptSink(),
+                makeEngine: { geometry, _ in SwiftTermEngine(geometry: geometry, scrollback: 100) })
+        ).runtime
+        let surface = runtime.surface()
+        let watcher = surface.attach(cadence: .preview(.milliseconds(200)))
+        let clock = ContinuousClock()
+        let start = clock.now
+        for index in 0..<40 {
+            pty.emit("burst \(index)\r\n")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let burst = clock.now - start
+        try await Task.sleep(for: .milliseconds(250))
+        // The attach frame, the leading edge, then one trailing edge per
+        // 200 ms the burst lasted (rounded up) — however long a loaded
+        // machine took to run it; a fixed count flaked under load.
+        let budget = 2 + Int(burst / .milliseconds(200)) + 1
+        #expect(surface.framesReceived <= budget,
+                "\(burst) of burst at a 200 ms cadence: the attach frame, a leading edge and a trailing edge per interval — saw \(surface.framesReceived)")
+        #expect(surface.screen.lines.contains { $0.text.hasPrefix("burst 39") }, "and the last frame is current")
+        surface.detach(watcher)
+    }
+
+    // A pane and a Mission Control card share one surface; at a tab switch the
+    // newcomer attaches in the same commit that cancels the other. With one
+    // flag per surface the survivor ended up detached — frozen on its last
+    // screen for as long as the tab stayed open.
+    @Test("two watchers overlap: the second keeps frames when the first leaves")
+    func deuxObservateursSeChevauchent() async throws {
+        let pty = ScriptedPTYHost()
+        let runtime = try makeRuntime(pty: pty)
+        let surface = runtime.surface()
+
+        let card = Task { await surface.attached(cadence: .preview(.milliseconds(250))) }
+        #expect(await pollUntil { surface.isAttached })
+        let pane = Task { await surface.attached() }
+        try await Task.sleep(for: .milliseconds(20))
+        card.cancel()
+        _ = await card.value
+        #expect(surface.isAttached, "the pane still watches")
+
+        pty.emit("after the switch")
+        #expect(await pollUntil { surface.screen.lines[0].text.hasPrefix("after the switch") },
+                "frames keep flowing to the watcher that stayed")
+
+        pane.cancel()
+        #expect(await pollUntil { !surface.isAttached }, "the last to leave detaches")
     }
 }

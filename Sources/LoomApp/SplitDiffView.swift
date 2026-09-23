@@ -84,11 +84,17 @@ struct SplitDiffView: View {
     /// What the action bar is composing, and its text.
     @State private var composer: Composer = .none
     @State private var draft = ""
-    /// EVERY row's y span, in ONE coordinate space keyed by global row id.
-    /// (A per-hunk dictionary meant each hunk overwrote the others' entries,
-    /// so a drag in one file was resolved against another file's geometry —
-    /// that is what selected lines nowhere near the cursor.)
-    @State private var rowSpans: [DiffSelection.RowID: ClosedRange<CGFloat>] = [:]
+    /// EVERY row's y span, in ONE coordinate space keyed by global row id,
+    /// and the diff's own size. (A per-hunk dictionary meant each hunk
+    /// overwrote the others' entries, so a drag in one file was resolved
+    /// against another file's geometry — that is what selected lines nowhere
+    /// near the cursor.) A REFERENCE, not state: scrolling materialises new
+    /// rows, which publish new spans, and a state write there re-ran this
+    /// whole body — every row of a large PR — on every flick.
+    @State private var geometry = Geometry()
+    /// The one geometric fact the body needs: where the action bar hangs.
+    /// Refreshed only when a settled selection's bottom edge moves.
+    @State private var barAnchorY: CGFloat?
     /// The mouse is up: only then do the actions appear — a bar following the
     /// cursor mid-drag is in the way of the very lines being picked.
     @State private var selectionSettled = false
@@ -96,9 +102,24 @@ struct SplitDiffView: View {
     /// code being discussed.
     @State private var barOffset: CGSize = .zero
     @State private var barOffsetAtDragStart: CGSize = .zero
-    /// The diff's own size, so the bar can never be dragged out of reach
-    /// (the button that brings it back lives inside it).
-    @State private var diffSize: CGSize = .zero
+    /// Threads and drafts indexed by the line they hang under — rebuilt when
+    /// the comments change, looked up per row. Filtering the whole comment
+    /// array per row per pass was O(rows × comments) on every scroll.
+    @State private var threadIndex: [CommentAnchor: [CommentThread]] = [:]
+    @State private var fileThreadIndex: [String: [CommentThread]] = [:]
+    @State private var draftIndex: [CommentAnchor: [DraftComment]] = [:]
+
+    private final class Geometry {
+        var rowSpans: [DiffSelection.RowID: ClosedRange<CGFloat>] = [:]
+        var diffSize: CGSize = .zero
+    }
+
+    /// Where a comment hangs: a file, a side, the LAST line of its range.
+    struct CommentAnchor: Hashable {
+        let path: String
+        let isLeft: Bool
+        let line: Int
+    }
 
     var body: some View {
         // Lazy: a large PR materializes thousands of rows — only what is
@@ -114,17 +135,22 @@ struct SplitDiffView: View {
         .background(GeometryReader { geometry in
             Color.clear.preference(key: DiffSizeKey.self, value: geometry.size)
         })
-        .onPreferenceChange(DiffSizeKey.self) { diffSize = $0 }
+        .onPreferenceChange(DiffSizeKey.self) { geometry.diffSize = $0 }
         .onPreferenceChange(DiffRowSpansKey.self) { spans in
-            if !spans.isEmpty { rowSpans = spans }
+            guard !spans.isEmpty else { return }
+            geometry.rowSpans = spans
+            refreshBarAnchor()
         }
+        .onChange(of: comments, initial: true) { _, comments in reindexThreads(comments) }
+        .onChange(of: drafts, initial: true) { _, drafts in reindexDrafts(drafts) }
+        .onChange(of: selectionSettled) { refreshBarAnchor() }
         .gesture(selectionDrag)
         .overlay(alignment: .topLeading) {
             // Anchored right under the SELECTION — an overlay at the content's
             // bottom floated next to the last file, screens away from the
             // lines being acted on. snippet, not just "a range exists": a
             // selection covering only collapsed files has nothing to act on.
-            if selectionSettled, snippet != nil, let anchorY = selectionBottomY {
+            if selectionSettled, snippet != nil, let anchorY = barAnchorY {
                 quickActionBar
                     .padding(.leading, 44)
                     .offset(x: barOffset.width, y: anchorY + 8 + barOffset.height)
@@ -163,10 +189,44 @@ struct SplitDiffView: View {
             .onEnded { _ in
                 dragging = false
                 if selection != nil { selectionSettled = true }
+                refreshBarAnchor()
             }
     }
 
-    private static let diffSpace = "loom.diff"
+    fileprivate static let diffSpace = "loom.diff"
+
+    /// The bar's anchor is state; the spans it derives from are not. Written
+    /// on change only, and only while a settled selection shows the bar.
+    private func refreshBarAnchor() {
+        let anchor = selectionSettled ? selectionBottomY : nil
+        if barAnchorY != anchor { barAnchorY = anchor }
+    }
+
+    private func reindexThreads(_ comments: [GitHubService.ReviewComment]) {
+        var byAnchor: [CommentAnchor: [CommentThread]] = [:]
+        var byFile: [String: [CommentThread]] = [:]
+        for root in comments where root.replyToID == nil {
+            let thread = CommentThread(root: root, replies: comments.filter { $0.replyToID == root.id })
+            if root.isFileLevel {
+                byFile[root.path, default: []].append(thread)
+            } else {
+                // A multi-line comment hangs under its LAST line, like GitHub.
+                byAnchor[CommentAnchor(path: root.path, isLeft: root.side == "LEFT", line: root.line),
+                         default: []].append(thread)
+            }
+        }
+        threadIndex = byAnchor
+        fileThreadIndex = byFile
+    }
+
+    private func reindexDrafts(_ drafts: [DraftComment]) {
+        var byAnchor: [CommentAnchor: [DraftComment]] = [:]
+        for draft in drafts {
+            byAnchor[CommentAnchor(path: draft.path, isLeft: draft.side == "LEFT", line: draft.lastLine),
+                     default: []].append(draft)
+        }
+        draftIndex = byAnchor
+    }
 
     /// The selection's ordered ends, once both exist.
     private var selection: (from: DiffSelection.RowID, to: DiffSelection.RowID)? {
@@ -185,6 +245,7 @@ struct SplitDiffView: View {
         composer = .none
         draft = ""
         selectionSettled = true
+        refreshBarAnchor()
     }
 
     private func clearSelection() {
@@ -194,6 +255,7 @@ struct SplitDiffView: View {
         composer = .none
         draft = ""
         selectionSettled = false
+        refreshBarAnchor()
     }
 
     private func isSelected(_ id: DiffSelection.RowID) -> Bool {
@@ -204,14 +266,14 @@ struct SplitDiffView: View {
     /// The row under a y position in the diff's own space — nil when the
     /// cursor is between rows rather than on one.
     private func rowAt(_ y: CGFloat) -> DiffSelection.RowID? {
-        rowSpans.first { $0.value.contains(y) }?.key
+        geometry.rowSpans.first { $0.value.contains(y) }?.key
     }
 
     /// Bottom edge of the lowest visible selected row — where the action bar
     /// belongs. Selected rows are on screen (the user just dragged them).
     private var selectionBottomY: CGFloat? {
         guard let selection else { return nil }
-        return rowSpans
+        return geometry.rowSpans
             .filter { $0.key >= selection.from && $0.key <= selection.to }
             .map(\.value.upperBound)
             .max()
@@ -474,7 +536,7 @@ struct SplitDiffView: View {
             if !collapsed.contains(file.path) {
                 // Comments on the file itself (no line anchor) sit right
                 // under the header, before the code.
-                ForEach(fileThreads(file.path), id: \.root.id) { thread in
+                ForEach(fileThreadIndex[file.path] ?? [], id: \.root.id) { thread in
                     CommentThreadView(thread: thread, onReply: onReply)
                 }
                 ForEach(Array(file.hunks.enumerated()), id: \.offset) { hunkIndex, hunk in
@@ -504,43 +566,13 @@ struct SplitDiffView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
                     let id = DiffSelection.RowID(file: fileIndex, hunk: hunkIndex, row: rowIndex)
-                    Group {
-                        if unified {
-                            // Full width: the deletion (when any) stacked over
-                            // the addition/context line, both with dual gutters.
-                            VStack(alignment: .leading, spacing: 0) {
-                                if let left = row.left, left.kind == .deletion {
-                                    unifiedLine(left, isOld: true, file: file)
-                                }
-                                if let right = row.right {
-                                    unifiedLine(right, isOld: false, file: file)
-                                }
-                            }
-                        } else {
-                            HStack(alignment: .top, spacing: 0) {
-                                side(row.left, isOld: true, file: file)
-                                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                                Rectangle()
-                                    .fill(DefaultTheme.cardBorder)
-                                    .frame(width: 1)
-                                side(row.right, isOld: false, file: file)
-                                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                            }
-                        }
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-                    .overlay(Rectangle().fill(DefaultTheme.accent.opacity(
-                        isSelected(id) ? 0.10 : 0)))
-                    .background {
-                        // Every row publishes its y span in the DIFF's space,
-                        // under its global id — comment threads sit between
-                        // rows, so positions are looked up, never computed.
-                        GeometryReader { geometry in
-                            let frame = geometry.frame(in: .named(Self.diffSpace))
-                            Color.clear.preference(key: DiffRowSpansKey.self,
-                                                   value: [id: frame.minY...frame.maxY])
-                        }
-                    }
+                    // A VALUE view: SwiftUI compares it and skips the row when
+                    // nothing it shows changed — the colours are looked up here
+                    // (a dictionary read) so the row itself needs no closure.
+                    DiffRowView(id: id, row: row, unified: unified, isSelected: isSelected(id),
+                                leftCode: highlights.line(path: file, isOld: true, number: row.left?.oldNumber),
+                                rightCode: highlights.line(path: file, isOld: false, number: row.right?.newNumber))
+                        .equatable()
                     // GitHub-style: the threads anchored to this line sit
                     // right under it, inside the diff.
                     ForEach(threads(file: file, row: row), id: \.root.id) { thread in
@@ -558,76 +590,38 @@ struct SplitDiffView: View {
     /// The drafts hanging under a diff row — matched like the threads, on
     /// the last line of their range, on their side.
     private func draftComments(file: String, row: DiffParser.SplitRow) -> [DraftComment] {
-        guard !drafts.isEmpty else { return [] }
-        return drafts.filter { comment in
-            guard comment.path == file else { return false }
-            let number = comment.side == "LEFT" ? row.left?.oldNumber : row.right?.newNumber
-            return number == comment.lastLine
+        guard !draftIndex.isEmpty else { return [] }
+        var result: [DraftComment] = []
+        if let number = row.left?.oldNumber,
+           let left = draftIndex[CommentAnchor(path: file, isLeft: true, line: number)] {
+            result += left
         }
-    }
-
-    /// Threads on the file itself — rendered under its header.
-    private func fileThreads(_ file: String) -> [CommentThread] {
-        comments
-            .filter { $0.path == file && $0.isFileLevel && $0.replyToID == nil }
-            .map { root in
-                CommentThread(root: root,
-                              replies: comments.filter { $0.replyToID == root.id })
-            }
+        if let number = row.right?.newNumber,
+           let right = draftIndex[CommentAnchor(path: file, isLeft: false, line: number)] {
+            result += right
+        }
+        return result
     }
 
     /// The comment threads anchored to a diff row: matched on the new-side
     /// line for additions/context, the old side for deletions.
     private func threads(file: String, row: DiffParser.SplitRow) -> [CommentThread] {
-        guard !comments.isEmpty else { return [] }
-        let roots = comments.filter { comment in
-            guard comment.path == file, comment.replyToID == nil,
-                  !comment.isFileLevel else { return false }
-            let number = comment.side == "LEFT" ? row.left?.oldNumber : row.right?.newNumber
-            guard let number else { return false }
-            // A multi-line comment hangs under its LAST line, like GitHub.
-            return comment.line == number
+        guard !threadIndex.isEmpty else { return [] }
+        var result: [CommentThread] = []
+        if let number = row.left?.oldNumber,
+           let left = threadIndex[CommentAnchor(path: file, isLeft: true, line: number)] {
+            result += left
         }
-        return roots.map { root in
-            CommentThread(root: root,
-                          replies: comments.filter { $0.replyToID == root.id })
+        if let number = row.right?.newNumber,
+           let right = threadIndex[CommentAnchor(path: file, isLeft: false, line: number)] {
+            result += right
         }
-    }
-
-    /// One half of a row: number gutter + text, tinted by kind. An absent
-    /// side (unpaired add/delete) renders as a dimmed void, like GitHub.
-    /// Long lines wrap instead of scrolling: the code column starts after the
-    /// gutter, so continuations already hang under the code, not the number.
-    @ViewBuilder
-    private func side(_ line: DiffParser.Line?, isOld: Bool, file: String) -> some View {
-        let background: Color = switch line?.kind {
-        case .addition: DefaultTheme.groupHeader.opacity(0.12)
-        case .deletion: DefaultTheme.danger.opacity(0.12)
-        case .context, nil: .clear
-        }
-        HStack(alignment: .top, spacing: 8) {
-            Text(line.flatMap { isOld ? $0.oldNumber : $0.newNumber }.map(String.init) ?? "")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(DefaultTheme.mutedText)
-                .frame(width: 34, alignment: .trailing)
-            Text(line.map { code($0, isOld: isOld, file: file) } ?? AttributedString())
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(line?.kind == .context || line == nil
-                                 ? DefaultTheme.primaryText.opacity(0.75)
-                                 : DefaultTheme.primaryText)
-                // No .textSelection here: it captured the mouse and broke the
-                // press-and-drag line selection (Copy lives in the action bar).
-                .lineLimit(nil)
-        }
-        .padding(.horizontal, 8).padding(.vertical, 1.5)
-        // maxHeight so the tint fills the row: a wrapped line on one side
-        // makes the pair taller than the other side's single line.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(line == nil ? DefaultTheme.surface.opacity(0.4) : background)
+        return result
     }
 
     /// Keeps the bar inside the diff, whichever selection it hangs under.
     private func clampedOffset(_ offset: CGSize) -> CGSize {
+        let diffSize = geometry.diffSize
         guard diffSize.width > 0, diffSize.height > 0 else { return offset }
         let anchor = selectionBottomY ?? 0
         let horizontal = max(diffSize.width - 660, 0)
@@ -643,7 +637,7 @@ struct SplitDiffView: View {
         }
     }
 
-    private struct DiffRowSpansKey: PreferenceKey {
+    struct DiffRowSpansKey: PreferenceKey {
         static let defaultValue: [DiffSelection.RowID: ClosedRange<CGFloat>] = [:]
         static func reduce(value: inout [DiffSelection.RowID: ClosedRange<CGFloat>],
                            nextValue: () -> [DiffSelection.RowID: ClosedRange<CGFloat>]) {
@@ -656,9 +650,96 @@ struct SplitDiffView: View {
         let replies: [GitHubService.ReviewComment]
     }
 
+}
+
+/// One diff row — a VALUE SwiftUI compares (`.equatable()`): its body, two
+/// gutters and two attributed texts, runs again only when the row, its
+/// selection or its colours changed. The rows of a large PR used to re-run
+/// on every pass of the diff: every scroll, every keystroke in the summary,
+/// every drag sample of the drawer (audit 2026-09-22, hot path 4).
+struct DiffRowView: View, Equatable {
+    let id: DiffSelection.RowID
+    let row: DiffParser.SplitRow
+    let unified: Bool
+    let isSelected: Bool
+    /// Syntax colours for each side, looked up by the parent; nil paints plain.
+    let leftCode: AttributedString?
+    let rightCode: AttributedString?
+
+    var body: some View {
+        Group {
+            if unified {
+                // Full width: the deletion (when any) stacked over the
+                // addition/context line, both with dual gutters.
+                VStack(alignment: .leading, spacing: 0) {
+                    if let left = row.left, left.kind == .deletion {
+                        unifiedLine(left, coloured: leftCode)
+                    }
+                    if let right = row.right {
+                        unifiedLine(right, coloured: rightCode)
+                    }
+                }
+            } else {
+                HStack(alignment: .top, spacing: 0) {
+                    side(row.left, isOld: true, coloured: leftCode)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    Rectangle()
+                        .fill(DefaultTheme.cardBorder)
+                        .frame(width: 1)
+                    side(row.right, isOld: false, coloured: rightCode)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .overlay(Rectangle().fill(DefaultTheme.accent.opacity(isSelected ? 0.10 : 0)))
+        .background {
+            // Every row publishes its y span in the DIFF's space, under its
+            // global id — comment threads sit between rows, so positions are
+            // looked up, never computed.
+            GeometryReader { geometry in
+                let frame = geometry.frame(in: .named(SplitDiffView.diffSpace))
+                Color.clear.preference(key: SplitDiffView.DiffRowSpansKey.self,
+                                       value: [id: frame.minY...frame.maxY])
+            }
+        }
+    }
+
+    /// One half of a row: number gutter + text, tinted by kind. An absent
+    /// side (unpaired add/delete) renders as a dimmed void, like GitHub.
+    /// Long lines wrap instead of scrolling: the code column starts after the
+    /// gutter, so continuations already hang under the code, not the number.
+    @ViewBuilder
+    private func side(_ line: DiffParser.Line?, isOld: Bool, coloured: AttributedString?) -> some View {
+        let background: Color = switch line?.kind {
+        case .addition: DefaultTheme.groupHeader.opacity(0.12)
+        case .deletion: DefaultTheme.danger.opacity(0.12)
+        case .context, nil: .clear
+        }
+        HStack(alignment: .top, spacing: 8) {
+            Text(line.flatMap { isOld ? $0.oldNumber : $0.newNumber }.map(String.init) ?? "")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(DefaultTheme.mutedText)
+                .frame(width: 34, alignment: .trailing)
+            Text(line.map { Self.code($0, coloured: coloured) } ?? AttributedString())
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(line?.kind == .context || line == nil
+                                 ? DefaultTheme.primaryText.opacity(0.75)
+                                 : DefaultTheme.primaryText)
+                // No .textSelection here: it captured the mouse and broke the
+                // press-and-drag line selection (Copy lives in the action bar).
+                .lineLimit(nil)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 1.5)
+        // maxHeight so the tint fills the row: a wrapped line on one side
+        // makes the pair taller than the other side's single line.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(line == nil ? DefaultTheme.surface.opacity(0.4) : background)
+    }
+
     /// One full-width unified line: old + new number gutters, then the text.
     @ViewBuilder
-    private func unifiedLine(_ line: DiffParser.Line, isOld: Bool, file: String) -> some View {
+    private func unifiedLine(_ line: DiffParser.Line, coloured: AttributedString?) -> some View {
         let background: Color = switch line.kind {
         case .addition: DefaultTheme.groupHeader.opacity(0.12)
         case .deletion: DefaultTheme.danger.opacity(0.12)
@@ -673,7 +754,7 @@ struct SplitDiffView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(width: 34, alignment: .trailing)
-            Text(code(line, isOld: isOld, file: file))
+            Text(Self.code(line, coloured: coloured))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(line.kind == .context
                                  ? DefaultTheme.primaryText.opacity(0.75)
@@ -685,7 +766,7 @@ struct SplitDiffView: View {
         .background(background)
     }
 
-    private func marker(_ line: DiffParser.Line) -> String {
+    private static func marker(_ line: DiffParser.Line) -> String {
         switch line.kind {
         case .addition: "+ "
         case .deletion: "− "
@@ -695,10 +776,9 @@ struct SplitDiffView: View {
 
     /// The marker, then the line — coloured by language when the highlights
     /// have arrived, plain (and identical in shape) until then.
-    private func code(_ line: DiffParser.Line, isOld: Bool, file: String) -> AttributedString {
+    private static func code(_ line: DiffParser.Line, coloured: AttributedString?) -> AttributedString {
         var result = AttributedString(marker(line))
-        if let coloured = highlights.line(path: file, isOld: isOld,
-                                          number: isOld ? line.oldNumber : line.newNumber) {
+        if let coloured {
             result.append(coloured)
         } else {
             result.append(AttributedString(line.text))

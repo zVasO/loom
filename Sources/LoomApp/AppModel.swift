@@ -291,10 +291,12 @@ public final class AppModel {
         UserDefaults.standard.set(map, forKey: "loom.worktree.projects")
     }
 
-    /// P0 perf — the Settings refresh rate as a frame interval (default 30 fps).
+    /// P0 perf — the Settings refresh rate as a frame interval. 60 by default:
+    /// with rows that survive a frame and gated deliveries, any supported Mac
+    /// affords it, and at 30 the echo of a keystroke landed up to 33 ms late.
     public static func preferredFrameInterval() -> Duration {
         let fps = UserDefaults.standard.integer(forKey: "loom.terminal.fps")
-        let clamped = [30, 60, 120].contains(fps) ? fps : 30
+        let clamped = [30, 60, 120].contains(fps) ? fps : 60
         return .milliseconds(1000 / clamped)
     }
 
@@ -385,9 +387,8 @@ public final class AppModel {
         do {
             try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
             ThemeStore.shared.configure(themesDirectory: supportDirectory.appendingPathComponent("themes"))
-            loadPRListCache()
+            loadPRCaches()
             reviewDrafts = reviewDraftStore.load()
-            catalog = repoCatalogCache.load()
             prTabs = prTabsStore.load()
             let store = try SessionStore(path: supportDirectory.appendingPathComponent("loom.sqlite").path)
             self.store = store
@@ -395,14 +396,13 @@ public final class AppModel {
             importLegacyBadgeDefinitions(into: store)
             reloadBadgeDefinitions()
 
-            let transcripts = try FileTranscriptSink(
-                directory: supportDirectory.appendingPathComponent("transcripts"))
             // v2 (search): one sink per session, in its own directory — this is
-            // what makes transcripts indexable per session.
+            // what makes transcripts indexable per session. The dependency's
+            // sink is only the fallback when a session's own cannot be made.
             let transcriptsRoot = supportDirectory.appendingPathComponent("transcripts")
             let manager = SessionManager(
                 runtimeDependencies: SessionRuntime.Dependencies(ptyHost: ForkPTYHost(),
-                                                                 transcript: transcripts),
+                                                                 transcript: NullTranscriptSink()),
                 store: store,
                 notifier: UserNotificationsNotifier(),
                 transcriptFactory: { id in
@@ -481,6 +481,25 @@ public final class AppModel {
         return exists
     }
 
+    /// Fills the memo for every record it does not cover yet from ONE walk of
+    /// `~/.claude/projects`. A cold launch used to walk it once per persisted
+    /// session, on the main thread, before the first frame — and both the
+    /// session table and the project slugs only ever grow.
+    private func seedNativeExistsCache(for records: [SessionRecord]) {
+        let uncached = records.filter { nativeExistsCache[$0.id] == nil }
+        guard !uncached.isEmpty else { return }
+        // One record (a close, an identity change): the per-session lookup
+        // stops at the first slug that holds it. The walk pays off past that.
+        if uncached.count == 1, let record = uncached.first {
+            nativeExistsCache[record.id] = ClaudeNativeSessions.exists(record.resolvedNativeSessionID)
+            return
+        }
+        let index = ClaudeNativeSessions.index()
+        for record in uncached {
+            nativeExistsCache[record.id] = ClaudeNativeSessions.contains(index, record.resolvedNativeSessionID)
+        }
+    }
+
     /// The conversation a session serves — live item first, then its record,
     /// else the Loom id itself. The one read path for the ring, the info
     /// panel, the context sheet and Mission Control.
@@ -493,6 +512,9 @@ public final class AppModel {
     private func reloadPersistedSessions() {
         let all = ((try? store?.allSessions()) ?? nil) ?? []
         allRecords = all
+        seedNativeExistsCache(for: all.filter {
+            [.interrupted, .completed, .failed, .archived].contains($0.state)
+        })
         // A closed session with no persisted conversation has nothing to show or
         // to resume: it doesn't clutter the lists (pre-fix identifier wrecks
         // disappear at the same time).
@@ -691,6 +713,9 @@ public final class AppModel {
 
     /// Every list ever fetched, by project and filter — the cache on disk mirrors it.
     private var prLists: [PRListKey: PRListCache.Entry] = [:]
+    /// The disk decode of the PR lists and the catalog, in flight from
+    /// launch until it lands — see `loadPRCaches`.
+    @ObservationIgnored private var prCacheLoad: Task<Void, Never>?
     public private(set) var prLoading: Set<PRListKey> = []
     /// PRs whose review session is being prepared (worktree fetch + launch) —
     /// the UI shows progress instead of feeling frozen during the network fetch.
@@ -699,6 +724,56 @@ public final class AppModel {
     /// of re-running two gh processes. Invalidated by refreshPRs / submissions.
     private var prDetailCache: [String: GitHubService.PRDetail] = [:]
     private var prDiffCache: [String: String] = [:]
+
+    /// What the diff view paints, per PR: the products of `DiffPipeline`,
+    /// mirrored here so a workspace seeds its state SYNCHRONOUSLY in its init
+    /// and paints a coloured diff in its first frame on a revisit.
+    struct CachedDiff: Sendable {
+        /// `DiffPipeline.Rows.hash` of the diff text these came from.
+        var hash: Int
+        var files: [DiffFileRows]
+        /// Per scheme (dark: true): a revisit after an appearance change
+        /// paints its own palette, never the other one's greys.
+        var highlights: [Bool: DiffHighlights] = [:]
+    }
+    @ObservationIgnored private let diffPipeline = DiffPipeline()
+    @ObservationIgnored private var diffProducts: [String: CachedDiff] = [:]
+    @ObservationIgnored private var prTourCache: [String: PRTour] = [:]
+
+    func cachedDiff(pr number: Int, in projectID: ProjectID) -> CachedDiff? {
+        diffProducts[prKey(number, projectID)]
+    }
+
+    func cachedTour(pr number: Int, in projectID: ProjectID) -> PRTour? {
+        prTourCache[prKey(number, projectID)]
+    }
+
+    /// Parsed and paired rows for a diff — cached across tab switches.
+    func diffRows(pr number: Int, in projectID: ProjectID, diff: String) async -> DiffPipeline.Rows {
+        let key = prKey(number, projectID)
+        let rows = await diffPipeline.rows(for: key, diff: diff)
+        // A refresh during the parse evicted the project's raw diffs: the
+        // products of a diff the model no longer holds are not mirrored back,
+        // or the next workspace would seed itself from the previous head.
+        guard prDiffCache[key] == diff else { return rows }
+        if diffProducts[key]?.hash != rows.hash {
+            diffProducts[key] = CachedDiff(hash: rows.hash, files: rows.files)
+        }
+        return rows
+    }
+
+    /// Colours for those rows in the given scheme — cached across tab switches.
+    func diffHighlights(pr number: Int, in projectID: ProjectID,
+                        rows: DiffPipeline.Rows, dark: Bool) async -> DiffHighlights {
+        let key = prKey(number, projectID)
+        let highlights = await diffPipeline.highlights(for: key, rows: rows, dark: dark)
+        // Attached only to the rows the mirror still holds: nil after an
+        // eviction, another hash after a refresh landed meanwhile.
+        if diffProducts[key]?.hash == rows.hash {
+            diffProducts[key]?.highlights[dark] = highlights
+        }
+        return highlights
+    }
     private var prCommentsCache: [String: [GitHubService.ReviewComment]] = [:]
     private var prFileViewsCache: [String: GitHubService.FileViews] = [:]
     private var prListCache: PRListCache { PRListCache(directory: supportDirectory) }
@@ -845,27 +920,73 @@ public final class AppModel {
         prLoading.contains(prKey(projectID))
     }
 
-    /// Seeds every list from disk: after a relaunch the tab paints its lists,
-    /// and their counts, without a single `gh` call.
-    private func loadPRListCache() {
+    /// Seeds every list and the catalog from disk, so a relaunch paints the
+    /// PRs tab without a single `gh` call — decoded OFF the main actor: the
+    /// two files run to megabytes on a busy account and were parsed before
+    /// the first frame (audit 2026-09-22, hot path 11). Whoever reads or
+    /// writes them first awaits the load; a list fetched meanwhile keeps
+    /// its place when it is the fresher of the two.
+    private func loadPRCaches() {
         customPRFilters = prFilterStore.load()
-        for (projectID, lists) in prListCache.load() {
-            for (filterID, entry) in lists {
-                prLists[PRListKey(projectID: projectID, filterID: filterID)] = entry
+        let listCache = prListCache
+        let catalogCache = repoCatalogCache
+        prCacheLoad = Task { [weak self] in
+            let loaded = await Task.detached(priority: .userInitiated) {
+                (lists: listCache.load(), catalog: catalogCache.load())
+            }.value
+            guard let self else { return }
+            for (projectID, lists) in loaded.lists {
+                for (filterID, entry) in lists {
+                    let key = PRListKey(projectID: projectID, filterID: filterID)
+                    if let live = self.prLists[key], live.fetchedAt >= entry.fetchedAt { continue }
+                    self.prLists[key] = entry
+                }
+            }
+            if let stored = loaded.catalog,
+               self.catalog.map({ $0.fetchedAt < stored.fetchedAt }) ?? true {
+                self.catalog = stored
             }
         }
     }
 
+    /// Done once the lists and the catalog read at launch are in memory:
+    /// a fetch decided before that would ask `gh` for a list the disk holds,
+    /// and a save would write the few lists in memory over the whole file.
+    func awaitPRCaches() async {
+        await prCacheLoad?.value
+    }
+
     /// Projects that no longer exist are dropped here rather than at load
     /// time, where `projects` has not been read from the database yet.
+    /// Coalesced like the tabs: a filter change refreshes every expanded
+    /// project, and each answer used to serialise and write the whole cache.
     private func savePRListCache() {
-        let known = Set(projects.map(\.id))
-        var lists: PRListCache.Lists = [:]
-        for (key, entry) in prLists where known.contains(key.projectID) {
-            lists[key.projectID, default: [:]][key.filterID] = entry
+        prListSaveTask?.cancel()
+        prListSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled, let self else { return }
+            await self.awaitPRCaches()   // never write a partial cache over the whole one
+            guard !Task.isCancelled else { return }
+            let known = Set(self.projects.map(\.id))
+            var lists: PRListCache.Lists = [:]
+            for (key, entry) in self.prLists where known.contains(key.projectID) {
+                lists[key.projectID, default: [:]][key.filterID] = entry
+            }
+            let cache = self.prListCache
+            Task.detached(priority: .utility) { cache.save(lists) }
         }
-        let cache = prListCache
-        Task.detached(priority: .utility) { cache.save(lists) }
+    }
+
+    @ObservationIgnored private var prListSaveTask: Task<Void, Never>?
+
+    /// Several projects at once: the lists arrive together instead of one
+    /// gh process after another (audit 2026-09-22, secondary findings).
+    public func ensurePRs(for projectIDs: [ProjectID]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for projectID in projectIDs {
+                group.addTask { await self.ensurePRs(for: projectID) }
+            }
+        }
     }
 
     /// How old a project's cached list is — nil when nothing is cached.
@@ -887,12 +1008,14 @@ public final class AppModel {
     /// longer ago than the TTL, or stored for a filter edited since. What
     /// visiting a project, or picking a filter, calls.
     public func ensurePRs(for projectID: ProjectID) async {
+        await awaitPRCaches()
         if let entry = prLists[prKey(projectID)], !entry.isStale(for: selectedPRFilter) { return }
         await refreshPRs(for: projectID)
     }
 
     /// Fetches whatever the cache's age — the refresh button.
     public func refreshPRs(for projectID: ProjectID) async {
+        await awaitPRCaches()
         let filter = selectedPRFilter
         let key = PRListKey(projectID: projectID, filterID: filter.id)
         guard !prLoading.contains(key) else { return }
@@ -905,6 +1028,9 @@ public final class AppModel {
         let prefix = "\(projectID.rawValue.uuidString)#"
         prDetailCache = prDetailCache.filter { !$0.key.hasPrefix(prefix) }
         prDiffCache = prDiffCache.filter { !$0.key.hasPrefix(prefix) }
+        diffProducts = diffProducts.filter { !$0.key.hasPrefix(prefix) }
+        prTourCache = prTourCache.filter { !$0.key.hasPrefix(prefix) }
+        Task { await diffPipeline.evict(prefix: prefix) }
         prCommentsCache = prCommentsCache.filter { !$0.key.hasPrefix(prefix) }
         prFileViewsCache = prFileViewsCache.filter { !$0.key.hasPrefix(prefix) }
         prLists[key] = PRListCache.Entry(fetchedAt: Date(), prs: prs, query: filter.query)
@@ -1014,6 +1140,7 @@ public final class AppModel {
             // the ship actions read worktreePath, and a nil left them blind.
             spec.worktree = .existing(path: worktree, branch: pr.branch)
             let id = try await manager.launch(spec)
+            await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(pr.number) · review",
                                         state: .starting, projectID: projectID,
@@ -1130,6 +1257,12 @@ public final class AppModel {
     /// into chapters + a playful risk gauge. Slow (an agent run) — call it from
     /// a task, show progress.
     public func generateTour(_ number: Int, in projectID: ProjectID) async -> PRTour? {
+        let tour = await generateTourUncached(number, in: projectID)
+        if let tour { prTourCache[prKey(number, projectID)] = tour }
+        return tour
+    }
+
+    private func generateTourUncached(_ number: Int, in projectID: ProjectID) async -> PRTour? {
         guard let repo = projectRepo(projectID), let claude = claudePath else { return nil }
         let diff = String((try? await GitHubService().prDiff(number, in: repo))?.prefix(40_000) ?? "")
         guard !diff.isEmpty else { return nil }
@@ -1196,6 +1329,7 @@ public final class AppModel {
             spec.badges = ["PR #\(number)"]
             spec.worktree = .existing(path: worktree, branch: nil)
             let id = try await manager.launch(spec)
+            await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: "PR #\(number) · guide",
                                         state: .starting, projectID: projectID,
@@ -1234,6 +1368,7 @@ public final class AppModel {
             spec.title = "Review · \(record.title)"
             spec.badges = ["review"]
             let reviewID = try await manager.launch(spec)
+            await cacheSurface(for: reviewID)
             tokenRegistry.register(token: token, session: reviewID)
             sessions.append(SessionItem(id: reviewID, title: "Review · \(record.title)",
                                         state: .starting, projectID: record.projectID,
@@ -1274,34 +1409,75 @@ public final class AppModel {
         let plain = files.filter { $0.pathExtension == "txt" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         var text = ""
-        for file in plain {
-            if let chunk = try? String(contentsOf: file, encoding: .utf8) { text += chunk }
-            if text.count > 2_000_000 { break }   // FTS does not need more to be useful
+        // Capped by bytes READ: a rotated 10 MB file used to be loaded whole
+        // before the cap was even looked at. FTS does not need more to be useful.
+        var remaining = Self.indexedTranscriptCap
+        for file in plain where remaining > 0 {
+            guard let handle = try? FileHandle(forReadingFrom: file) else { continue }
+            defer { try? handle.close() }
+            guard let data = try? handle.read(upToCount: remaining), !data.isEmpty else { continue }
+            text += String(decoding: data, as: UTF8.self)
+            remaining -= data.count
         }
         return text.isEmpty ? nil : text
+    }
+
+    private static let indexedTranscriptCap = 2_000_000
+
+    /// Size and last write of a session's transcript files — what the FTS row
+    /// is compared against before anything is read. nil = no transcript.
+    private nonisolated static func transcriptFingerprint(root: URL, id: SessionID)
+        -> SessionStore.IndexFingerprint? {
+        let directory = root.appendingPathComponent(id.rawValue.uuidString)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])
+        else { return nil }
+        var bytes: Int64 = 0
+        var modifiedAt: Double = 0
+        var found = false
+        for file in files where file.pathExtension == "txt" {
+            guard let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            else { continue }
+            found = true
+            bytes += Int64(values.fileSize ?? 0)
+            modifiedAt = max(modifiedAt, values.contentModificationDate?.timeIntervalSince1970 ?? 0)
+        }
+        return found ? SessionStore.IndexFingerprint(bytes: bytes, modifiedAt: modifiedAt) : nil
     }
 
     func indexSessionForSearch(_ id: SessionID) {
         guard let store else { return }
         let root = supportDirectory.appendingPathComponent("transcripts")
         Task.detached(priority: .utility) {
+            // Stat BEFORE reading: a flush landing between the two would stamp
+            // the row with more content than it holds, and the next launch
+            // would skip that tail for good. Older than the file, it re-indexes.
+            let fingerprint = Self.transcriptFingerprint(root: root, id: id)
             guard let record = (try? store.session(id: id)) ?? nil,
                   let text = Self.transcriptText(root: root, id: id) else { return }
-            try? store.indexForSearch(session: id, title: record.title, transcript: text)
+            try? store.indexForSearch(session: id, title: record.title, transcript: text,
+                                      fingerprint: fingerprint)
         }
     }
 
-    /// Startup pass: (re)index every known session that has a transcript —
-    /// idempotent, off the main actor (P1 perf: MBs of file reads).
+    /// Startup pass: index every known session whose transcript CHANGED since
+    /// it was last indexed — a stat per session, no read and no write for the
+    /// rest. It used to re-read and re-tokenise every transcript ever written
+    /// at each launch, one write transaction each, on the one connection every
+    /// read then waited on (audit 2026-09-22, hot path 3). Off the main actor.
     private func reindexAllSessions() {
         guard let store else { return }
         let root = supportDirectory.appendingPathComponent("transcripts")
         let ids = allRecords.map(\.id)
         Task.detached(priority: .utility) {
             for id in ids {
+                guard let fingerprint = Self.transcriptFingerprint(root: root, id: id) else { continue }
+                if let indexed = (try? store.indexedFingerprint(session: id)) ?? nil,
+                   indexed == fingerprint { continue }
                 guard let record = (try? store.session(id: id)) ?? nil,
                       let text = Self.transcriptText(root: root, id: id) else { continue }
-                try? store.indexForSearch(session: id, title: record.title, transcript: text)
+                try? store.indexForSearch(session: id, title: record.title, transcript: text,
+                                          fingerprint: fingerprint)
             }
         }
     }
@@ -1325,9 +1501,21 @@ public final class AppModel {
     /// process ended — "last activity" in the session info. Nil before any
     /// transition was journaled.
     public func lastActivity(of id: SessionID) -> Date? {
-        let transition = ((try? store?.transitions(session: id)) ?? nil)?.last?.at
+        let transition = (try? store?.lastTransitionDate(session: id)) ?? nil
         let ended = sessionInfo(id)?.endedAt
         return [transition, ended].compactMap { $0 }.max()
+    }
+
+    /// What the session info panel shows, read off the main actor in one go:
+    /// its body used to run three store reads per pass, one fetching the
+    /// whole transition journal to take its last row.
+    public func sessionInfoSnapshot(_ id: SessionID) async -> (record: SessionRecord?, lastActivity: Date?) {
+        guard let store else { return (nil, nil) }
+        return await Task.detached(priority: .userInitiated) {
+            let record = (try? store.session(id: id)) ?? nil
+            let transition = (try? store.lastTransitionDate(session: id)) ?? nil
+            return (record, [transition, record?.endedAt].compactMap { $0 }.max())
+        }.value
     }
 
     /// Removes the project from the app (archived in the database): the local
@@ -1397,6 +1585,7 @@ public final class AppModel {
         spec.projectID = parent.projectID
         do {
             let id = try await manager.launch(spec)
+            await cacheSurface(for: id)
             sessions.append(SessionItem(id: id, title: name, state: .starting,
                                         projectID: parent.projectID, branch: parent.branch,
                                         parentID: parent.id, isShell: true))
@@ -1495,7 +1684,7 @@ public final class AppModel {
         }
         for record in payload.panes {
             let pane = BrowserPane(title: record.title, parentID: record.parentID)
-            for url in record.urls { pane.controller.openTab(urlString: url) }
+            pane.controller.restoreTabs(urlStrings: record.urls)   // model only, until shown
             browserPanes.append(pane)
         }
     }
@@ -1602,6 +1791,29 @@ public final class AppModel {
     /// excluded (except .claude, useful for finding skills and rules).
     public func listFiles(in id: ProjectID, at relativePath: String) -> [FileEntry] {
         guard let rootPath = project(id)?.path else { return [] }
+        return Self.listFiles(root: rootPath, at: relativePath)
+    }
+
+    /// The listing stats every entry: off the main actor for the Files tab.
+    public func listFilesDetached(in id: ProjectID, at relativePath: String) async -> [FileEntry] {
+        guard let rootPath = project(id)?.path else { return [] }
+        return await Task.detached(priority: .userInitiated) {
+            Self.listFiles(root: rootPath, at: relativePath)
+        }.value
+    }
+
+    /// Skills scan two directory trees: off the main actor for the Skills tab.
+    public func skillsDetached(forProject id: ProjectID) async -> [SkillEntry] {
+        let projectDirectory = project(id).map {
+            URL(fileURLWithPath: $0.path).appendingPathComponent(".claude/skills")
+        }
+        return await Task.detached(priority: .userInitiated) {
+            SkillsCatalog.scan(globalDirectory: SkillsCatalog.defaultGlobalDirectory,
+                               projectDirectory: projectDirectory)
+        }.value
+    }
+
+    private nonisolated static func listFiles(root rootPath: String, at relativePath: String) -> [FileEntry] {
         let directory = URL(fileURLWithPath: rootPath).appendingPathComponent(relativePath)
         let contents = (try? FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
@@ -1722,7 +1934,7 @@ public final class AppModel {
         // The conversation to pick up is the NATIVE one — the imposed UUID,
         // unless a `/resume <id>` in the terminal moved the session elsewhere.
         let native = record.resolvedNativeSessionID
-        let command = ClaudeNativeSessions.exists(native)
+        let command = nativeSessionExists(record)
             ? adapter.resumeCommand(session: native, hookToken: token)
             : adapter.launchCommand(session: record.id, initialPrompt: nil, hookToken: token)
         guard let directory = workingDirectory(worktreePath: record.worktreePath,
@@ -1738,6 +1950,7 @@ public final class AppModel {
             try await manager.resume(record, command: command, workingDirectory: directory,
                                      geometry: preferredGrid,
                                      samplingInterval: .milliseconds(500), hookToken: token)
+            await cacheSurface(for: record.id)
             tokenRegistry.register(token: token, session: record.id)
             sessions.append(SessionItem(id: record.id, title: record.title, state: .starting,
                                         projectID: record.projectID, branch: record.branch,
@@ -1753,6 +1966,10 @@ public final class AppModel {
     public func archiveSession(_ id: SessionID) async {
         await manager?.archive(id)
         sessions.removeAll { $0.id == id }
+        // A live session archived from its card exits through `.archived`, a
+        // terminal state the reducer never leaves: no `.completed` follows,
+        // so the close path in observeStates never drops its surface.
+        surfaceCache.removeValue(forKey: id)
         reloadPersistedSessions()
     }
 
@@ -1798,6 +2015,7 @@ public final class AppModel {
                 sessions.removeAll { $0.id == closed }
                 tokenRegistry.unregister(session: closed)
                 nativeExistsCache.removeValue(forKey: closed)   // settled at close: rescan once
+                surfaceCache.removeValue(forKey: closed)
                 saveStackChildren()
                 // SES-07: a close the user asked for — the cross, or `exit`,
                 // which leaves through code 0 — archives on the spot. A session
@@ -1892,6 +2110,7 @@ public final class AppModel {
                 spec.worktree = .create(repo: directory, slug: Self.slug(from: initialPrompt ?? ""))
             }
             let id = try await manager.launch(spec)
+            await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
             let record = (try? store?.session(id: id)) ?? nil
             sessions.append(SessionItem(id: id, title: record?.title ?? "Session",
@@ -1933,7 +2152,12 @@ public final class AppModel {
             guard !Task.isCancelled else { return }
             self?.saveStackChildren()
         }
-        try? store?.recordVisit(url: url, title: title, at: Date())
+        // A page load is not worth a synchronous write on the main actor.
+        guard let store else { return }
+        let visitedAt = Date()
+        Task.detached(priority: .utility) {
+            try? store.recordVisit(url: url, title: title, at: visitedAt)
+        }
     }
 
     /// Sessions whose tab was optimistically removed while the shutdown
@@ -2020,7 +2244,23 @@ public final class AppModel {
         return GitPanelData(changes: changes, diff: diff)
     }
 
+    /// The surfaces of the live sessions, kept from the moment their runtime
+    /// exists: a pane reads them synchronously and paints the retained screen
+    /// in its first commit, where a hop to the session actor and back showed a
+    /// spinner first (audit 2026-09-22, hot path 9). Dropped at close.
+    @ObservationIgnored private var surfaceCache: [SessionID: TerminalSurface] = [:]
+
+    public func cachedSurface(for id: SessionID) -> TerminalSurface? { surfaceCache[id] }
+
+    private func cacheSurface(for id: SessionID) async {
+        guard let surface = await manager?.runtime(for: id)?.surface() else { return }
+        surfaceCache[id] = surface
+    }
+
     public func surface(for id: SessionID) async -> TerminalSurface? {
-        await manager?.runtime(for: id)?.surface()
+        if let cached = surfaceCache[id] { return cached }
+        guard let surface = await manager?.runtime(for: id)?.surface() else { return nil }
+        surfaceCache[id] = surface
+        return surface
     }
 }

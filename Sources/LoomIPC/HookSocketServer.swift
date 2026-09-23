@@ -35,7 +35,9 @@ public final class HookSocketServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "app.loom.ipc")
     private var listeningDescriptor: Int32 = -1
     private var acceptSource: DispatchSourceRead?
-    private var connections: [Int32: (source: DispatchSourceRead, buffer: Data)] = [:]
+    /// Per client: its read source, the bytes not yet delivered, and how far
+    /// into them the last drain looked without finding a newline.
+    private var connections: [Int32: (source: DispatchSourceRead, buffer: Data, scanned: Int)] = [:]
 
     public init(socketPath: URL, validate: @escaping Validate, handler: @escaping Handler,
                 authorize: Authorize? = nil, requests: RequestHandler? = nil) {
@@ -114,7 +116,7 @@ public final class HookSocketServer: @unchecked Sendable {
         let source = DispatchSource.makeReadSource(fileDescriptor: client, queue: queue)
         source.setEventHandler { [weak self] in self?.readFrom(client) }
         source.setCancelHandler { close(client) }
-        connections[client] = (source, Data())
+        connections[client] = (source, Data(), 0)
         source.activate()
     }
 
@@ -130,16 +132,27 @@ public final class HookSocketServer: @unchecked Sendable {
         drainLines(from: client)
     }
 
+    /// Lines are cut out of the connection's buffer IN PLACE. The buffer is
+    /// checked out of the dictionary for the drain, so its storage has one
+    /// owner and each cut is a memmove — a second reference (a `while let`
+    /// binding) made Data copy the whole buffer before every cut. The scan
+    /// resumes where the last one stopped: a large payload arriving in 4 KB
+    /// events is not rescanned from its start on each of them.
     private func drainLines(from client: Int32) {
         guard var buffer = connections[client]?.buffer else { return }
-        while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-            let line = buffer[buffer.startIndex..<newline]
-            buffer = buffer[buffer.index(after: newline)...]
-            deliver(Data(line), from: client)
-            // A rejected request dropped the connection: nothing more to read from it.
+        var scanned = connections[client]?.scanned ?? 0
+        connections[client]?.buffer = Data()
+        let newlineByte = UInt8(ascii: "\n")
+        while let newline = buffer[(buffer.startIndex + scanned)...].firstIndex(of: newlineByte) {
+            let line = buffer.subdata(in: buffer.startIndex..<newline)
+            buffer.removeSubrange(buffer.startIndex...newline)
+            scanned = 0
+            deliver(line, from: client)
+            // A rejected request dropped the connection: nothing to put back.
             guard connections[client] != nil else { return }
         }
-        connections[client]?.buffer = Data(buffer)
+        connections[client]?.buffer = buffer
+        connections[client]?.scanned = buffer.count
     }
 
     private func deliver(_ line: Data, from client: Int32) {

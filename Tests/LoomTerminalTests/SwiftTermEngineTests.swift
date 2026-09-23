@@ -282,4 +282,82 @@ extension SwiftTermEngineTests {
             #expect(after == fresh.historyTail(400))
         }
     }
+
+    // P1-6: the sampler and the readiness probe read a tail twice a second
+    // per session; a cheap walk must answer exactly what a snapshot did.
+    @Test("the visible tail walks the rows bottom-up and matches the snapshot-derived tail")
+    func queueVisibleSansSnapshot() {
+        let engine = makeEngine(cols: 20, rows: 6)
+        queue.sync {
+            engine.feed(ArraySlice("first line\r\n\r\n  padded  \r\nthird\r\n> ".utf8))
+            let expected = Array(engine.snapshot().lines
+                .map(\.text)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .suffix(12))
+            #expect(engine.visibleTail(12) == expected)
+            #expect(engine.visibleTail(12) == ["first line", "padded", "third", ">"])
+            #expect(engine.visibleTail(2) == ["third", ">"], "the limit keeps the LAST lines")
+            #expect(engine.visibleTail(0).isEmpty)
+        }
+    }
+
+    @Test("the history tail is primed with what is asked, and grows to a larger ask")
+    func amorcageDuTail() {
+        let engine = makeEngine(cols: 20, rows: 4)
+        queue.sync {
+            for index in 0..<50 { engine.feed(ArraySlice("line \(index)\r\n".utf8)) }
+            let small = engine.historyTail(5)
+            #expect(small.count == 5)
+            #expect(small.last?.text.hasPrefix("line 45") == true || small.last?.text.hasPrefix("line 46") == true)
+            let large = engine.historyTail(30)
+            #expect(large.count == 30, "a larger window re-primes instead of answering short")
+            #expect(large.suffix(5) == small, "the same lines, in the same order")
+            engine.feed(ArraySlice("line 50\r\n".utf8))
+            let grown = engine.historyTail(30)
+            #expect(grown.count == 30)
+            #expect(grown.last?.text.hasPrefix("line 4") == true)
+        }
+    }
+
+    // P1-5: a snapshot reuses the rows the emulator did not touch. Whatever
+    // the sequence — scrolling, clears, the alternate screen, a resize — it
+    // must equal the snapshot of an engine that saw the same bytes at once.
+    @Test("an incremental snapshot equals a from-scratch one, whatever scrolled or cleared")
+    func snapshotIncrementalExact() {
+        let scripts: [[String]] = [
+            ["hello\r\n", "world\r\n", "\u{1B}[1;3Hx", "again\r\n"],
+            (0..<20).map { "scrolling line \($0)\r\n" },
+            ["one\r\ntwo\r\n", "\u{1B}[2J\u{1B}[H", "fresh\r\n"],
+            ["main\r\n", "\u{1B}[?1049h\u{1B}[2;2Halt", "\u{1B}[?1049l", "back\r\n"],
+            ["abc\r\ndef\r\n", "\u{1B}[2L", "\u{1B}[1M", "tail"],
+        ]
+        for script in scripts {
+            let incremental = makeEngine(cols: 20, rows: 5)
+            let scratch = makeEngine(cols: 20, rows: 5)
+            queue.sync {
+                for chunk in script {
+                    incremental.feed(ArraySlice(chunk.utf8))
+                    _ = incremental.snapshot()   // populates and reuses the row cache
+                }
+                scratch.feed(ArraySlice(script.joined().utf8))
+                #expect(incremental.snapshot().lines == scratch.snapshot().lines,
+                        "script \(script.prefix(2)) diverged")
+                #expect(incremental.snapshot().cursor == scratch.snapshot().cursor)
+            }
+        }
+    }
+
+    @Test("a resize invalidates every cached row")
+    func snapshotApresResize() {
+        let engine = makeEngine(cols: 20, rows: 5)
+        queue.sync {
+            engine.feed(ArraySlice("keep me\r\nand me\r\n".utf8))
+            _ = engine.snapshot()
+            engine.resize(to: TerminalGeometry(cols: 30, rows: 5))
+            let after = engine.snapshot()
+            #expect(after.lines.allSatisfy { $0.cells.count == 30 }, "every row at the new width")
+            #expect(after.lines[0].text.hasPrefix("keep me"))
+        }
+    }
 }

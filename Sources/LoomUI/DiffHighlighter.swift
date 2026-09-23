@@ -41,10 +41,17 @@ public enum DiffHighlighter {
     public static let maxLinesPerFile = 5000
     public static let maxBytesPerFile = 500_000
 
-    /// One JavaScriptCore context per call — Highlightr is not thread-safe,
-    /// and a diff is highlighted once. Call off the main thread.
+    /// One JavaScriptCore context per call. Call off the main thread; prefer
+    /// `SharedHighlighters` when the same process highlights more than once.
     public static func highlight(_ files: [DiffParser.File], dark: Bool) -> DiffHighlights {
         guard let highlightr = Highlightr() else { return .none }
+        return highlight(files, dark: dark, using: highlightr)
+    }
+
+    /// With a caller-owned instance. Highlightr is not thread-safe: the
+    /// caller serialises its use.
+    public static func highlight(_ files: [DiffParser.File], dark: Bool,
+                                 using highlightr: Highlightr) -> DiffHighlights {
         highlightr.ignoreIllegals = true
         if !highlightr.setTheme(to: dark ? "atom-one-dark" : "atom-one-light") {
             _ = highlightr.setTheme(to: dark ? "github-dark" : "github")
@@ -155,5 +162,22 @@ public enum DiffHighlighter {
             result.append(run)
         }
         return result
+    }
+}
+
+/// One Highlightr per colour scheme, reused for every diff: a JSContext and
+/// a highlight.js load per call cost 100-300 ms per PR tab (audit 2026-09-22,
+/// hot path 8). Highlightr is not thread-safe, so the instances live in an
+/// actor: highlights never overlap, and a caller waiting for a big PR to
+/// colour queues in the mailbox instead of parking a pool thread on a lock.
+public actor SharedHighlighters {
+    public static let shared = SharedHighlighters()
+
+    private var instances: [Bool: Highlightr] = [:]
+
+    public func highlight(_ files: [DiffParser.File], dark: Bool) -> DiffHighlights {
+        if instances[dark] == nil { instances[dark] = Highlightr() }
+        guard let highlightr = instances[dark] else { return .none }
+        return DiffHighlighter.highlight(files, dark: dark, using: highlightr)
     }
 }

@@ -6,6 +6,7 @@ import LoomTerminal
 import LoomUI
 import LoomWeb
 import SwiftUI
+import Observation
 
 // Structure of the validated reference: custom navbar (Projects / Sessions / +),
 // Projects view as a centered column, Sessions view as grouped sidebar + detail.
@@ -563,14 +564,15 @@ struct ProjectsView: View {
     let onOpenSession: (SessionID) -> Void
     /// Clicking a PR in the project tab opens it in the global PRs tab.
     let onOpenPR: (ProjectID, GitHubService.PullRequest) -> Void
-    @State private var goal = ""
-    @FocusState private var goalFocused: Bool
     @State private var draggedProject: ProjectID?
     @State private var removalTarget: ProjectRecord?
-    @State private var fanOut = 1
+    /// The goal draft outlives the Overview tab being left and re-entered
+    /// (a tab switch tears the field down); only the field reads it.
+    @State private var goalDraft = GoalDraft()
     // P1 perf: filesystem scans live in .task, never in body.
     @State private var loadedSkills: [SkillEntry] = []
     @State private var loadedRules: [AppModel.RuleFile] = []
+    @State private var loadedFiles: [AppModel.FileEntry] = []
     @State private var projectTab: ProjectTab = .overview
     @State private var skillFilter: SkillFilter = .all
     @State private var viewedDocument: ViewedDocument?
@@ -580,6 +582,9 @@ struct ProjectsView: View {
         var path: URL
         var content: String
         var isText: Bool
+        /// Parsed ONCE when the document opens: the viewer used to re-parse
+        /// up to 200 KB of Markdown on every pass of the Projects view.
+        var rendered: AttributedString = AttributedString()
     }
 
     enum SkillFilter: String, CaseIterable {
@@ -677,7 +682,7 @@ struct ProjectsView: View {
                     } else {
                         switch projectTab {
                         case .overview:
-                            goalField(project)
+                            GoalFieldView(model: model, project: project, draft: goalDraft, onOpenSession: onOpenSession)
                             activeSection(project)
                             recentSection(project)
                         case .git: gitTab(project)
@@ -703,12 +708,26 @@ struct ProjectsView: View {
         .onChange(of: projectTab) {
             viewedDocument = nil
         }
-        .task(id: "\(current?.id.rawValue.uuidString ?? "")-\(projectTab.rawValue)") {
+        .task(id: "\(current?.id.rawValue.uuidString ?? "")-\(projectTab.rawValue)-\(filesPath)") {
             guard let project = current else { return }
+            // The listings run in detached tasks, which this task's
+            // cancellation does not reach: a result that lands after the key
+            // moved on (a click into `..`, a project switch) is dropped here,
+            // or it would overwrite the listing of the directory now shown.
             switch projectTab {
-            case .git: gitData = await model.projectGit(project.id)
-            case .skills: loadedSkills = model.skills(forProject: project.id)
+            case .git:
+                let git = await model.projectGit(project.id)
+                guard !Task.isCancelled else { return }
+                gitData = git
+            case .skills:
+                let skills = await model.skillsDetached(forProject: project.id)
+                guard !Task.isCancelled else { return }
+                loadedSkills = skills
             case .rules: loadedRules = model.ruleFiles(for: project.id)
+            case .files:
+                let entries = await model.listFilesDetached(in: project.id, at: filesPath)
+                guard !Task.isCancelled else { return }
+                loadedFiles = entries
             default: break
             }
         }
@@ -777,7 +796,9 @@ struct ProjectsView: View {
     // MARK: Files tab — read-only navigation
 
     private func filesTab(_ project: ProjectRecord) -> some View {
-        let entries = model.listFiles(in: project.id, at: filesPath)
+        // Listed in the tab's task, off the main actor: a directory scan
+        // used to run here, on every pass of the Projects view.
+        let entries = loadedFiles
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 HoverIconButton(systemImage: "house", help: "Project root") { filesPath = "" }
@@ -791,7 +812,7 @@ struct ProjectsView: View {
                     NSWorkspace.shared.open(url)
                 }
             }
-            VStack(spacing: 1) {
+            LazyVStack(spacing: 1) {
                 if !filesPath.isEmpty {
                     fileRow(name: "..", isDirectory: true) {
                         filesPath = filesPath.contains("/")
@@ -868,9 +889,9 @@ struct ProjectsView: View {
     /// Opens a file INSIDE the app: text displayed in place, binary flagged.
     private func openDocument(at url: URL, title: String) {
         if let content = try? String(contentsOf: url, encoding: .utf8) {
-            viewedDocument = ViewedDocument(title: title, path: url,
-                                            content: String(content.prefix(200_000)),
-                                            isText: true)
+            let text = String(content.prefix(200_000))
+            viewedDocument = ViewedDocument(title: title, path: url, content: text, isText: true,
+                                            rendered: Self.render(text, path: url))
         } else {
             viewedDocument = ViewedDocument(title: title, path: url, content: "",
                                             isText: false)
@@ -924,11 +945,15 @@ struct ProjectsView: View {
     }
 
     private func renderedContent(_ document: ViewedDocument) -> AttributedString {
-        guard document.path.pathExtension.lowercased() == "md",
+        document.rendered
+    }
+
+    private static func render(_ content: String, path: URL) -> AttributedString {
+        guard path.pathExtension.lowercased() == "md",
               let markdown = try? AttributedString(
-                  markdown: document.content,
+                  markdown: content,
                   options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
-        else { return AttributedString(document.content) }
+        else { return AttributedString(content) }
         return markdown
     }
 
@@ -986,110 +1011,6 @@ struct ProjectsView: View {
             }
             Spacer()
             GhostButton("Sessions", systemImage: "arrow.right") { onOpenSessions(project.id) }
-        }
-    }
-
-    /// The reference's central gesture: describing the goal HERE launches the
-    /// session — the prompt goes straight into the agent's terminal.
-    private func goalField(_ project: ProjectRecord) -> some View {
-        HStack(spacing: 10) {
-            TextField("What are we building? Describe your goal — Enter starts a session…",
-                      text: $goal)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .foregroundStyle(DefaultTheme.primaryText)
-                .focused($goalFocused)
-                .onSubmit { submitGoal(project) }
-            // Worktree isolation is a per-project choice (default: off — the
-            // session works in the project folder).
-            Button {
-                model.setWorktreeEnabled(!model.worktreeEnabled(for: project.id), for: project.id)
-            } label: {
-                let enabled = model.worktreeEnabled(for: project.id)
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("worktree")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .foregroundStyle(enabled ? DefaultTheme.accentText : DefaultTheme.secondaryText)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(enabled ? DefaultTheme.accent : DefaultTheme.surfaceRaised,
-                            in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .help("On: each session gets an isolated git worktree on its own branch. Off: sessions work directly in the project folder.")
-            // v3 — fan-out: the same goal, N parallel sessions, N worktrees.
-            Menu {
-                ForEach(1...4, id: \.self) { count in
-                    Button("×\(count)\(count > 1 ? " parallel sessions" : " session")") {
-                        fanOut = count
-                    }
-                }
-            } label: {
-                Text("×\(fanOut)")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(fanOut > 1 ? DefaultTheme.accent : DefaultTheme.secondaryText)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Launch the goal in N parallel sessions, each where the placement says")
-            // Launch = Enter, with the project's default placement. The menu
-            // beside it launches THIS goal the other way, once, without
-            // flipping the project's default.
-            HStack(spacing: 2) {
-                AccentButton("Launch") { submitGoal(project) }
-                Menu {
-                    Button {
-                        submitGoal(project, placement: .projectFolder)
-                    } label: {
-                        Label("In the project folder", systemImage: "folder")
-                    }
-                    Button {
-                        submitGoal(project, placement: .newWorktree)
-                    } label: {
-                        Label("In a new worktree", systemImage: "arrow.triangle.branch")
-                    }
-                    .disabled(!model.isGitRepository(project.id))
-                } label: {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(DefaultTheme.accentText)
-                        .frame(width: 22, height: 30)
-                        .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 7))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Launch this goal in the folder or on a worktree, whatever the default")
-            }
-        }
-        .padding(.horizontal, 18).padding(.vertical, 17)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12)
-            .stroke(goalFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
-                    lineWidth: 1))
-        .animation(.hover, value: goalFocused)
-    }
-
-    private func submitGoal(_ project: ProjectRecord,
-                            placement: AppModel.LaunchPlacement? = nil) {
-        let trimmed = goal.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        goal = ""
-        let count = fanOut
-        Task {
-            var first: SessionID?
-            for _ in 0..<count {
-                if let id = await model.launchSession(prompt: trimmed, in: project.id,
-                                                      placement: placement) {
-                    if first == nil { first = id }
-                }
-            }
-            if let first { onOpenSession(first) }
         }
     }
 
@@ -1761,10 +1682,16 @@ struct RecentSessionRow: View {
         .onTapGesture(perform: onOpen)
     }
 
-    private static func relative(_ date: Date) -> String {
+    /// One formatter for every row — Foundation's formatters are expensive to
+    /// build, and one was made per row per pass.
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
+        return formatter
+    }()
+
+    private static func relative(_ date: Date) -> String {
+        relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
@@ -1991,15 +1918,16 @@ struct SessionsView: View {
                             isSelected: selected == .webPane(pane.id)) }
                     }
                 }
+                let dormant = model.dormantSessions
                 ForEach(model.projects, id: \.id) { project in
-                    let items = stackItems(for: project.id)
+                    let items = stackItems(for: project.id, dormant: dormant)
                     if !items.isEmpty {
                         group(project.name.uppercased(), projectID: project.id) {
                             projectStacks(items: items)
                         }
                     }
                 }
-                let orphans = stackItems(for: nil)
+                let orphans = stackItems(for: nil, dormant: dormant)
                 if !orphans.isEmpty {
                     group("NO PROJECT", projectID: nil) {
                         projectStacks(items: orphans)
@@ -2025,11 +1953,15 @@ struct SessionsView: View {
     /// Live + inactive (closed but not destroyed): the project's complete
     /// stack, name and tabs remembered — only claude sessions with no
     /// conversation at all are excluded (filtered upstream, in the model).
-    private func stackItems(for projectID: ProjectID?) -> [AppModel.SessionItem] {
+    /// `dormant`: the model's dormant sessions, computed ONCE by the caller for
+    /// the whole sidebar — the filter over every record per live session used
+    /// to run once per project group, six times a pass.
+    private func stackItems(for projectID: ProjectID?,
+                            dormant: [SessionRecord]) -> [AppModel.SessionItem] {
         let live = model.sessions.filter {
             projectID != nil ? $0.projectID == projectID : model.project($0.projectID) == nil
         }
-        let dormant = model.dormantSessions
+        let dormant = dormant
             .filter { projectID != nil ? $0.projectID == projectID
                                        : model.project($0.projectID) == nil }
             .map { record in
@@ -2102,6 +2034,7 @@ struct SessionsView: View {
                             Task { await model.stopSession(item.id) }
                         }
                 })
+                .equatable()
                 .stackChrome(isSelected: selected == .session(item.id))
             // Individual tabs live in the HORIZONTAL bar: the vertical
             // stack only shows one group row per type.
@@ -2351,6 +2284,8 @@ struct SessionDetailView: View {
     /// v3 — opens the reviewer session that the Ship panel just launched.
     var selectedAfterReview: ((SessionID) -> Void)?
     @State private var infoShown = false
+    @State private var infoRecord: SessionRecord?
+    @State private var infoLastActivity: Date?
     @State private var gitShown = false
     @State private var gitData: AppModel.GitPanelData?
     @State private var shipMessage = ""
@@ -2379,6 +2314,14 @@ struct SessionDetailView: View {
         var native: SessionID
     }
 
+    /// What re-reads the info snapshot: the popover opening, or a state
+    /// transition while it is open — the journal row behind "Last activity"
+    /// and the record's exit code are written just before `sessions` updates.
+    private struct InfoKey: Equatable {
+        var shown: Bool
+        var state: SessionState?
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             breadcrumb
@@ -2397,6 +2340,13 @@ struct SessionDetailView: View {
             }
         }
         .background(DefaultTheme.contentBackground)
+        .task(id: InfoKey(shown: infoShown, state: item?.state)) {
+            guard infoShown else { return }
+            let snapshot = await model.sessionInfoSnapshot(sessionID)
+            guard !Task.isCancelled else { return }   // a restarted read wins
+            infoRecord = snapshot.record
+            infoLastActivity = snapshot.lastActivity
+        }
     }
 
     private var breadcrumb: some View {
@@ -2519,10 +2469,12 @@ struct SessionDetailView: View {
     /// identity, worktree, agent, dates — under its window, read from
     /// claude's own records. Nothing invented.
     private var sessionInfoPanel: some View {
-        let record = model.sessionInfo(sessionID)
+        // Loaded once when the panel opens (see the task on the body): no
+        // store read in a body pass.
+        let record = infoRecord
         let workingDir = record?.worktreePath
             ?? model.project(item?.projectID ?? record?.projectID)?.path
-        let lastActivity = model.lastActivity(of: sessionID)
+        let lastActivity = infoLastActivity
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Context Usage")
@@ -2815,7 +2767,7 @@ struct HoverIconButton: View {
 
 // MARK: - Stack parent card (icons on hover — terminal, browser)
 
-struct SidebarSessionCard: View {
+struct SidebarSessionCard: View, Equatable {
     let model: AppModel
     let item: AppModel.SessionItem
     let childCount: Int
@@ -2827,6 +2779,13 @@ struct SidebarSessionCard: View {
     let onArchive: () -> Void
     let onClose: () -> Void
     @State private var hovered = false
+
+    /// What the card SHOWS decides whether it re-runs; the actions capture
+    /// the same item and the same bindings either way. The sidebar rebuilds
+    /// on every session transition, and ~25 of these used to re-run each time.
+    static func == (lhs: SidebarSessionCard, rhs: SidebarSessionCard) -> Bool {
+        lhs.item == rhs.item && lhs.childCount == rhs.childCount && lhs.isSelected == rhs.isSelected
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -2881,6 +2840,129 @@ struct SidebarSessionCard: View {
             Button("New terminal", action: onNewTerminal)
             Button("Dedicated browser", action: onOpenBrowser)
             Button("Archive", action: onArchive)
+        }
+    }
+}
+
+// MARK: - Goal field
+
+/// The typed goal and the fan-out count, held by ProjectsView so they
+/// survive a project-tab round trip, as they did when they were its own
+/// state — but read by GoalFieldView alone, so a keystroke re-runs the
+/// field, not the whole Projects view.
+@MainActor @Observable final class GoalDraft {
+    var text = ""
+    var fanOut = 1
+}
+
+/// The goal field with its launch controls (audit 2026-09-22, P2-16).
+struct GoalFieldView: View {
+    let model: AppModel
+    let project: ProjectRecord
+    @Bindable var draft: GoalDraft
+    let onOpenSession: (SessionID) -> Void
+    @FocusState private var goalFocused: Bool
+
+    /// The reference's central gesture: describing the goal HERE launches the
+    /// session — the prompt goes straight into the agent's terminal.
+    var body: some View {
+        HStack(spacing: 10) {
+            TextField("What are we building? Describe your goal — Enter starts a session…",
+                      text: $draft.text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .foregroundStyle(DefaultTheme.primaryText)
+                .focused($goalFocused)
+                .onSubmit { submitGoal() }
+            // Worktree isolation is a per-project choice (default: off — the
+            // session works in the project folder).
+            Button {
+                model.setWorktreeEnabled(!model.worktreeEnabled(for: project.id), for: project.id)
+            } label: {
+                let enabled = model.worktreeEnabled(for: project.id)
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("worktree")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundStyle(enabled ? DefaultTheme.accentText : DefaultTheme.secondaryText)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(enabled ? DefaultTheme.accent : DefaultTheme.surfaceRaised,
+                            in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .help("On: each session gets an isolated git worktree on its own branch. Off: sessions work directly in the project folder.")
+            // v3 — fan-out: the same goal, N parallel sessions, N worktrees.
+            Menu {
+                ForEach(1...4, id: \.self) { count in
+                    Button("×\(count)\(count > 1 ? " parallel sessions" : " session")") {
+                        draft.fanOut = count
+                    }
+                }
+            } label: {
+                Text("×\(draft.fanOut)")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(draft.fanOut > 1 ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Launch the goal in N parallel sessions, each where the placement says")
+            // Launch = Enter, with the project's default placement. The menu
+            // beside it launches THIS goal the other way, once, without
+            // flipping the project's default.
+            HStack(spacing: 2) {
+                AccentButton("Launch") { submitGoal() }
+                Menu {
+                    Button {
+                        submitGoal(placement: .projectFolder)
+                    } label: {
+                        Label("In the project folder", systemImage: "folder")
+                    }
+                    Button {
+                        submitGoal(placement: .newWorktree)
+                    } label: {
+                        Label("In a new worktree", systemImage: "arrow.triangle.branch")
+                    }
+                    .disabled(!model.isGitRepository(project.id))
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(DefaultTheme.accentText)
+                        .frame(width: 22, height: 30)
+                        .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 7))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Launch this goal in the folder or on a worktree, whatever the default")
+            }
+        }
+        .padding(.horizontal, 18).padding(.vertical, 17)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12)
+            .stroke(goalFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
+                    lineWidth: 1))
+        .animation(.hover, value: goalFocused)
+    }
+
+    private func submitGoal(placement: AppModel.LaunchPlacement? = nil) {
+        let trimmed = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        draft.text = ""
+        let count = draft.fanOut
+        Task {
+            var first: SessionID?
+            for _ in 0..<count {
+                if let id = await model.launchSession(prompt: trimmed, in: project.id,
+                                                      placement: placement) {
+                    if first == nil { first = id }
+                }
+            }
+            if let first { onOpenSession(first) }
         }
     }
 }

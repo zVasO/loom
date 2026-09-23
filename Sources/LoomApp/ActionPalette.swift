@@ -15,6 +15,16 @@ struct PaletteAction: Identifiable {
     let run: () -> Void
 }
 
+/// `run` is a closure and cannot be compared; the fields a row shows and the
+/// ranking reads are what decides whether the sections must be rebuilt.
+extension PaletteAction: Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id && lhs.icon == rhs.icon && lhs.title == rhs.title
+            && lhs.subtitle == rhs.subtitle && lhs.section == rhs.section
+            && lhs.shortcut == rhs.shortcut
+    }
+}
+
 /// The ⌘K action palette (Raycast-style): search across commands, settings,
 /// projects and sessions; ↑↓ to navigate, Enter to run, Esc to close.
 /// With an empty query only Navigation + Actions show — the launcher pose.
@@ -47,8 +57,12 @@ struct ActionPaletteView: View {
 
     /// The sections as displayed, each with the index its first row carries.
     /// Rendering and keyboard selection both read this, so the highlighted row
-    /// is always the one ↑↓ landed on.
-    private var displayedSections: [(section: String, start: Int, actions: [PaletteAction])] {
+    /// is always the one ↑↓ landed on. Computed when the query (or the action
+    /// list) changes, not per body: the fuzzy ranking folds every candidate
+    /// through ICU, and the body re-ran on every hovered row.
+    @State private var sections: [(section: String, start: Int, actions: [PaletteAction])] = []
+
+    private func computeSections() -> [(section: String, start: Int, actions: [PaletteAction])] {
         let grouped = Dictionary(grouping: matchedActions, by: \.section)
         var start = 0
         var result: [(String, Int, [PaletteAction])] = []
@@ -62,7 +76,7 @@ struct ActionPaletteView: View {
 
     /// The displayed entries flattened — index i is the i-th visible row.
     private var visibleActions: [PaletteAction] {
-        displayedSections.flatMap(\.actions)
+        sections.flatMap(\.actions)
     }
 
     private var totalCount: Int { visibleActions.count + transcriptHits.count }
@@ -80,6 +94,8 @@ struct ActionPaletteView: View {
         .background(DefaultTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .onChange(of: query, initial: true) { sections = computeSections() }
+        .onChange(of: actions) { sections = computeSections() }
         .task(id: query) {
             selection = 0
             let searched = query
@@ -117,7 +133,7 @@ struct ActionPaletteView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    let sections = displayedSections
+                    let sections = self.sections
                     let actionCount = sections.reduce(0) { $0 + $1.actions.count }
                     ForEach(sections, id: \.section) { section, start, entries in
                         sectionHeader(section)
@@ -190,7 +206,7 @@ struct ActionPaletteView: View {
             isPresented = false
             action.run()
         }
-        .onHover { if $0 { selection = index } }
+        .onHover { if $0, selection != index { selection = index } }
     }
 
     private func transcriptRow(_ hit: SessionStore.SearchHit, index: Int) -> some View {
@@ -220,7 +236,7 @@ struct ActionPaletteView: View {
             isPresented = false
             onOpenSession(hit.id)
         }
-        .onHover { if $0 { selection = index } }
+        .onHover { if $0, selection != index { selection = index } }
     }
 
     private var footer: some View {

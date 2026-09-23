@@ -36,12 +36,27 @@ public enum DiffParser {
         public var id: String { path }
         public let path: String
         public let hunks: [Hunk]
+        /// Counted once here: the header of every file section reads both on
+        /// every pass of the diff view.
+        public let additions: Int
+        public let deletions: Int
         public init(path: String, hunks: [Hunk]) {
             self.path = path
             self.hunks = hunks
+            var additions = 0
+            var deletions = 0
+            for hunk in hunks {
+                for line in hunk.lines {
+                    switch line.kind {
+                    case .addition: additions += 1
+                    case .deletion: deletions += 1
+                    case .context: break
+                    }
+                }
+            }
+            self.additions = additions
+            self.deletions = deletions
         }
-        public var additions: Int { hunks.flatMap(\.lines).count { $0.kind == .addition } }
-        public var deletions: Int { hunks.flatMap(\.lines).count { $0.kind == .deletion } }
     }
 
     /// One row of the side-by-side view: old on the left, new on the right.

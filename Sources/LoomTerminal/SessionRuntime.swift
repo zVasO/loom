@@ -87,9 +87,10 @@ public final class SessionRuntime: @unchecked Sendable {
     var launchGeometry: TerminalGeometry { geometry }
     /// Shared projections, MainActor-confined (one per TerminalID).
     @MainActor var surfaces: [TerminalID: TerminalSurface] = [:]
-    /// Terminals with at least one attached surface — read on the queue for every byte
-    /// batch, protected by the lock (no rendering for sessions that are not visible).
-    private var attachedTerminals: Set<TerminalID> = []
+    /// Terminals with an attached surface and the cadence it asked for — read
+    /// on the queue for every byte batch, protected by the lock (no rendering
+    /// for sessions that are not visible, and a preview's rate for a preview).
+    private var attachedTerminals: [TerminalID: FrameCadence] = [:]
     /// Coalescing: at most one frame in flight (confined to the session queue).
     private var frameScheduled = false
     private let lock = NSLock()
@@ -162,14 +163,21 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
-    /// On the session queue: the last non-empty visible lines, plain text only.
+    /// On the session queue: the last non-empty visible lines, plain text
+    /// only. Memoized on what could change them — bytes received, grid — so
+    /// the sampler's two reads a second and a readiness poll cost nothing
+    /// while the agent is quiet.
     private func visibleTail(_ limit: Int = 12) -> [String] {
-        Array((engine?.snapshot().lines ?? [])
-            .map(\.text)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .suffix(limit))
+        if let memo = tailMemo, memo.bytes == bytesReceived, memo.geometry == appliedGeometry,
+           memo.limit == limit {
+            return memo.tail
+        }
+        let tail = engine?.visibleTail(limit) ?? []
+        tailMemo = (bytesReceived, appliedGeometry, limit, tail)
+        return tail
     }
+
+    private var tailMemo: (bytes: Int, geometry: TerminalGeometry, limit: Int, tail: [String])?
 
     /// Write to the terminal's PTY (keystrokes, quick message SES-05).
     /// Non-blocking: one hop onto the session queue, then the channel.
@@ -202,14 +210,29 @@ public final class SessionRuntime: @unchecked Sendable {
         channel?.write(bytes)
     }
 
-    /// Called from the MainActor by the surfaces; attaching immediately paints the
-    /// current screen (reattachment path < 100 ms, TRM-03).
-    func setAttachment(_ terminal: TerminalID, attached: Bool) {
-        lock.withLock {
-            if attached { attachedTerminals.insert(terminal) } else { attachedTerminals.remove(terminal) }
+    /// Called from the MainActor by the surfaces with the cadence their
+    /// watchers need — nil once nobody watches. A watched terminal is painted
+    /// at once, so a newcomer sees the current screen even when another
+    /// watcher already had it attached (reattachment path < 100 ms, TRM-03).
+    func setAttachment(_ terminal: TerminalID, cadence: FrameCadence?) {
+        lock.withLock { attachedTerminals[terminal] = cadence }
+        if cadence != nil {
+            queue.async { self.deliverFrame(force: true) }
         }
-        if attached {
-            queue.async { self.deliverFrame() }
+    }
+
+    /// The interval the watchers ask for: a pane's frame rate when one is
+    /// live, otherwise the slowest a preview needs — a Mission Control card
+    /// at 7 pt text has no use for 60 snapshots a second (audit 2026-09-22,
+    /// hot path 10). Read under the lock.
+    private func watchedInterval() -> Duration? {
+        lock.withLock {
+            attachedTerminals.values.map { cadence -> Duration in
+                switch cadence {
+                case .live: frameInterval
+                case .preview(let interval): interval
+                }
+            }.min()
         }
     }
 
@@ -217,7 +240,7 @@ public final class SessionRuntime: @unchecked Sendable {
     // snapshot + history extraction). The cap coalesces them: leading edge
     // immediate, trailing edge scheduled — at most 1000/interval frames per
     // second regardless of the output rate. Confined to the session queue.
-    private var frameInterval: Duration = .milliseconds(33)
+    private var frameInterval: Duration = .milliseconds(16)
     private var lastFrameAt: ContinuousClock.Instant?
 
     /// The user's refresh-rate setting (30/60/120 fps). Applied on the queue.
@@ -227,12 +250,11 @@ public final class SessionRuntime: @unchecked Sendable {
 
     /// On the session queue: schedules at most one frame delivery per interval.
     private func scheduleFrame() {
-        let anyoneWatching = lock.withLock { !attachedTerminals.isEmpty }
-        guard anyoneWatching, !frameScheduled else { return }
+        guard let interval = watchedInterval(), !frameScheduled else { return }
         frameScheduled = true
         let now = ContinuousClock().now
-        let sinceLast = lastFrameAt.map { now - $0 } ?? frameInterval
-        let remaining = frameInterval - sinceLast
+        let sinceLast = lastFrameAt.map { now - $0 } ?? interval
+        let remaining = interval - sinceLast
         let deliver = {
             self.frameScheduled = false
             self.lastFrameAt = ContinuousClock().now
@@ -248,10 +270,29 @@ public final class SessionRuntime: @unchecked Sendable {
         }
     }
 
-    /// On the session queue: copies the screen and delivers it to the attached surfaces.
-    private func deliverFrame() {
-        let watching = lock.withLock { attachedTerminals }
+    /// What the last delivered frame showed. Equal again means nothing to
+    /// redraw: a DSR reply, a mode toggle, a chunk that moved no cell used to
+    /// cross to the main actor and invalidate every watcher all the same.
+    private struct FrameKey: Equatable {
+        let revision: UInt64
+        let cursor: CursorPosition
+        let scrollbackRows: Int
+        let modes: TerminalModes
+        let hasOutput: Bool
+    }
+    private var lastDelivered: FrameKey?
+
+    /// On the session queue: copies the screen and delivers it to the attached
+    /// surfaces — unless nothing visible changed since the last delivery.
+    /// `force`: an attach paints whatever is there.
+    private func deliverFrame(force: Bool = false) {
+        let watching = lock.withLock { Array(attachedTerminals.keys) }
         guard !watching.isEmpty, let engine else { return }
+        let key = FrameKey(revision: engine.revision, cursor: engine.cursor,
+                           scrollbackRows: engine.scrollbackRows, modes: engine.modes,
+                           hasOutput: bytesReceived > 0)
+        if !force, key == lastDelivered { return }
+        lastDelivered = key
         let snapshot = engine.snapshot()
         let history = engine.historyTail(400)
         let base = engine.scrollbackRows - history.count

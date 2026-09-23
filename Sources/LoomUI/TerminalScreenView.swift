@@ -109,8 +109,15 @@ public struct TerminalScreenView: View {
     /// The scroll view's own space: where the content's end is measured.
     private static let scroll = "loom.terminal.scroll"
 
-    @State private var contentEnd: CGFloat = 0
-    @State private var viewportHeight: CGFloat = 0
+    /// Where the content ends and how tall the viewport is, read only by the
+    /// re-pin below. A reference, not state: the end moves with every line the
+    /// agent prints, and a state write there re-ran this whole body per frame.
+    @State private var probe = ScrollProbe()
+
+    private final class ScrollProbe {
+        var contentEnd: CGFloat = 0
+        var viewportHeight: CGFloat = 0
+    }
 
     public var body: some View {
         let cell = TerminalMetrics.cellSize
@@ -122,17 +129,19 @@ public struct TerminalScreenView: View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    // Rows are identified by their ABSOLUTE scrollback number, which
-                    // is what historyBase is for. Positional ids made every line
-                    // change meaning the moment the scrollback trimmed its front.
-                    ForEach(Array(history.enumerated()), id: \.offset) { index, line in
-                        row(line, height: cell.height)
-                            .id(historyBase + index)
-                    }
-                    ForEach(Array(screen.lines.enumerated()), id: \.offset) { index, line in
-                        row(line, height: cell.height,
-                            cursorCol: index == screen.cursor.row ? screen.cursor.col : nil)
-                            .id(lastRowID - (screen.lines.count - 1 - index))
+                    // ONE ForEach whose identity IS the absolute scrollback number:
+                    // a row keeps its view while the content slides under it, and
+                    // only the rows that changed re-run (TerminalRow is Equatable).
+                    // Two positional ForEach with an .id() on top used to hand every
+                    // row a new identity per scrolled frame — the whole visible
+                    // grid was torn down and laid out again 30 times a second.
+                    ForEach(historyBase..<(historyBase + contentRows), id: \.self) { absolute in
+                        let index = absolute - historyBase
+                        let onScreen = index - history.count
+                        TerminalRow(line: contentLine(index) ?? TerminalLine(cells: []),
+                                    cursorCol: onScreen == screen.cursor.row ? screen.cursor.col : nil,
+                                    height: cell.height)
+                            .equatable()
                     }
                     Color.clear.frame(height: 0)
                         .background(GeometryReader { end in
@@ -174,8 +183,8 @@ public struct TerminalScreenView: View {
             .background(GeometryReader { viewport in
                 Color.clear.preference(key: ViewportHeightKey.self, value: viewport.size.height)
             })
-            .onPreferenceChange(ContentEndKey.self) { contentEnd = $0 }
-            .onPreferenceChange(ViewportHeightKey.self) { viewportHeight = $0 }
+            .onPreferenceChange(ContentEndKey.self) { probe.contentEnd = $0 }
+            .onPreferenceChange(ViewportHeightKey.self) { probe.viewportHeight = $0 }
             // Past the scrollback cap the history stops growing: a line is trimmed
             // for each one pushed, the content keeps its SIZE, and the bottom anchor
             // — which only re-applies on a size change — never fires again while the
@@ -183,8 +192,8 @@ public struct TerminalScreenView: View {
             // end of the content is still at the bottom edge: a reader who scrolled
             // up is never moved.
             .onChange(of: historyBase) {
-                guard TerminalMetrics.isPinnedToBottom(contentEnd: contentEnd,
-                                                       viewportHeight: viewportHeight,
+                guard TerminalMetrics.isPinnedToBottom(contentEnd: probe.contentEnd,
+                                                       viewportHeight: probe.viewportHeight,
                                                        cellHeight: cell.height)
                 else { return }
                 proxy.scrollTo(lastRowID, anchor: .bottom)
@@ -275,8 +284,12 @@ public struct TerminalScreenView: View {
                 // Read live: pressing ⌥ MID-drag must flip to a block, the way
                 // every emulator behaves. A captured event could not tell us.
                 guard !openingLink, lastPress?.count == 1 else { return }
-                selection.mode = NSEvent.modifierFlags.contains(.option) ? .block : .linear
-                selection.head = position(at: value.location)
+                // Written on CHANGE only: the binding is the pane's state, and a
+                // drag samples faster than the cell under it moves.
+                let mode: TerminalSelection.Mode = NSEvent.modifierFlags.contains(.option) ? .block : .linear
+                if selection.mode != mode { selection.mode = mode }
+                let head = position(at: value.location)
+                if selection.head != head { selection.head = head }
             }
             .onEnded { _ in
                 dragging = false
@@ -381,13 +394,25 @@ public struct TerminalScreenView: View {
         .allowsHitTesting(false)
     }
 
-    // MARK: - Rows
+}
 
-    /// `cursorCol`: the terminal cursor, drawn by US (the agent only paints
-    /// its cells) — without it, one would type blind into its field.
-    private func row(_ line: TerminalLine, height: CGFloat, cursorCol: Int? = nil) -> some View {
-        Text(attributed(line))
-            .font(.system(size: TerminalMetrics.fontSize, design: .monospaced))
+/// One terminal row. A VALUE: SwiftUI compares it (`.equatable()`) and only
+/// re-runs the body — the attributed runs, the CoreText layout — for a row
+/// whose cells or cursor actually changed. History lines share their buffers
+/// with the engine's tail cache, so the comparison is a pointer check there.
+/// `cursorCol`: the terminal cursor, drawn by US (the agent only paints its
+/// cells) — without it, one would type blind into its field.
+struct TerminalRow: View, Equatable {
+    let line: TerminalLine
+    let cursorCol: Int?
+    let height: CGFloat
+
+    private static let font = Font.system(size: TerminalMetrics.fontSize, design: .monospaced)
+    private static let boldFont = font.bold()
+
+    var body: some View {
+        Text(Self.attributed(line))
+            .font(Self.font)
             .frame(height: height, alignment: .leading)
             .lineLimit(1)
             .fixedSize(horizontal: true, vertical: false)
@@ -403,7 +428,7 @@ public struct TerminalScreenView: View {
 
     /// P0 perf: consecutive same-style cells become ONE attributed piece —
     /// measured 18× cheaper than a per-cell append (most lines are 1-3 runs).
-    private func attributed(_ line: TerminalLine) -> AttributedString {
+    static func attributed(_ line: TerminalLine) -> AttributedString {
         var result = AttributedString()
         let cells = line.cells
         var runStart = 0
@@ -416,7 +441,7 @@ public struct TerminalScreenView: View {
             let background = DefaultTheme.terminalColor(style.background, isBackground: true)
             if background != .clear { piece.backgroundColor = background }
             if style.attributes.contains(.bold) {
-                piece.font = .system(size: TerminalMetrics.fontSize, design: .monospaced).bold()
+                piece.font = boldFont
             }
             result.append(piece)
             runStart = runEnd

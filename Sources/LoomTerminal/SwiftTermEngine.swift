@@ -19,7 +19,7 @@ public final class SwiftTermEngine: TerminalEngine {
     private let terminal: Terminal
     private let headlessDelegate = HeadlessDelegate()
     private var geometry: TerminalGeometry
-    private var revision: UInt64 = 0
+    private var revisionCounter: UInt64 = 0
     private var dirtyRows = IndexSet()
 
     public init(geometry: TerminalGeometry, scrollback: Int) {
@@ -35,7 +35,7 @@ public final class SwiftTermEngine: TerminalEngine {
         if let updated = terminal.getUpdateRange() {
             dirtyRows.insert(integersIn: updated.startY...updated.endY)
             terminal.clearUpdateRange()
-            revision += 1
+            revisionCounter += 1
         }
     }
 
@@ -91,14 +91,27 @@ public final class SwiftTermEngine: TerminalEngine {
         self.geometry = geometry
         terminal.resize(cols: geometry.cols, rows: geometry.rows)
         dirtyRows.insert(integersIn: 0..<geometry.rows)
-        revision += 1
+        revisionCounter += 1
         invalidateTailCache()   // the scrollback reflows: cached lines are stale
     }
 
+    /// The lines of the last snapshot: a row the emulator did not touch since
+    /// (SwiftTerm's own update range, kept in `dirtyRows`) is handed back as
+    /// is — the O(cols × rows) copy per frame only pays for what changed.
+    /// A scroll, a clear, an alternate-screen switch and a resize all mark
+    /// every row, as SwiftTerm's own view relies on.
+    private var lineCache: [TerminalLine] = []
+
     public func snapshot() -> TerminalScreen {
+        let dirty = takeDirtyRows()
+        let reusable = lineCache.count == geometry.rows
         var lines: [TerminalLine] = []
         lines.reserveCapacity(geometry.rows)
         for row in 0..<geometry.rows {
+            if reusable, !dirty.contains(row) {
+                lines.append(lineCache[row])
+                continue
+            }
             var cells: [TerminalCell] = []
             cells.reserveCapacity(geometry.cols)
             for col in 0..<geometry.cols {
@@ -108,11 +121,12 @@ public final class SwiftTermEngine: TerminalEngine {
             lines.append(TerminalLine(cells: cells,
                                       isWrapped: terminal.getLine(row: row)?.isWrapped ?? false))
         }
+        lineCache = lines
         let cursor = terminal.getCursorLocation()
         return TerminalScreen(geometry: geometry,
                               lines: lines,
                               cursor: CursorPosition(col: cursor.x, row: cursor.y),
-                              revision: revision)
+                              revision: revisionCounter)
     }
 
     /// Rows that ever scrolled above the screen — also the absolute index base
@@ -137,14 +151,24 @@ public final class SwiftTermEngine: TerminalEngine {
     private var tailCache: [TerminalLine] = []
     private var tailCachedRows = 0
 
+    /// The largest tail ever asked for: the cache is primed with THAT, not
+    /// with the cap — a resize or a first attach on a long session extracted
+    /// 1000 lines to answer for 400. The cap only bounds its growth.
+    private var primedLimit = 0
+
     public func historyTail(_ limit: Int) -> [TerminalLine] {
         let rows = scrollbackRows   // absolute: keeps growing past the cap
         guard rows > 0 else { return [] }
         if rows < tailCachedRows { invalidateTailCache() }   // defensive: buffer shrank
+        let cap = 1000   // internal — callers' varying limits must not starve each other
+        // A caller asking for more than the cache was primed with, while
+        // older rows exist: start over with the larger window.
+        if limit > primedLimit, tailCache.count < min(limit, rows), tailCachedRows > 0 {
+            invalidateTailCache()
+        }
+        primedLimit = max(primedLimit, limit)
         if rows > tailCachedRows {
-            let cap = 1000   // internal — callers' varying limits must not starve each other
-            // Priming against a large existing scrollback only extracts the cap.
-            let start = max(tailCachedRows, rows - cap)
+            let start = max(tailCachedRows, rows - min(primedLimit, cap))
             for row in start..<rows {
                 tailCache.append(extractScrollbackLine(row))
             }
@@ -192,9 +216,34 @@ public final class SwiftTermEngine: TerminalEngine {
         tailCachedRows = 0
     }
 
+    /// Consumed by `snapshot()`: a caller taking them itself would hand the
+    /// next snapshot stale rows.
     public func takeDirtyRows() -> IndexSet {
         defer { dirtyRows.removeAll() }
         return dirtyRows
+    }
+
+    public var revision: UInt64 { revisionCounter }
+    public var cursor: CursorPosition {
+        let location = terminal.getCursorLocation()
+        return CursorPosition(col: location.x, row: location.y)
+    }
+
+    /// Bottom-up, stopping as soon as `limit` lines are in hand: one string
+    /// per row read, no cell copies, no snapshot.
+    public func visibleTail(_ limit: Int) -> [String] {
+        guard limit > 0 else { return [] }
+        var tail: [String] = []
+        var row = geometry.rows - 1
+        while row >= 0, tail.count < limit {
+            defer { row -= 1 }
+            guard let line = terminal.getLine(row: row) else { continue }
+            let text = line.translateToString(trimRight: true)
+                .replacingOccurrences(of: "\0", with: " ")
+                .trimmingCharacters(in: .whitespaces)
+            if !text.isEmpty { tail.append(text) }
+        }
+        return tail.reversed()
     }
 
     public func setScrollback(_ lines: Int) {

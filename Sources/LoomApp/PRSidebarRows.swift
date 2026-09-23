@@ -58,9 +58,13 @@ struct PRHitRow: View {
         .animation(.hover, value: hovered)
     }
 
+    /// One formatter for every row: ISO8601DateFormatter is among the most
+    /// expensive objects Foundation builds, and one was made per row per pass.
+    private static let iso = ISO8601DateFormatter()
+
     /// "3 d", "5 h", "12 min" — from GitHub's ISO-8601 timestamp.
     static func age(_ iso: String, now: Date = Date()) -> String {
-        guard let date = ISO8601DateFormatter().date(from: iso) else { return "" }
+        guard let date = Self.iso.date(from: iso) else { return "" }
         let seconds = max(0, now.timeIntervalSince(date))
         let minutes = Int(seconds / 60)
         if minutes < 60 { return "\(max(minutes, 1)) min" }

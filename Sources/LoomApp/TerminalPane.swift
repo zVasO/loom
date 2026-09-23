@@ -11,8 +11,17 @@ struct TerminalPane: View {
     let model: AppModel
     let sessionID: SessionID
     /// Where this pane lives — the grid it measures is remembered per role.
-    var role: TerminalPaneRole = .session
+    let role: TerminalPaneRole
+    /// Seeded from the model's cache: a live session's pane paints its retained
+    /// screen in its first commit, no spinner, no actor round trip first.
     @State private var surface: TerminalSurface?
+
+    init(model: AppModel, sessionID: SessionID, role: TerminalPaneRole = .session) {
+        self.model = model
+        self.sessionID = sessionID
+        self.role = role
+        _surface = State(initialValue: model.cachedSurface(for: sessionID))
+    }
     @State private var paneSize: CGSize = .zero
     /// The surface the last fit went to: its first fit is immediate, the
     /// following ones are debounced.
@@ -138,14 +147,18 @@ struct TerminalPane: View {
                         badge = nil
                     }
                     .background(DefaultTheme.contentBackground)
-                    .task { await surface.attached() }
+                    // Keyed on the surface: a pane whose session changed (the PR
+                    // drawer switching tabs) attaches the NEW surface; an id-less
+                    // task ran once and left the newcomer detached.
+                    .task(id: ObjectIdentifier(surface)) { await surface.attached() }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .task(id: sessionID) {
             selection = .empty
-            surface = await model.surface(for: sessionID)
+            let fetched = await model.surface(for: sessionID)
+            if fetched !== surface { surface = fetched }
         }
     }
 }

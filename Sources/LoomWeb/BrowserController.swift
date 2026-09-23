@@ -31,9 +31,26 @@ public final class BrowserController: NSObject {
 
     public func openTab(urlString: String) {
         guard let url = Self.normalize(urlString) else { return }
-        let id = model.openTab(url: url)
+        model.openTab(url: url)
+        // The reconcile creates the webview and loads it — a second load here
+        // fetched every new page twice.
         reconcileWebViews()
-        webViews[id]?.load(URLRequest(url: url))
+    }
+
+    /// Restores tabs in the MODEL only: no WKWebView, no request. At launch a
+    /// hidden pane used to spawn WebKit processes and fetch pages nobody was
+    /// looking at, next to the agents booting (audit 2026-09-22, hot path 11).
+    /// The panel materialises them when it appears.
+    public func restoreTabs(urlStrings: [String]) {
+        for urlString in urlStrings {
+            guard let url = Self.normalize(urlString) else { continue }
+            model.openTab(url: url)
+        }
+    }
+
+    /// Creates the live tabs' webviews when the panel shows — idempotent.
+    public func materialize() {
+        reconcileWebViews()
     }
 
     public func activate(_ id: BrowserTabsModel.TabID) {

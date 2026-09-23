@@ -54,9 +54,7 @@ struct PRFilterMenu: View {
     private func filterItem(_ filter: PRFilter) -> some View {
         Button {
             model.selectedPRFilterID = filter.id
-            Task {
-                for projectID in projectsToRefresh() { await model.ensurePRs(for: projectID) }
-            }
+            Task { await model.ensurePRs(for: projectsToRefresh()) }
         } label: {
             if filter.id == model.selectedPRFilterID {
                 Label(filter.name, systemImage: "checkmark")
@@ -256,9 +254,7 @@ struct PRFilterEditorSheet: View {
             editingID = filter.id
             model.selectedPRFilterID = filter.id
         }
-        Task {
-            for projectID in projectsToRefresh() { await model.ensurePRs(for: projectID) }
-        }
+        Task { await model.ensurePRs(for: projectsToRefresh()) }
     }
 
     private func test() {
