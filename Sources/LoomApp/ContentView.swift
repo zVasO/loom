@@ -6,6 +6,7 @@ import LoomTerminal
 import LoomUI
 import LoomWeb
 import SwiftUI
+import Observation
 
 // Structure of the validated reference: custom navbar (Projects / Sessions / +),
 // Projects view as a centered column, Sessions view as grouped sidebar + detail.
@@ -565,6 +566,9 @@ struct ProjectsView: View {
     let onOpenPR: (ProjectID, GitHubService.PullRequest) -> Void
     @State private var draggedProject: ProjectID?
     @State private var removalTarget: ProjectRecord?
+    /// The goal draft outlives the Overview tab being left and re-entered
+    /// (a tab switch tears the field down); only the field reads it.
+    @State private var goalDraft = GoalDraft()
     // P1 perf: filesystem scans live in .task, never in body.
     @State private var loadedSkills: [SkillEntry] = []
     @State private var loadedRules: [AppModel.RuleFile] = []
@@ -678,7 +682,7 @@ struct ProjectsView: View {
                     } else {
                         switch projectTab {
                         case .overview:
-                            GoalFieldView(model: model, project: project, onOpenSession: onOpenSession)
+                            GoalFieldView(model: model, project: project, draft: goalDraft, onOpenSession: onOpenSession)
                             activeSection(project)
                             recentSection(project)
                         case .git: gitTab(project)
@@ -2842,23 +2846,29 @@ struct SidebarSessionCard: View, Equatable {
 
 // MARK: - Goal field
 
-/// The goal field with its launch controls, owning the typed text: every
-/// keystroke used to re-render the whole Projects view (audit 2026-09-22,
-/// P2-16). The text survives a project switch, as it did in the parent.
+/// The typed goal and the fan-out count, held by ProjectsView so they
+/// survive a project-tab round trip, as they did when they were its own
+/// state — but read by GoalFieldView alone, so a keystroke re-runs the
+/// field, not the whole Projects view.
+@MainActor @Observable final class GoalDraft {
+    var text = ""
+    var fanOut = 1
+}
+
+/// The goal field with its launch controls (audit 2026-09-22, P2-16).
 struct GoalFieldView: View {
     let model: AppModel
     let project: ProjectRecord
+    @Bindable var draft: GoalDraft
     let onOpenSession: (SessionID) -> Void
-    @State private var goal = ""
     @FocusState private var goalFocused: Bool
-    @State private var fanOut = 1
 
     /// The reference's central gesture: describing the goal HERE launches the
     /// session — the prompt goes straight into the agent's terminal.
     var body: some View {
         HStack(spacing: 10) {
             TextField("What are we building? Describe your goal — Enter starts a session…",
-                      text: $goal)
+                      text: $draft.text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .foregroundStyle(DefaultTheme.primaryText)
@@ -2887,13 +2897,13 @@ struct GoalFieldView: View {
             Menu {
                 ForEach(1...4, id: \.self) { count in
                     Button("×\(count)\(count > 1 ? " parallel sessions" : " session")") {
-                        fanOut = count
+                        draft.fanOut = count
                     }
                 }
             } label: {
-                Text("×\(fanOut)")
+                Text("×\(draft.fanOut)")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(fanOut > 1 ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                    .foregroundStyle(draft.fanOut > 1 ? DefaultTheme.accent : DefaultTheme.secondaryText)
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
             }
@@ -2940,10 +2950,10 @@ struct GoalFieldView: View {
     }
 
     private func submitGoal(placement: AppModel.LaunchPlacement? = nil) {
-        let trimmed = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        goal = ""
-        let count = fanOut
+        draft.text = ""
+        let count = draft.fanOut
         Task {
             var first: SessionID?
             for _ in 0..<count {
