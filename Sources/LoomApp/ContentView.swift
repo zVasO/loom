@@ -709,9 +709,19 @@ struct ProjectsView: View {
         }
         .task(id: "\(current?.id.rawValue.uuidString ?? "")-\(projectTab.rawValue)-\(filesPath)") {
             guard let project = current else { return }
+            // The listings run in detached tasks, which this task's
+            // cancellation does not reach: a result that lands after the key
+            // moved on (a click into `..`, a project switch) is dropped here,
+            // or it would overwrite the listing of the directory now shown.
             switch projectTab {
-            case .git: gitData = await model.projectGit(project.id)
-            case .skills: loadedSkills = await model.skillsDetached(forProject: project.id)
+            case .git:
+                let git = await model.projectGit(project.id)
+                guard !Task.isCancelled else { return }
+                gitData = git
+            case .skills:
+                let skills = await model.skillsDetached(forProject: project.id)
+                guard !Task.isCancelled else { return }
+                loadedSkills = skills
             case .rules: loadedRules = model.ruleFiles(for: project.id)
             case .files:
                 let entries = await model.listFilesDetached(in: project.id, at: filesPath)
@@ -2407,6 +2417,14 @@ struct SessionDetailView: View {
         var native: SessionID
     }
 
+    /// What re-reads the info snapshot: the popover opening, or a state
+    /// transition while it is open — the journal row behind "Last activity"
+    /// and the record's exit code are written just before `sessions` updates.
+    private struct InfoKey: Equatable {
+        var shown: Bool
+        var state: SessionState?
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             breadcrumb
@@ -2425,9 +2443,10 @@ struct SessionDetailView: View {
             }
         }
         .background(DefaultTheme.contentBackground)
-        .task(id: infoShown) {
+        .task(id: InfoKey(shown: infoShown, state: item?.state)) {
             guard infoShown else { return }
             let snapshot = await model.sessionInfoSnapshot(sessionID)
+            guard !Task.isCancelled else { return }   // a restarted read wins
             infoRecord = snapshot.record
             infoLastActivity = snapshot.lastActivity
         }
