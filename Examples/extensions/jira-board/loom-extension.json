@@ -1,0 +1,20 @@
+{
+  "id": "dev.loom.jira-board",
+  "name": "Jira Board",
+  "version": "1.0.0",
+  "description": "Your Jira board in Loom — start a session from a ticket.",
+  "author": "Loom",
+  "icon": "rectangle.split.3x1",
+  "entry": "index.html",
+  "loomApi": 1,
+  "permissions": {
+    "network": ["*.atlassian.net"],
+    "sessions": ["read", "launch"],
+    "projects": ["read"]
+  },
+  "contributes": {
+    "commands": [
+      { "id": "refresh", "title": "Refresh the Jira board" }
+    ]
+  }
+}
