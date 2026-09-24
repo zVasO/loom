@@ -81,6 +81,36 @@ select, input {
 }
 
 .bar-left, .bar-right { display: flex; align-items: center; gap: 10px; }
+.board-picker { position: relative; }
+.board-picker input { width: 260px; color: var(--text); }
+.board-results {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 340px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+.board-option {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.board-option.active, .board-option:hover { background: var(--raised); }
+.board-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-meta { flex: none; color: var(--muted); font-size: 11px; }
+.board-empty { padding: 6px 8px; color: var(--muted); }
 .project-picker { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; }
 .status { color: var(--muted); font-size: 12px; }
 .status.error { color: var(--danger); }

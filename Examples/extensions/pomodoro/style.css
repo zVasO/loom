@@ -1,0 +1,123 @@
+/* Loom's theme arrives as --loom-* variables; the fallbacks keep the page
+   legible in a plain browser. */
+:root {
+  --bg: var(--loom-content-background, #1c1c1f);
+  --surface: var(--loom-surface, #232327);
+  --raised: var(--loom-surface-raised, #2c2c31);
+  --border: var(--loom-card-border, #34343a);
+  --text: var(--loom-primary-text, #ececf0);
+  --text-2: var(--loom-secondary-text, #a1a1aa);
+  --muted: var(--loom-muted-text, #71717a);
+  --accent: var(--loom-accent, #7c83ff);
+  --accent-text: var(--loom-accent-text, #ffffff);
+  --focus: var(--loom-danger, #ef4444);
+  --rest: var(--loom-state-working, #22c55e);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+.accent {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-weight: 600;
+}
+
+.ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 14px;
+  color: var(--text-2);
+}
+
+.ghost:hover { background: var(--raised); color: var(--text); }
+.accent:hover { filter: brightness(1.08); }
+.muted { color: var(--text-2); }
+
+/* The tab */
+body.main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 36px 20px;
+}
+
+.timer { text-align: center; }
+.phase {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.clock {
+  margin: 4px 0;
+  font-size: 72px;
+  font-weight: 200;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+body[data-phase="focus"] .clock { color: var(--focus); }
+body[data-phase="shortBreak"] .clock,
+body[data-phase="longBreak"] .clock { color: var(--rest); }
+.cycle { margin: 0 0 14px; color: var(--muted); letter-spacing: 0.3em; }
+.controls { display: flex; gap: 8px; justify-content: center; }
+.hint { margin-top: 10px; font-size: 12px; }
+
+.panel {
+  width: min(460px, 100%);
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.panel > p { margin: 10px 0 0; font-size: 11px; }
+
+.stats { display: flex; gap: 12px; margin: 0; }
+.stats div { flex: 1; }
+.stats dt { font-size: 11px; color: var(--muted); }
+.stats dd { margin: 2px 0 0; font-size: 20px; font-variant-numeric: tabular-nums; }
+
+.settings { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
+.settings label { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; }
+.settings input[type="number"] {
+  width: 56px;
+  padding: 3px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.settings .check { grid-column: 1 / -1; }
+
+/* The break overlay */
+body.break {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--rest) 16%, transparent), transparent 60%),
+    var(--bg);
+}
+.break-card { text-align: center; padding: 24px; }
+.break-card .clock { font-size: 96px; color: var(--rest); }
+.tip { margin: 8px 0 18px; font-size: 18px; }

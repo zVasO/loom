@@ -153,3 +153,25 @@ test("without the Loom bridge, calls reject instead of hanging", async () => {
   vm.runInContext(userScript({ extensionId: "dev.example.x", loomApi: 1, theme: { isLight: true, tokens: {} } }), context);
   await assert.rejects(window.loom.info(), { code: "internalError" });
 });
+
+test("setStatus takes a string, options with a Date, or null to clear", async () => {
+  const page = makePage({ reply: answer({ ok: true }) });
+  await page.loom.ui.setStatus("🍅");
+  await page.loom.ui.setStatus({ text: "☕", countdownTo: new Date(1_800_000_000_000) });
+  await page.loom.ui.setStatus(null);
+  assert.deepEqual(plain(page.posted.map((request) => request.params)),
+    [{ text: "🍅" }, { text: "☕", countdownTo: 1_800_000_000_000 }, {}]);
+  assert.deepEqual(page.posted.map((request) => request.method), ["ui.setStatus", "ui.setStatus", "ui.setStatus"]);
+});
+
+test("alarms and overlays accept Dates and send milliseconds", async () => {
+  const page = makePage({ reply: answer({ name: "tick", scheduledTime: 1 }) });
+  await page.loom.alarms.create("tick", { when: new Date(1_800_000_000_000) });
+  await page.loom.ui.presentOverlay({ page: "break.html", until: new Date(1_800_000_060_000), dismissLabel: "Skip" });
+  await page.loom.alarms.clear("tick");
+  assert.deepEqual(plain(page.posted.map(({ method, params }) => ({ method, params }))), [
+    { method: "alarms.create", params: { name: "tick", when: 1_800_000_000_000 } },
+    { method: "ui.presentOverlay", params: { page: "break.html", until: 1_800_000_060_000, dismissLabel: "Skip" } },
+    { method: "alarms.clear", params: { name: "tick" } },
+  ]);
+});

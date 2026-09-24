@@ -1,0 +1,22 @@
+{
+  "id": "dev.loom.pomodoro",
+  "name": "Pomodoro",
+  "version": "1.0.0",
+  "description": "Focus in 25-minute runs; when a break starts, it covers Loom wherever you are.",
+  "author": "Loom",
+  "icon": "timer",
+  "entry": "index.html",
+  "loomApi": 1,
+  "permissions": {
+    "background": true,
+    "ui": ["status", "overlay"],
+    "sessions": ["read"]
+  },
+  "contributes": {
+    "commands": [
+      { "id": "start", "title": "Pomodoro: start or resume" },
+      { "id": "pause", "title": "Pomodoro: pause" },
+      { "id": "skip", "title": "Pomodoro: skip to the next phase" }
+    ]
+  }
+}

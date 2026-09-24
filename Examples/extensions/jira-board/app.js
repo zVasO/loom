@@ -17,7 +17,9 @@
   const FIELDS = "summary,status,assignee,issuetype,priority,description";
 
   /** @typedef {{ site: string, email: string }} Config */
-  /** @typedef {{ id: number, name: string, type: string }} Board */
+  /**
+   * @typedef {{ id: number, name: string, type: string, projectKey: string, projectName: string }} Board
+   */
   /** @typedef {{ name: string, statusIds: string[] }} Column */
   /**
    * @typedef {{ key: string, summary: string, statusId: string, statusName: string,
@@ -28,6 +30,8 @@
     /** @type {Config | null} */ config: null,
     /** @type {string | null} */ token: null,
     /** @type {Board[]} */ boards: [],
+    /** The site has more boards than were listed: a search also asks Jira. */
+    boardsTruncated: false,
     /** @type {number | null} */ boardId: null,
     /** @type {Column[]} */ columns: [],
     /** @type {Issue[]} */ issues: [],
@@ -110,19 +114,72 @@
     return response.json();
   }
 
+  /** @param {any} board @returns {Board} */
+  function toBoard(board) {
+    const location = board.location || {};
+    return {
+      id: Number(board.id),
+      name: String(board.name || ""),
+      type: String(board.type || ""),
+      projectKey: String(location.projectKey || ""),
+      projectName: String(location.projectName || location.displayName || ""),
+    };
+  }
+
+  /** Every board of the site, up to 1000 — past that, a search asks Jira by name. */
   async function loadBoards() {
     /** @type {Board[]} */
     const boards = [];
     let startAt = 0;
+    let truncated = true;
     for (let page = 0; page < 20; page++) {
       const result = await jira("/rest/agile/1.0/board?maxResults=50&startAt=" + startAt);
-      for (const board of result.values || []) {
-        boards.push({ id: board.id, name: board.name, type: board.type });
+      for (const board of result.values || []) boards.push(toBoard(board));
+      if (result.isLast || !result.values || result.values.length === 0) {
+        truncated = false;
+        break;
       }
-      if (result.isLast || !result.values || result.values.length === 0) break;
       startAt += result.values.length;
     }
+    state.boardsTruncated = truncated;
     return boards;
+  }
+
+  /** @param {string} query @returns {Promise<Board[]>} */
+  async function searchBoardsRemotely(query) {
+    const result = await jira("/rest/agile/1.0/board?maxResults=50&name=" + encodeURIComponent(query));
+    return (result.values || []).map(toBoard);
+  }
+
+  // MARK: - Board search
+
+  /** "HomeServe – Wéb" → "homeserve – web": case and accents never matter. */
+  /** @param {string} text */
+  function normalize(text) {
+    return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  }
+
+  /**
+   * The boards a query finds: every word must appear in the board's name, its
+   * project's key or its project's name. Names that start with the query come
+   * first, then names that contain it, then the rest; alphabetical within each.
+   * @param {Board[]} boards @param {string} query @returns {Board[]}
+   */
+  function matchBoards(boards, query) {
+    const needle = normalize(query.trim());
+    const words = needle.split(/\s+/).filter(Boolean);
+    const byName = (/** @type {Board} */ a, /** @type {Board} */ b) => a.name.localeCompare(b.name);
+    if (words.length === 0) return boards.slice().sort(byName);
+    const rank = (/** @type {Board} */ board) => {
+      const name = normalize(board.name);
+      return name.startsWith(needle) ? 0 : name.includes(needle) ? 1 : 2;
+    };
+    return boards
+      .filter((board) => {
+        const haystack = normalize(board.name + " " + board.projectKey + " " + board.projectName);
+        return words.every((word) => haystack.includes(word));
+      })
+      .sort((a, b) => rank(a) - rank(b) || byName(a, b));
   }
 
   /** @param {number} boardId @returns {Promise<Column[]>} */
@@ -284,7 +341,8 @@
   function showSetup(visible) {
     $("setup").hidden = !visible;
     $("board").hidden = visible;
-    $("board-select").hidden = visible || state.boards.length === 0;
+    $("board-picker").hidden = visible || state.boards.length === 0;
+    if (visible) closeBoardSearch(false);
     $("project-picker").hidden = visible || state.boards.length === 0;
     $("refresh").hidden = visible;
     $("settings").hidden = visible;
@@ -342,7 +400,8 @@
     try {
       if (reloadBoards || state.boards.length === 0) {
         state.boards = await loadBoards();
-        renderBoardPicker();
+        await keepStoredBoard();
+        $("board-picker").hidden = state.boards.length === 0;
       }
       if (state.boards.length === 0) {
         state.columns = [];
@@ -352,7 +411,7 @@
       }
       const board = state.boards.find((candidate) => candidate.id === state.boardId) || state.boards[0];
       state.boardId = board.id;
-      /** @type {HTMLSelectElement} */ ($("board-select")).value = String(board.id);
+      closeBoardSearch(false);
       renderProjectPicker();
       const [columns, issues] = await Promise.all([loadColumns(board.id), loadIssues(board)]);
       state.columns = columns;
@@ -371,16 +430,156 @@
     }
   }
 
-  function renderBoardPicker() {
-    const select = /** @type {HTMLSelectElement} */ ($("board-select"));
-    select.replaceChildren(
-      ...state.boards.map((board) => {
-        const option = /** @type {HTMLOptionElement} */ (el("option", { text: board.name + " (" + board.type + ")" }));
-        option.value = String(board.id);
-        return option;
+  /** A board remembered from a search past the first 1000 is fetched on its own. */
+  async function keepStoredBoard() {
+    if (state.boardId === null || state.boards.some((board) => board.id === state.boardId)) return;
+    if (!state.boardsTruncated) return;
+    try {
+      state.boards.push(toBoard(await jira("/rest/agile/1.0/board/" + state.boardId)));
+    } catch (error) {
+      console.warn("[jira] stored board", error);
+    }
+  }
+
+  const search = {
+    open: false,
+    /** @type {Board[]} */ results: [],
+    active: 0,
+    /** @type {number | undefined} */ timer: undefined,
+    query: "",
+  };
+
+  function searchInput() {
+    return /** @type {HTMLInputElement} */ ($("board-search"));
+  }
+
+  function currentBoard() {
+    return state.boards.find((board) => board.id === state.boardId) || null;
+  }
+
+  /** @param {Board} board */
+  function boardMeta(board) {
+    return [board.projectKey, board.type].filter(Boolean).join(" · ");
+  }
+
+  /** @param {boolean} [showAll] the field still shows the current board: list them all */
+  function openBoardSearch(showAll = false) {
+    search.open = true;
+    searchInput().setAttribute("aria-expanded", "true");
+    updateBoardSearch(showAll ? "" : undefined);
+  }
+
+  /** @param {boolean} keepText */
+  function closeBoardSearch(keepText) {
+    search.open = false;
+    window.clearTimeout(search.timer);
+    const input = searchInput();
+    input.setAttribute("aria-expanded", "false");
+    $("board-results").hidden = true;
+    if (!keepText) {
+      const board = currentBoard();
+      input.value = board ? board.name : "";
+      search.query = "";
+    }
+  }
+
+  /** @param {string} [query] defaults to what the field holds */
+  function updateBoardSearch(query) {
+    search.query = query === undefined ? searchInput().value : query;
+    search.results = matchBoards(state.boards, search.query).slice(0, 50);
+    search.active = 0;
+    renderBoardResults();
+    window.clearTimeout(search.timer);
+    const trimmed = search.query.trim();
+    if (state.boardsTruncated && trimmed.length >= 2) {
+      search.timer = window.setTimeout(() => searchRemotely(trimmed), 300);
+    }
+  }
+
+  /** @param {string} query */
+  async function searchRemotely(query) {
+    try {
+      const found = await searchBoardsRemotely(query);
+      if (!search.open || search.query.trim() !== query) return;
+      const known = new Set(search.results.map((board) => board.id));
+      const merged = search.results.concat(found.filter((board) => !known.has(board.id)));
+      search.results = matchBoards(merged, query).slice(0, 50);
+      renderBoardResults();
+    } catch (error) {
+      console.warn("[jira] board search", error);
+    }
+  }
+
+  function renderBoardResults() {
+    const list = $("board-results");
+    list.hidden = !search.open;
+    if (!search.open) return;
+    if (search.results.length === 0) {
+      list.replaceChildren(el("li", { className: "board-empty", text: "No board matches “" + search.query.trim() + "”" }));
+      return;
+    }
+    list.replaceChildren(
+      ...search.results.map((board, index) => {
+        const item = el("li", { className: "board-option" + (index === search.active ? " active" : "") }, [
+          el("span", { className: "board-name", text: board.name }),
+          el("span", { className: "board-meta", text: boardMeta(board) }),
+        ]);
+        item.setAttribute("role", "option");
+        item.setAttribute("aria-selected", String(index === search.active));
+        item.dataset.boardId = String(board.id);
+        // mousedown, not click: the input's blur would close the list first.
+        item.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          chooseBoard(board);
+        });
+        return item;
       })
     );
-    select.hidden = state.boards.length === 0;
+    const active = list.children[search.active];
+    if (active instanceof HTMLElement) active.scrollIntoView({ block: "nearest" });
+  }
+
+  /** @param {KeyboardEvent} event */
+  function onBoardSearchKey(event) {
+    if (!search.open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      openBoardSearch(true);
+      event.preventDefault();
+      return;
+    }
+    switch (event.key) {
+      case "ArrowDown":
+        search.active = Math.min(search.active + 1, search.results.length - 1);
+        renderBoardResults();
+        event.preventDefault();
+        break;
+      case "ArrowUp":
+        search.active = Math.max(search.active - 1, 0);
+        renderBoardResults();
+        event.preventDefault();
+        break;
+      case "Enter": {
+        const board = search.results[search.active];
+        if (board) chooseBoard(board);
+        event.preventDefault();
+        break;
+      }
+      case "Escape":
+        closeBoardSearch(false);
+        searchInput().blur();
+        event.preventDefault();
+        break;
+    }
+  }
+
+  /** @param {Board} board */
+  async function chooseBoard(board) {
+    if (!state.boards.some((known) => known.id === board.id)) state.boards.push(board);
+    state.boardId = board.id;
+    state.selected = null;
+    closeBoardSearch(false);
+    searchInput().blur();
+    await loom.storage.set(KEY_BOARD, state.boardId);
+    loadBoard(false);
   }
 
   function renderProjectPicker() {
@@ -504,12 +703,17 @@
         setStatus(describe(error), "error");
       }
     });
-    $("board-select").addEventListener("change", async (event) => {
-      state.boardId = Number(/** @type {HTMLSelectElement} */ (event.target).value);
-      state.selected = null;
-      await loom.storage.set(KEY_BOARD, state.boardId);
-      loadBoard(false);
+    const boardSearch = searchInput();
+    boardSearch.addEventListener("focus", () => {
+      boardSearch.select();
+      openBoardSearch(true);
     });
+    boardSearch.addEventListener("input", () => {
+      if (!search.open) openBoardSearch();
+      else updateBoardSearch();
+    });
+    boardSearch.addEventListener("keydown", onBoardSearchKey);
+    boardSearch.addEventListener("blur", () => closeBoardSearch(false));
     $("project-select").addEventListener("change", async (event) => {
       if (state.boardId === null) return;
       const value = /** @type {HTMLSelectElement} */ (event.target).value;

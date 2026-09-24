@@ -46,6 +46,60 @@ struct BridgeProtocolTests {
         }
     }
 
+    @Test("the top bar and the overlay need their ui grant; alarms need none")
+    func exigencesInterface() {
+        #expect(BridgeMethod.uiSetStatus.requirement == .ui(.status))
+        #expect(BridgeMethod.uiPresentOverlay.requirement == .ui(.overlay))
+        #expect(BridgeMethod.uiDismissOverlay.requirement == .ui(.overlay))
+        for method in [BridgeMethod.alarmsCreate, .alarmsClear, .alarmsList] {
+            #expect(method.requirement == nil, "\(method.rawValue)")
+        }
+    }
+
+    @Test("an alarm fires within a week, at an instant or after a delay; too soon or past fires in a second")
+    func alarmes() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let later = try BridgeAlarmParams(name: "phase-end", when: (now.timeIntervalSince1970 + 60) * 1000).fireDate(now: now)
+        #expect(later == now.addingTimeInterval(60))
+        #expect(try BridgeAlarmParams(name: "t", delayMs: 5000).fireDate(now: now) == now.addingTimeInterval(5))
+        #expect(try BridgeAlarmParams(name: "t", delayMs: 10).fireDate(now: now) == now.addingTimeInterval(1))
+        #expect(try BridgeAlarmParams(name: "t", when: (now.timeIntervalSince1970 - 30) * 1000).fireDate(now: now)
+                == now.addingTimeInterval(1), "a page re-creating an alarm that just passed")
+        #expect(throws: BridgeError.self) { try BridgeAlarmParams(name: "t", delayMs: 8 * 24 * 3600 * 1000).fireDate(now: now) }
+        #expect(throws: BridgeError.self) { try BridgeAlarmParams(name: "t").fireDate(now: now) }
+        #expect(throws: BridgeError.self) {
+            try BridgeAlarmParams(name: "t", when: 1, delayMs: 5000).fireDate(now: now)
+        }
+        #expect(throws: BridgeError.self) { try BridgeAlarmParams(name: "a b", delayMs: 5000).fireDate(now: now) }
+    }
+
+    @Test("an overlay's end is capped at an hour and must be ahead")
+    func finDeLEcran() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let capped = try BridgeOverlayParams(page: "break.html").validated(now: now)
+        #expect(capped.until == now.addingTimeInterval(3600))
+        #expect(capped.dismissLabel == "Dismiss")
+        let five = try BridgeOverlayParams(page: "ui/break.html", until: (now.timeIntervalSince1970 + 300) * 1000,
+                                           dismissLabel: " Skip break ").validated(now: now)
+        #expect(five.until == now.addingTimeInterval(300))
+        #expect(five.dismissLabel == "Skip break")
+        #expect(throws: BridgeError.self) {
+            try BridgeOverlayParams(page: "break.html", until: (now.timeIntervalSince1970 - 1) * 1000).validated(now: now)
+        }
+        #expect(throws: BridgeError.self) {
+            try BridgeOverlayParams(page: "break.html", dismissLabel: "  ").validated(now: now)
+        }
+    }
+
+    @Test("alarm and overlay events carry what the page needs")
+    func evenementsDesBriques() {
+        let alarm = BridgeEvent.alarm("phase-end", scheduledTime: Date(timeIntervalSince1970: 1_800_000_000))
+        #expect(alarm.payload["scheduledTime"] == .number(1_800_000_000_000))
+        #expect(alarm.requirement == nil)
+        let dismissed = BridgeEvent.overlayDismissed(.user, page: "break.html")
+        #expect(dismissed.payload["reason"] == .string("user"))
+    }
+
     @Test("a launch proposal is checked before any sheet opens")
     func propositionDeLancement() {
         #expect(throws: BridgeError.self) { try BridgeLaunchParams(prompt: "  ").validate() }

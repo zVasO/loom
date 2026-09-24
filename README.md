@@ -54,8 +54,11 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   bloqué sauf `loom.http.fetch` vers les hôtes consentis), pont `window.loom`
   gardé par les permissions du manifeste (lecture des sessions et projets,
   lancement toujours confirmé par une feuille native), secrets au Trousseau,
-  commandes dans ⌘K. Exemple : un board Jira qui démarre une session depuis un
-  ticket (`Examples/extensions/jira-board/`). Guide : [`docs/extensions.md`](docs/extensions.md).
+  commandes dans ⌘K ; extensions d'arrière-plan, alarmes natives, statut dans
+  la barre du haut et écran de premier plan (ADR-0012). Exemples : un board Jira
+  qui démarre une session depuis un ticket (`Examples/extensions/jira-board/`),
+  un Pomodoro qui couvre Loom pendant les pauses (`Examples/extensions/pomodoro/`).
+  Guide : [`docs/extensions.md`](docs/extensions.md).
 - **Thèmes** : 9 familles intégrées, chacune en clair et en sombre ; apparence
   Système / Clair / Sombre (suivi de macOS en direct) ; override par projet ;
   import d'un thème tweakcn/shadcn (nom, URL ou CSS collé) ; aperçu sur des

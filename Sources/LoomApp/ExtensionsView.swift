@@ -218,10 +218,104 @@ struct ExtensionsWiring: ViewModifier {
             .sheet(item: launchBinding) { request in
                 ExtensionLaunchSheet(model: model, request: request)
             }
+            // ADR-0012: an extension's page over everything, wherever the user is.
+            .overlay {
+                if let overlay = model.extensions.overlay {
+                    ExtensionOverlayView(overlay: overlay) { model.extensions.dismissOverlayByUser() }
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: model.extensions.overlay?.id)
             .sheet(item: consentBinding) { request in
                 ExtensionConsentSheet(request: request,
                                       onApprove: { model.extensions.confirm(request) },
                                       onCancel: { model.extensions.consentRequest = nil })
             }
+    }
+}
+
+/// An extension's status in the top bar (ADR-0012): its icon, its text, and a
+/// countdown Loom ticks itself.
+struct ExtensionStatusChip: View {
+    let item: ExtensionStatusItem
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 5) {
+                if !item.text.isEmpty {
+                    Text(item.text)
+                } else {
+                    Image(systemName: item.icon)
+                }
+                if let end = item.countdownTo {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(Self.format(end.timeIntervalSince(context.date)))
+                            .monospacedDigit()
+                    }
+                }
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(DefaultTheme.primaryText)
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+            .hoverBrightness(0.1)
+        }
+        .buttonStyle(.plain)
+        .help(item.tooltip ?? "")
+    }
+
+    /// 12:34, or 1:02:03 past an hour; never below zero.
+    static func format(_ interval: TimeInterval) -> String {
+        let total = max(0, Int(interval.rounded(.up)))
+        let hours = total / 3600, minutes = (total % 3600) / 60, seconds = total % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
+            : String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+/// The overlay (ADR-0012): the extension's page over the whole window, and
+/// Loom's own bar with the time left and the dismiss button — never the
+/// extension's to hide. Escape dismisses too.
+struct ExtensionOverlayView: View {
+    let overlay: ExtensionOverlay
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                // The traffic lights float over this corner (hidden title bar).
+                Spacer().frame(width: 70)
+                Image(systemName: "puzzlepiece.extension")
+                    .foregroundStyle(DefaultTheme.accent)
+                Text(overlay.extensionName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                Spacer()
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(ExtensionStatusChip.format(overlay.until.timeIntervalSince(context.date)) + " left")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                }
+                GhostButton(overlay.dismissLabel, systemImage: "xmark", action: onDismiss)
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 44)
+            .background(DefaultTheme.background)
+            Divider().overlay(DefaultTheme.cardBorder)
+            if let error = overlay.host.loadError {
+                Text(error)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ExtensionWebView(webView: overlay.host.webView, takesFocus: true)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DefaultTheme.contentBackground)
+        .contentShape(Rectangle())
     }
 }

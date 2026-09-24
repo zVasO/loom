@@ -149,7 +149,8 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
             && matches(#"^[a-z0-9]+(-[a-z0-9]+)*(\.[a-z0-9]+(-[a-z0-9]+)*)+$"#, id)
     }
 
-    static func isValidEntry(_ entry: String) -> Bool {
+    /// An .html file inside the folder: no leading `/`, no `..`, no hidden part.
+    public static func isValidEntry(_ entry: String) -> Bool {
         guard !entry.isEmpty, !entry.hasPrefix("/"), !entry.contains("\\") else { return false }
         let components = entry.split(separator: "/", omittingEmptySubsequences: false)
         guard components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && !$0.hasPrefix(".") })
@@ -158,7 +159,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         return lower.hasSuffix(".html") || lower.hasSuffix(".htm")
     }
 
-    static func matches(_ pattern: String, _ string: String) -> Bool {
+    public static func matches(_ pattern: String, _ string: String) -> Bool {
         string.range(of: pattern, options: .regularExpression) != nil
     }
 

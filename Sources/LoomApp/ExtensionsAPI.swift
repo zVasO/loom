@@ -73,6 +73,34 @@ extension AppModel: ExtensionAppServices {
         NSWorkspace.shared.open(url)
     }
 
+    // ADR-0012: alarms, the top-bar status and the overlay live in the
+    // extensions model; the app only lends its window.
+
+    public func scheduleAlarm(_ name: String, at date: Date, for extensionID: String) throws {
+        try extensions.scheduleAlarm(name, at: date, for: extensionID)
+    }
+
+    public func clearAlarm(_ name: String, for extensionID: String) {
+        extensions.clearAlarm(name, for: extensionID)
+    }
+
+    public func alarms(for extensionID: String) -> [BridgeAlarm] {
+        extensions.alarmList(for: extensionID)
+    }
+
+    public func setStatus(_ status: BridgeStatusParams?, for manifest: ExtensionManifest) {
+        extensions.setStatus(status, for: manifest)
+    }
+
+    public func presentOverlay(page: String, until: Date, dismissLabel: String,
+                               for manifest: ExtensionManifest) throws {
+        try extensions.presentOverlay(page: page, until: until, dismissLabel: dismissLabel, for: manifest)
+    }
+
+    public func dismissOverlay(for extensionID: String) {
+        extensions.dismissOverlay(for: extensionID)
+    }
+
     /// Hands the extensions the sessions as they now are — skipped when no
     /// open extension may read them.
     func publishSessionSnapshot() {

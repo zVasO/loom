@@ -32,10 +32,13 @@ public final class ExtensionWebHost: NSObject {
     /// The rule list compiles once per launch; every host shares it.
     private static var ruleList: WKContentRuleList?
 
+    /// `page`: another page of the extension than its entry — an overlay's
+    /// (ADR-0012). It gets the same bridge, the same confinement.
     public init(manifest: ExtensionManifest, root: URL, userScript: String, inspectable: Bool,
+                page: String? = nil,
                 dispatch: @escaping @MainActor (String) async -> String) {
         extensionID = manifest.id
-        entryURL = ExtensionWebPolicy.entryURL(for: manifest.id, entry: manifest.entry)
+        entryURL = ExtensionWebPolicy.entryURL(for: manifest.id, entry: page ?? manifest.entry)
         let schemeHandler = ExtensionSchemeHandler(resolver: ExtensionFileResolver(
             extensionID: manifest.id, root: root, entry: manifest.entry))
         messageHandler = ExtensionMessageHandler(extensionID: manifest.id, dispatch: dispatch)
