@@ -157,11 +157,36 @@ struct PermissionsTests {
         #expect(effective.allows(.network))
     }
 
+    @Test("background and ui are permissions like the others: asked, granted, re-asked when added")
+    func arrierePlanEtInterface() throws {
+        let manifest = try JSONDecoder().decode(ExtensionManifest.self, from: Data(#"""
+            {"id":"dev.loom.pomodoro","name":"Pomodoro","version":"1","loomApi":1,
+             "permissions":{"background":true,"ui":["status","overlay"]}}
+            """#.utf8))
+        #expect(manifest.permissions.background)
+        #expect(manifest.permissions.ui == [.status, .overlay])
+        let granted = ExtensionPermissions(ui: [.status])
+        let missing = manifest.permissions.missing(from: granted)
+        #expect(missing.background)
+        #expect(missing.ui == [.overlay])
+        #expect(!manifest.permissions.intersection(granted).background)
+        #expect(manifest.permissions.intersection(granted).allows(.ui(.status)))
+        #expect(!manifest.permissions.intersection(granted).allows(.ui(.overlay)))
+        #expect(throws: ManifestError.self) {
+            try JSONDecoder().decode(ExtensionManifest.self, from: Data(
+                #"{"id":"dev.x.y","name":"X","version":"1","loomApi":1,"permissions":{"ui":["fullscreen"]}}"#.utf8))
+        }
+    }
+
     @Test("the consent sheet says every permission in plain words")
     func resume() {
         let permissions = ExtensionPermissions(network: ["*.atlassian.net"], sessions: [.read, .launch],
                                                projects: [.read])
         #expect(permissions.summary.count == 4)
+        let pomodoro = ExtensionPermissions(background: true, ui: [.status, .overlay])
+        #expect(pomodoro.summary == ["Run in the background while Loom is open",
+                                     "Show a short status in Loom's top bar",
+                                     "Cover Loom with one of its pages — you can always dismiss it"])
         #expect(permissions.summary.first == "Connect to https://*.atlassian.net")
     }
 }

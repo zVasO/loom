@@ -47,6 +47,40 @@ struct ExtensionConsentRequest: Identifiable {
     let permissions: ExtensionPermissions
 }
 
+/// A short status an extension shows in Loom's top bar (ADR-0012).
+struct ExtensionStatusItem: Identifiable, Equatable {
+    var id: String { extensionID }
+    let extensionID: String
+    let icon: String
+    var text: String
+    /// Loom ticks the countdown itself; the page need not run every second.
+    var countdownTo: Date?
+    var tooltip: String?
+}
+
+/// One extension page over the whole window (ADR-0012). Loom owns the frame
+/// and the dismiss button; the extension only fills the page.
+@MainActor
+final class ExtensionOverlay: Identifiable {
+    nonisolated let id = UUID()
+    let extensionID: String
+    let extensionName: String
+    let page: String
+    let until: Date
+    let dismissLabel: String
+    let host: ExtensionWebHost
+
+    init(extensionID: String, extensionName: String, page: String, until: Date,
+         dismissLabel: String, host: ExtensionWebHost) {
+        self.extensionID = extensionID
+        self.extensionName = extensionName
+        self.page = page
+        self.until = until
+        self.dismissLabel = dismissLabel
+        self.host = host
+    }
+}
+
 /// The extensions side of the app (ADR-0011): the registry, the one web host
 /// per extension opened, the bridge behind each, and what flows to the pages —
 /// the theme, the sessions, commands. Hosts are created the first time their
@@ -66,6 +100,9 @@ final class ExtensionsModel {
     /// A live session an extension asked to bring on screen.
     var openSessionRequest: SessionOpenRequest?
     var lastError: String?
+    /// ADR-0012: statuses in the top bar, and the one overlay on screen.
+    private(set) var statusItems: [ExtensionStatusItem] = []
+    private(set) var overlay: ExtensionOverlay?
 
     struct SessionOpenRequest: Equatable {
         let id = UUID()
@@ -81,10 +118,16 @@ final class ExtensionsModel {
     @ObservationIgnored private weak var services: ExtensionAppServices?
     @ObservationIgnored private var detector = SessionChangeDetector()
     @ObservationIgnored private var theme: BridgeTheme?
+    @ObservationIgnored private let alarms: ExtensionAlarmScheduler
+    @ObservationIgnored private var overlayTimeout: Task<Void, Never>?
 
     init(directory: URL, secrets: any SecretStore = KeychainSecretStore()) {
         self.secrets = secrets
         registry = ExtensionRegistry(directory: directory, secrets: secrets)
+        alarms = ExtensionAlarmScheduler()
+        alarms.onFire = { [weak self] extensionID, name, date in
+            self?.emit(.alarm(name, scheduledTime: date), to: extensionID)
+        }
     }
 
     func start(services: ExtensionAppServices) {
@@ -121,6 +164,16 @@ final class ExtensionsModel {
         }
         if let selectedID, extensionNamed(selectedID) == nil { self.selectedID = nil }
         if selectedID == nil { selectedID = readyExtensions.first?.id ?? extensions.first?.id }
+        startBackgroundExtensions()
+    }
+
+    /// ADR-0012: an extension granted `background` runs from Loom's launch —
+    /// the same page its tab shows, loaded before anyone opens it.
+    private func startBackgroundExtensions() {
+        guard services != nil else { return }
+        for installed in readyExtensions where installed.effectivePermissions.background {
+            host(for: installed.id)
+        }
     }
 
     func inspect(_ folder: URL) throws -> ExtensionManifest {
@@ -216,18 +269,7 @@ final class ExtensionsModel {
             services: services,
             storage: ExtensionStorage(file: registry.storageFile(for: id)),
             secrets: secrets, http: http)
-        let theme = self.theme ?? services.currentTheme()
-        let host = ExtensionWebHost(
-            manifest: installed.manifest, root: installed.root,
-            userScript: BridgeScripts.userScript(boot: BridgeBoot(extensionId: id, theme: theme)),
-            inspectable: installed.isLinked,
-            dispatch: { [weak bridge] text in
-                guard let bridge else {
-                    return BridgeResponse.failure("", BridgeError(.internalError, "the extension was unloaded")).jsonText
-                }
-                return await bridge.handle(json: text)
-            })
-        host.onOpenExternal = { url in NSWorkspace.shared.open(url) }
+        let host = makeHost(installed, bridge: bridge, page: nil)
         // The first listener: the detector's baseline is now, or the first
         // change would only set it.
         if !needsSessionSnapshots, installed.effectivePermissions.allows(.sessions(.read)) {
@@ -241,20 +283,126 @@ final class ExtensionsModel {
         return host
     }
 
+    /// A web view for one of the extension's pages, answered by its bridge.
+    private func makeHost(_ installed: InstalledExtension, bridge: ExtensionBridge,
+                          page: String?) -> ExtensionWebHost {
+        let theme = self.theme ?? services?.currentTheme() ?? BridgeTheme(isLight: false, tokens: [:])
+        let host = ExtensionWebHost(
+            manifest: installed.manifest, root: installed.root,
+            userScript: BridgeScripts.userScript(boot: BridgeBoot(extensionId: installed.id, theme: theme)),
+            inspectable: installed.isLinked,
+            page: page,
+            dispatch: { [weak bridge] text in
+                guard let bridge else {
+                    return BridgeResponse.failure("", BridgeError(.internalError, "the extension was unloaded")).jsonText
+                }
+                return await bridge.handle(json: text)
+            })
+        host.onOpenExternal = { url in NSWorkspace.shared.open(url) }
+        return host
+    }
+
     private func tearDownHost(_ id: String) {
         hosts[id]?.tearDown()
         hosts[id] = nil
         bridges[id] = nil
         hostedFrom[id] = nil
+        alarms.clearAll(for: id)
+        statusItems.removeAll { $0.extensionID == id }
+        if overlay?.extensionID == id { closeOverlay(reason: nil) }
         if let pending = pendingLaunch, pending.extensionID == id {
             finishLaunch(BridgeLaunchResult(launched: false), for: pending)
         }
     }
 
+    /// Every page of the extension hears it: its view (or background page)
+    /// and its overlay, when one is up.
+    private func emit(_ event: BridgeEvent, to id: String) {
+        hosts[id]?.emit(event)
+        if let overlay, overlay.extensionID == id { overlay.host.emit(event) }
+    }
+
+    // MARK: - Alarms, status, overlay (ADR-0012)
+
+    func scheduleAlarm(_ name: String, at date: Date, for id: String) throws {
+        try alarms.schedule(name, at: date, for: id)
+    }
+
+    func clearAlarm(_ name: String, for id: String) {
+        alarms.clear(name, for: id)
+    }
+
+    func alarmList(for id: String) -> [BridgeAlarm] {
+        alarms.alarms(for: id)
+    }
+
+    func setStatus(_ status: BridgeStatusParams?, for manifest: ExtensionManifest) {
+        guard let status else {
+            statusItems.removeAll { $0.extensionID == manifest.id }
+            return
+        }
+        let item = ExtensionStatusItem(
+            extensionID: manifest.id, icon: manifest.icon ?? "puzzlepiece.extension",
+            text: status.text ?? "",
+            countdownTo: status.countdownTo.map { Date(timeIntervalSince1970: $0 / 1000) },
+            tooltip: status.tooltip ?? manifest.name)
+        if let index = statusItems.firstIndex(where: { $0.extensionID == manifest.id }) {
+            statusItems[index] = item
+        } else {
+            statusItems.append(item)
+        }
+    }
+
+    /// One overlay at a time, app-wide: another extension's gets `conflict`;
+    /// the same extension's replaces it.
+    func presentOverlay(page: String, until: Date, dismissLabel: String,
+                        for manifest: ExtensionManifest) throws {
+        if let overlay, overlay.extensionID != manifest.id {
+            throw BridgeError(.conflict, "\(overlay.extensionName) is already showing a page over Loom")
+        }
+        guard let installed = extensionNamed(manifest.id), let bridge = bridges[manifest.id] else {
+            throw BridgeError(.internalError, "the extension is not running")
+        }
+        if overlay != nil { closeOverlay(reason: .replaced) }
+        let host = makeHost(installed, bridge: bridge, page: page)
+        overlay = ExtensionOverlay(extensionID: manifest.id, extensionName: manifest.name, page: page,
+                                   until: until, dismissLabel: dismissLabel, host: host)
+        host.load()
+        overlayTimeout = Task { [weak self] in
+            let delay = max(0, until.timeIntervalSinceNow)
+            try? await Task.sleep(for: .milliseconds(Int64(delay * 1000)), clock: .continuous)
+            guard !Task.isCancelled else { return }
+            self?.closeOverlay(reason: .timeout)
+        }
+        // Loom in the background: the break still starts — say so.
+        if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
+    }
+
+    func dismissOverlay(for id: String) {
+        guard overlay?.extensionID == id else { return }
+        closeOverlay(reason: .extension)
+    }
+
+    /// The native button, or Escape.
+    func dismissOverlayByUser() {
+        closeOverlay(reason: .user)
+    }
+
+    /// `reason` nil: the extension itself is going away — nobody to tell.
+    private func closeOverlay(reason: BridgeEvent.OverlayDismissal?) {
+        guard let current = overlay else { return }
+        overlayTimeout?.cancel()
+        overlayTimeout = nil
+        current.host.tearDown()
+        overlay = nil
+        if let reason { hosts[current.extensionID]?.emit(.overlayDismissed(reason, page: current.page)) }
+    }
+
     /// A ⌘K command: shows the extension and hands it the command.
     func sendCommand(_ command: String, to id: String) {
         selectedID = id
-        host(for: id)?.emit(.command(command))
+        host(for: id)
+        emit(.command(command), to: id)
     }
 
     // MARK: - What flows to the pages
@@ -264,7 +412,7 @@ final class ExtensionsModel {
         self.theme = theme
         for (id, host) in hosts {
             host.updateUserScript(BridgeScripts.userScript(boot: BridgeBoot(extensionId: id, theme: theme)))
-            host.emit(.themeChanged(theme))
+            emit(.themeChanged(theme), to: id)
         }
     }
 
@@ -281,10 +429,10 @@ final class ExtensionsModel {
         }
         let events = detector.update(snapshot)
         guard !events.isEmpty else { return }
-        for (id, host) in hosts {
+        for id in hosts.keys {
             guard let permissions = bridges[id]?.permissions else { continue }
             for event in events where event.requirement.map(permissions.allows) ?? true {
-                host.emit(event)
+                emit(event, to: id)
             }
         }
     }

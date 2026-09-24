@@ -114,17 +114,25 @@ public enum BridgeMethod: String, CaseIterable, Sendable {
     case storageSet = "storage.set"
     case storageDelete = "storage.delete"
     case openExternal = "ui.openExternal"
+    case uiSetStatus = "ui.setStatus"
+    case uiPresentOverlay = "ui.presentOverlay"
+    case uiDismissOverlay = "ui.dismissOverlay"
+    case alarmsCreate = "alarms.create"
+    case alarmsClear = "alarms.clear"
+    case alarmsList = "alarms.list"
 
     public enum Requirement: Equatable, Sendable, CustomStringConvertible {
         case sessions(ExtensionPermissions.SessionAccess)
         case projects(ExtensionPermissions.ProjectAccess)
         case network
+        case ui(ExtensionPermissions.UIAccess)
 
         public var description: String {
             switch self {
             case .sessions(let access): return "sessions: \(access.rawValue)"
             case .projects(let access): return "projects: \(access.rawValue)"
             case .network: return "network"
+            case .ui(let access): return "ui: \(access.rawValue)"
             }
         }
     }
@@ -132,8 +140,11 @@ public enum BridgeMethod: String, CaseIterable, Sendable {
     public var requirement: Requirement? {
         switch self {
         case .info, .secretsGet, .secretsSet, .secretsDelete,
-             .storageGet, .storageSet, .storageDelete, .openExternal:
+             .storageGet, .storageSet, .storageDelete, .openExternal,
+             .alarmsCreate, .alarmsClear, .alarmsList:
             return nil
+        case .uiSetStatus: return .ui(.status)
+        case .uiPresentOverlay, .uiDismissOverlay: return .ui(.overlay)
         case .projectsList: return .projects(.read)
         case .sessionsList, .sessionsGet, .sessionsOpen: return .sessions(.read)
         case .sessionsLaunch: return .sessions(.launch)
@@ -296,6 +307,140 @@ public struct BridgeURLParams: Codable, Equatable, Sendable {
     public init(url: String) { self.url = url }
 }
 
+// MARK: - Alarms, status, overlay (ADR-0012)
+
+/// `alarms.create`: a named alarm, at an instant or after a delay. Loom's own
+/// timer fires it — a hidden page's timers are throttled; this one is not.
+public struct BridgeAlarmParams: Codable, Equatable, Sendable {
+    public var name: String
+    /// Milliseconds since 1970, as `Date.now()` gives them.
+    public var when: Double?
+    public var delayMs: Double?
+
+    public init(name: String, when: Double? = nil, delayMs: Double? = nil) {
+        self.name = name
+        self.when = when
+        self.delayMs = delayMs
+    }
+
+    public static let maxAlarms = 20
+    public static let minimumDelay: TimeInterval = 1
+    public static let maximumDelay: TimeInterval = 7 * 24 * 3600
+
+    /// The instant it fires, checked: a clean name, one of `when`/`delayMs`,
+    /// between a second and a week from `now`.
+    public func fireDate(now: Date) throws -> Date {
+        guard ExtensionManifest.matches(#"^[A-Za-z0-9._-]{1,64}$"#, name) else {
+            throw BridgeError(.invalidParams, "an alarm name is 1 to 64 letters, digits, . _ -")
+        }
+        let date: Date
+        switch (when, delayMs) {
+        case (let when?, nil): date = Date(timeIntervalSince1970: when / 1000)
+        case (nil, let delay?): date = now.addingTimeInterval(delay / 1000)
+        default: throw BridgeError(.invalidParams, "an alarm takes either when (ms since 1970) or delayMs")
+        }
+        let delay = date.timeIntervalSince(now)
+        guard delay.isFinite, delay >= Self.minimumDelay - 0.5, delay <= Self.maximumDelay else {
+            throw BridgeError(.invalidParams, "an alarm fires between one second and seven days from now")
+        }
+        return date
+    }
+}
+
+public struct BridgeAlarm: Codable, Equatable, Sendable {
+    public var name: String
+    /// Milliseconds since 1970.
+    public var scheduledTime: Double
+    public init(name: String, scheduledTime: Double) {
+        self.name = name
+        self.scheduledTime = scheduledTime
+    }
+}
+
+public struct BridgeAlarmList: Codable, Equatable, Sendable {
+    public var alarms: [BridgeAlarm]
+    public init(alarms: [BridgeAlarm]) { self.alarms = alarms }
+}
+
+public struct BridgeNameParams: Codable, Equatable, Sendable {
+    public var name: String
+    public init(name: String) { self.name = name }
+}
+
+/// `ui.setStatus`: a short text in Loom's top bar, and optionally an instant
+/// Loom counts down to itself — `🍅 12:34` ticks without the page's help.
+/// `text` null or absent clears it.
+public struct BridgeStatusParams: Codable, Equatable, Sendable {
+    public var text: String?
+    /// Milliseconds since 1970.
+    public var countdownTo: Double?
+    public var tooltip: String?
+
+    public init(text: String? = nil, countdownTo: Double? = nil, tooltip: String? = nil) {
+        self.text = text
+        self.countdownTo = countdownTo
+        self.tooltip = tooltip
+    }
+
+    public static let maxTextLength = 24
+    public static let maxTooltipLength = 120
+
+    public func validate() throws {
+        if let text, text.count > Self.maxTextLength || text.contains(where: \.isNewline) {
+            throw BridgeError(.invalidParams, "a status is one line of at most \(Self.maxTextLength) characters")
+        }
+        if let tooltip, tooltip.count > Self.maxTooltipLength {
+            throw BridgeError(.invalidParams, "a status tooltip is at most \(Self.maxTooltipLength) characters")
+        }
+        if let countdownTo, !countdownTo.isFinite {
+            throw BridgeError(.invalidParams, "countdownTo is milliseconds since 1970")
+        }
+    }
+
+    /// Whether this clears the status.
+    public var isClear: Bool { (text ?? "").isEmpty && countdownTo == nil }
+}
+
+/// `ui.presentOverlay`: one of the extension's pages over the whole window.
+/// Loom draws the frame and its dismiss button — never the extension — and
+/// takes the page down at `until`, or after an hour at most.
+public struct BridgeOverlayParams: Codable, Equatable, Sendable {
+    public var page: String
+    /// Milliseconds since 1970.
+    public var until: Double?
+    /// The dismiss button's label: "Skip break".
+    public var dismissLabel: String?
+
+    public init(page: String, until: Double? = nil, dismissLabel: String? = nil) {
+        self.page = page
+        self.until = until
+        self.dismissLabel = dismissLabel
+    }
+
+    public static let maximumDuration: TimeInterval = 3600
+    public static let maxLabelLength = 30
+
+    /// The checked request: the page is an .html file of the extension, the
+    /// end is capped at an hour from `now`, the label is short and not empty.
+    public func validated(now: Date) throws -> (page: String, until: Date, dismissLabel: String) {
+        guard ExtensionManifest.isValidEntry(page) else {
+            throw BridgeError(.invalidParams, "page must be an .html file of the extension (no leading /, no ..)")
+        }
+        let cap = now.addingTimeInterval(Self.maximumDuration)
+        var end = cap
+        if let until {
+            guard until.isFinite else { throw BridgeError(.invalidParams, "until is milliseconds since 1970") }
+            end = min(Date(timeIntervalSince1970: until / 1000), cap)
+            guard end > now else { throw BridgeError(.invalidParams, "until is already past") }
+        }
+        let label = (dismissLabel ?? "Dismiss").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty, label.count <= Self.maxLabelLength else {
+            throw BridgeError(.invalidParams, "dismissLabel is 1 to \(Self.maxLabelLength) characters")
+        }
+        return (page, end, label)
+    }
+}
+
 /// The empty success: `{ "ok": true }`.
 public struct BridgeOK: Codable, Equatable, Sendable {
     public var ok: Bool
@@ -319,6 +464,8 @@ public struct BridgeEvent: Codable, Equatable, Sendable {
     public static let sessionsChangedName = "sessions.changed"
     public static let sessionStateChangedName = "session.stateChanged"
     public static let commandName = "command"
+    public static let alarmName = "alarm"
+    public static let overlayDismissedName = "overlay.dismissed"
 
     public static func themeChanged(_ theme: BridgeTheme) -> BridgeEvent {
         BridgeEvent(name: themeChangedName, payload: (try? JSONValue.from(theme)) ?? .null)
@@ -338,6 +485,25 @@ public struct BridgeEvent: Codable, Equatable, Sendable {
 
     public static func command(_ id: String) -> BridgeEvent {
         BridgeEvent(name: commandName, payload: .object(["id": .string(id)]))
+    }
+
+    public static func alarm(_ name: String, scheduledTime: Date) -> BridgeEvent {
+        BridgeEvent(name: alarmName, payload: .object([
+            "name": .string(name),
+            "scheduledTime": .number((scheduledTime.timeIntervalSince1970 * 1000).rounded()),
+        ]))
+    }
+
+    /// Why an overlay went away: the user's button, its `until`, the
+    /// extension's own `ui.dismissOverlay`, or another overlay taking its place.
+    public enum OverlayDismissal: String, Sendable {
+        case user, timeout, `extension`, replaced
+    }
+
+    public static func overlayDismissed(_ reason: OverlayDismissal, page: String) -> BridgeEvent {
+        BridgeEvent(name: overlayDismissedName, payload: .object([
+            "reason": .string(reason.rawValue), "page": .string(page),
+        ]))
     }
 
     /// The permission a page needs to hear this event: session events carry

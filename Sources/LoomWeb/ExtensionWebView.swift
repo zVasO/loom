@@ -7,9 +7,13 @@ import WebKit
 /// place must never leave the previous page showing.
 public struct ExtensionWebView: NSViewRepresentable {
     let webView: WKWebView
+    /// Takes the keyboard once on screen — an overlay must not leave keystrokes
+    /// going to the terminal it covers.
+    let takesFocus: Bool
 
-    public init(webView: WKWebView) {
+    public init(webView: WKWebView, takesFocus: Bool = false) {
         self.webView = webView
+        self.takesFocus = takesFocus
     }
 
     public func makeNSView(context: Context) -> NSView {
@@ -35,5 +39,10 @@ public struct ExtensionWebView: NSViewRepresentable {
             webView.topAnchor.constraint(equalTo: container.topAnchor),
             webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
+        if takesFocus {
+            Task { @MainActor [webView] in
+                webView.window?.makeFirstResponder(webView)
+            }
+        }
     }
 }

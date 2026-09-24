@@ -19,6 +19,18 @@ public protocol ExtensionAppServices: AnyObject {
     /// Brings a live session on screen; false when there is none by that id.
     func openSession(id: String) -> Bool
     func openExternal(_ url: URL)
+
+    // ADR-0012 — what reaches past the extension's own view.
+    func scheduleAlarm(_ name: String, at date: Date, for extensionID: String) throws
+    func clearAlarm(_ name: String, for extensionID: String)
+    func alarms(for extensionID: String) -> [BridgeAlarm]
+    /// nil clears the extension's status.
+    func setStatus(_ status: BridgeStatusParams?, for manifest: ExtensionManifest)
+    /// Shows `page` over the whole window until `until`, the user's dismiss, or
+    /// the extension's; `conflict` while another extension's overlay is up.
+    func presentOverlay(page: String, until: Date, dismissLabel: String,
+                        for manifest: ExtensionManifest) throws
+    func dismissOverlay(for extensionID: String)
 }
 
 /// The native side of `window.loom` for one extension: decodes a request,
@@ -168,6 +180,38 @@ public final class ExtensionBridge {
                 throw BridgeError(.forbidden, "ui.openExternal is only accepted while the extension is on screen")
             }
             services.openExternal(url)
+            return .ok(request.id, BridgeOK())
+
+        case .alarmsCreate:
+            let params = try request.decodeParams(BridgeAlarmParams.self)
+            let date = try params.fireDate(now: Date())
+            try services.scheduleAlarm(params.name, at: date, for: id)
+            return .ok(request.id, BridgeAlarm(name: params.name,
+                                               scheduledTime: (date.timeIntervalSince1970 * 1000).rounded()))
+
+        case .alarmsClear:
+            let params = try request.decodeParams(BridgeNameParams.self)
+            services.clearAlarm(params.name, for: id)
+            return .ok(request.id, BridgeOK())
+
+        case .alarmsList:
+            return .ok(request.id, BridgeAlarmList(alarms: services.alarms(for: id)))
+
+        case .uiSetStatus:
+            let params = try request.decodeParams(BridgeStatusParams.self)
+            try params.validate()
+            services.setStatus(params.isClear ? nil : params, for: manifest)
+            return .ok(request.id, BridgeOK())
+
+        case .uiPresentOverlay:
+            let params = try request.decodeParams(BridgeOverlayParams.self)
+            let checked = try params.validated(now: Date())
+            try services.presentOverlay(page: checked.page, until: checked.until,
+                                        dismissLabel: checked.dismissLabel, for: manifest)
+            return .ok(request.id, BridgeOK())
+
+        case .uiDismissOverlay:
+            services.dismissOverlay(for: id)
             return .ok(request.id, BridgeOK())
         }
     }

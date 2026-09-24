@@ -322,6 +322,14 @@ struct ContentView: View {
 
             Spacer()
 
+            // ADR-0012: what extensions show in the top bar — a click opens them.
+            ForEach(model.extensions.statusItems) { item in
+                ExtensionStatusChip(item: item) {
+                    model.extensions.selectedID = item.extensionID
+                    tab = .extensions
+                }
+            }
+
             // v2 — Mission Control: the fleet at a glance (⌘G). A TOGGLE:
             // press again to return to the view you came from.
             BarIconButton(systemImage: "square.grid.2x2", isActive: tab == .overview) {

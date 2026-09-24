@@ -133,6 +133,11 @@ public enum LoomSDKScript {
     configurable: false,
   });
 
+  // A Date from any realm becomes milliseconds; anything else goes as is.
+  function toMillis(value) {
+    return Object.prototype.toString.call(value) === "[object Date]" ? value.getTime() : value;
+  }
+
   function encodeBody(init) {
     const headers = Object.assign({}, init.headers || {});
     let body = init.body;
@@ -204,6 +209,27 @@ public enum LoomSDKScript {
     },
     ui: {
       openExternal: (url) => call("ui.openExternal", { url: String(url) }).then(() => undefined),
+      setStatus: (status) => {
+        const params = status === null || status === undefined ? {}
+          : typeof status === "string" ? { text: status } : Object.assign({}, status);
+        if (params.countdownTo !== undefined) params.countdownTo = toMillis(params.countdownTo);
+        return call("ui.setStatus", params).then(() => undefined);
+      },
+      presentOverlay: (options) => {
+        const params = Object.assign({}, options || {});
+        if (params.until !== undefined) params.until = toMillis(params.until);
+        return call("ui.presentOverlay", params).then(() => undefined);
+      },
+      dismissOverlay: () => call("ui.dismissOverlay").then(() => undefined),
+    },
+    alarms: {
+      create: (name, options) => {
+        const params = Object.assign({ name: String(name) }, options || {});
+        if (params.when !== undefined) params.when = toMillis(params.when);
+        return call("alarms.create", params);
+      },
+      clear: (name) => call("alarms.clear", { name: String(name) }).then(() => undefined),
+      list: () => call("alarms.list").then((result) => result.alarms),
     },
   };
 
@@ -213,6 +239,7 @@ public enum LoomSDKScript {
   Object.freeze(loom.secrets);
   Object.freeze(loom.storage);
   Object.freeze(loom.ui);
+  Object.freeze(loom.alarms);
   Object.defineProperty(window, "loom", { value: Object.freeze(loom), writable: false, configurable: false });
 })();
 """#

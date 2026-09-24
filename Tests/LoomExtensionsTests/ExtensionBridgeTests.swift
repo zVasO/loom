@@ -33,6 +33,22 @@ final class FakeServices: ExtensionAppServices {
         return true
     }
     func openExternal(_ url: URL) { external.append(url) }
+
+    var scheduled: [String: Date] = [:]
+    var statuses: [BridgeStatusParams?] = []
+    var overlays: [(page: String, until: Date, label: String)] = []
+    var overlayDismissals = 0
+
+    func scheduleAlarm(_ name: String, at date: Date, for extensionID: String) throws { scheduled[name] = date }
+    func clearAlarm(_ name: String, for extensionID: String) { scheduled[name] = nil }
+    func alarms(for extensionID: String) -> [BridgeAlarm] {
+        scheduled.map { BridgeAlarm(name: $0.key, scheduledTime: $0.value.timeIntervalSince1970 * 1000) }
+    }
+    func setStatus(_ status: BridgeStatusParams?, for manifest: ExtensionManifest) { statuses.append(status) }
+    func presentOverlay(page: String, until: Date, dismissLabel: String, for manifest: ExtensionManifest) throws {
+        overlays.append((page, until, dismissLabel))
+    }
+    func dismissOverlay(for extensionID: String) { overlayDismissals += 1 }
 }
 
 @MainActor
@@ -152,6 +168,54 @@ struct ExtensionBridgeTests {
         let response = await call(makeBridge(FakeServices()), "http.fetch",
                                   .object(["url": .string("https://example.com/")]))
         #expect(response.error?.code == .forbidden)
+    }
+
+    @Test("status and overlay are held to the ui grant; alarms need none")
+    func interfaceHorsAutorisation() async {
+        let services = FakeServices()
+        let bare = makeBridge(services, permissions: .empty)
+        #expect(await call(bare, "ui.setStatus", .object(["text": .string("🍅")])).error?.code == .forbidden)
+        #expect(await call(bare, "ui.presentOverlay", .object(["page": .string("break.html")])).error?.code == .forbidden)
+        #expect(await call(bare, "ui.dismissOverlay").error?.code == .forbidden)
+        let alarm = await call(bare, "alarms.create", .object(["name": .string("tick"), "delayMs": .number(60_000)]))
+        #expect(alarm.error == nil)
+        #expect(services.scheduled["tick"] != nil)
+        #expect(services.statuses.isEmpty)
+        #expect(services.overlays.isEmpty)
+    }
+
+    @Test("a status with nothing to show clears it; a countdown goes through")
+    func statut() async {
+        let services = FakeServices()
+        let bridge = makeBridge(services, permissions: ExtensionPermissions(ui: [.status]))
+        _ = await call(bridge, "ui.setStatus", .object(["text": .string("🍅"), "countdownTo": .number(1_800_000_000_000)]))
+        _ = await call(bridge, "ui.setStatus", .object([:]))
+        #expect(services.statuses.count == 2)
+        #expect(services.statuses.first??.countdownTo == 1_800_000_000_000)
+        #expect(services.statuses.last! == nil, "an empty status clears")
+        let tooLong = await call(bridge, "ui.setStatus", .object(["text": .string(String(repeating: "x", count: 40))]))
+        #expect(tooLong.error?.code == .invalidParams)
+    }
+
+    @Test("an overlay is an .html page of the extension, capped at an hour, with Loom's label")
+    func ecranDePremierPlan() async {
+        let services = FakeServices()
+        let bridge = makeBridge(services, permissions: ExtensionPermissions(ui: [.overlay]))
+        let farFuture = (Date().timeIntervalSince1970 + 5 * 3600) * 1000
+        let shown = await call(bridge, "ui.presentOverlay", .object([
+            "page": .string("break.html"), "until": .number(farFuture), "dismissLabel": .string("Skip break"),
+        ]))
+        #expect(shown.error == nil)
+        let overlay = services.overlays.first
+        #expect(overlay?.page == "break.html")
+        #expect(overlay?.label == "Skip break")
+        #expect((overlay?.until.timeIntervalSinceNow ?? 0) <= 3600 + 1, "capped at an hour")
+        for page in ["../x.html", "/break.html", "app.js", ".hidden.html"] {
+            #expect(await call(bridge, "ui.presentOverlay", .object(["page": .string(page)])).error?.code
+                    == .invalidParams, "\(page)")
+        }
+        #expect(await call(bridge, "ui.dismissOverlay").error == nil)
+        #expect(services.overlayDismissals == 1)
     }
 
     @Test("openExternal takes https only, and only from the extension on screen")
