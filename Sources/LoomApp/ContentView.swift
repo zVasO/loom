@@ -309,27 +309,17 @@ struct ContentView: View {
 
             // v2 — Mission Control: the fleet at a glance (⌘G). A TOGGLE:
             // press again to return to the view you came from.
-            Button {
+            BarIconButton(systemImage: "square.grid.2x2", isActive: tab == .overview) {
                 if tab == .overview {
                     tab = tabBeforeOverview
                 } else {
                     tabBeforeOverview = tab
                     tab = .overview
                 }
-            } label: {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 12))
-                    .foregroundStyle(tab == .overview ? DefaultTheme.accent
-                                                      : DefaultTheme.secondaryText)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(tab == .overview ? DefaultTheme.surfaceRaised : .clear,
-                                in: RoundedRectangle(cornerRadius: 7))
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .keyboardShortcut(KeyEquivalent(keyMissionControl.first ?? "g"), modifiers: .command)
             .help("Mission Control — every live session (⌘\(keyMissionControl.uppercased()))")
-            GhostButton(systemImage: "globe") {
+            BarIconButton(systemImage: "globe") {
                 // WEB-03: the browser is born INSIDE the current session's stack.
                 var parent: SessionID?
                 if case .session(let id) = selected { parent = id }
@@ -337,6 +327,7 @@ struct ContentView: View {
                 tab = .sessions
                 selected = .webPane(pane)
             }
+            .help("New browser pane in the current session's stack")
             Button {
                 paletteShown = true
             } label: {
@@ -350,36 +341,16 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .keyboardShortcut(KeyEquivalent(keyPalette.first ?? "k"), modifiers: .command)
             // Every claude session on this machine, not just Loom's own.
-            Button {
-                usageShown = true
-            } label: {
-                Image(systemName: "dollarsign")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .contentShape(Rectangle())
-                    .hoverBrightness(0.1)
-            }
-            .buttonStyle(.plain)
-            .help("Usage & estimated costs")
-            Button {
+            BarIconButton(systemImage: "dollarsign") { usageShown = true }
+                .help("Usage & estimated costs")
+            BarIconButton(systemImage: "gearshape", isActive: tab == .settings) {
                 if tab == .settings {
                     tab = tabBeforeSettings
                 } else {
                     tabBeforeSettings = tab
                     tab = .settings
                 }
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12))
-                    .foregroundStyle(tab == .settings ? DefaultTheme.accent
-                                                      : DefaultTheme.secondaryText)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(tab == .settings ? DefaultTheme.surfaceRaised : .clear,
-                                in: RoundedRectangle(cornerRadius: 7))
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .keyboardShortcut(",", modifiers: .command)
             .help("Settings (⌘,)")
         }

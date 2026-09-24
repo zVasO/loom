@@ -152,6 +152,40 @@ public struct GhostButton: View {
     }
 }
 
+/// Icon button of the top bar (Mission Control, browser, usage, settings):
+/// one size and one hover for all of them. A transparent glyph shows no
+/// brightness change, so the hover raises a surface and lights the glyph,
+/// like the tabs beside it. `isActive`: the screen it opens is showing.
+public struct BarIconButton: View {
+    let systemImage: String
+    let isActive: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    public init(systemImage: String, isActive: Bool = false, action: @escaping () -> Void) {
+        self.systemImage = systemImage
+        self.isActive = isActive
+        self.action = action
+    }
+
+    public var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isActive ? DefaultTheme.accent
+                                 : hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
+                .frame(width: 30, height: 26)
+                .background(isActive ? DefaultTheme.surfaceRaised
+                            : hovered ? DefaultTheme.surfaceRaised.opacity(0.7) : .clear,
+                            in: RoundedRectangle(cornerRadius: 7))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
+    }
+}
+
 /// Dot + status label (● working).
 public struct StatusLabel: View {
     let state: SessionState
