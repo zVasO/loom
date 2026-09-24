@@ -56,13 +56,15 @@ struct BridgeProtocolTests {
         }
     }
 
-    @Test("an alarm fires between a second and a week from now, at an instant or after a delay")
+    @Test("an alarm fires within a week, at an instant or after a delay; too soon or past fires in a second")
     func alarmes() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let later = try BridgeAlarmParams(name: "phase-end", when: (now.timeIntervalSince1970 + 60) * 1000).fireDate(now: now)
         #expect(later == now.addingTimeInterval(60))
         #expect(try BridgeAlarmParams(name: "t", delayMs: 5000).fireDate(now: now) == now.addingTimeInterval(5))
-        #expect(throws: BridgeError.self) { try BridgeAlarmParams(name: "t", delayMs: 10).fireDate(now: now) }
+        #expect(try BridgeAlarmParams(name: "t", delayMs: 10).fireDate(now: now) == now.addingTimeInterval(1))
+        #expect(try BridgeAlarmParams(name: "t", when: (now.timeIntervalSince1970 - 30) * 1000).fireDate(now: now)
+                == now.addingTimeInterval(1), "a page re-creating an alarm that just passed")
         #expect(throws: BridgeError.self) { try BridgeAlarmParams(name: "t", delayMs: 8 * 24 * 3600 * 1000).fireDate(now: now) }
         #expect(throws: BridgeError.self) { try BridgeAlarmParams(name: "t").fireDate(now: now) }
         #expect(throws: BridgeError.self) {

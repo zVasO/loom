@@ -285,6 +285,8 @@ struct ExtensionOverlayView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
+                // The traffic lights float over this corner (hidden title bar).
+                Spacer().frame(width: 70)
                 Image(systemName: "puzzlepiece.extension")
                     .foregroundStyle(DefaultTheme.accent)
                 Text(overlay.extensionName)
@@ -303,7 +305,14 @@ struct ExtensionOverlayView: View {
             .frame(height: 44)
             .background(DefaultTheme.background)
             Divider().overlay(DefaultTheme.cardBorder)
-            ExtensionWebView(webView: overlay.host.webView, takesFocus: true)
+            if let error = overlay.host.loadError {
+                Text(error)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ExtensionWebView(webView: overlay.host.webView, takesFocus: true)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DefaultTheme.contentBackground)

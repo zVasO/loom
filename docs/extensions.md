@@ -211,8 +211,8 @@ await loom.alarms.create("phase-end", { when: Date.now() + 25 * 60_000 });
 loom.on("alarm", ({ name }) => { if (name === "phase-end") endPhase(); });
 ```
 
-Les alarmes vivent entre une seconde et sept jours (vingt au plus par
-extension) et disparaissent quand Loom quitte : au chargement, recréez-les
+Les alarmes vivent sept jours au plus (vingt par extension ; une échéance déjà
+passée ou à moins d'une seconde part dans la seconde) et disparaissent quand Loom quitte : au chargement, recréez-les
 depuis votre propre état (`loom.storage`), comme le fait l'exemple Pomodoro.
 
 ### La barre du haut
@@ -238,7 +238,9 @@ nom de l'extension, le temps restant et le bouton de fermeture
 (`dismissLabel`, Échap aussi). **L'extension ne peut ni cacher ni désactiver ce
 bouton.** L'écran disparaît à `until`, et au plus tard une heure après son
 ouverture. Il n'y en a qu'un à la fois pour toute l'app : celui d'une autre
-extension renvoie `conflict`. Les agents continuent de travailler dessous.
+extension renvoie `conflict`. Après une fermeture par l'utilisateur, l'extension
+ne peut pas rouvrir d'écran pendant deux minutes (`conflict`) ; une page qui
+n'existe pas renvoie `notFound`. Les agents continuent de travailler dessous.
 
 ### Le thème
 

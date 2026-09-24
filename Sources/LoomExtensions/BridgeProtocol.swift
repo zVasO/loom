@@ -328,7 +328,8 @@ public struct BridgeAlarmParams: Codable, Equatable, Sendable {
     public static let maximumDelay: TimeInterval = 7 * 24 * 3600
 
     /// The instant it fires, checked: a clean name, one of `when`/`delayMs`,
-    /// between a second and a week from `now`.
+    /// at most a week from `now`. Sooner than a second — or already past, as
+    /// when a page re-creates its alarms from stored state — fires in a second.
     public func fireDate(now: Date) throws -> Date {
         guard ExtensionManifest.matches(#"^[A-Za-z0-9._-]{1,64}$"#, name) else {
             throw BridgeError(.invalidParams, "an alarm name is 1 to 64 letters, digits, . _ -")
@@ -340,10 +341,10 @@ public struct BridgeAlarmParams: Codable, Equatable, Sendable {
         default: throw BridgeError(.invalidParams, "an alarm takes either when (ms since 1970) or delayMs")
         }
         let delay = date.timeIntervalSince(now)
-        guard delay.isFinite, delay >= Self.minimumDelay - 0.5, delay <= Self.maximumDelay else {
-            throw BridgeError(.invalidParams, "an alarm fires between one second and seven days from now")
+        guard delay.isFinite, delay <= Self.maximumDelay else {
+            throw BridgeError(.invalidParams, "an alarm fires at most seven days from now")
         }
-        return date
+        return delay < Self.minimumDelay ? now.addingTimeInterval(Self.minimumDelay) : date
     }
 }
 

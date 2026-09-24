@@ -39,8 +39,9 @@
     const previous = state;
     state = next;
     await loom.storage.set(KEY_STATE, state);
-    await syncAlarm();
-    await syncStatus();
+    // A refused alarm or status must not leave the rest undone.
+    await syncAlarm().catch((error) => console.warn("[pomodoro] alarm", error));
+    await syncStatus().catch((error) => console.warn("[pomodoro] status", error));
     const onBreak = Pomodoro.isBreak(state.phase) && state.endsAt !== null;
     if (onBreak && previous.endsAt !== state.endsAt) {
       await presentBreak();

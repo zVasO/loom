@@ -120,6 +120,13 @@ final class ExtensionsModel {
     @ObservationIgnored private var theme: BridgeTheme?
     @ObservationIgnored private let alarms: ExtensionAlarmScheduler
     @ObservationIgnored private var overlayTimeout: Task<Void, Never>?
+    /// When the user last dismissed each extension's overlay: it may not come
+    /// straight back — an extension never keeps the user out of Loom.
+    @ObservationIgnored private var userDismissedAt: [String: Date] = [:]
+    /// Where the keyboard was before an overlay took it, given back after.
+    @ObservationIgnored private weak var focusBeforeOverlay: NSResponder?
+    @ObservationIgnored private weak var windowBeforeOverlay: NSWindow?
+    static let overlayCooldown: TimeInterval = 120
 
     init(directory: URL, secrets: any SecretStore = KeychainSecretStore()) {
         self.secrets = secrets
@@ -360,11 +367,28 @@ final class ExtensionsModel {
         if let overlay, overlay.extensionID != manifest.id {
             throw BridgeError(.conflict, "\(overlay.extensionName) is already showing a page over Loom")
         }
+        if let dismissed = userDismissedAt[manifest.id],
+           Date().timeIntervalSince(dismissed) < Self.overlayCooldown {
+            throw BridgeError(.conflict, "the user dismissed this extension's overlay less than two minutes ago")
+        }
         guard let installed = extensionNamed(manifest.id), let bridge = bridges[manifest.id] else {
             throw BridgeError(.internalError, "the extension is not running")
         }
-        if overlay != nil { closeOverlay(reason: .replaced) }
+        let resolver = ExtensionFileResolver(extensionID: installed.id, root: installed.root,
+                                             entry: installed.manifest.entry)
+        guard resolver.resolve(ExtensionWebPolicy.entryURL(for: installed.id, entry: page)) != nil else {
+            throw BridgeError(.notFound, "\(page) is not a page of the extension")
+        }
+        let replaced = overlay?.page
+        if overlay != nil {
+            closeOverlay(reason: .replaced, restoringFocus: false)
+        } else {
+            windowBeforeOverlay = NSApp.keyWindow
+            focusBeforeOverlay = NSApp.keyWindow?.firstResponder
+        }
         let host = makeHost(installed, bridge: bridge, page: page)
+        // Held until the new page loads: it learns what it replaced.
+        if let replaced { host.emit(.overlayDismissed(.replaced, page: replaced)) }
         overlay = ExtensionOverlay(extensionID: manifest.id, extensionName: manifest.name, page: page,
                                    until: until, dismissLabel: dismissLabel, host: host)
         host.load()
@@ -385,17 +409,28 @@ final class ExtensionsModel {
 
     /// The native button, or Escape.
     func dismissOverlayByUser() {
+        if let id = overlay?.extensionID { userDismissedAt[id] = Date() }
         closeOverlay(reason: .user)
     }
 
     /// `reason` nil: the extension itself is going away — nobody to tell.
-    private func closeOverlay(reason: BridgeEvent.OverlayDismissal?) {
+    private func closeOverlay(reason: BridgeEvent.OverlayDismissal?, restoringFocus: Bool = true) {
         guard let current = overlay else { return }
         overlayTimeout?.cancel()
         overlayTimeout = nil
         current.host.tearDown()
         overlay = nil
         if let reason { hosts[current.extensionID]?.emit(.overlayDismissed(reason, page: current.page)) }
+        // The terminal the user was typing in gets the keyboard back.
+        if restoringFocus, let window = windowBeforeOverlay {
+            if let view = focusBeforeOverlay as? NSView, view.window === window {
+                window.makeFirstResponder(view)
+            } else {
+                window.makeFirstResponder(nil)
+            }
+            windowBeforeOverlay = nil
+            focusBeforeOverlay = nil
+        }
     }
 
     /// A ⌘K command: shows the extension and hands it the command.
