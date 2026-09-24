@@ -168,7 +168,7 @@ struct PRFilterEditorSheet: View {
                 .foregroundStyle(DefaultTheme.secondaryText)
             field("Name", text: $name, mono: false)
             field("Query", text: $query, mono: true)
-            Text("GitHub's search qualifiers, the ones the search box on github.com takes. gh adds the repository and is:pr itself; name a state (is:merged…) to look beyond open PRs.")
+            Text("GitHub's search qualifiers, the ones the search box on github.com takes. is:pr and the repository are implied — keep them or leave them out; name a state (is:merged…) to look beyond open PRs.")
                 .font(.system(size: 11))
                 .foregroundStyle(DefaultTheme.secondaryText)
             VStack(alignment: .leading, spacing: 3) {
@@ -246,7 +246,7 @@ struct PRFilterEditorSheet: View {
         validation = nil
         if let editingID, var existing = model.customPRFilters.first(where: { $0.id == editingID }) {
             existing.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            existing.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            existing.query = PRFilter.normalizedQuery(query)
             model.updateCustomPRFilter(existing)
             model.selectedPRFilterID = existing.id
         } else {
