@@ -1487,14 +1487,15 @@ struct ProjectReorderDelegate: DropDelegate {
 /// A session card being dragged, and the group it belongs to.
 struct DraggedSession: Equatable {
     let id: SessionID
-    let group: ProjectID?
+    /// The sidebar group the card was taken from (`SessionsView.groupKey`).
+    let group: String
 }
 
 /// Same live reorder as the projects', confined to one group: over another
 /// project's card the drop is refused and nothing moves.
 struct SessionReorderDelegate: DropDelegate {
     let target: SessionID
-    let group: ProjectID?
+    let group: String
     @Binding var dragged: DraggedSession?
     let move: (SessionID) -> Void
 
@@ -1731,6 +1732,22 @@ struct SessionsView: View {
     @State private var collapsedGroups: Set<String> = []
     /// The card being dragged into a new place, and the group it may not leave.
     @State private var draggedSession: DraggedSession?
+    /// Sessions born in the PR tab filed under CODE REVIEW, below the
+    /// projects — a choice, not a rule: off, they sit with their project.
+    @AppStorage("loom.sessions.groupReviews") private var groupReviews = true
+    @AppStorage("loom.sessions.reviewsFolded") private var reviewsFolded = false
+
+    /// A sidebar group's identity: its fold state and the drag confinement.
+    private static func groupKey(_ projectID: ProjectID?, review: Bool = false) -> String {
+        (review ? "review:" : "project:") + (projectID?.rawValue.uuidString ?? "none")
+    }
+
+    /// The project's review cards, for the CODE REVIEW section.
+    private struct ReviewGroup: Identifiable {
+        let project: ProjectRecord
+        let items: [AppModel.SessionItem]
+        var id: ProjectID { project.id }
+    }
     /// Close requested but not yet confirmed: every close cross goes through here.
     @State private var pendingClose: PendingClose?
 
@@ -1943,19 +1960,36 @@ struct SessionsView: View {
                     }
                 }
                 let dormant = model.dormantSessions
+                // Filed apart only when the user wants it; a terminal follows
+                // its parent session wherever that one is shown.
+                let reviewIDs = groupReviews ? model.codeReviewSessionIDs : []
+                let isReview = { (item: AppModel.SessionItem) -> Bool in
+                    reviewIDs.contains(item.id) || item.parentID.map(reviewIDs.contains) == true
+                }
+                let byProject = Dictionary(uniqueKeysWithValues: model.projects.map {
+                    ($0.id, stackItems(for: $0.id, dormant: dormant))
+                })
                 ForEach(model.projects, id: \.id) { project in
-                    let items = stackItems(for: project.id, dormant: dormant)
+                    let items = (byProject[project.id] ?? []).filter { !isReview($0) }
                     if !items.isEmpty {
-                        group(project.name.uppercased(), projectID: project.id) {
-                            projectStacks(items: items, group: project.id)
+                        group(project.name.uppercased(), projectID: project.id,
+                              key: Self.groupKey(project.id)) {
+                            projectStacks(items: items, group: Self.groupKey(project.id))
                         }
                     }
                 }
                 let orphans = stackItems(for: nil, dormant: dormant)
                 if !orphans.isEmpty {
-                    group("NO PROJECT", projectID: nil) {
-                        projectStacks(items: orphans, group: nil)
+                    group("NO PROJECT", projectID: nil, key: Self.groupKey(nil)) {
+                        projectStacks(items: orphans, group: Self.groupKey(nil))
                     }
+                }
+                let reviewGroups = model.projects.compactMap { project -> ReviewGroup? in
+                    let items = (byProject[project.id] ?? []).filter(isReview)
+                    return items.isEmpty ? nil : ReviewGroup(project: project, items: items)
+                }
+                if !reviewGroups.isEmpty {
+                    codeReviewSection(reviewGroups)
                 }
             }
             .padding(12)
@@ -2001,10 +2035,10 @@ struct SessionsView: View {
 
     /// The reference's stack: the session and its children (terminals, webs)
     /// form ONE joined block; each stack is separated from the next.
-    /// `group`: the project the cards belong to (nil: no project) — a card
-    /// dragged over another group's is refused, it never leaves its own.
+    /// `group`: the sidebar group the cards are shown in (`groupKey`) — a
+    /// card dragged over another group's is refused, it never leaves its own.
     @ViewBuilder
-    private func projectStacks(items: [AppModel.SessionItem], group: ProjectID?) -> some View {
+    private func projectStacks(items: [AppModel.SessionItem], group: String) -> some View {
         // Grouped once by parent instead of rescanning all three lists per
         // stack: the sidebar rebuilds on every session update.
         let childrenByParent = Dictionary(grouping: items, by: \.parentID)
@@ -2258,15 +2292,18 @@ struct SessionsView: View {
 
     /// A collapsible group: clickable chevron + title (display only, the
     /// sessions keep running); tightened gap between the stacks.
+    /// `key`: what the fold is remembered by — a project's name can title a
+    /// group in the projects and another in CODE REVIEW.
     @ViewBuilder
-    private func group(_ title: String, projectID: ProjectID?,
+    private func group(_ title: String, projectID: ProjectID?, key: String? = nil,
                        @ViewBuilder content: () -> some View) -> some View {
-        let collapsed = collapsedGroups.contains(title)
+        let foldKey = key ?? title
+        let collapsed = collapsedGroups.contains(foldKey)
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) {
-                        if collapsed { collapsedGroups.remove(title) } else { collapsedGroups.insert(title) }
+                        if collapsed { collapsedGroups.remove(foldKey) } else { collapsedGroups.insert(foldKey) }
                     }
                 } label: {
                     HStack(spacing: 6) {
@@ -2293,6 +2330,54 @@ struct SessionsView: View {
             .padding(.horizontal, 2)
             if !collapsed {
                 content()
+            }
+        }
+    }
+
+    /// The sessions born in the PR tab, below a separator: one fold for the
+    /// whole section, then one group per project, as above.
+    private func codeReviewSection(_ groups: [ReviewGroup]) -> some View {
+        let count = groups.reduce(0) { $0 + $1.items.filter { !$0.isShell }.count }
+        return VStack(alignment: .leading, spacing: 10) {
+            Divider().overlay(DefaultTheme.cardBorder)
+                .padding(.top, 4)
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { reviewsFolded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .rotationEffect(.degrees(reviewsFolded ? -90 : 0))
+                    Image(systemName: "checklist")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("CODE REVIEW")
+                        .font(.system(size: 10, weight: .semibold))
+                        .kerning(0.8)
+                    Text("\(count)")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(DefaultTheme.surfaceRaised, in: Capsule())
+                    Spacer()
+                }
+                .foregroundStyle(DefaultTheme.groupHeader)
+                .contentShape(Rectangle())
+                .hoverBrightness(0.2)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 2)
+            .help("Sessions opened from the PRs tab")
+            .contextMenu {
+                Button("Show them with their projects") { groupReviews = false }
+            }
+            if !reviewsFolded {
+                ForEach(groups) { review in
+                    group(review.project.name.uppercased(), projectID: nil,
+                          key: Self.groupKey(review.project.id, review: true)) {
+                        projectStacks(items: review.items,
+                                      group: Self.groupKey(review.project.id, review: true))
+                    }
+                }
             }
         }
     }

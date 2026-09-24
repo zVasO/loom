@@ -1076,6 +1076,28 @@ public final class AppModel {
         return known ? id : nil
     }
 
+    /// The sessions born in the PR tab — review and guide sessions — that the
+    /// sidebar can file under CODE REVIEW: the ones the PR tab attached to a
+    /// PR, and any session wearing a "PR #n" badge (the tab stamps one on
+    /// both kinds, and a user can put one on a session of their own).
+    public var codeReviewSessionIDs: Set<SessionID> {
+        // Read without caching: a getter that writes observed state runs
+        // inside a view update.
+        let map = prSessionMap ?? (UserDefaults.standard.dictionary(forKey: "loom.pr.sessions")
+                                   as? [String: String]) ?? [:]
+        var ids = Set(map.values.compactMap { UUID(uuidString: $0) }.map { SessionID($0) })
+        for item in sessions where Self.wearsPRBadge(item.badges) { ids.insert(item.id) }
+        for record in allRecords where Self.wearsPRBadge(record.badges) { ids.insert(record.id) }
+        return ids
+    }
+
+    /// "PR #648" — the badge the PR tab gives its sessions.
+    static func wearsPRBadge(_ badges: [String]) -> Bool {
+        badges.contains { badge in
+            badge.hasPrefix("PR #") && Int(badge.dropFirst(4)) != nil
+        }
+    }
+
     private func rememberReviewSession(_ id: SessionID, forPR number: Int, in projectID: ProjectID) {
         var map = (UserDefaults.standard.dictionary(forKey: "loom.pr.sessions")
                    as? [String: String]) ?? [:]
