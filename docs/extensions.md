@@ -2,10 +2,15 @@
 
 Une extension est une page web (HTML, CSS, JavaScript — n'importe quel
 framework, avec ou sans build) que Loom affiche dans l'onglet **Extensions** et
-qui parle à Loom par `window.loom`. Exemple complet et commenté :
-[`Examples/extensions/jira-board/`](../Examples/extensions/jira-board/) — un
-board Jira qui démarre une session depuis un ticket. Le pourquoi et les limites
-de sécurité : [ADR-0011](adr/0011-extensions-web-isolees.md).
+qui parle à Loom par `window.loom`. Deux exemples complets et commentés :
+- [`Examples/extensions/jira-board/`](../Examples/extensions/jira-board/) — un
+  board Jira qui démarre une session depuis un ticket ;
+- [`Examples/extensions/pomodoro/`](../Examples/extensions/pomodoro/) — un
+  Pomodoro qui tourne en arrière-plan, décompte dans la barre du haut et
+  couvre Loom pendant les pauses.
+
+Le pourquoi et les limites de sécurité : [ADR-0011](adr/0011-extensions-web-isolees.md)
+et [ADR-0012](adr/0012-extensions-arriere-plan-alarmes-barre-et-ecran.md).
 
 ## En cinq minutes
 
@@ -84,9 +89,12 @@ tourner ; en retirer n'en demande pas.
 | `"sessions": ["read"]` | `loom.sessions.list/get/open` et les événements de sessions. |
 | `"sessions": ["launch"]` | `loom.sessions.launch` — l'utilisateur confirme chaque lancement. |
 | `"projects": ["read"]` | `loom.projects.list` : identifiants et noms des projets (jamais leurs chemins). |
+| `"background": true` | La page d'entrée est chargée au lancement de Loom, sans ouvrir l'onglet — c'est la même page que l'onglet affiche. |
+| `"ui": ["status"]` | `loom.ui.setStatus` : un texte court dans la barre du haut de Loom. |
+| `"ui": ["overlay"]` | `loom.ui.presentOverlay` : une page de l'extension par-dessus toute la fenêtre. |
 
 Sans permission : le stockage de l'extension (`loom.storage`), ses secrets
-(`loom.secrets`), `loom.info`, `loom.ui.openExternal`.
+(`loom.secrets`), ses alarmes (`loom.alarms`), `loom.info`, `loom.ui.openExternal`.
 
 ## Ce que la page peut faire, et ce qu'elle ne peut pas
 
@@ -137,6 +145,11 @@ dont `code` vaut `invalidRequest`, `unknownMethod`, `invalidParams`,
 | `loom.secrets.get/set/delete(key[, value])` | — | Trousseau macOS, propre à l'extension. Clé : 1–64 caractères `A-Z a-z 0-9 . _ -` ; valeur ≤ 8 Ko. |
 | `loom.storage.get/set/delete(key[, value])` | — | Toute valeur JSON ; 1 Mo au total pour l'extension. |
 | `loom.ui.openExternal(url)` | — | Ouvre une URL `https://` dans le navigateur de l'utilisateur. |
+| `loom.ui.setStatus(text \| { text, countdownTo, tooltip } \| null)` | `ui: status` | Le statut de l'extension dans la barre du haut ; `null` l'efface. |
+| `loom.ui.presentOverlay({ page, until?, dismissLabel? })` | `ui: overlay` | Affiche `page` par-dessus Loom. |
+| `loom.ui.dismissOverlay()` | `ui: overlay` | Retire l'écran de l'extension. |
+| `loom.alarms.create(name, { when \| delayMs })` | — | Une alarme de Loom ; en recréer une du même nom la remplace. |
+| `loom.alarms.clear(name)`, `loom.alarms.list()` | — | Annuler, lister. |
 | `loom.on(event, callback)` | selon l'événement | Renvoie une fonction de désabonnement. |
 | `loom.call(method, params)` | — | L'appel brut, pour une méthode que le SDK n'enveloppe pas. |
 
@@ -183,7 +196,49 @@ revient telle quelle. Un corps non textuel revient en base64
 | `sessions.changed` | `{ sessions: [Session] }` — à chaque changement (titre, badge, session ouverte ou fermée) | `sessions: read` |
 | `theme.changed` | `{ isLight, tokens }` | — |
 | `command` | `{ id }` — une commande du manifeste lancée depuis ⌘K | — |
+| `alarm` | `{ name, scheduledTime }` — une alarme de `loom.alarms` | — |
+| `overlay.dismissed` | `{ reason, page }` — `user` (le bouton de Loom ou Échap), `timeout`, `extension`, `replaced` | `ui: overlay` |
 | `*` | `(name, payload)` — tous | — |
+
+### Tourner en arrière-plan, et garder l'heure
+
+Avec `"background": true`, la page d'entrée tourne dès le lancement de Loom.
+Quand son onglet n'est pas affiché, WebKit ralentit ses `setTimeout` et
+`setInterval` : pour tout ce qui doit arriver à l'heure, utilisez une alarme.
+
+```js
+await loom.alarms.create("phase-end", { when: Date.now() + 25 * 60_000 });
+loom.on("alarm", ({ name }) => { if (name === "phase-end") endPhase(); });
+```
+
+Les alarmes vivent entre une seconde et sept jours (vingt au plus par
+extension) et disparaissent quand Loom quitte : au chargement, recréez-les
+depuis votre propre état (`loom.storage`), comme le fait l'exemple Pomodoro.
+
+### La barre du haut
+
+```js
+await loom.ui.setStatus({ text: "🍅", countdownTo: endsAt, tooltip: "Focus until 10:25" });
+await loom.ui.setStatus(null); // efface
+```
+
+Loom décompte `countdownTo` lui-même (`🍅 12:34`) : inutile de rappeler
+`setStatus` chaque seconde. Un clic sur le statut ouvre l'extension.
+
+### L'écran de premier plan
+
+```js
+await loom.ui.presentOverlay({ page: "break.html", until: endsAt, dismissLabel: "Skip break" });
+loom.on("overlay.dismissed", ({ reason }) => { if (reason === "user") skipBreak(); });
+```
+
+`page` s'affiche par-dessus toute la fenêtre de Loom, où que soit
+l'utilisateur, avec le même `window.loom`. Loom dessine la barre du dessus : le
+nom de l'extension, le temps restant et le bouton de fermeture
+(`dismissLabel`, Échap aussi). **L'extension ne peut ni cacher ni désactiver ce
+bouton.** L'écran disparaît à `until`, et au plus tard une heure après son
+ouverture. Il n'y en a qu'un à la fois pour toute l'app : celui d'une autre
+extension renvoie `conflict`. Les agents continuent de travailler dessous.
 
 ### Le thème
 
@@ -208,7 +263,7 @@ Loom — et, pour l'exemple, comme Jira.
 ```sh
 cd Examples/extensions
 npm test              # node --test tests/*.test.mjs
-npm run typecheck     # tsc --checkJs sur l'exemple Jira
+npm run typecheck     # tsc --checkJs sur les exemples Jira et Pomodoro
 ```
 
 ## Où vivent les données
