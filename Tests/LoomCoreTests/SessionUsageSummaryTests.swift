@@ -53,7 +53,10 @@ struct SessionUsageSummaryTests {
 
     @Test("past the window the fraction caps at 1 and nothing remains")
     func plafond() {
-        let summary = SessionUsageSummary(turns: [turn("m1", model: "claude-haiku-4-5", input: 250_000)])
+        // The window claude reported (a transcript past 200k alone would raise
+        // the table's window to 1M: the context cannot exceed what is served).
+        let summary = SessionUsageSummary(turns: [turn("m1", model: "claude-haiku-4-5", input: 250_000)])?
+            .reportingWindow(200_000)
         #expect(summary?.fraction == 1)
         #expect(summary?.remainingTokens == 0)
         #expect(summary?.level == .critical)

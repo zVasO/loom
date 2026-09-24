@@ -309,27 +309,17 @@ struct ContentView: View {
 
             // v2 — Mission Control: the fleet at a glance (⌘G). A TOGGLE:
             // press again to return to the view you came from.
-            Button {
+            BarIconButton(systemImage: "square.grid.2x2", isActive: tab == .overview) {
                 if tab == .overview {
                     tab = tabBeforeOverview
                 } else {
                     tabBeforeOverview = tab
                     tab = .overview
                 }
-            } label: {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 12))
-                    .foregroundStyle(tab == .overview ? DefaultTheme.accent
-                                                      : DefaultTheme.secondaryText)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(tab == .overview ? DefaultTheme.surfaceRaised : .clear,
-                                in: RoundedRectangle(cornerRadius: 7))
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .keyboardShortcut(KeyEquivalent(keyMissionControl.first ?? "g"), modifiers: .command)
             .help("Mission Control — every live session (⌘\(keyMissionControl.uppercased()))")
-            GhostButton(systemImage: "globe") {
+            BarIconButton(systemImage: "globe") {
                 // WEB-03: the browser is born INSIDE the current session's stack.
                 var parent: SessionID?
                 if case .session(let id) = selected { parent = id }
@@ -337,6 +327,7 @@ struct ContentView: View {
                 tab = .sessions
                 selected = .webPane(pane)
             }
+            .help("New browser pane in the current session's stack")
             Button {
                 paletteShown = true
             } label: {
@@ -350,36 +341,16 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .keyboardShortcut(KeyEquivalent(keyPalette.first ?? "k"), modifiers: .command)
             // Every claude session on this machine, not just Loom's own.
-            Button {
-                usageShown = true
-            } label: {
-                Image(systemName: "dollarsign")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .contentShape(Rectangle())
-                    .hoverBrightness(0.1)
-            }
-            .buttonStyle(.plain)
-            .help("Usage & estimated costs")
-            Button {
+            BarIconButton(systemImage: "dollarsign") { usageShown = true }
+                .help("Usage & estimated costs")
+            BarIconButton(systemImage: "gearshape", isActive: tab == .settings) {
                 if tab == .settings {
                     tab = tabBeforeSettings
                 } else {
                     tabBeforeSettings = tab
                     tab = .settings
                 }
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12))
-                    .foregroundStyle(tab == .settings ? DefaultTheme.accent
-                                                      : DefaultTheme.secondaryText)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(tab == .settings ? DefaultTheme.surfaceRaised : .clear,
-                                in: RoundedRectangle(cornerRadius: 7))
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .keyboardShortcut(",", modifiers: .command)
             .help("Settings (⌘,)")
         }
@@ -639,6 +610,7 @@ struct ProjectsView: View {
                 .opacity(draggedProject == project.id ? 0.35 : 1)
                 .onDrag {
                     draggedProject = project.id
+                    DragEndWatch.start { draggedProject = nil }
                     return NSItemProvider(object: project.id.rawValue.uuidString as NSString)
                 }
                 .onDrop(of: [.text], delegate: ProjectReorderDelegate(
@@ -1512,6 +1484,56 @@ struct ProjectReorderDelegate: DropDelegate {
     }
 }
 
+/// A session card being dragged, and the group it belongs to.
+struct DraggedSession: Equatable {
+    let id: SessionID
+    let group: ProjectID?
+}
+
+/// Same live reorder as the projects', confined to one group: over another
+/// project's card the drop is refused and nothing moves.
+struct SessionReorderDelegate: DropDelegate {
+    let target: SessionID
+    let group: ProjectID?
+    @Binding var dragged: DraggedSession?
+    let move: (SessionID) -> Void
+
+    private var allowed: Bool { dragged?.group == group }
+
+    func dropEntered(info: DropInfo) {
+        guard let dragged, allowed, dragged.id != target else { return }
+        move(dragged.id)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: allowed ? .move : .forbidden)
+    }
+
+    func validateDrop(info: DropInfo) -> Bool { dragged != nil }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let accepted = allowed
+        dragged = nil
+        return accepted
+    }
+}
+
+/// A drag that ends outside any drop target — Esc, a release over the
+/// terminal — never reaches `performDrop`: its dimmed row stayed dimmed.
+/// Watches the mouse button instead, and runs `onEnd` once it is released.
+enum DragEndWatch {
+    /// Callable from any drag callback: the watch itself hops to the main actor.
+    static func start(_ onEnd: @escaping @MainActor () -> Void) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            while NSEvent.pressedMouseButtons & 1 != 0 {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            onEnd()
+        }
+    }
+}
+
 /// Sidebar row: accent bar + orange folder when the project is open.
 struct ProjectSidebarRow: View {
     let project: ProjectRecord
@@ -1707,6 +1729,8 @@ struct SessionsView: View {
     @State private var renameText = ""
     /// Collapsed groups (display only — the sessions keep running).
     @State private var collapsedGroups: Set<String> = []
+    /// The card being dragged into a new place, and the group it may not leave.
+    @State private var draggedSession: DraggedSession?
     /// Close requested but not yet confirmed: every close cross goes through here.
     @State private var pendingClose: PendingClose?
 
@@ -1923,14 +1947,14 @@ struct SessionsView: View {
                     let items = stackItems(for: project.id, dormant: dormant)
                     if !items.isEmpty {
                         group(project.name.uppercased(), projectID: project.id) {
-                            projectStacks(items: items)
+                            projectStacks(items: items, group: project.id)
                         }
                     }
                 }
                 let orphans = stackItems(for: nil, dormant: dormant)
                 if !orphans.isEmpty {
                     group("NO PROJECT", projectID: nil) {
-                        projectStacks(items: orphans)
+                        projectStacks(items: orphans, group: nil)
                     }
                 }
             }
@@ -1971,23 +1995,43 @@ struct SessionsView: View {
                                      badges: record.badges,
                                      nativeSessionID: record.nativeSessionID)
             }
-        return live + dormant
+        // The user's order, dragged into place; unplaced cards keep their slot.
+        return model.sessionOrder.sorted(live + dormant, id: \.id)
     }
 
     /// The reference's stack: the session and its children (terminals, webs)
     /// form ONE joined block; each stack is separated from the next.
+    /// `group`: the project the cards belong to (nil: no project) — a card
+    /// dragged over another group's is refused, it never leaves its own.
     @ViewBuilder
-    private func projectStacks(items: [AppModel.SessionItem]) -> some View {
+    private func projectStacks(items: [AppModel.SessionItem], group: ProjectID?) -> some View {
         // Grouped once by parent instead of rescanning all three lists per
         // stack: the sidebar rebuilds on every session update.
         let childrenByParent = Dictionary(grouping: items, by: \.parentID)
         let dormantByParent = Dictionary(grouping: model.dormantShells, by: \.parentID)
         let panesByParent = Dictionary(grouping: model.browserPanes, by: \.parentID)
-        ForEach(items.filter { !$0.isShell }) { item in
+        let stacks = items.filter { !$0.isShell }
+        let visible = stacks.map(\.id)
+        ForEach(stacks) { item in
             sessionStack(item,
                          shells: childrenByParent[item.id] ?? [],
                          dormantShells: dormantByParent[item.id] ?? [],
                          panes: panesByParent[item.id] ?? [])
+                .opacity(draggedSession?.id == item.id ? 0.35 : 1)
+                .onDrag {
+                    draggedSession = DraggedSession(id: item.id, group: group)
+                    // The drag can end anywhere, dropped or cancelled: the
+                    // card's opacity must come back whatever happened.
+                    DragEndWatch.start { draggedSession = nil }
+                    return NSItemProvider(object: "loom-session:\(item.id.rawValue.uuidString)" as NSString)
+                }
+                .onDrop(of: [.text], delegate: SessionReorderDelegate(
+                    target: item.id, group: group, dragged: $draggedSession,
+                    move: { dragged in
+                        withAnimation(.hover) {
+                            model.moveSession(dragged, onto: item.id, within: visible)
+                        }
+                    }))
         }
     }
 
@@ -2296,7 +2340,12 @@ struct SessionDetailView: View {
     /// The session's window, read from claude's own records: shared by the
     /// ring, the info popover and the context sheet. Refreshed at every state
     /// transition (a turn boundary) and every few seconds while working.
-    @State private var usage: SessionUsageSummary?
+    @State private var loadedUsage: SessionUsageSummary?
+    /// The transcript's figures measured against the window claude reported
+    /// (status line relay), the table's otherwise.
+    private var usage: SessionUsageSummary? {
+        loadedUsage?.reportingWindow(model.reportedWindows[sessionID])
+    }
     @State private var contextShown = false
 
     private var item: AppModel.SessionItem? {
@@ -2459,7 +2508,7 @@ struct SessionDetailView: View {
             let latest = await Task.detached(priority: .utility) {
                 ClaudeNativeSessions.usage(for: id, tailBytes: 65_536)
             }.value
-            if latest != usage { usage = latest }
+            if latest != loadedUsage { loadedUsage = latest }
             guard item?.state == .working else { return }
             try? await Task.sleep(for: .seconds(5))
         } while !Task.isCancelled

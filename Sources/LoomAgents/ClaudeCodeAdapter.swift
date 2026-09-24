@@ -38,11 +38,16 @@ public struct ClaudeCodeAdapter: Sendable {
     /// deterministic, without depending on the SessionStart hook arriving (research §5).
     /// The hooks go out as inline `--settings`: session-scoped, merged with the
     /// user's personal hooks, nothing written to their disk (STA-01).
+    ///
+    /// `userStatusLine`: the user's own status line (`ClaudeStatusLine.user`),
+    /// chained behind Loom's — which the inline settings would otherwise hide.
     public func launchCommand(session: SessionID, initialPrompt: String?,
-                              hookToken: String? = nil) -> Command {
+                              hookToken: String? = nil,
+                              userStatusLine: ClaudeStatusLine.UserCommand? = nil) -> Command {
         var arguments = ["--session-id", session.rawValue.uuidString]
         if let hooks, let hookToken,
-           let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken) {
+           let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken,
+                                                userStatusLine: userStatusLine) {
             arguments.append(contentsOf: ["--settings", settings])
         }
         if let hooks, let hookToken, let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken) {
@@ -129,10 +134,12 @@ public struct ClaudeCodeAdapter: Sendable {
 
     /// UC-7: Resume is a simple `--resume` of the NATIVE session — the imposed
     /// UUID unless the agent switched conversation since (`SessionRecord.nativeSessionID`).
-    public func resumeCommand(session: SessionID, hookToken: String? = nil) -> Command {
+    public func resumeCommand(session: SessionID, hookToken: String? = nil,
+                              userStatusLine: ClaudeStatusLine.UserCommand? = nil) -> Command {
         var arguments = ["--resume", session.rawValue.uuidString]
         if let hooks, let hookToken,
-           let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken) {
+           let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken,
+                                                userStatusLine: userStatusLine) {
             arguments.append(contentsOf: ["--settings", settings])
         }
         if let hooks, let hookToken, let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken) {
@@ -141,6 +148,15 @@ public struct ClaudeCodeAdapter: Sendable {
         return Command(executable: executable, arguments: arguments,
                        environment: Self.apiEnvironment(wiring: hooks, token: hookToken),
                        pathPrefix: Self.pathPrefix(wiring: hooks))
+    }
+
+    /// Arguments as one shell command line: an argument with a space or a
+    /// quote is single-quoted, its own quotes escaped (`/Users/o'brien`).
+    private static func shellJoined(_ arguments: [String]) -> String {
+        arguments.map { argument in
+            guard argument.contains(where: { " '\"$`\\".contains($0) }) else { return argument }
+            return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }.joined(separator: " ")
     }
 
     /// The API as MCP tools (ADR-0010), through inline `--mcp-config` — the CLI
@@ -165,16 +181,30 @@ public struct ClaudeCodeAdapter: Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    private static func hookSettingsJSON(wiring: HookWiring, token: String) -> String? {
-        let helperInvocation = [
+    static func hookSettingsJSON(wiring: HookWiring, token: String,
+                                 userStatusLine: ClaudeStatusLine.UserCommand? = nil) -> String? {
+        let helperArguments = [
             wiring.helper.path, "--socket", wiring.socket.path, "--token", token,
-        ].map { $0.contains(" ") ? "'\($0)'" : $0 }.joined(separator: " ")
+        ]
+        let helperInvocation = shellJoined(helperArguments)
 
         let entry: [[String: Any]] = [[
             "hooks": [["type": "command", "command": helperInvocation]],
         ]]
+        // The status line is the one place claude says how large its context
+        // window is: Loom's forwards it, then runs the user's (base64, so no
+        // quoting of an arbitrary shell command can go wrong) and prints its
+        // output unchanged — the user sees their own line.
+        var relay = helperArguments + ["--statusline"]
+        if let userStatusLine {
+            relay += ["--then-b64", Data(userStatusLine.command.utf8).base64EncodedString()]
+        }
+        var statusLine: [String: Any] = ["type": "command", "command": shellJoined(relay)]
+        if let padding = userStatusLine?.padding { statusLine["padding"] = padding }
+        if let interval = userStatusLine?.refreshInterval { statusLine["refreshInterval"] = interval }
         let settings: [String: Any] = [
             "hooks": Dictionary(uniqueKeysWithValues: hookedEvents.map { ($0, entry) }),
+            "statusLine": statusLine,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: settings,
                                                      options: [.sortedKeys, .withoutEscapingSlashes]) else {
