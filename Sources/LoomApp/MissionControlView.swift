@@ -63,7 +63,11 @@ private struct FleetCard: View {
     }
     @State private var hovered = false
     @State private var quickReply = ""
-    @State private var usage: SessionUsageSummary?
+    @State private var loadedUsage: SessionUsageSummary?
+    /// Measured against the window claude reported, when it did.
+    private var usage: SessionUsageSummary? {
+        loadedUsage?.reportingWindow(model.reportedWindows[item.id])
+    }
 
     private var borderColor: Color {
         if item.state == .needsInput { return DefaultTheme.badgeColor(for: .needsInput).opacity(0.8) }
@@ -147,7 +151,7 @@ private struct FleetCard: View {
             // Keyed by the native id: a `/resume <id>` in the terminal
             // changes which file to read.
             let id = item.nativeID
-            usage = await Task.detached(priority: .utility) {
+            loadedUsage = await Task.detached(priority: .utility) {
                 ClaudeNativeSessions.usage(for: id, tailBytes: 65_536)
             }.value
         }

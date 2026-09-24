@@ -6,15 +6,17 @@ import Foundation
 /// Source: https://platform.claude.com/docs/en/about-claude/models, read on `asOf`.
 public enum ContextWindow {
 
-    public static let asOf = "2026-09-22"
+    public static let asOf = "2026-09-24"
 
     public static let standard = 200_000
     public static let extended = 1_000_000
 
     /// Families served with a 1M window. Everything else — Haiku 4.5, the
-    /// 4.5 generation and older, unknown IDs — gets the 200k standard.
+    /// 4.5 generation and older, unknown IDs — gets the 200k standard. Only
+    /// a fallback: a live session's window comes from claude itself, through
+    /// its status line (`ClaudeStatusLine`), whatever the model.
     private static let extendedFamilies: Set<String> = [
-        "opus-5", "opus-4-8", "opus-4-7", "opus-4-6",
+        "opus-5-5", "opus-5", "opus-4-8", "opus-4-7", "opus-4-6",
         "sonnet-5", "sonnet-4-6",
     ]
 

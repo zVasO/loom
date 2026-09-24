@@ -19,7 +19,10 @@ public struct SessionUsageSummary: Equatable, Sendable {
     public let lastTurnAt: Date
 
     // Window
-    public let windowTokens: Int
+    /// The table's figure for the model, raised to 1M when the context
+    /// already exceeds 200k (the window is at least what was used), and
+    /// replaced by claude's own figure when it reported one.
+    public private(set) var windowTokens: Int
 
     // Cumulative over the turns given
     public let inputTokens: Int
@@ -43,7 +46,10 @@ public struct SessionUsageSummary: Equatable, Sendable {
         lastTurnCacheWrite = last.cacheWrite5m + last.cacheWrite1h
         lastTurnOutput = last.output
         lastTurnAt = last.timestamp
-        windowTokens = ContextWindow.tokens(for: last.model)
+        let tabled = ContextWindow.tokens(for: last.model)
+        // A model the table does not know yet, on its 1M window: the tokens
+        // in use are the proof, 200k would read as a full context.
+        windowTokens = last.contextTokens > tabled ? max(tabled, ContextWindow.extended) : tabled
 
         inputTokens = turns.reduce(0) { $0 + $1.input }
         cacheReadTokens = turns.reduce(0) { $0 + $1.cacheRead }
@@ -67,6 +73,15 @@ public struct SessionUsageSummary: Equatable, Sendable {
             total += turnCost
         }
         cost = priced ? total : nil
+    }
+
+    /// The same summary measured against the window claude reported for the
+    /// session (status line), when there is one — the exact figure.
+    public func reportingWindow(_ tokens: Int?) -> SessionUsageSummary {
+        guard let tokens, tokens > 0 else { return self }
+        var copy = self
+        copy.windowTokens = tokens
+        return copy
     }
 
     /// 0…1, capped: claude compacts before the window overflows, but a record

@@ -452,6 +452,7 @@ public final class AppModel {
 
             Task { await self.observeStates(of: manager) }
             Task { await self.observeIdentities(of: manager) }
+            Task { await self.observeWindows(of: manager) }
             reloadPersistedSessions()
             restoreStackChildren()
             reindexAllSessions()
@@ -1133,7 +1134,8 @@ public final class AppModel {
             // the boot, from the outside, and only when the setting says so.
             var spec = SessionManager.SessionSpec(
                 command: adapter.launchCommand(session: sessionID, initialPrompt: nil,
-                                               hookToken: token),
+                                               hookToken: token,
+                                               userStatusLine: userStatusLine(in: worktree)),
                 workingDirectory: worktree,
                 // Born at the drawer's grid: the first fit is then a no-op,
                 // and nothing resizes claude while it boots.
@@ -1326,7 +1328,8 @@ public final class AppModel {
             let token = UUID().uuidString
             var spec = SessionManager.SessionSpec(
                 command: adapter.launchCommand(session: sessionID, initialPrompt: prompt,
-                                               hookToken: token),
+                                               hookToken: token,
+                                               userStatusLine: userStatusLine(in: worktree)),
                 workingDirectory: worktree,
                 geometry: preferredGrid,
                 samplingInterval: .milliseconds(500),
@@ -1365,8 +1368,9 @@ public final class AppModel {
             let sessionID = SessionID()
             let token = UUID().uuidString
             var spec = SessionManager.SessionSpec(
-                command: adapter.launchCommand(session: sessionID, initialPrompt: prompt,
-                                               hookToken: token),
+                command: adapter.launchCommand(
+                    session: sessionID, initialPrompt: prompt, hookToken: token,
+                    userStatusLine: userStatusLine(in: URL(fileURLWithPath: worktreePath))),
                 workingDirectory: URL(fileURLWithPath: worktreePath),
                 geometry: preferredGrid,
                 samplingInterval: .milliseconds(500),
@@ -1965,9 +1969,6 @@ public final class AppModel {
         // The conversation to pick up is the NATIVE one — the imposed UUID,
         // unless a `/resume <id>` in the terminal moved the session elsewhere.
         let native = record.resolvedNativeSessionID
-        let command = nativeSessionExists(record)
-            ? adapter.resumeCommand(session: native, hookToken: token)
-            : adapter.launchCommand(session: record.id, initialPrompt: nil, hookToken: token)
         guard let directory = workingDirectory(worktreePath: record.worktreePath,
                                                project: project(record.projectID))
         else {
@@ -1977,6 +1978,11 @@ public final class AppModel {
             """
             return
         }
+        let statusLine = userStatusLine(in: directory)
+        let command = nativeSessionExists(record)
+            ? adapter.resumeCommand(session: native, hookToken: token, userStatusLine: statusLine)
+            : adapter.launchCommand(session: record.id, initialPrompt: nil, hookToken: token,
+                                    userStatusLine: statusLine)
         do {
             try await manager.resume(record, command: command, workingDirectory: directory,
                                      geometry: preferredGrid,
@@ -2001,6 +2007,7 @@ public final class AppModel {
         // terminal state the reducer never leaves: no `.completed` follows,
         // so the close path in observeStates never drops its surface.
         surfaceCache.removeValue(forKey: id)
+        reportedWindows.removeValue(forKey: id)
         reloadPersistedSessions()
     }
 
@@ -2071,6 +2078,23 @@ public final class AppModel {
     /// The process of a live session switched conversation: its item and its
     /// record follow, and the "does it have a conversation" memo of that
     /// record is stale — the file to look for is another one now.
+    /// The context window each session's claude reported through its status
+    /// line — exact, whatever the model; the table is only the fallback.
+    /// Kept after the process ends: the dormant card still shows its context.
+    public private(set) var reportedWindows: [SessionID: Int] = [:]
+
+    private func observeWindows(of manager: SessionManager) async {
+        for await update in await manager.windowUpdates() {
+            reportedWindows[update.id] = update.windowTokens
+        }
+    }
+
+    /// The user's own claude status line for a session working in
+    /// `directory`, chained behind Loom's relay so they still see it.
+    private func userStatusLine(in directory: URL) -> ClaudeStatusLine.UserCommand? {
+        ClaudeStatusLine.user(cwd: directory)
+    }
+
     private func observeIdentities(of manager: SessionManager) async {
         let updates = await manager.identityUpdates()
         for await update in updates {
@@ -2123,7 +2147,8 @@ public final class AppModel {
             let token = UUID().uuidString
             var spec = SessionManager.SessionSpec(
                 command: adapter.launchCommand(session: sessionID, initialPrompt: initialPrompt,
-                                               hookToken: token),
+                                               hookToken: token,
+                                               userStatusLine: userStatusLine(in: directory)),
                 workingDirectory: directory,
                 geometry: preferredGrid,
                 samplingInterval: .milliseconds(500),

@@ -70,6 +70,10 @@ public actor SessionManager {
     private var nativeIDs: [SessionID: SessionID] = [:]
     private var stateContinuation: AsyncStream<StateUpdate>.Continuation?
     private var identityContinuation: AsyncStream<IdentityUpdate>.Continuation?
+    private var windowContinuation: AsyncStream<WindowUpdate>.Continuation?
+    /// The context window each live process last reported through its status
+    /// line — claude's own figure, not a table's guess.
+    private var contextWindows: [SessionID: Int] = [:]
     private let clock = ContinuousClock()
 
     public struct StateUpdate: Sendable, Equatable {
@@ -103,6 +107,30 @@ public actor SessionManager {
                                                             bufferingPolicy: .bufferingNewest(64))
         identityContinuation = continuation
         return stream
+    }
+
+    /// A session's context window as claude reported it (status line relay).
+    public struct WindowUpdate: Sendable, Equatable {
+        public let id: SessionID
+        public let windowTokens: Int
+        public init(id: SessionID, windowTokens: Int) {
+            self.id = id
+            self.windowTokens = windowTokens
+        }
+    }
+
+    /// Stream of context window sizes, one update per change — a status line
+    /// runs after every message, the size rarely moves. Single-consumer.
+    public func windowUpdates() -> AsyncStream<WindowUpdate> {
+        let (stream, continuation) = AsyncStream.makeStream(of: WindowUpdate.self,
+                                                            bufferingPolicy: .bufferingNewest(64))
+        windowContinuation = continuation
+        return stream
+    }
+
+    /// The window claude last reported for the session; nil before any.
+    public func contextWindow(of id: SessionID) -> Int? {
+        contextWindows[id]
     }
 
     /// The conversation the session's process serves; `nil` for a session the
@@ -315,6 +343,13 @@ public actor SessionManager {
     /// Variant for when the session is already authenticated (the server validated the token).
     public func ingest(_ payload: Data, for id: SessionID) {
         guard states[id] != nil else { return }
+        // A status line update: the window size, never a state.
+        if let report = ClaudeStatusLine.report(from: payload) {
+            guard contextWindows[id] != report.windowTokens else { return }
+            contextWindows[id] = report.windowTokens
+            windowContinuation?.yield(WindowUpdate(id: id, windowTokens: report.windowTokens))
+            return
+        }
         // Identity first: a SessionStart carries no state, but it is the one
         // place the agent tells us WHICH conversation the process now serves.
         if let start = ClaudeCodeAdapter.sessionStart(from: payload) {
@@ -379,5 +414,6 @@ public actor SessionManager {
         finished.remove(id)
         runtimes[id] = nil
         nativeIDs[id] = nil
+        contextWindows[id] = nil
     }
 }

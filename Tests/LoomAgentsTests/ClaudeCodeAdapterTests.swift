@@ -139,6 +139,43 @@ struct ClaudeCodeAdapterTests {
         #expect(ClaudeCodeAdapter.sessionStart(from: Data("not json".utf8)) == nil)
     }
 
+    /// The inline `--settings` JSON of a command.
+    private func settings(of command: Command) throws -> [String: Any] {
+        let index = try #require(command.arguments.firstIndex(of: "--settings"))
+        let json = command.arguments[index + 1]
+        return try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+    }
+
+    @Test("a wired session's status line is Loom's relay, chaining the user's own")
+    func relaisStatusLine() throws {
+        let adapter = ClaudeCodeAdapter(hooks: .init(
+            helper: URL(fileURLWithPath: "/tmp/loom-hook"),
+            socket: URL(fileURLWithPath: "/tmp/loom.sock")))
+        let user = ClaudeStatusLine.UserCommand(command: "~/.claude/line.sh --short", padding: 2)
+
+        let launch = try settings(of: adapter.launchCommand(session: SessionID(), initialPrompt: nil,
+                                                            hookToken: "tok", userStatusLine: user))
+        let statusLine = try #require(launch["statusLine"] as? [String: Any])
+        let command = try #require(statusLine["command"] as? String)
+        #expect(command.hasPrefix("/tmp/loom-hook --socket /tmp/loom.sock --token tok --statusline"))
+        let encoded = Data(user.command.utf8).base64EncodedString()
+        #expect(command.hasSuffix("--then-b64 \(encoded)"), "the user's line runs after the relay")
+        #expect(statusLine["padding"] as? Int == 2, "their padding is kept")
+        #expect(launch["hooks"] != nil, "the hooks are still there")
+
+        let alone = try settings(of: adapter.resumeCommand(session: SessionID(), hookToken: "tok"))
+        let bare = try #require((alone["statusLine"] as? [String: Any])?["command"] as? String)
+        #expect(bare.hasSuffix("--statusline"), "no user line: the relay alone, printing nothing")
+    }
+
+    @Test("a status line update is not a state event")
+    func statusLinePasUnEtat() throws {
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "hook_event_name": "LoomStatusLine", "context_window": ["context_window_size": 1_000_000],
+        ])
+        #expect(ClaudeCodeAdapter.interpret(payload) == nil)
+    }
+
     @Test("Resume re-injects the hooks: the resumed session stays observed")
     func repriseAvecHooks() {
         let adapter = ClaudeCodeAdapter(hooks: .init(

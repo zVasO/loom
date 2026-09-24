@@ -24,7 +24,11 @@ struct ContextWindowSheet: View {
     let sessionID: SessionID
     let onClose: () -> Void
 
-    @State private var usage: SessionUsageSummary?
+    @State private var loadedUsage: SessionUsageSummary?
+    /// Measured against the window claude reported, when it did.
+    private var usage: SessionUsageSummary? {
+        loadedUsage?.reportingWindow(model.reportedWindows[sessionID])
+    }
     @State private var loaded = false
     @State private var refreshing = false
 
@@ -273,7 +277,7 @@ struct ContextWindowSheet: View {
         let id = model.nativeSessionID(for: sessionID)   // the conversation, not the Loom id
         // The whole file: the cumulative figures need every turn, and the
         // megabytes never stall the UI from a detached utility task.
-        usage = await Task.detached(priority: .utility) {
+        loadedUsage = await Task.detached(priority: .utility) {
             ClaudeNativeSessions.usage(for: id, tailBytes: nil)
         }.value
     }

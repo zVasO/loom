@@ -369,6 +369,38 @@ struct SessionManagerTests {
         #expect(await manager.nativeSessionID(of: id) == imposed, "a forged token moves nothing")
     }
 
+    @Test("a status line update reports the window once, and moves no state")
+    func fenetreRapportee() async throws {
+        let manager = makeManager()
+        let updates = await manager.windowUpdates()
+        let id = try await manager.launch(spec())
+        let token = try #require(await manager.hookToken(for: id))
+        let update = try JSONSerialization.data(withJSONObject: [
+            "hook_event_name": "LoomStatusLine",
+            "context_window": ["context_window_size": 1_000_000],
+        ])
+
+        await manager.ingestHookPayload(update, token: token)
+        await manager.ingestHookPayload(update, token: token)   // every message: same size
+        #expect(await manager.contextWindow(of: id) == 1_000_000)
+        #expect(await manager.state(of: id) == .starting, "a window is not a state")
+
+        let smaller = try JSONSerialization.data(withJSONObject: [
+            "hook_event_name": "LoomStatusLine",
+            "context_window": ["context_window_size": 200_000],
+        ])
+        await manager.ingestHookPayload(smaller, token: token)   // /model to a 200k model
+        var iterator = updates.makeAsyncIterator()
+        let first = await iterator.next()
+        let second = await iterator.next()
+        #expect(first == SessionManager.WindowUpdate(id: id, windowTokens: 1_000_000))
+        #expect(second == SessionManager.WindowUpdate(id: id, windowTokens: 200_000),
+                "one update per change: the repeat was silent")
+
+        await manager.ingestHookPayload(update, token: "forged")
+        #expect(await manager.contextWindow(of: id) == 200_000, "a forged token reports nothing")
+    }
+
     @Test("archiving via the manager: state + database (SES-07)")
     func archiverUneSession() async throws {
         let dbURL = FileManager.default.temporaryDirectory

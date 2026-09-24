@@ -2340,7 +2340,12 @@ struct SessionDetailView: View {
     /// The session's window, read from claude's own records: shared by the
     /// ring, the info popover and the context sheet. Refreshed at every state
     /// transition (a turn boundary) and every few seconds while working.
-    @State private var usage: SessionUsageSummary?
+    @State private var loadedUsage: SessionUsageSummary?
+    /// The transcript's figures measured against the window claude reported
+    /// (status line relay), the table's otherwise.
+    private var usage: SessionUsageSummary? {
+        loadedUsage?.reportingWindow(model.reportedWindows[sessionID])
+    }
     @State private var contextShown = false
 
     private var item: AppModel.SessionItem? {
@@ -2503,7 +2508,7 @@ struct SessionDetailView: View {
             let latest = await Task.detached(priority: .utility) {
                 ClaudeNativeSessions.usage(for: id, tailBytes: 65_536)
             }.value
-            if latest != usage { usage = latest }
+            if latest != loadedUsage { loadedUsage = latest }
             guard item?.state == .working else { return }
             try? await Task.sleep(for: .seconds(5))
         } while !Task.isCancelled
