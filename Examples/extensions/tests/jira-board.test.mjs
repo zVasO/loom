@@ -26,14 +26,27 @@ const ORIGIN = "https://ext.test";
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json" };
 
 /** The fake Loom and the fake Jira, installed in the page before anything runs. */
-function fakeLoom({ jiraAuth, issues }) {
+function fakeLoom({ jiraAuth, issues, manyBoards = false }) {
   const storage = new Map();
   const secrets = new Map();
   const launches = [];
   const sessions = [];
   const expected = "Basic " + btoa(jiraAuth);
 
-  const board = { id: 7, name: "PROJ board", type: "scrum" };
+  const loc = (projectKey, projectName) => ({ projectKey, projectName, displayName: projectName + " (" + projectKey + ")" });
+  const boards = [
+    { id: 7, name: "HomeServe – Web", type: "scrum", location: loc("HS", "HomeServe") },
+    { id: 8, name: "HomeServe Mobile", type: "kanban", location: loc("HSM", "HomeServe Mobile") },
+    { id: 9, name: "Acme Platform", type: "scrum", location: loc("ACME", "Acme") },
+    { id: 10, name: "Internal Tools", type: "kanban", location: loc("INT", "Internal") },
+  ];
+  // Past the first 1000 boards of a big site: reachable only by a name search.
+  const hidden = { id: 5000, name: "Zeta Secret Ops", type: "kanban", location: loc("ZSO", "Zeta") };
+  const filler = (id) => ({ id, name: "Filler " + id, type: "scrum", location: loc("F" + id, "Filler") });
+  const kanbanIssues = {
+    8: [{ key: "HSM-1", fields: { summary: "Push notifications", status: { id: "1", name: "To Do" }, issuetype: { name: "Story" } } }],
+    5000: [{ key: "ZSO-9", fields: { summary: "Rotate keys", status: { id: "3", name: "In Progress" }, issuetype: { name: "Task" } } }],
+  };
   const configuration = {
     columnConfig: {
       columns: [
@@ -45,13 +58,34 @@ function fakeLoom({ jiraAuth, issues }) {
   };
 
   function jira(url, headers) {
-    const { pathname } = new URL(url);
+    const { pathname, searchParams } = new URL(url);
     if (headers.Authorization !== expected) return { status: 401, body: { errorMessages: ["unauthorized"] } };
+    window.__fake.jiraCalls.push(pathname + (searchParams.toString() ? "?" + searchParams : ""));
     if (pathname === "/rest/api/3/myself") return { status: 200, body: { displayName: "Ada Lovelace" } };
-    if (pathname === "/rest/agile/1.0/board") return { status: 200, body: { values: [board], isLast: true } };
-    if (pathname === "/rest/agile/1.0/board/7/configuration") return { status: 200, body: configuration };
-    if (pathname === "/rest/agile/1.0/board/7/sprint") return { status: 200, body: { values: [{ id: 42 }] } };
-    if (pathname === "/rest/agile/1.0/sprint/42/issue") return { status: 200, body: { issues } };
+    if (pathname === "/rest/agile/1.0/board") {
+      const name = searchParams.get("name");
+      const all = manyBoards ? boards.concat(Array.from({ length: 2000 }, (_, i) => filler(100 + i)), [hidden]) : boards;
+      if (name) {
+        const found = all.filter((board) => board.name.toLowerCase().includes(name.toLowerCase()));
+        return { status: 200, body: { values: found.slice(0, 50), isLast: true } };
+      }
+      const startAt = Number(searchParams.get("startAt") || 0);
+      const page = all.slice(startAt, startAt + 50);
+      return { status: 200, body: { values: page, isLast: startAt + 50 >= all.length } };
+    }
+    let match = /^\/rest\/agile\/1\.0\/board\/(\d+)(\/.*)?$/.exec(pathname);
+    if (match) {
+      const id = Number(match[1]);
+      const rest = match[2] || "";
+      const board = boards.concat([hidden]).find((candidate) => candidate.id === id) || (id >= 100 && id < 2100 ? filler(id) : null);
+      if (!board) return { status: 404, body: {} };
+      if (rest === "") return { status: 200, body: board };
+      if (rest === "/configuration") return { status: 200, body: configuration };
+      if (rest === "/sprint") return { status: 200, body: { values: [{ id: id === 7 ? 42 : id * 100 }] } };
+      if (rest === "/issue") return { status: 200, body: { issues: kanbanIssues[id] || [] } };
+    }
+    match = /^\/rest\/agile\/1\.0\/sprint\/(\d+)\/issue$/.exec(pathname);
+    if (match) return { status: 200, body: { issues: match[1] === "42" ? issues : [] } };
     return { status: 404, body: {} };
   }
 
@@ -94,7 +128,7 @@ function fakeLoom({ jiraAuth, issues }) {
     }
   }
 
-  window.__fake = { storage, secrets, launches, sessions, violations: [] };
+  window.__fake = { storage, secrets, launches, sessions, violations: [], jiraCalls: [] };
   document.addEventListener("securitypolicyviolation", (event) => {
     window.__fake.violations.push(event.violatedDirective + " " + event.blockedURI);
   });
@@ -137,7 +171,7 @@ const ISSUES = [
   { key: "PROJ-3", fields: { summary: "Ship it", status: { id: "10001", name: "Done" }, issuetype: { name: "Story" } } },
 ];
 
-async function openExtension(browser) {
+async function openExtension(browser, { manyBoards = false, connected = false } = {}) {
   const page = await browser.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
@@ -162,7 +196,13 @@ async function openExtension(browser) {
       await route.fulfill({ status: 404, body: "Not found" });
     }
   });
-  await page.addInitScript(fakeLoom, { jiraAuth: "ada@example.com:tok-123", issues: ISSUES });
+  await page.addInitScript(fakeLoom, { jiraAuth: "ada@example.com:tok-123", issues: ISSUES, manyBoards });
+  if (connected) {
+    await page.addInitScript(() => {
+      window.__fake.storage.set("config", { site: "acme.atlassian.net", email: "ada@example.com" });
+      window.__fake.secrets.set("apiToken", "tok-123");
+    });
+  }
   await page.addInitScript(userScript({ extensionId: "dev.loom.jira-board", loomApi: 1,
     theme: { isLight: false, tokens: { accent: "#7C83FF" } } }));
   await page.goto(ORIGIN + "/");
@@ -287,4 +327,78 @@ test("Loom's CSP blocks a direct network call from the page", { skip: !playwrigh
   assert.equal(outcome, "blocked");
   const violations = await page.evaluate(() => window.__fake.violations);
   assert.ok(violations.some((line) => line.startsWith("connect-src")), violations.join(", "));
+});
+
+/** The names the board search currently lists. */
+async function listedBoards(page) {
+  return page.locator("#board-results .board-option .board-name").allTextContents();
+}
+
+test("Jira Board: typing a name filters the boards; Enter opens one and remembers it", { skip: !playwright && "playwright is not installed" }, async (t) => {
+  const browser = await playwright.chromium.launch();
+  t.after(() => browser.close());
+  const { page, errors } = await openExtension(browser, { connected: true });
+  await page.locator("#board .column").first().waitFor();
+  assert.equal(await page.inputValue("#board-search"), "HomeServe – Web", "at rest, the field names the current board");
+
+  // Focus lists every board, even though the field still shows the current one.
+  await page.click("#board-search");
+  assert.deepEqual(await listedBoards(page), ["Acme Platform", "HomeServe – Web", "HomeServe Mobile", "Internal Tools"]);
+
+  await page.fill("#board-search", "homeserve");
+  assert.deepEqual(await listedBoards(page), ["HomeServe – Web", "HomeServe Mobile"]);
+  assert.equal(await page.locator("#board-results .board-option").first().locator(".board-meta").textContent(), "HS · scrum");
+
+  // Case, accents and word order do not matter; every word must match.
+  await page.fill("#board-search", "HÔME web");
+  assert.deepEqual(await listedBoards(page), ["HomeServe – Web"]);
+  await page.fill("#board-search", "int");
+  assert.deepEqual(await listedBoards(page), ["Internal Tools"], "the project key counts (INT)");
+  await page.fill("#board-search", "zzz");
+  assert.equal(await page.textContent("#board-results"), "No board matches “zzz”");
+
+  // Escape closes and puts the current board's name back.
+  await page.press("#board-search", "Escape");
+  assert.equal(await page.isVisible("#board-results"), false);
+  assert.equal(await page.inputValue("#board-search"), "HomeServe – Web");
+
+  // ↓ then Enter picks the second match, loads it and remembers it.
+  await page.click("#board-search");
+  await page.fill("#board-search", "homeserve");
+  await page.press("#board-search", "ArrowDown");
+  await page.press("#board-search", "Enter");
+  await page.locator(".card[data-key='HSM-1']").waitFor();
+  assert.equal(await page.inputValue("#board-search"), "HomeServe Mobile");
+  assert.equal(await page.evaluate(() => window.__fake.storage.get("board")), 8);
+
+  // A click works too.
+  await page.click("#board-search");
+  await page.fill("#board-search", "acme");
+  await page.click("#board-results .board-option");
+  await page.locator("#status").filter({ hasText: "0 issues" }).waitFor();
+  assert.equal(await page.inputValue("#board-search"), "Acme Platform");
+
+  const fake = await page.evaluate(() => ({ violations: window.__fake.violations, calls: window.__fake.jiraCalls }));
+  assert.ok(!fake.calls.some((call) => call.includes("name=")), "a complete list is searched locally, never by asking Jira");
+  assert.deepEqual(fake.violations, []);
+  assert.deepEqual(errors, []);
+});
+
+test("Jira Board: on a site past 1000 boards, a search also asks Jira by name", { skip: !playwright && "playwright is not installed" }, async (t) => {
+  const browser = await playwright.chromium.launch();
+  t.after(() => browser.close());
+  const { page, errors } = await openExtension(browser, { connected: true, manyBoards: true });
+  await page.locator("#board .column").first().waitFor();
+
+  await page.click("#board-search");
+  await page.fill("#board-search", "zeta");
+  await page.locator("#board-results .board-option").filter({ hasText: "Zeta Secret Ops" }).waitFor();
+  await page.press("#board-search", "Enter");
+  await page.locator(".card[data-key='ZSO-9']").waitFor();
+
+  const calls = await page.evaluate(() => window.__fake.jiraCalls);
+  assert.ok(calls.some((call) => call.includes("name=zeta")), calls.filter((c) => c.includes("board?")).slice(-3).join(", "));
+  assert.equal(calls.filter((call) => call.startsWith("/rest/agile/1.0/board?") && call.includes("startAt")).length, 20,
+    "the listing stops at 1000 boards");
+  assert.deepEqual(errors, []);
 });

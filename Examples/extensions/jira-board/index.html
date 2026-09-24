@@ -9,7 +9,12 @@
 <body>
   <header class="bar">
     <div class="bar-left">
-      <select id="board-select" aria-label="Board" hidden></select>
+      <div class="board-picker" id="board-picker" hidden>
+        <input id="board-search" type="search" role="combobox" aria-label="Board"
+               aria-autocomplete="list" aria-expanded="false" aria-controls="board-results"
+               placeholder="Search a board…" autocomplete="off" spellcheck="false">
+        <ul id="board-results" class="board-results" role="listbox" hidden></ul>
+      </div>
       <label class="project-picker" id="project-picker" hidden>
         <span>Loom project</span>
         <select id="project-select" aria-label="Loom project for this board"></select>
