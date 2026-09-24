@@ -12,6 +12,7 @@ struct SettingsPage: View {
     @AppStorage("loom.terminal.copyOnSelect") private var copyOnSelect = false
     @AppStorage(KeyboardPreferences.userDefaultsKey) private var optionAsMeta = false
     @AppStorage("loom.session.restoreOnLaunch") private var restoreOnLaunch = true
+    @AppStorage("loom.sessions.groupReviews") private var groupReviews = true
     @AppStorage("loom.shortcut.newSession") private var keyNewSession = "n"
     @AppStorage("loom.shortcut.newTab") private var keyNewTab = "t"
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
@@ -118,6 +119,16 @@ struct SettingsPage: View {
                 }
                 .toggleStyle(.switch)
                 Text("Loom comes back to the project you left and restarts the session you had open. Your other closed sessions keep showing in the sidebar as they always do, and stay asleep until you click one — waking them all would reload every plugin and MCP server at once.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                Divider().overlay(DefaultTheme.cardBorder)
+                Toggle(isOn: $groupReviews) {
+                    Text("File PR review sessions under Code Review")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                Text("Sessions opened from the PRs tab, or wearing a PR badge, gather below the projects in their own foldable section, still grouped by project. Off, they stay with the rest of their project's sessions.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }

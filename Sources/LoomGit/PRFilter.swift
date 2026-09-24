@@ -62,7 +62,7 @@ public struct PRFilter: Identifiable, Codable, Hashable, Sendable {
     /// state must lift that scope or it silently matches nothing.
     public func ghArguments(limit: Int = PRFilter.defaultLimit) -> [String] {
         var arguments = ["--limit", "\(limit)"]
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = Self.normalizedQuery(query)
         guard !trimmed.isEmpty else { return arguments }
         arguments += ["--search", trimmed]
         if Self.namesAState(trimmed) { arguments += ["--state", "all"] }
@@ -80,16 +80,32 @@ public struct PRFilter: Identifiable, Codable, Hashable, Sendable {
 
     // MARK: Custom filters
 
+    /// The query as gh will run it: trimmed, and without `is:pr` / `type:pr`.
+    /// Those are redundant under `gh pr list` — and exactly what github.com's
+    /// own search box starts with, so a query pasted from it must be taken
+    /// as is, not refused. Other tokens, and their order, are untouched.
+    public static func normalizedQuery(_ query: String) -> String {
+        query.split(whereSeparator: \.isWhitespace)
+            .filter { token in
+                let lowered = token.lowercased()
+                return lowered != "is:pr" && lowered != "type:pr"
+            }
+            .joined(separator: " ")
+    }
+
     /// Why a custom filter cannot be saved as typed, or nil when it can.
     public static func validate(name: String, query: String) -> String? {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if name.isEmpty { return "Give the filter a name." }
+        if query.trimmingCharacters(in: .whitespacesAndNewlines).contains("\n") {
+            return "One line: qualifiers separated by spaces."
+        }
+        let query = normalizedQuery(query)
         if query.isEmpty { return "Write a search query — GitHub's search syntax." }
-        if query.contains("\n") { return "One line: qualifiers separated by spaces." }
         let tokens = query.split(whereSeparator: \.isWhitespace).map { $0.lowercased() }
-        if tokens.contains(where: { $0.hasPrefix("repo:") || $0 == "is:pr" || $0 == "type:pr" }) {
-            return "gh already scopes the search to this repository's pull requests."
+        // repo: would fight gh's own scope — the project's repository.
+        if tokens.contains(where: { $0.hasPrefix("repo:") }) {
+            return "Leave out repo: — the filter already runs in the project's repository."
         }
         return nil
     }
@@ -97,7 +113,7 @@ public struct PRFilter: Identifiable, Codable, Hashable, Sendable {
     public static func custom(name: String, query: String) -> PRFilter {
         PRFilter(id: UUID().uuidString,
                  name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                 query: query.trimmingCharacters(in: .whitespacesAndNewlines),
+                 query: normalizedQuery(query),
                  isBuiltIn: false)
     }
 }

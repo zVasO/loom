@@ -50,8 +50,23 @@ struct PRFilterTests {
         #expect(PRFilter.validate(name: "x", query: "   ") != nil)
         #expect(PRFilter.validate(name: "x", query: "a:b\nc:d") != nil)
         #expect(PRFilter.validate(name: "x", query: "repo:acme/repo author:@me") != nil)
-        #expect(PRFilter.validate(name: "x", query: "is:pr author:@me") != nil)
+        #expect(PRFilter.validate(name: "x", query: "is:pr author:@me") == nil,
+                "what github.com's search box starts with: taken, not refused")
+        #expect(PRFilter.validate(name: "x", query: "is:pr") != nil, "nothing left to search")
         #expect(PRFilter.validate(name: "x", query: "label:bug base:main") == nil)
+    }
+
+    @Test("is:pr and type:pr are dropped: gh pr list only lists pull requests")
+    func normalisation() {
+        #expect(PRFilter.normalizedQuery(" is:pr is:open  author:Julienlem84 ")
+                == "is:open author:Julienlem84")
+        #expect(PRFilter.normalizedQuery("IS:PR type:pr label:bug") == "label:bug")
+        let pasted = PRFilter.custom(name: "Julien", query: "is:pr is:open author:Julienlem84")
+        #expect(pasted.query == "is:open author:Julienlem84", "stored as gh runs it")
+        let raw = PRFilter(id: "probe", name: "probe", query: "is:pr is:open author:x", isBuiltIn: false)
+        #expect(raw.ghArguments() == ["--limit", "50", "--search", "is:open author:x",
+                                      "--state", "all"],
+                "a query built elsewhere (the Test button) is cleaned the same way")
     }
 
     @Test("a custom filter gets a fresh id, trimmed fields, and is never built-in")
