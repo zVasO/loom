@@ -4,6 +4,6 @@
   "description": "Example Loom extensions and the tests of the window.loom SDK (docs/extensions.md).",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "typecheck": "tsc --noEmit --allowJs --checkJs --strict --target es2022 --lib dom,es2022 loom.d.ts jira-board/app.js"
+    "typecheck": "tsc --noEmit --allowJs --checkJs --strict --target es2022 --lib dom,es2022 loom.d.ts jira-board/app.js pomodoro/pomodoro.d.ts pomodoro/engine.js pomodoro/app.js pomodoro/break.js"
   }
 }

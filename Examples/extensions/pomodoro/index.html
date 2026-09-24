@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Pomodoro</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="engine.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body class="main">
+  <section class="timer" aria-live="polite">
+    <p id="phase" class="phase">Ready</p>
+    <p id="clock" class="clock">25:00</p>
+    <p id="cycle" class="cycle" aria-label="Focus runs in this cycle"></p>
+    <div class="controls">
+      <button id="start" class="accent" type="button">Start focus</button>
+      <button id="pause" class="ghost" type="button" hidden>Pause</button>
+      <button id="skip" class="ghost" type="button" hidden>Skip</button>
+      <button id="reset" class="ghost" type="button" hidden>Reset</button>
+    </div>
+    <p id="hint" class="muted hint"></p>
+  </section>
+
+  <section class="panel">
+    <h2>Today</h2>
+    <dl class="stats">
+      <div><dt>Focus runs</dt><dd id="stat-focus">0</dd></div>
+      <div><dt>Breaks taken</dt><dd id="stat-taken">0</dd></div>
+      <div><dt>Breaks skipped</dt><dd id="stat-skipped">0</dd></div>
+    </dl>
+  </section>
+
+  <section class="panel">
+    <h2>Settings</h2>
+    <form id="settings" class="settings">
+      <label>Focus <input name="focus" type="number" min="1" max="180"> min</label>
+      <label>Short break <input name="shortBreak" type="number" min="1" max="60"> min</label>
+      <label>Long break <input name="longBreak" type="number" min="1" max="60"> min</label>
+      <label>Long break every <input name="longEvery" type="number" min="1" max="12"> runs</label>
+      <label class="check"><input name="autoStartFocus" type="checkbox"> Start the next focus run by itself after a break</label>
+    </form>
+    <p class="muted">When a break starts, it covers Loom wherever you are — your agents keep working underneath. “Skip break” is always there.</p>
+  </section>
+</body>
+</html>

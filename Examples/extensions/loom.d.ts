@@ -96,11 +96,36 @@ declare namespace Loom {
     json(): any;
   }
 
+  interface StatusOptions {
+    /** One line, 24 characters at most — "🍅". */
+    text?: string;
+    /** Loom counts down to this instant itself (ms since 1970, or a Date). */
+    countdownTo?: number | Date;
+    tooltip?: string;
+  }
+
+  interface OverlayOptions {
+    /** An .html file of the extension, e.g. "break.html". */
+    page: string;
+    /** When Loom takes it down by itself (ms since 1970, or a Date) — an hour at most. */
+    until?: number | Date;
+    /** The label of Loom's own dismiss button. Default "Dismiss". */
+    dismissLabel?: string;
+  }
+
+  interface Alarm {
+    name: string;
+    /** ms since 1970. */
+    scheduledTime: number;
+  }
+
   interface EventPayloads {
     "theme.changed": Theme;
     "sessions.changed": { sessions: Session[] };
     "session.stateChanged": { sessionId: string; state: SessionState | string; previous: string | null };
     command: { id: string };
+    alarm: Alarm;
+    "overlay.dismissed": { reason: "user" | "timeout" | "extension" | "replaced"; page: string };
   }
 
   interface SDK {
@@ -144,6 +169,17 @@ declare namespace Loom {
     ui: {
       /** Opens an https URL in the user's browser. */
       openExternal(url: string): Promise<void>;
+      /** Needs `"ui": ["status"]`. A string, options, or null to clear. */
+      setStatus(status: string | StatusOptions | null): Promise<void>;
+      /** Needs `"ui": ["overlay"]`. Shows one of the extension's pages over the whole window. */
+      presentOverlay(options: OverlayOptions): Promise<void>;
+      dismissOverlay(): Promise<void>;
+    };
+    alarms: {
+      /** Fired by Loom's clock, even when the page is hidden. Replaces an alarm of the same name. */
+      create(name: string, options: { when?: number | Date; delayMs?: number }): Promise<Alarm>;
+      clear(name: string): Promise<void>;
+      list(): Promise<Alarm[]>;
     };
   }
 }
