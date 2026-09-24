@@ -527,6 +527,14 @@ public final class AppModel {
         let loadedProjects = (try? store?.activeProjects()) ?? nil
         projects = loadedProjects ?? []
         applySavedProjectOrder()
+        // Only against a store that answered: an empty read is not proof
+        // that every ranked session is gone.
+        if !all.isEmpty {
+            let known = Set(all.map(\.id)).union(sessions.map(\.id))
+            let before = sessionOrder
+            sessionOrder.prune(keeping: known)
+            if sessionOrder != before { saveSessionOrder() }
+        }
         if selectedProject == nil { selectedProject = lastOpenedProject ?? projects.first?.id }
         resolveProjectRepoNames()
         // A tab of a project removed since has nowhere to show. Only when
@@ -1534,6 +1542,29 @@ public final class AppModel {
         projects.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
         UserDefaults.standard.set(projects.map(\.id.rawValue.uuidString),
                                   forKey: "loom.projects.order")
+    }
+
+    /// The order of the session cards inside each project group, dragged
+    /// into place by the user — a display preference like the projects'.
+    public private(set) var sessionOrder: SessionOrder = {
+        let saved = UserDefaults.standard.stringArray(forKey: "loom.sessions.order") ?? []
+        return SessionOrder(ids: saved.compactMap { UUID(uuidString: $0).map { SessionID($0) } })
+    }()
+
+    /// Moves a card onto another's place inside ONE group (`visible`, as
+    /// displayed). Refused across projects: a session never leaves its own.
+    public func moveSession(_ dragged: SessionID, onto target: SessionID, within visible: [SessionID]) {
+        let group = { (id: SessionID) -> ProjectID? in
+            self.sessions.first { $0.id == id }?.projectID
+                ?? self.allRecords.first { $0.id == id }?.projectID
+        }
+        guard group(dragged) == group(target) else { return }
+        if sessionOrder.move(dragged, onto: target, within: visible) { saveSessionOrder() }
+    }
+
+    private func saveSessionOrder() {
+        UserDefaults.standard.set(sessionOrder.ids.map(\.rawValue.uuidString),
+                                  forKey: "loom.sessions.order")
     }
 
     /// `nil` when the remembered project has since been removed.
