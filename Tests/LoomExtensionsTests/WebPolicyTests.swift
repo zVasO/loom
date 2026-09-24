@@ -75,6 +75,14 @@ struct WebPolicyTests {
                                           isMainFrame: true, isUserClick: false, extensionID: id) == .cancel)
     }
 
+    @Test("a view opens its entry itself, so a nested entry's relative URLs stay in its folder")
+    func urlDEntree() {
+        #expect(ExtensionWebPolicy.entryURL(for: "dev.example.x", entry: "index.html").absoluteString
+                == "loom-ext://dev.example.x/index.html")
+        let nested = ExtensionWebPolicy.entryURL(for: "dev.example.x", entry: "ui/index.html")
+        #expect(URL(string: "app.js", relativeTo: nested)?.absoluteURL.path == "/ui/app.js")
+    }
+
     @Test("the bridge answers the extension's own top-level page only")
     func origineDesMessages() {
         let id = "dev.example.x"

@@ -43,6 +43,13 @@ public enum ExtensionWebPolicy {
         URL(string: "\(scheme)://\(extensionID)/")!
     }
 
+    /// The page a view opens: the entry itself, so that its relative URLs
+    /// resolve from its own folder (`ui/index.html` loads `ui/app.js`).
+    public static func entryURL(for extensionID: String, entry: String) -> URL {
+        let path = entry.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? entry
+        return URL(string: "\(scheme)://\(extensionID)/\(path)") ?? url(for: extensionID)
+    }
+
     /// Headers of every scheme-handler response.
     public static func responseHeaders(contentType: String, length: Int) -> [String: String] {
         [

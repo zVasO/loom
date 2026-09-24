@@ -24,6 +24,8 @@ struct ExtensionsView: View {
         .background(DefaultTheme.contentBackground)
         .onAppear { materializeSelection() }
         .onChange(of: extensions.selectedID) { materializeSelection() }
+        // Enabled or approved in place: the page must load without a detour.
+        .onChange(of: extensions.extensions) { materializeSelection() }
     }
 
     private func materializeSelection() {
@@ -174,5 +176,52 @@ struct ExtensionsView: View {
         .frame(maxWidth: 420)
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// What the rest of the app owes the extensions (ADR-0011): the theme as it
+/// now is, the sessions as they now are, the sheets they ask for, and a live
+/// session one of them wants on screen. A modifier of its own so ContentView's
+/// body stays within the type checker's budget.
+struct ExtensionsWiring: ViewModifier {
+    let model: AppModel
+    let onOpenSession: (SessionID) -> Void
+
+    private var launchBinding: Binding<PendingExtensionLaunch?> {
+        Binding(get: { model.extensions.pendingLaunch },
+                set: { value in
+                    guard value == nil, let shown = model.extensions.pendingLaunch else { return }
+                    model.extensions.finishLaunch(BridgeLaunchResult(launched: false), for: shown)
+                })
+    }
+
+    private var consentBinding: Binding<ExtensionConsentRequest?> {
+        Binding(get: { model.extensions.consentRequest },
+                set: { value in
+                    if value == nil { model.extensions.consentRequest = nil }
+                })
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: ThemeStore.shared.palette) {
+                model.extensions.themeDidChange(model.bridgeTheme())
+            }
+            .onChange(of: model.sessions) { model.publishSessionSnapshot() }
+            .onChange(of: model.allRecords) { model.publishSessionSnapshot() }
+            .onChange(of: model.extensions.openSessionRequest) {
+                guard let request = model.extensions.openSessionRequest,
+                      let uuid = UUID(uuidString: request.sessionID) else { return }
+                model.extensions.openSessionRequest = nil
+                onOpenSession(SessionID(uuid))
+            }
+            .sheet(item: launchBinding) { request in
+                ExtensionLaunchSheet(model: model, request: request)
+            }
+            .sheet(item: consentBinding) { request in
+                ExtensionConsentSheet(request: request,
+                                      onApprove: { model.extensions.confirm(request) },
+                                      onCancel: { model.extensions.consentRequest = nil })
+            }
     }
 }

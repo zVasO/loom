@@ -210,9 +210,10 @@ public final class ExtensionRegistry {
         return linked
     }
 
-    /// Removes the extension, its storage and its secrets. A linked source
-    /// folder is never touched: it is the developer's.
-    public func remove(_ id: String) throws {
+    /// Removes the extension, its storage and — unless the caller purges
+    /// them itself, off the main actor — its secrets. A linked source folder
+    /// is never touched: it is the developer's.
+    public func remove(_ id: String, purgingSecrets: Bool = true) throws {
         let entry = state.extensions[id]
         let fm = FileManager.default
         if entry?.linkedPath == nil {
@@ -221,7 +222,7 @@ public final class ExtensionRegistry {
         }
         let data = dataDirectory.appendingPathComponent(id)
         if fm.fileExists(atPath: data.path) { try fm.removeItem(at: data) }
-        try? secrets.deleteAll(for: id)
+        if purgingSecrets { try? secrets.deleteAll(for: id) }
         state.extensions.removeValue(forKey: id)
         try saveState()
         scan()
@@ -238,13 +239,14 @@ public final class ExtensionRegistry {
         scan()
     }
 
-    /// Records the user's consent: the grant becomes exactly the manifest's
-    /// current asks — approving never grants more than is asked.
-    public func approve(_ id: String) throws {
+    /// Records the user's consent to `shown` — what the sheet listed. The
+    /// grant becomes the old one plus that, cut to the manifest's asks: a
+    /// manifest that changed while the sheet was up gets nothing unseen.
+    public func approve(_ id: String, adding shown: ExtensionPermissions) throws {
         guard let current = extensionNamed(id) else { throw RegistryError.notFound("no extension \(id)") }
         var entry = state.extensions[id]
             ?? RegistryState.Entry(enabled: true, granted: nil, linkedPath: nil)
-        entry.granted = current.manifest.permissions
+        entry.granted = current.manifest.permissions.intersection((entry.granted ?? .empty).union(shown))
         if current.isLinked, entry.linkedPath == nil { entry.linkedPath = current.root.path }
         state.extensions[id] = entry
         try saveState()

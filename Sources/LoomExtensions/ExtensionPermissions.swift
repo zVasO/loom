@@ -102,6 +102,15 @@ public struct ExtensionPermissions: Codable, Equatable, Sendable {
             projects: projects.filter { other.projects.contains($0) })
     }
 
+    /// Both grants together, each entry once.
+    public func union(_ other: ExtensionPermissions) -> ExtensionPermissions {
+        let hosts = Set(network.map { $0.lowercased() })
+        return ExtensionPermissions(
+            network: network + other.network.filter { !hosts.contains($0.lowercased()) },
+            sessions: sessions + other.sessions.filter { !sessions.contains($0) },
+            projects: projects + other.projects.filter { !projects.contains($0) })
+    }
+
     public func allows(_ requirement: BridgeMethod.Requirement) -> Bool {
         switch requirement {
         case .sessions(let access): return sessions.contains(access)

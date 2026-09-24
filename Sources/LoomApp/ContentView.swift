@@ -193,30 +193,10 @@ struct ContentView: View {
             applyTheme()
             model.extensions.isTabVisible = tab == .extensions
         }
-        // ADR-0011: what the extensions hear — the theme as it now is, the
-        // sessions as they now are, and a live session one of them asked for.
-        .onChange(of: ThemeStore.shared.palette) {
-            model.extensions.themeDidChange(model.bridgeTheme())
-        }
-        .onChange(of: model.sessions) { model.publishSessionSnapshot() }
-        .onChange(of: model.allRecords) { model.publishSessionSnapshot() }
-        .onChange(of: model.extensions.openSessionRequest) {
-            guard let request = model.extensions.openSessionRequest,
-                  let uuid = UUID(uuidString: request.sessionID) else { return }
-            model.extensions.openSessionRequest = nil
-            selected = .session(SessionID(uuid))
+        .modifier(ExtensionsWiring(model: model, onOpenSession: { id in
+            selected = .session(id)
             tab = .sessions
-        }
-        .sheet(item: Binding(get: { model.extensions.pendingLaunch },
-                             set: { if $0 == nil { model.extensions.finishLaunch(.init(launched: false)) } })) { request in
-            ExtensionLaunchSheet(model: model, request: request)
-        }
-        .sheet(item: Binding(get: { model.extensions.consentRequest },
-                             set: { if $0 == nil { model.extensions.consentRequest = nil } })) { request in
-            ExtensionConsentSheet(request: request,
-                                  onApprove: { model.extensions.confirm(request) },
-                                  onCancel: { model.extensions.consentRequest = nil })
-        }
+        }))
         .onReceive(NotificationCenter.default.publisher(for: .loomThemeChanged)) { _ in
             applyTheme()
         }

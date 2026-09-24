@@ -39,7 +39,7 @@ struct ExtensionLaunchSheet: View {
                     }
                 }
                 .labelsHidden()
-                .onChange(of: projectID) { placement = model.defaultPlacement(for: projectID) }
+                .onChange(of: projectID) { placement = proposedPlacement ?? model.defaultPlacement(for: projectID) }
             }
 
             field("WHERE IT WORKS") {
@@ -92,6 +92,7 @@ struct ExtensionLaunchSheet: View {
             HStack {
                 GhostButton("Cancel") { finish(nil) }
                     .keyboardShortcut(.cancelAction)
+                    .disabled(launching)
                 Spacer()
                 AccentButton(launching ? "Launching…" : "Launch", systemImage: "play.fill") { launch() }
                     .disabled(!canLaunch)
@@ -109,16 +110,22 @@ struct ExtensionLaunchSheet: View {
             && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// What the extension asked for, if anything — it survives a change of
+    /// project; only an unspecified placement follows the project's default.
+    private var proposedPlacement: AppModel.LaunchPlacement? {
+        switch request.params.placement {
+        case "worktree": return .newWorktree
+        case "folder": return .projectFolder
+        default: return nil
+        }
+    }
+
     private func prefill() {
         let params = request.params
         let proposed = params.projectId.flatMap { UUID(uuidString: $0) }.map { ProjectID($0) }
         projectID = model.projects.contains { $0.id == proposed } ? proposed
             : (model.selectedProject ?? model.projects.first?.id)
-        switch params.placement {
-        case "worktree": placement = .newWorktree
-        case "folder": placement = .projectFolder
-        default: placement = model.defaultPlacement(for: projectID)
-        }
+        placement = proposedPlacement ?? model.defaultPlacement(for: projectID)
         title = params.title ?? ""
         prompt = params.prompt
         badges = SessionRecord.normalizedBadges(params.badges ?? [])
@@ -137,7 +144,8 @@ struct ExtensionLaunchSheet: View {
 
     private func finish(_ id: SessionID?) {
         model.extensions.finishLaunch(BridgeLaunchResult(launched: id != nil,
-                                                         sessionId: id?.rawValue.uuidString))
+                                                         sessionId: id?.rawValue.uuidString),
+                                      for: request)
     }
 
     private func field(_ title: String, @ViewBuilder content: () -> some View) -> some View {

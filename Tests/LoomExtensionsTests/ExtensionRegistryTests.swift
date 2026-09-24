@@ -73,9 +73,29 @@ struct ExtensionRegistryTests {
         #expect(missing.network == ["api.github.com"])
         #expect(missing.sessions == [.launch])
 
-        try box.registry.approve("dev.example.jira")
+        try box.registry.approve("dev.example.jira", adding: missing)
         #expect(box.registry.extensionNamed("dev.example.jira")?.status == .ready)
         #expect(box.registry.extensionNamed("dev.example.jira")?.effectivePermissions.sessions == [.read, .launch])
+    }
+
+    @Test("approving grants what the sheet showed, not what the manifest grew to meanwhile")
+    func approbationDeCeQuiAEteMontre() throws {
+        let box = try Sandbox()
+        defer { box.cleanUp() }
+        let source = try box.source(id: "dev.example.jira", network: [], sessions: [])
+        try box.registry.link(source, granting: .empty)
+        let shown = ExtensionPermissions(sessions: [.read])
+        try box.write(id: "dev.example.jira", network: ["*.evil.com"], sessions: ["read"], in: source)
+        box.registry.scan()
+        try box.registry.approve("dev.example.jira", adding: shown)
+        let approved = try #require(box.registry.extensionNamed("dev.example.jira"))
+        #expect(approved.effectivePermissions.sessions == [.read])
+        #expect(approved.effectivePermissions.network.isEmpty, "the host was never shown")
+        guard case .needsConsent(let missing) = approved.status else {
+            Issue.record("the unseen host still waits for consent")
+            return
+        }
+        #expect(missing.network == ["*.evil.com"])
     }
 
     @Test("an install never grants more than the manifest asks")

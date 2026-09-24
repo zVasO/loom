@@ -101,8 +101,11 @@ final class ExtensionsModel {
 
     /// The extension the user is looking at — in the Extensions tab, with
     /// Loom in front. The only one that may ask for a launch.
+    /// With another sheet up (⌘K, usage) a launch sheet could not show, and
+    /// the page's promise would hang: not frontmost then.
     func isFrontmost(_ id: String) -> Bool {
         NSApp.isActive && isTabVisible && selectedID == id
+            && NSApp.mainWindow?.attachedSheet == nil
     }
 
     // MARK: - Registry
@@ -154,7 +157,7 @@ final class ExtensionsModel {
                 let linked = try registry.link(folder, granting: request.manifest.permissions)
                 selectedID = linked.id
             case .update(let id):
-                try registry.approve(id)
+                try registry.approve(id, adding: request.permissions)
             }
         } catch {
             lastError = "\(error)"
@@ -174,10 +177,13 @@ final class ExtensionsModel {
     func remove(_ id: String) {
         tearDownHost(id)
         do {
-            try registry.remove(id)
+            try registry.remove(id, purgingSecrets: false)
         } catch {
             lastError = "\(error)"
         }
+        // The Keychain can block on a prompt: never on the main actor.
+        let secrets = self.secrets
+        Task.detached { try? secrets.deleteAll(for: id) }
         reloadRegistry()
     }
 
@@ -240,9 +246,8 @@ final class ExtensionsModel {
         hosts[id] = nil
         bridges[id] = nil
         hostedFrom[id] = nil
-        if pendingLaunch?.extensionID == id {
-            pendingLaunch?.resolve(BridgeLaunchResult(launched: false))
-            pendingLaunch = nil
+        if let pending = pendingLaunch, pending.extensionID == id {
+            finishLaunch(BridgeLaunchResult(launched: false), for: pending)
         }
     }
 
@@ -296,8 +301,10 @@ final class ExtensionsModel {
         }
     }
 
-    func finishLaunch(_ result: BridgeLaunchResult) {
-        pendingLaunch?.resolve(result)
-        pendingLaunch = nil
+    /// Answers `request` — and clears the pending slot only if it still holds
+    /// that request, never a newer one.
+    func finishLaunch(_ result: BridgeLaunchResult, for request: PendingExtensionLaunch) {
+        request.resolve(result)
+        if pendingLaunch === request { pendingLaunch = nil }
     }
 }

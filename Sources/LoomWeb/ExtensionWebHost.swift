@@ -14,6 +14,8 @@ import WebKit
 @Observable
 public final class ExtensionWebHost: NSObject {
     public let extensionID: String
+    /// Where the page starts: `loom-ext://<id>/<entry>`.
+    public let entryURL: URL
     public let webView: WKWebView
     /// A link the user clicked, to be opened in their browser.
     @ObservationIgnored public var onOpenExternal: ((URL) -> Void)?
@@ -33,6 +35,7 @@ public final class ExtensionWebHost: NSObject {
     public init(manifest: ExtensionManifest, root: URL, userScript: String, inspectable: Bool,
                 dispatch: @escaping @MainActor (String) async -> String) {
         extensionID = manifest.id
+        entryURL = ExtensionWebPolicy.entryURL(for: manifest.id, entry: manifest.entry)
         let schemeHandler = ExtensionSchemeHandler(resolver: ExtensionFileResolver(
             extensionID: manifest.id, root: root, entry: manifest.entry))
         messageHandler = ExtensionMessageHandler(extensionID: manifest.id, dispatch: dispatch)
@@ -99,7 +102,7 @@ public final class ExtensionWebHost: NSObject {
     /// still loading for the first time must reach it.
     private func navigateHome() {
         isLoaded = false
-        webView.load(URLRequest(url: ExtensionWebPolicy.url(for: extensionID)))
+        webView.load(URLRequest(url: entryURL))
     }
 
     /// Loads the page again from its first file — after an edit to a linked

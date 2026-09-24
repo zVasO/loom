@@ -149,18 +149,31 @@ public final class ExtensionHTTPClient: @unchecked Sendable {
         let session = URLSession(configuration: config, delegate: redirectGuard, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
 
-        let data: Data
+        // Streamed, so the cap stops a huge answer before it sits in memory.
+        let limit = HTTPProxyPolicy.maxResponseBody
+        let tooLarge = BridgeError(.tooLarge, "the response is over \(limit) bytes")
+        let bytes: URLSession.AsyncBytes
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: urlRequest, delegate: redirectGuard)
+            (bytes, response) = try await session.bytes(for: urlRequest, delegate: redirectGuard)
         } catch {
             throw BridgeError(.network, error.localizedDescription)
         }
         guard let http = response as? HTTPURLResponse else {
             throw BridgeError(.network, "the host did not answer in HTTP")
         }
-        guard data.count <= HTTPProxyPolicy.maxResponseBody else {
-            throw BridgeError(.tooLarge, "the response is over \(HTTPProxyPolicy.maxResponseBody) bytes")
+        guard http.expectedContentLength <= Int64(limit) else { throw tooLarge }
+        var data = Data()
+        if http.expectedContentLength > 0 { data.reserveCapacity(Int(http.expectedContentLength)) }
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count > limit { throw tooLarge }
+            }
+        } catch let error as BridgeError {
+            throw error
+        } catch {
+            throw BridgeError(.network, error.localizedDescription)
         }
         let (body, encoding) = HTTPProxyPolicy.encodeBody(data)
         return BridgeHTTPResponse(status: http.statusCode,
