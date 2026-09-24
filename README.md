@@ -17,6 +17,7 @@ swift run -c release LoomApp    # IMPORTANT : release — le debug est 10-50× p
 ```
 
 Tests : `swift test` (process réels, repos Git réels, sockets réels).
+SDK des extensions et exemple Jira : `cd Examples/extensions && npm test`.
 
 Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 étapes).
 
@@ -48,6 +49,13 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   UA Safari, LRU d'onglets, historique avec suggestions.
 - **Persistance** : GRDB, migrations versionnées (v1→v4), journal des transitions
   avec source, marquage `interrupted` au relancement.
+- **Extensions** (ADR-0011) : pages web tierces dans un onglet « Extensions »,
+  chacune dans sa vue web isolée (store non persistant, CSP stricte, réseau
+  bloqué sauf `loom.http.fetch` vers les hôtes consentis), pont `window.loom`
+  gardé par les permissions du manifeste (lecture des sessions et projets,
+  lancement toujours confirmé par une feuille native), secrets au Trousseau,
+  commandes dans ⌘K. Exemple : un board Jira qui démarre une session depuis un
+  ticket (`Examples/extensions/jira-board/`). Guide : [`docs/extensions.md`](docs/extensions.md).
 - **Thèmes** : 9 familles intégrées, chacune en clair et en sombre ; apparence
   Système / Clair / Sombre (suivi de macOS en direct) ; override par projet ;
   import d'un thème tweakcn/shadcn (nom, URL ou CSS collé) ; aperçu sur des
@@ -59,6 +67,7 @@ Packages SPM aux frontières imposées (§6.1 du cahier des charges, ADR-0009) :
 `LoomCore` (états, réducteur) ← `LoomTerminal` (PTY, moteur, runtime) ·
 `LoomAgents` (adapter Claude Code, classification) · `LoomGit` · `LoomWeb` ·
 `LoomPersistence` (GRDB, transcripts) · `LoomAPI` (contrat de l'API agents) ·
+`LoomExtensions` (manifeste, permissions et pont des extensions, ADR-0011) ·
 `LoomIPC` (socket hooks + requêtes) ←
 `LoomSessions` (SessionManager, orchestration) ← `LoomApp` (SwiftUI).
 Exécutables compagnons : `loom-hook` (hooks) et `loom` (CLI + serveur MCP de

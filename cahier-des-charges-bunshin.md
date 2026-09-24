@@ -29,7 +29,7 @@ Le périmètre v1 couvre : la gestion de projets locaux (dossiers Git), le cycle
 
 ### 2.2 Exclus de la v1 (envisagé v2+)
 
-Sont explicitement hors périmètre v1 : tout backend cloud ou synchronisation multi-machines, le partage de sessions entre utilisateurs, l'équivalent de Spotify Portal (catalogue de services, contexte organisationnel), la survie des sessions au-delà du cycle de vie de l'application (redémarrage app ou machine — voir §6.4 pour la stratégie de reprise), le support Windows/Linux, un système de plugins tiers, la facturation/télémétrie, et l'édition de code intégrée (l'app affiche des diffs, elle n'est pas un éditeur).
+Sont explicitement hors périmètre v1 : tout backend cloud ou synchronisation multi-machines, le partage de sessions entre utilisateurs, l'équivalent de Spotify Portal (catalogue de services, contexte organisationnel), la survie des sessions au-delà du cycle de vie de l'application (redémarrage app ou machine — voir §6.4 pour la stratégie de reprise), le support Windows/Linux, un système de plugins tiers (révisé : extensions web isolées, ADR-0011), la facturation/télémétrie, et l'édition de code intégrée (l'app affiche des diffs, elle n'est pas un éditeur).
 
 ### 2.3 Contraintes imposées
 
