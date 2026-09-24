@@ -45,6 +45,12 @@ struct GlobalPRsView: View {
     /// Organizations whose repositories are unfolded — folded by default,
     /// an organization can hold hundreds.
     @State private var expandedOwners: Set<String> = []
+    /// "WAITING ON ME" and "PROJECTS" folded away — persisted: a section
+    /// the user put aside stays aside across tabs and relaunches. Unlike an
+    /// organization, a search does not unfold them: the count in the header
+    /// says what matched, and the chevron always does what it shows.
+    @AppStorage("loom.pr.inboxFolded") private var inboxFolded = false
+    @AppStorage("loom.pr.projectsFolded") private var projectsFolded = false
     @State private var addRepoShown = false
     @State private var addRepoText = ""
     /// Which region of the workspace is showing. Persisted: whichever one you
@@ -106,6 +112,7 @@ struct GlobalPRsView: View {
         guard let pending = model.pendingPR else { return }
         model.showPR(pending.pr, in: pending.projectID)
         model.expandedPRProjects.insert(pending.projectID)
+        projectsFolded = false   // the project just unfolded must be on screen
         Task { await model.ensurePRs(for: pending.projectID) }
         model.pendingPR = nil
     }
@@ -297,6 +304,26 @@ struct GlobalPRsView: View {
         .foregroundStyle(DefaultTheme.groupHeader)
     }
 
+    /// A section header that folds its section: the organizations' chevron,
+    /// icon, title and count, the whole line clickable.
+    private func foldableHeader(_ title: String, count: Int?, systemImage: String,
+                                folded: Binding<Bool>) -> some View {
+        Button {
+            withAnimation(.hover) { folded.wrappedValue.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .rotationEffect(.degrees(folded.wrappedValue ? -90 : 0))
+                    .foregroundStyle(DefaultTheme.groupHeader)
+                header(title, count: count, systemImage: systemImage)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(folded.wrappedValue ? "Unfold" : "Fold")
+    }
+
     /// GitHub's answer to the typed text, grouped by repository. A hit in a
     /// repository nobody cloned yet offers the clone.
     private func searchSection(_ results: [GitHubService.PRSearchHit]) -> some View {
@@ -330,23 +357,26 @@ struct GlobalPRsView: View {
         if !hits.isEmpty || query.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    header("WAITING ON ME", count: hits.count, systemImage: "tray")
+                    foldableHeader("WAITING ON ME", count: hits.count, systemImage: "tray",
+                                   folded: $inboxFolded)
                     Spacer()
                     if model.inboxLoading { ProgressView().controlSize(.mini) }
                 }
                 .padding(.horizontal, 2)
-                if let error = model.inboxError {
-                    Text(error)
-                        .font(.system(size: 11))
-                        .foregroundStyle(DefaultTheme.danger)
-                        .textSelection(.enabled)
-                } else if hits.isEmpty && !model.inboxLoading {
-                    Text("No review requested from you.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(DefaultTheme.mutedText)
-                        .padding(.leading, 2)
+                if !inboxFolded {
+                    if let error = model.inboxError {
+                        Text(error)
+                            .font(.system(size: 11))
+                            .foregroundStyle(DefaultTheme.danger)
+                            .textSelection(.enabled)
+                    } else if hits.isEmpty && !model.inboxLoading {
+                        Text("No review requested from you.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(DefaultTheme.mutedText)
+                            .padding(.leading, 2)
+                    }
+                    hitList(hits)
                 }
-                hitList(hits)
             }
         }
     }
@@ -394,16 +424,19 @@ struct GlobalPRsView: View {
         }
         if !visible.isEmpty || query.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                header("PROJECTS", count: visible.count, systemImage: "folder")
+                foldableHeader("PROJECTS", count: visible.count, systemImage: "folder",
+                               folded: $projectsFolded)
                     .padding(.horizontal, 2)
-                if visible.isEmpty {
-                    Text("No project yet — add one from an organization below, or with +.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(DefaultTheme.mutedText)
-                        .padding(.leading, 2)
-                }
-                ForEach(visible, id: \.id) { project in
-                    projectGroup(project)
+                if !projectsFolded {
+                    if visible.isEmpty {
+                        Text("No project yet — add one from an organization below, or with +.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(DefaultTheme.mutedText)
+                            .padding(.leading, 2)
+                    }
+                    ForEach(visible, id: \.id) { project in
+                        projectGroup(project)
+                    }
                 }
             }
         }
