@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Jira Board</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="bar">
+    <div class="bar-left">
+      <select id="board-select" aria-label="Board" hidden></select>
+      <label class="project-picker" id="project-picker" hidden>
+        <span>Loom project</span>
+        <select id="project-select" aria-label="Loom project for this board"></select>
+      </label>
+    </div>
+    <div class="bar-right">
+      <span id="status" class="status" role="status"></span>
+      <button id="refresh" class="ghost" type="button" title="Refresh" hidden>Refresh</button>
+      <button id="settings" class="ghost" type="button" title="Jira connection" hidden>Connection</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="setup" class="setup" hidden>
+      <h1>Connect to Jira</h1>
+      <p class="muted">Your site, the e-mail of your Atlassian account and an
+        <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank">API token</a>.
+        The token is kept in your macOS Keychain.</p>
+      <form id="setup-form" autocomplete="off">
+        <label>Site
+          <input id="site" name="site" placeholder="your-team.atlassian.net" required>
+        </label>
+        <label>E-mail
+          <input id="email" name="email" type="email" placeholder="you@company.com" required>
+        </label>
+        <label>API token
+          <input id="token" name="token" type="password" placeholder="Paste your token" required>
+        </label>
+        <p id="setup-error" class="error" hidden></p>
+        <div class="actions">
+          <button id="setup-cancel" class="ghost" type="button" hidden>Cancel</button>
+          <button type="submit" class="accent">Connect</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="board" class="board" hidden></section>
+
+    <aside id="detail" class="detail" hidden>
+      <div class="detail-head">
+        <span id="detail-key" class="key"></span>
+        <button id="detail-close" class="ghost" type="button" aria-label="Close">✕</button>
+      </div>
+      <h2 id="detail-summary"></h2>
+      <p id="detail-meta" class="muted"></p>
+      <div class="detail-actions">
+        <button id="detail-start" class="accent" type="button">Start a session</button>
+        <button id="detail-open" class="ghost" type="button" hidden>Open the session</button>
+        <a id="detail-link" class="ghost" target="_blank">Open in Jira</a>
+      </div>
+      <p id="detail-session" class="muted"></p>
+      <pre id="detail-description" class="description"></pre>
+    </aside>
+  </main>
+</body>
+</html>

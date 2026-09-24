@@ -32,7 +32,10 @@ let package = Package(
         .target(name: "LoomTerminal", dependencies: ["LoomCore", .product(name: "SwiftTerm", package: "SwiftTerm")]),
         .target(name: "LoomAgents", dependencies: ["LoomCore", "LoomAPI"]),
         .target(name: "LoomGit", dependencies: ["LoomCore"]),
-        .target(name: "LoomWeb", dependencies: ["LoomCore", "LoomUI"]),
+        // Web extensions (ADR-0011): manifest, permissions, the bridge and its guards — pure,
+        // testable; the WebKit host lives in LoomWeb, the wiring in LoomApp.
+        .target(name: "LoomExtensions", dependencies: ["LoomCore", "LoomAPI"]),
+        .target(name: "LoomWeb", dependencies: ["LoomCore", "LoomUI", "LoomExtensions"]),
         .target(name: "LoomPersistence", dependencies: ["LoomCore", "LoomTerminal", "LoomAgents", .product(name: "GRDB", package: "GRDB.swift")]),
         .target(name: "LoomIPC", dependencies: ["LoomCore", "LoomAPI"]),
         // The helper the agents' hooks call (ADR-0005): stdin → socket, no dependencies.
@@ -52,7 +55,7 @@ let package = Package(
             dependencies: [
                 "LoomCore", "LoomAPI", "LoomUI", "LoomTerminal", "LoomAgents",
                 "LoomGit", "LoomWeb", "LoomPersistence", "LoomIPC",
-                "LoomSessions",
+                "LoomSessions", "LoomExtensions",
             ],
             resources: [.process("Resources")]
         ),
@@ -66,6 +69,7 @@ let package = Package(
         .testTarget(name: "LoomGitTests", dependencies: ["LoomGit", "LoomCore"]),
         .testTarget(name: "LoomPersistenceTests", dependencies: ["LoomPersistence"]),
         .testTarget(name: "LoomWebTests", dependencies: ["LoomWeb"]),
+        .testTarget(name: "LoomExtensionsTests", dependencies: ["LoomExtensions", "LoomAPI", "LoomCore"]),
         .testTarget(name: "LoomUITests", dependencies: ["LoomUI", "LoomTerminal", "LoomGit"]),
     ]
 )

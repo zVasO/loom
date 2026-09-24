@@ -1,6 +1,7 @@
 import LoomAgents
 import LoomAPI
 import LoomCore
+import LoomExtensions
 import LoomGit
 import LoomIPC
 import LoomPersistence
@@ -208,6 +209,9 @@ public final class AppModel {
     private let supportDirectory: URL
     private var socketURL: URL { supportDirectory.appendingPathComponent("loom.sock") }
 
+    /// Web extensions (ADR-0011): `<support>/extensions/`.
+    let extensions: ExtensionsModel
+
     /// The agents API's global token (ADR-0010), read from `api-token` in the
     /// support directory; nil when the file could not be created.
     public private(set) var apiToken: String?
@@ -364,6 +368,7 @@ public final class AppModel {
                 .appendingPathComponent("Loom")
         Self.migrateLegacySupportDirectory(to: resolved)
         self.supportDirectory = resolved
+        self.extensions = ExtensionsModel(directory: resolved.appendingPathComponent("extensions"))
     }
 
     /// The app used to be called Bunshin: on first launch under the new name, the
@@ -463,6 +468,8 @@ public final class AppModel {
                 startupError = String(describing: error)
             }
         }
+        // After the do/catch: extensions load even when startup was partial.
+        extensions.start(services: self)
     }
 
     /// All known records — counters and dates for the project cards.
@@ -2148,7 +2155,8 @@ public final class AppModel {
     /// Returns the identifier of the created session.
     @discardableResult
     public func launchSession(prompt: String? = nil, in projectID: ProjectID? = nil,
-                              placement: LaunchPlacement? = nil) async -> SessionID? {
+                              placement: LaunchPlacement? = nil, title: String? = nil,
+                              badges: [String] = []) async -> SessionID? {
         guard let manager else { return nil }
         if let projectID { selectedProject = projectID }
         let project = project(selectedProject)
@@ -2176,14 +2184,18 @@ public final class AppModel {
             spec.projectID = project?.id
             // A single UUID end to end: the `--session-id` one — Resume depends on it.
             spec.sessionID = sessionID
-            spec.title = initialPrompt ?? Self.generatedName(project: project)
+            // An extension proposes its own title (ADR-0011); a trimmed empty one is none.
+            let givenTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let chosenTitle = (givenTitle?.isEmpty == false) ? givenTitle : nil
+            spec.title = chosenTitle ?? initialPrompt ?? Self.generatedName(project: project)
+            spec.badges = SessionRecord.normalizedBadges(badges)
             // GIT-01 became a CHOICE, per launch: worktree isolation only when
             // asked (or when the project made it its default). A folder that is
             // not a git repository has no worktree to offer — the session runs
             // in it, and the record says so through its missing worktreePath.
             if placement == .newWorktree,
                FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) {
-                spec.worktree = .create(repo: directory, slug: Self.slug(from: initialPrompt ?? ""))
+                spec.worktree = .create(repo: directory, slug: Self.slug(from: chosenTitle ?? initialPrompt ?? ""))
             }
             let id = try await manager.launch(spec)
             await cacheSurface(for: id)
@@ -2191,7 +2203,8 @@ public final class AppModel {
             let record = (try? store?.session(id: id)) ?? nil
             sessions.append(SessionItem(id: id, title: record?.title ?? "Session",
                                         state: .starting, projectID: project?.id,
-                                        branch: record?.branch))
+                                        branch: record?.branch,
+                                        badges: record?.badges ?? spec.badges))
             reloadPersistedSessions()
             return id
         } catch {

@@ -40,7 +40,7 @@ struct ActionPaletteView: View {
     @FocusState private var searchFocused: Bool
 
     /// The order sections are drawn in — also the order ↑↓ walks through them.
-    private static let sectionOrder = ["Navigation", "Actions", "Theme", "Projects", "Sessions"]
+    private static let sectionOrder = ["Navigation", "Actions", "Extensions", "Theme", "Projects", "Sessions"]
 
     /// The filtered entries, rank-sorted inside each section.
     private var matchedActions: [PaletteAction] {

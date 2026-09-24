@@ -102,3 +102,23 @@ Choix d'un projet de dévier du thème global — soit thème complet, soit acce
 
 **Accent** :
 La couleur signature d'un projet, portée par ses cartes de session ; le repère visuel « je suis dans quel projet ? ».
+
+### Extensions
+
+**Extension** :
+Une page web tierce (HTML/JS/CSS) que Loom affiche dans l'onglet Extensions, isolée dans sa propre vue web, et qui ne parle à Loom que par le pont. Installée (copiée) ou liée (servie depuis son dossier, pour le développement).
+_Avoid_ : plugin, add-on, intégration
+
+**Manifeste** :
+Le fichier `loom-extension.json` d'une extension : son identité, sa page d'entrée, la version du pont visée, ses permissions, ses commandes.
+
+**Pont** :
+`window.loom` : l'API qu'une extension appelle, et les événements qu'elle reçoit. Chaque appel est vérifié côté Loom.
+_Avoid_ : SDK (le SDK n'est que l'enveloppe JavaScript du pont)
+
+**Permission** :
+Ce qu'une extension demande dans son manifeste au-delà de sa propre page : des hôtes réseau, la lecture ou le lancement de sessions, la lecture des projets.
+
+**Autorisation** :
+Les permissions que l'utilisateur a accordées. Une extension tourne avec ce que son manifeste demande *et* que l'autorisation couvre ; un manifeste qui demande plus attend une nouvelle autorisation.
+_Avoid_ : grant, consentement (le consentement est le geste, l'autorisation son résultat)
