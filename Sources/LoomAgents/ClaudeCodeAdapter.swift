@@ -150,9 +150,13 @@ public struct ClaudeCodeAdapter: Sendable {
                        pathPrefix: Self.pathPrefix(wiring: hooks))
     }
 
-    /// Arguments as one shell command line: a path with a space is quoted.
+    /// Arguments as one shell command line: an argument with a space or a
+    /// quote is single-quoted, its own quotes escaped (`/Users/o'brien`).
     private static func shellJoined(_ arguments: [String]) -> String {
-        arguments.map { $0.contains(" ") ? "'\($0)'" : $0 }.joined(separator: " ")
+        arguments.map { argument in
+            guard argument.contains(where: { " '\"$`\\".contains($0) }) else { return argument }
+            return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }.joined(separator: " ")
     }
 
     /// The API as MCP tools (ADR-0010), through inline `--mcp-config` — the CLI

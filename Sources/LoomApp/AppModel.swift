@@ -1555,14 +1555,12 @@ public final class AppModel {
         return SessionOrder(ids: saved.compactMap { UUID(uuidString: $0).map { SessionID($0) } })
     }()
 
-    /// Moves a card onto another's place inside ONE group (`visible`, as
-    /// displayed). Refused across projects: a session never leaves its own.
+    /// Moves a card onto another's place inside ONE group (`visible`, the
+    /// group's cards as displayed). A session never leaves its own group: a
+    /// card that is not in `visible` moves nothing. The displayed group is
+    /// the judge, not the raw project id — NO PROJECT gathers sessions with
+    /// none and sessions of removed projects alike.
     public func moveSession(_ dragged: SessionID, onto target: SessionID, within visible: [SessionID]) {
-        let group = { (id: SessionID) -> ProjectID? in
-            self.sessions.first { $0.id == id }?.projectID
-                ?? self.allRecords.first { $0.id == id }?.projectID
-        }
-        guard group(dragged) == group(target) else { return }
         if sessionOrder.move(dragged, onto: target, within: visible) { saveSessionOrder() }
     }
 

@@ -18,10 +18,12 @@ struct SessionOrderTests {
     @Test("a move within the group lands on the target's place, both ways")
     func deplacement() {
         var order = SessionOrder()
-        #expect(order.move(c, onto: a, within: [a, b, c]))
+        let up = order.move(c, onto: a, within: [a, b, c])
+        #expect(up)
         #expect(order.sorted([a, b, c], id: { $0 }) == [c, a, b], "dragged up: before the target")
 
-        #expect(order.move(c, onto: b, within: [c, a, b]))
+        let down = order.move(c, onto: b, within: [c, a, b])
+        #expect(down)
         #expect(order.sorted([a, b, c], id: { $0 }) == [a, b, c], "dragged down: after the target")
     }
 
@@ -46,8 +48,10 @@ struct SessionOrderTests {
     @Test("a card outside the group, or onto itself, moves nothing")
     func deplacementRefuse() {
         var order = SessionOrder()
-        #expect(!order.move(a, onto: c, within: [a, b]))
-        #expect(!order.move(a, onto: a, within: [a, b]))
+        let outside = order.move(a, onto: c, within: [a, b])
+        let ontoItself = order.move(a, onto: a, within: [a, b])
+        #expect(!outside)
+        #expect(!ontoItself)
         #expect(order.ids.isEmpty)
     }
 

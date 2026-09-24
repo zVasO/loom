@@ -46,6 +46,11 @@ func deliver(_ payloadObject: Any, socketPath: String, token: String) -> String?
     let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
     guard descriptor >= 0 else { return "socket(): errno \(errno)" }
     defer { close(descriptor) }
+    // An app closing the connection mid-write (quitting) must not kill the
+    // helper with SIGPIPE — in status line mode, before the user's line runs.
+    // Per socket, unlike SIG_IGN, so nothing leaks into the exec'd command.
+    var noSigPipe: Int32 = 1
+    setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
 
     var address = sockaddr_un()
     address.sun_family = sa_family_t(AF_UNIX)
@@ -72,8 +77,22 @@ func deliver(_ payloadObject: Any, socketPath: String, token: String) -> String?
     return nil
 }
 
+/// Writes all of `input` to `descriptor`; false on a short write.
+func writeAll(_ input: Data, to descriptor: Int32) -> Bool {
+    input.withUnsafeBytes { buffer in
+        var offset = 0
+        while offset < buffer.count {
+            let count = write(descriptor, buffer.baseAddress! + offset, buffer.count - offset)
+            guard count > 0 else { return false }
+            offset += count
+        }
+        return true
+    }
+}
+
 /// Replaces this process with `sh -c command`, `input` on its stdin. Only
-/// returns if the exec failed.
+/// returns if the exec failed — or if the input could not be handed over:
+/// the user's line run on an empty stdin would print garbage, not theirs.
 func execShell(_ command: String, input: Data) {
     // The same bytes claude gave us, from a file already unlinked: no size
     // limit (a pipe would block past its buffer), nothing left behind.
@@ -81,17 +100,19 @@ func execShell(_ command: String, input: Data) {
     let file = template.withUnsafeMutableBufferPointer { mkstemp($0.baseAddress!) }
     if file >= 0 {
         template.withUnsafeBufferPointer { _ = unlink($0.baseAddress!) }
-        var offset = 0
-        input.withUnsafeBytes { buffer in
-            while offset < buffer.count {
-                let count = write(file, buffer.baseAddress! + offset, buffer.count - offset)
-                guard count > 0 else { break }
-                offset += count
-            }
-        }
-        lseek(file, 0, SEEK_SET)
+        guard writeAll(input, to: file), lseek(file, 0, SEEK_SET) == 0 else { return }
         dup2(file, STDIN_FILENO)
         close(file)
+    } else {
+        // No temporary file: a pipe carries a status line's few KB as well
+        // (8 KB: well under the smallest pipe buffer, the write never blocks).
+        var ends: [Int32] = [0, 0]
+        guard pipe(&ends) == 0 else { return }
+        let written = input.count <= 8192 && writeAll(input, to: ends[1])
+        close(ends[1])
+        guard written else { close(ends[0]); return }
+        dup2(ends[0], STDIN_FILENO)
+        close(ends[0])
     }
     let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(command), nil]
     execv("/bin/sh", argv)
