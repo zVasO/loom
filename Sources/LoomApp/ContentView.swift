@@ -1966,8 +1966,9 @@ struct SessionsView: View {
                 let isReview = { (item: AppModel.SessionItem) -> Bool in
                     reviewIDs.contains(item.id) || item.parentID.map(reviewIDs.contains) == true
                 }
+                let createdAt = Dictionary(model.allRecords.map { ($0.id, $0.createdAt) }) { first, _ in first }
                 let byProject = Dictionary(uniqueKeysWithValues: model.projects.map {
-                    ($0.id, stackItems(for: $0.id, dormant: dormant))
+                    ($0.id, stackItems(for: $0.id, dormant: dormant, createdAt: createdAt))
                 })
                 ForEach(model.projects, id: \.id) { project in
                     let items = (byProject[project.id] ?? []).filter { !isReview($0) }
@@ -1978,7 +1979,7 @@ struct SessionsView: View {
                         }
                     }
                 }
-                let orphans = stackItems(for: nil, dormant: dormant)
+                let orphans = stackItems(for: nil, dormant: dormant, createdAt: createdAt)
                 if !orphans.isEmpty {
                     group("NO PROJECT", projectID: nil, key: Self.groupKey(nil)) {
                         projectStacks(items: orphans, group: Self.groupKey(nil))
@@ -2015,7 +2016,8 @@ struct SessionsView: View {
     /// the whole sidebar — the filter over every record per live session used
     /// to run once per project group, six times a pass.
     private func stackItems(for projectID: ProjectID?,
-                            dormant: [SessionRecord]) -> [AppModel.SessionItem] {
+                            dormant: [SessionRecord],
+                            createdAt: [SessionID: Date] = [:]) -> [AppModel.SessionItem] {
         let live = model.sessions.filter {
             projectID != nil ? $0.projectID == projectID : model.project($0.projectID) == nil
         }
@@ -2029,8 +2031,12 @@ struct SessionsView: View {
                                      badges: record.badges,
                                      nativeSessionID: record.nativeSessionID)
             }
-        // The user's order, dragged into place; unplaced cards keep their slot.
-        return model.sessionOrder.sorted(live + dormant, id: \.id)
+        // The user's order, dragged into place; the cards never placed on
+        // top, newest first — by creation date, which a restart leaves alone
+        // (live and dormant swap at every launch: that order could not hold).
+        return model.sessionOrder.sorted(live + dormant, id: \.id) { item in
+            createdAt[item.id] ?? .distantFuture
+        }
     }
 
     /// The reference's stack: the session and its children (terminals, webs)

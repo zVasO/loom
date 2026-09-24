@@ -3,11 +3,11 @@ import Foundation
 /// The order the user gave the session cards of the sidebar by dragging
 /// them — a display preference, one rank per session across every project.
 ///
-/// Sessions the user never placed keep the slot their natural order gives
-/// them (live ones first, in launch order, then dormant ones newest first):
-/// only the ranked ones are permuted among the slots they occupy. A new
-/// session therefore appears where it always did, and a resumed one keeps
-/// the place the user gave it instead of jumping to the end of the live block.
+/// The order must read the same before and after a restart, and a restart
+/// turns every live session into a dormant one: nothing may depend on which
+/// is which. Sessions the user never placed therefore come first, newest
+/// creation first — a date that never changes — so a new session appears on
+/// top of its group; the placed ones follow, in the order the user gave them.
 public struct SessionOrder: Equatable, Sendable {
     public private(set) var ids: [SessionID]
 
@@ -15,17 +15,20 @@ public struct SessionOrder: Equatable, Sendable {
         self.ids = ids
     }
 
-    /// `items` in the user's order. Stable; a no-op without any rank.
-    public func sorted<T>(_ items: [T], id: (T) -> SessionID) -> [T] {
-        guard !ids.isEmpty else { return items }
+    /// `items` in the user's order: the unplaced ones first, newest
+    /// `createdAt` first, then the placed ones by rank. Independent of the
+    /// input order; ties keep it.
+    public func sorted<T>(_ items: [T], id: (T) -> SessionID, createdAt: (T) -> Date) -> [T] {
         let rank = Dictionary(ids.enumerated().map { ($1, $0) }) { first, _ in first }
-        let rankedSlots = items.indices.filter { rank[id(items[$0])] != nil }
-        guard rankedSlots.count > 1 else { return items }
-        let rankedItems = rankedSlots.map { items[$0] }
-            .sorted { (rank[id($0)] ?? .max) < (rank[id($1)] ?? .max) }
-        var result = items
-        for (slot, item) in zip(rankedSlots, rankedItems) { result[slot] = item }
-        return result
+        let indexed = Array(items.enumerated())
+        let unplaced = indexed.filter { rank[id($0.element)] == nil }
+            .sorted { lhs, rhs in
+                let (l, r) = (createdAt(lhs.element), createdAt(rhs.element))
+                return l == r ? lhs.offset < rhs.offset : l > r
+            }
+        let placed = indexed.filter { rank[id($0.element)] != nil }
+            .sorted { (rank[id($0.element)] ?? .max) < (rank[id($1.element)] ?? .max) }
+        return (unplaced + placed).map(\.element)
     }
 
     /// Moves `dragged` onto `target`'s place inside `visible` — the cards of
