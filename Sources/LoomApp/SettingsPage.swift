@@ -1,5 +1,6 @@
 import LoomAgents
 import LoomCore
+import LoomExtensions
 import LoomUI
 import SwiftUI
 
@@ -18,6 +19,7 @@ struct SettingsPage: View {
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
     @State private var importShown = false
+    @State private var removalCandidate: InstalledExtension?
 
     var body: some View {
         ScrollView {
@@ -33,6 +35,7 @@ struct SettingsPage: View {
                 badgesSection
                 themesSection
                 projectsSection
+                extensionsSection
             }
             .frame(maxWidth: 760, alignment: .leading)
             .padding(.horizontal, 36).padding(.top, 32).padding(.bottom, 44)
@@ -423,6 +426,123 @@ struct SettingsPage: View {
                         .fixedSize()
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: Extensions (ADR-0011)
+
+    private var extensionsSection: some View {
+        let extensions = model.extensions
+        return VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("Extensions")
+            card {
+                Text("Web pages that plug into Loom — a Jira board, an inbox, your own tools. Each runs in its own sandboxed web view and reaches only what you approve. See docs/extensions.md to write one.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                HStack(spacing: 8) {
+                    GhostButton("Install from folder…", systemImage: "square.and.arrow.down") {
+                        guard let url = AppModel.pickFolder(title: "Choose an extension folder") else { return }
+                        extensions.requestInstall(from: url, linking: false)
+                    }
+                    GhostButton("Link folder (development)…", systemImage: "link") {
+                        guard let url = AppModel.pickFolder(title: "Choose the extension you are developing") else { return }
+                        extensions.requestInstall(from: url, linking: true)
+                    }
+                    Spacer()
+                }
+                if let error = extensions.lastError {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                        Text(error).textSelection(.enabled)
+                        Spacer()
+                        Button("Dismiss") { extensions.lastError = nil }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.danger)
+                }
+                ForEach(extensions.extensions) { installed in
+                    Divider().overlay(DefaultTheme.cardBorder)
+                    extensionRow(installed)
+                }
+                ForEach(extensions.problems) { problem in
+                    Divider().overlay(DefaultTheme.cardBorder)
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(DefaultTheme.danger)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(problem.location.lastPathComponent)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(DefaultTheme.primaryText)
+                            Text(problem.message)
+                                .font(.system(size: 11))
+                                .foregroundStyle(DefaultTheme.secondaryText)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+        }
+        .alert("Remove \(removalCandidate?.manifest.name ?? "the extension")?",
+               isPresented: Binding(get: { removalCandidate != nil }, set: { if !$0 { removalCandidate = nil } })) {
+            Button("Remove", role: .destructive) {
+                if let id = removalCandidate?.id { extensions.remove(id) }
+                removalCandidate = nil
+            }
+            Button("Cancel", role: .cancel) { removalCandidate = nil }
+        } message: {
+            Text(removalCandidate?.isLinked == true
+                 ? "Its settings and Keychain secrets are deleted. Your development folder is left as it is."
+                 : "Its files, settings and Keychain secrets are deleted.")
+        }
+    }
+
+    private func extensionRow(_ installed: InstalledExtension) -> some View {
+        let extensions = model.extensions
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: installed.manifest.icon ?? "puzzlepiece.extension")
+                    .font(.system(size: 13))
+                    .foregroundStyle(DefaultTheme.accent)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(installed.manifest.name)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(DefaultTheme.primaryText)
+                        MonoTag("v\(installed.manifest.version)", color: DefaultTheme.mutedText)
+                        if installed.isLinked { MonoTag("linked", systemImage: "link", color: DefaultTheme.mutedText) }
+                    }
+                    Text(installed.id)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(get: { installed.enabled },
+                                         set: { extensions.setEnabled($0, for: installed.id) }))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+            }
+            if case .needsConsent(let missing) = installed.status {
+                HStack(spacing: 8) {
+                    Text("Now asks for: " + missing.summary.joined(separator: "; "))
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                    Spacer()
+                    GhostButton("Review…") { extensions.requestApproval(of: installed.id) }
+                }
+            }
+            let granted = installed.effectivePermissions.summary
+            Text(granted.isEmpty ? "No permission beyond its own page." : granted.joined(separator: " · "))
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.secondaryText)
+            HStack(spacing: 4) {
+                GhostButton("Reload", systemImage: "arrow.clockwise") { extensions.reload(installed.id) }
+                GhostButton("Show in Finder", systemImage: "folder") { extensions.revealInFinder(installed.id) }
+                Spacer()
+                GhostButton("Remove", systemImage: "trash", role: .destructive) { removalCandidate = installed }
             }
         }
     }

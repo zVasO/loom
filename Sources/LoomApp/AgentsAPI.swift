@@ -127,14 +127,14 @@ extension AppModel {
 
     /// A session as the API shows it: the live item's title, state and badges
     /// win over the record's — the record is what the base last heard.
-    private func apiSession(_ id: SessionID) throws -> APISession {
+    func apiSession(_ id: SessionID) throws -> APISession {
         guard let record = allRecords.first(where: { $0.id == id }) else {
             throw APIError(code: .notFound, message: "no session \(id.rawValue.uuidString)")
         }
         return apiSession(record: record)
     }
 
-    private func apiSession(record: SessionRecord) -> APISession {
+    func apiSession(record: SessionRecord) -> APISession {
         let live = sessions.first { $0.id == record.id }
         return APISession(id: record.id.rawValue.uuidString,
                           title: live?.title ?? record.title,

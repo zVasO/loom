@@ -1,5 +1,6 @@
 import LoomAgents
 import LoomCore
+import LoomExtensions
 import LoomGit
 import LoomPersistence
 import LoomTerminal
@@ -107,7 +108,7 @@ struct LogoMark: View {
 }
 
 enum MainTab {
-    case projects, sessions, prs, overview, settings
+    case projects, sessions, prs, overview, settings, extensions
 }
 
 /// The Sessions view's detail: a session… or the browser, as a tab
@@ -159,6 +160,10 @@ struct ContentView: View {
                 tab = .sessions
             })
             case .settings: SettingsPage(model: model)
+            case .extensions: ExtensionsView(model: model, onOpenSettings: {
+                tabBeforeSettings = .extensions
+                tab = .settings
+            })
             case .sessions: SessionsView(model: model, selected: $selected,
                                          onVisit: { url, title in model.recordVisit(url: url, title: title) },
                                          onNewSession: { project in
@@ -184,7 +189,34 @@ struct ContentView: View {
             // A web pane is not worth reopening on its own; the last SESSION is.
             if case .session(let id) = selected { lastOpenedSession = id.rawValue.uuidString }
         }
-        .onChange(of: tab) { applyTheme() }
+        .onChange(of: tab) {
+            applyTheme()
+            model.extensions.isTabVisible = tab == .extensions
+        }
+        // ADR-0011: what the extensions hear — the theme as it now is, the
+        // sessions as they now are, and a live session one of them asked for.
+        .onChange(of: ThemeStore.shared.palette) {
+            model.extensions.themeDidChange(model.bridgeTheme())
+        }
+        .onChange(of: model.sessions) { model.publishSessionSnapshot() }
+        .onChange(of: model.allRecords) { model.publishSessionSnapshot() }
+        .onChange(of: model.extensions.openSessionRequest) {
+            guard let request = model.extensions.openSessionRequest,
+                  let uuid = UUID(uuidString: request.sessionID) else { return }
+            model.extensions.openSessionRequest = nil
+            selected = .session(SessionID(uuid))
+            tab = .sessions
+        }
+        .sheet(item: Binding(get: { model.extensions.pendingLaunch },
+                             set: { if $0 == nil { model.extensions.finishLaunch(.init(launched: false)) } })) { request in
+            ExtensionLaunchSheet(model: model, request: request)
+        }
+        .sheet(item: Binding(get: { model.extensions.consentRequest },
+                             set: { if $0 == nil { model.extensions.consentRequest = nil } })) { request in
+            ExtensionConsentSheet(request: request,
+                                  onApprove: { model.extensions.confirm(request) },
+                                  onCancel: { model.extensions.consentRequest = nil })
+        }
         .onReceive(NotificationCenter.default.publisher(for: .loomThemeChanged)) { _ in
             applyTheme()
         }
@@ -284,6 +316,9 @@ struct ContentView: View {
             NavTab("Projects", isActive: tab == .projects) { tab = .projects }
             NavTab("Sessions", isActive: tab == .sessions) { tab = .sessions }
             NavTab("PRs", isActive: tab == .prs) { tab = .prs }
+            if !model.extensions.extensions.isEmpty {
+                NavTab("Extensions", isActive: tab == .extensions) { tab = .extensions }
+            }
             // The +: pick the project — or any folder, which becomes one —
             // and whether the session gets its own worktree. ⌘N keeps the
             // fast path: the selected project, its default placement.
@@ -439,6 +474,27 @@ struct ContentView: View {
                                          section: "Actions") {
                 Task { await model.stopSession(parent.id) }
             })
+        }
+
+        // Extensions (ADR-0011): open one, or run a command it contributes.
+        for installed in model.extensions.readyExtensions {
+            let icon = installed.manifest.icon ?? "puzzlepiece.extension"
+            actions.append(PaletteAction(id: "ext.open.\(installed.id)", icon: icon,
+                                         title: "Open \(installed.manifest.name)",
+                                         subtitle: installed.manifest.description ?? "Extension",
+                                         section: "Extensions") {
+                model.extensions.selectedID = installed.id
+                tab = .extensions
+            })
+            for command in installed.manifest.contributes.commands {
+                actions.append(PaletteAction(id: "ext.cmd.\(installed.id).\(command.id)", icon: icon,
+                                             title: command.title,
+                                             subtitle: installed.manifest.name,
+                                             section: "Extensions") {
+                    tab = .extensions
+                    model.extensions.sendCommand(command.id, to: installed.id)
+                })
+            }
         }
 
         // Themes — quick-apply, filterable by name; and the appearance.
