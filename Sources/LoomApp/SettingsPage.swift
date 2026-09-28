@@ -14,6 +14,7 @@ struct SettingsPage: View {
     @AppStorage(KeyboardPreferences.userDefaultsKey) private var optionAsMeta = false
     @AppStorage("loom.session.restoreOnLaunch") private var restoreOnLaunch = true
     @AppStorage("loom.sessions.groupReviews") private var groupReviews = true
+    @AppStorage(ClaudeThemeSync.enabledKey) private var syncClaudeTheme = false
     @AppStorage("loom.shortcut.newSession") private var keyNewSession = "n"
     @AppStorage("loom.shortcut.newTab") private var keyNewTab = "t"
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
@@ -369,6 +370,17 @@ struct SettingsPage: View {
                     .labelsHidden()
                     .fixedSize()
                 }
+                Divider().overlay(DefaultTheme.cardBorder)
+                Toggle(isOn: $syncClaudeTheme) {
+                    Text("Apply the theme to Claude Code")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                .onChange(of: syncClaudeTheme) { model.syncClaudeThemes() }
+                Text("Claude Code draws its own colours over the terminal. On, Loom writes its themes to ~/.claude/themes (loom-*.json, also listed in /theme) and every session it starts follows the project's theme and appearance — live, even while it runs. Needs Claude Code 2.1.118 or later. Off, the files are removed; sessions restarted after that go back to your own Claude theme.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
             }
             HStack {
                 Text("Every theme comes in light and dark; the appearance picks the variant.")

@@ -41,13 +41,15 @@ public struct ClaudeCodeAdapter: Sendable {
     ///
     /// `userStatusLine`: the user's own status line (`ClaudeStatusLine.user`),
     /// chained behind Loom's — which the inline settings would otherwise hide.
+    /// `theme`: a Claude Code theme preference (`custom:loom-…`, ADR-0013),
+    /// passed along with the hooks; nil leaves the user's own theme alone.
     public func launchCommand(session: SessionID, initialPrompt: String?,
                               hookToken: String? = nil,
-                              userStatusLine: ClaudeStatusLine.UserCommand? = nil) -> Command {
+                              userStatusLine: ClaudeStatusLine.UserCommand? = nil,
+                              theme: String? = nil) -> Command {
         var arguments = ["--session-id", session.rawValue.uuidString]
-        if let hooks, let hookToken,
-           let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken,
-                                                userStatusLine: userStatusLine) {
+        if let settings = Self.settingsJSON(wiring: hooks, token: hookToken,
+                                            userStatusLine: userStatusLine, theme: theme) {
             arguments.append(contentsOf: ["--settings", settings])
         }
         if let hooks, let hookToken, let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken) {
@@ -135,11 +137,11 @@ public struct ClaudeCodeAdapter: Sendable {
     /// UC-7: Resume is a simple `--resume` of the NATIVE session — the imposed
     /// UUID unless the agent switched conversation since (`SessionRecord.nativeSessionID`).
     public func resumeCommand(session: SessionID, hookToken: String? = nil,
-                              userStatusLine: ClaudeStatusLine.UserCommand? = nil) -> Command {
+                              userStatusLine: ClaudeStatusLine.UserCommand? = nil,
+                              theme: String? = nil) -> Command {
         var arguments = ["--resume", session.rawValue.uuidString]
-        if let hooks, let hookToken,
-           let settings = Self.hookSettingsJSON(wiring: hooks, token: hookToken,
-                                                userStatusLine: userStatusLine) {
+        if let settings = Self.settingsJSON(wiring: hooks, token: hookToken,
+                                            userStatusLine: userStatusLine, theme: theme) {
             arguments.append(contentsOf: ["--settings", settings])
         }
         if let hooks, let hookToken, let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken) {
@@ -181,8 +183,26 @@ public struct ClaudeCodeAdapter: Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    static func hookSettingsJSON(wiring: HookWiring, token: String,
-                                 userStatusLine: ClaudeStatusLine.UserCommand? = nil) -> String? {
+    /// The inline `--settings`: the hooks and the status line when the session
+    /// is wired, the theme when Loom sets one. nil when there is nothing to pass.
+    static func settingsJSON(wiring: HookWiring?, token: String?,
+                             userStatusLine: ClaudeStatusLine.UserCommand?,
+                             theme: String?) -> String? {
+        var settings: [String: Any] = [:]
+        if let wiring, let token {
+            settings = hookSettings(wiring: wiring, token: token, userStatusLine: userStatusLine)
+        }
+        if let theme { settings["theme"] = theme }
+        guard !settings.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: settings,
+                                                     options: [.sortedKeys, .withoutEscapingSlashes]) else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    static func hookSettings(wiring: HookWiring, token: String,
+                             userStatusLine: ClaudeStatusLine.UserCommand? = nil) -> [String: Any] {
         let helperArguments = [
             wiring.helper.path, "--socket", wiring.socket.path, "--token", token,
         ]
@@ -202,14 +222,9 @@ public struct ClaudeCodeAdapter: Sendable {
         var statusLine: [String: Any] = ["type": "command", "command": shellJoined(relay)]
         if let padding = userStatusLine?.padding { statusLine["padding"] = padding }
         if let interval = userStatusLine?.refreshInterval { statusLine["refreshInterval"] = interval }
-        let settings: [String: Any] = [
+        return [
             "hooks": Dictionary(uniqueKeysWithValues: hookedEvents.map { ($0, entry) }),
             "statusLine": statusLine,
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: settings,
-                                                     options: [.sortedKeys, .withoutEscapingSlashes]) else {
-            return nil
-        }
-        return String(decoding: data, as: UTF8.self)
     }
 }

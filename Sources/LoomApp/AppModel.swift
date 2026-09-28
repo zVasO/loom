@@ -183,7 +183,9 @@ public final class AppModel {
 
     public private(set) var sessions: [SessionItem] = []
     /// PRJ-03: the sidebar groups by project.
-    public private(set) var projects: [ProjectRecord] = []
+    public private(set) var projects: [ProjectRecord] = [] {
+        didSet { if projects != oldValue { syncClaudeThemes() } }
+    }
     /// Remembered across launches: landing in the project you left is half of
     /// "everything as it was", and the sidebar is scoped to it.
     public var selectedProject: ProjectID? {
@@ -392,6 +394,10 @@ public final class AppModel {
         do {
             try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
             ThemeStore.shared.configure(themesDirectory: supportDirectory.appendingPathComponent("themes"))
+            claudeThemeSync = ClaudeThemeSync(
+                directory: ClaudeStatusLine.defaultConfigDirectory.appendingPathComponent("themes"))
+            ThemeStore.shared.onInputsChanged = { [weak self] in self?.syncClaudeThemes() }
+            syncClaudeThemes()
             loadPRCaches()
             reviewDrafts = reviewDraftStore.load()
             prTabs = prTabsStore.load()
@@ -1164,7 +1170,8 @@ public final class AppModel {
             var spec = SessionManager.SessionSpec(
                 command: adapter.launchCommand(session: sessionID, initialPrompt: nil,
                                                hookToken: token,
-                                               userStatusLine: userStatusLine(in: worktree)),
+                                               userStatusLine: userStatusLine(in: worktree),
+                                               theme: claudeTheme(for: projectID)),
                 workingDirectory: worktree,
                 // Born at the drawer's grid: the first fit is then a no-op,
                 // and nothing resizes claude while it boots.
@@ -1358,7 +1365,8 @@ public final class AppModel {
             var spec = SessionManager.SessionSpec(
                 command: adapter.launchCommand(session: sessionID, initialPrompt: prompt,
                                                hookToken: token,
-                                               userStatusLine: userStatusLine(in: worktree)),
+                                               userStatusLine: userStatusLine(in: worktree),
+                                               theme: claudeTheme(for: projectID)),
                 workingDirectory: worktree,
                 geometry: preferredGrid,
                 samplingInterval: .milliseconds(500),
@@ -1399,7 +1407,8 @@ public final class AppModel {
             var spec = SessionManager.SessionSpec(
                 command: adapter.launchCommand(
                     session: sessionID, initialPrompt: prompt, hookToken: token,
-                    userStatusLine: userStatusLine(in: URL(fileURLWithPath: worktreePath))),
+                    userStatusLine: userStatusLine(in: URL(fileURLWithPath: worktreePath)),
+                    theme: claudeTheme(for: record.projectID)),
                 workingDirectory: URL(fileURLWithPath: worktreePath),
                 geometry: preferredGrid,
                 samplingInterval: .milliseconds(500),
@@ -2006,10 +2015,12 @@ public final class AppModel {
             return
         }
         let statusLine = userStatusLine(in: directory)
+        let theme = claudeTheme(for: record.projectID)
         let command = nativeSessionExists(record)
-            ? adapter.resumeCommand(session: native, hookToken: token, userStatusLine: statusLine)
+            ? adapter.resumeCommand(session: native, hookToken: token, userStatusLine: statusLine,
+                                    theme: theme)
             : adapter.launchCommand(session: record.id, initialPrompt: nil, hookToken: token,
-                                    userStatusLine: statusLine)
+                                    userStatusLine: statusLine, theme: theme)
         do {
             try await manager.resume(record, command: command, workingDirectory: directory,
                                      geometry: preferredGrid,
@@ -2122,6 +2133,25 @@ public final class AppModel {
         ClaudeStatusLine.user(cwd: directory)
     }
 
+    /// Claude Code's themes folder, kept in step with Loom's themes when the
+    /// user opted in (ADR-0013). Created at launch.
+    @ObservationIgnored private var claudeThemeSync: ClaudeThemeSync?
+
+    /// Rewrites Loom's Claude themes — or removes them, the sync being off.
+    /// Running sessions pick the change up live: claude watches the folder.
+    public func syncClaudeThemes() {
+        claudeThemeSync?.sync(store: ThemeStore.shared,
+                              projects: projects.map { (id: $0.id, name: $0.name) })
+    }
+
+    /// The `theme` a session of this project passes to claude: its live
+    /// Loom theme, written first; nil when the sync is off.
+    private func claudeTheme(for projectID: ProjectID?) -> String? {
+        guard let sync = claudeThemeSync, sync.isEnabled else { return nil }
+        syncClaudeThemes()
+        return sync.settingValue(for: projectID)
+    }
+
     private func observeIdentities(of manager: SessionManager) async {
         let updates = await manager.identityUpdates()
         for await update in updates {
@@ -2176,7 +2206,8 @@ public final class AppModel {
             var spec = SessionManager.SessionSpec(
                 command: adapter.launchCommand(session: sessionID, initialPrompt: initialPrompt,
                                                hookToken: token,
-                                               userStatusLine: userStatusLine(in: directory)),
+                                               userStatusLine: userStatusLine(in: directory),
+                                               theme: claudeTheme(for: project?.id)),
                 workingDirectory: directory,
                 geometry: preferredGrid,
                 samplingInterval: .milliseconds(500),
