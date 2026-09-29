@@ -168,6 +168,32 @@ struct ClaudeCodeAdapterTests {
         #expect(bare.hasSuffix("--statusline"), "no user line: the relay alone, printing nothing")
     }
 
+    @Test("a theme rides the inline settings, with the hooks — and alone when there are none (ADR-0013)")
+    func themeInline() throws {
+        let adapter = ClaudeCodeAdapter(hooks: .init(
+            helper: URL(fileURLWithPath: "/tmp/loom-hook"),
+            socket: URL(fileURLWithPath: "/tmp/loom.sock")))
+        let launch = try settings(of: adapter.launchCommand(session: SessionID(), initialPrompt: nil,
+                                                            hookToken: "tok",
+                                                            theme: "custom:loom-project-abcdef12"))
+        #expect(launch["theme"] as? String == "custom:loom-project-abcdef12")
+        #expect(launch["hooks"] != nil, "the hooks are still there")
+
+        let resume = try settings(of: adapter.resumeCommand(session: SessionID(), hookToken: "tok",
+                                                            theme: "custom:loom"))
+        #expect(resume["theme"] as? String == "custom:loom")
+
+        let untouched = try settings(of: adapter.launchCommand(session: SessionID(), initialPrompt: nil,
+                                                               hookToken: "tok"))
+        #expect(untouched["theme"] == nil, "no theme: the user's own stays")
+
+        let bare = try settings(of: ClaudeCodeAdapter().launchCommand(session: SessionID(), initialPrompt: nil,
+                                                                      theme: "custom:loom"))
+        #expect(bare.keys.sorted() == ["theme"])
+        #expect(!ClaudeCodeAdapter().launchCommand(session: SessionID(), initialPrompt: nil)
+            .arguments.contains("--settings"), "nothing to pass, no --settings")
+    }
+
     @Test("a status line update is not a state event")
     func statusLinePasUnEtat() throws {
         let payload = try JSONSerialization.data(withJSONObject: [

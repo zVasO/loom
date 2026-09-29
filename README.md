@@ -62,7 +62,8 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
 - **Thèmes** : 9 familles intégrées, chacune en clair et en sombre ; apparence
   Système / Clair / Sombre (suivi de macOS en direct) ; override par projet ;
   import d'un thème tweakcn/shadcn (nom, URL ou CSS collé) ; aperçu sur des
-  composants factices avec bascule clair/sombre ; sémantique des badges invariante.
+  composants factices avec bascule clair/sombre ; sémantique des badges invariante ;
+  en option, le thème appliqué à Claude Code lui-même, en direct (ADR-0013).
 
 ## Architecture
 

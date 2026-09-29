@@ -295,6 +295,10 @@ public final class ThemeStore {
     /// The project the palette was last applied for — replayed when the
     /// appearance flips under it.
     @ObservationIgnored private var contextProjectID: ProjectID?
+    /// Called when what a project's palette resolves to may have changed —
+    /// a theme, an override, the appearance, the families — never on a mere
+    /// focus change. Claude Code's theme files follow it (ADR-0013).
+    @ObservationIgnored public var onInputsChanged: (() -> Void)?
 
     private init() {
         let isDark = Self.currentSystemIsDark()
@@ -340,6 +344,7 @@ public final class ThemeStore {
         customFamilies.removeAll { $0.name == stored.name }
         customFamilies.append(stored)
         apply(projectID: contextProjectID)
+        onInputsChanged?()
     }
 
     /// Removes a user family; the global theme and any project pointing at it
@@ -353,6 +358,7 @@ public final class ThemeStore {
         for (key, value) in map where value == family.name { map[key] = nil }
         UserDefaults.standard.set(map, forKey: Self.projectsKey)
         apply(projectID: contextProjectID)
+        onInputsChanged?()
     }
 
     /// A tweakcn theme, from what the user pasted: its CSS export, parsed
@@ -389,12 +395,14 @@ public final class ThemeStore {
     /// Kept under its old name: every call site passes a family (or variant) name.
     public func setGlobalTheme(_ name: String) {
         UserDefaults.standard.set(family(named: name)?.name ?? name, forKey: Self.globalKey)
+        onInputsChanged?()
     }
 
     public func setAppearanceMode(_ mode: AppearanceMode) {
         appearanceMode = mode
         UserDefaults.standard.set(mode.rawValue, forKey: Self.appearanceKey)
         apply(projectID: contextProjectID)
+        onInputsChanged?()
     }
 
     /// Dark or light right now: what the mode says, or what macOS says.
@@ -419,6 +427,7 @@ public final class ThemeStore {
         guard dark != systemIsDark else { return }
         systemIsDark = dark
         apply(projectID: contextProjectID)
+        onInputsChanged?()
     }
 
     // MARK: Per-project overrides (presentation preference → UserDefaults)
@@ -431,6 +440,7 @@ public final class ThemeStore {
         var map = overrides()
         map[projectID.rawValue.uuidString] = name.flatMap { family(named: $0)?.name }
         UserDefaults.standard.set(map, forKey: Self.projectsKey)
+        onInputsChanged?()
     }
 
     private func overrides() -> [String: String] {
@@ -441,10 +451,14 @@ public final class ThemeStore {
     /// global one, in the variant the appearance calls for.
     public func apply(projectID: ProjectID?) {
         contextProjectID = projectID
-        let name = projectID.flatMap(projectThemeName) ?? globalFamilyName
-        let family = family(named: name) ?? .loom
-        let next = family.palette(dark: isDark)
+        let next = palette(for: projectID)
         if next != palette { palette = next }
+    }
+
+    /// The palette a context resolves to, without making it the active one.
+    public func palette(for projectID: ProjectID?) -> ThemePalette {
+        let name = projectID.flatMap(projectThemeName) ?? globalFamilyName
+        return (family(named: name) ?? .loom).palette(dark: isDark)
     }
 }
 
