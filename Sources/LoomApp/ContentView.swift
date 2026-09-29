@@ -86,7 +86,7 @@ struct BadgeRow: View {
     }
 }
 
-/// The woven logo, loaded once from the module resources.
+/// The app icon, loaded once from the module resources.
 struct LogoMark: View {
     let size: CGFloat
     private static let image: NSImage? = Bundle.module
