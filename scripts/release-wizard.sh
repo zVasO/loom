@@ -227,12 +227,14 @@ rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/LoomApp "$APP/Contents/MacOS/Loom"
 cp .build/release/loom-hook "$APP/Contents/MacOS/loom-hook"
 cp .build/release/loom "$APP/Contents/MacOS/loom"
+cp Assets/loom.icns "$APP/Contents/Resources/loom.icns"
 VERSION=$(git describe --tags --always 2>/dev/null || echo "0.1.0")
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleExecutable</key><string>Loom</string>
+  <key>CFBundleIconFile</key><string>loom</string>
   <key>CFBundleIdentifier</key><string>${LOOM_BUNDLE_ID}</string>
   <key>CFBundleName</key><string>Loom</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
