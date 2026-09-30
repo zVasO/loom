@@ -836,9 +836,37 @@ public struct GitHubService: Sendable {
     /// so the guide — or the user's session — can inspect real code, never the
     /// user's own checkout.
     public func checkoutPR(_ number: Int, repo: URL, readOnly: Bool = true) async throws -> URL {
+        try await syncPRWorktree(number, repo: repo, readOnly: readOnly).path
+    }
+
+    /// A review worktree brought to the PR's head: where it lives, and
+    /// whether the head moved under it (what a live review session must be
+    /// told about).
+    public struct PRCheckout: Sendable, Equatable {
+        public let path: URL
+        /// The worktree's HEAD before the sync — nil when it was just created.
+        public let previousHead: String?
+        public let head: String
+
+        public init(path: URL, previousHead: String?, head: String) {
+            self.path = path
+            self.previousHead = previousHead
+            self.head = head
+        }
+
+        /// The worktree existed and now stands on another commit.
+        public var moved: Bool { previousHead.map { $0 != head } ?? false }
+    }
+
+    /// `checkoutPR`, reporting the head before and after: creates the
+    /// worktree, or fetches the PR head and moves an existing one onto it.
+    /// Cheap when nothing moved — one fetch, no working-tree write.
+    public func syncPRWorktree(_ number: Int, repo: URL, readOnly: Bool = true) async throws -> PRCheckout {
         let root = repo.deletingLastPathComponent()
             .appendingPathComponent(repo.lastPathComponent + "-worktrees")
         let path = root.appendingPathComponent("pr-\(number)")
+        let previousHead: String?
+        let head: String
         // Detached fetch of the PR head: never fights over branch names —
         // `gh pr checkout` refuses when the branch is checked out elsewhere
         // (reviewing your OWN pr from the same repo, the common case).
@@ -849,13 +877,18 @@ public struct GitHubService: Sendable {
             // which doubled the cost on large repos.
             _ = try await runGit(["fetch", "origin", "pull/\(number)/head"], in: repo)
             _ = try await runGit(["worktree", "add", "--detach", path.path, "FETCH_HEAD"], in: repo)
+            previousHead = nil
+            head = try await revParse("HEAD", in: path)
         } else {
             _ = try await runGit(["fetch", "origin", "pull/\(number)/head"], in: path)
-            let head = try await revParse("HEAD", in: path)
+            let current = try await revParse("HEAD", in: path)
+            let fetched = try await revParse("FETCH_HEAD", in: path)
             // Only rewrite the tree when the PR actually moved.
-            if head != (try await revParse("FETCH_HEAD", in: path)) {
+            if current != fetched {
                 _ = try await runGit(["checkout", "--detach", "FETCH_HEAD"], in: path)
             }
+            previousHead = current
+            head = fetched
         }
         // Read-only is a user setting: protect or UNprotect — the worktree is
         // reused across checkouts, so a change of mind must apply to it.
@@ -864,7 +897,7 @@ public struct GitHubService: Sendable {
         } else {
             try await unprotectWorktree(path)
         }
-        return path
+        return PRCheckout(path: path, previousHead: previousHead, head: head)
     }
 
     /// Files Loom drops into a review worktree, kept out of `git status` for

@@ -49,6 +49,32 @@ struct ReviewWorktreeTests {
         #expect(try await git(["status", "--porcelain"], in: worktree) == "")
     }
 
+    @Test("syncing a review worktree follows the PR head and says when it moved")
+    func syncFollowsTheHead() async throws {
+        let repo = try await makeFixtureRepo()
+        // The repository is its own origin: `pull/9/head` is a local ref,
+        // the way GitHub serves it.
+        _ = try await git(["remote", "add", "origin", repo.path], in: repo)
+        _ = try await git(["update-ref", "refs/pull/9/head", "HEAD"], in: repo)
+        let first = try await git(["rev-parse", "HEAD"], in: repo)
+        let service = GitHubService()
+
+        let created = try await service.syncPRWorktree(9, repo: repo, readOnly: false)
+        #expect(created.previousHead == nil && created.head == first && !created.moved,
+                "a new worktree has nothing to report")
+
+        let again = try await service.syncPRWorktree(9, repo: repo, readOnly: false)
+        #expect(again.previousHead == first && again.head == first && !again.moved,
+                "nothing pushed, nothing moved")
+
+        let pushed = try await git(["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "push"], in: repo)
+        _ = try await git(["update-ref", "refs/pull/9/head", pushed], in: repo)
+        let moved = try await service.syncPRWorktree(9, repo: repo, readOnly: false)
+        #expect(moved.previousHead == first && moved.head == pushed && moved.moved)
+        #expect(try await git(["rev-parse", "HEAD"], in: moved.path) == pushed,
+                "the worktree stands on the new head")
+    }
+
     @Test("the exclude list names every Loom file, commands included")
     func excludeList() {
         let list = GitHubService.loomExcludes(commandNames: ["setup-pr-review"])
