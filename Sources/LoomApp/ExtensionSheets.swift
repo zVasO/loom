@@ -82,6 +82,7 @@ struct ExtensionLaunchSheet: View {
             field("PROMPT") {
                 TextEditor(text: $prompt)
                     .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.primaryText)
                     .frame(minHeight: 160, maxHeight: 280)
                     .scrollContentBackground(.hidden)
                     .padding(6)

@@ -262,6 +262,7 @@ struct SettingsPage: View {
                 }
                 TextEditor(text: $setupCommandDraft)
                     .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.primaryText)
                     .scrollContentBackground(.hidden)
                     .padding(8)
                     .frame(minHeight: 220)

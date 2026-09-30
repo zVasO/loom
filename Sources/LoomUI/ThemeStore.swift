@@ -89,6 +89,18 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
     }
 
     public var isLight: Bool { Self.luminance(background) > 0.4 }
+
+    /// The tokens with `surfaceRaised` brought back to the surfaces' side: a
+    /// raised surface is a step above `surface`, never its opposite. Some
+    /// imported themes (tweakcn's Claude) carry a near-white chip colour
+    /// in a dark variant; painted under dark-theme text it hid the editors,
+    /// tabs and hovers that sit on it.
+    public var sanitized: ThemeTokens {
+        guard abs(Self.luminance(surfaceRaised) - Self.luminance(surface)) > 0.4 else { return self }
+        var tokens = self
+        tokens.surfaceRaised = Self.mix(surface, with: primaryText, amount: 0.07)
+        return tokens
+    }
 }
 
 // MARK: - Palette
@@ -120,6 +132,7 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
     public let stateIdle: Color
 
     public init(name: String, isLight: Bool, tokens: ThemeTokens) {
+        let tokens = tokens.sanitized
         self.name = name
         self.isLight = isLight
         self.tokens = tokens

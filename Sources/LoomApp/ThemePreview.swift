@@ -309,6 +309,7 @@ struct ThemeImportSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
             TextEditor(text: $input)
                 .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(DefaultTheme.primaryText)
                 .scrollContentBackground(.hidden)
                 .padding(8)
                 .frame(height: family == nil ? 160 : 72)

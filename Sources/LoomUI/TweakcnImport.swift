@@ -211,7 +211,10 @@ public enum TweakcnImport {
             background: color("sidebar", "background", fallback: base.background),
             contentBackground: background,
             surface: color("card", "popover", fallback: base.surface),
-            surfaceRaised: color("secondary", "muted", "accent", fallback: base.surfaceRaised),
+            // `--muted` first: it sits on the background's side, where
+            // `--secondary` can be a high-contrast chip (a light one in a
+            // dark variant).
+            surfaceRaised: color("muted", "accent", "secondary", fallback: base.surfaceRaised),
             cardBorder: color("border", "input", fallback: base.cardBorder),
             accent: accent,
             accentText: color("primary-foreground", fallback: base.accentText),

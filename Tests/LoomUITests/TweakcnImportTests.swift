@@ -179,6 +179,17 @@ struct TweakcnImportTests {
         #expect(!dark.isLight)
     }
 
+    @Test("a dark variant's raised surface comes from --muted, never a light --secondary chip")
+    func raisedSurfaceStaysDark() {
+        // tweakcn's Claude theme: --secondary is a near-white chip in .dark.
+        let vars: TweakcnImport.Variables = [
+            "background": "#262624", "foreground": "#c3c0b6", "card": "#262624",
+            "secondary": "#faf9f5", "muted": "#1b1b19",
+        ]
+        let tokens = TweakcnImport.tokens(from: vars, dark: true)
+        #expect(tokens.surfaceRaised == "#1B1B19")
+    }
+
     @Test("a family from two variable sets, named and trimmed")
     func family() {
         let family = TweakcnImport.family(named: "  Twitter ",
