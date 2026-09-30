@@ -100,6 +100,15 @@ struct GlobalPRsView: View {
                 PRTabShortcuts(model: model)
             }
             .background(DefaultTheme.background)
+            // The PR on screen stays true to GitHub: checked on every tab
+            // switch, every minute, and whenever the app comes back to the
+            // front (a push made meanwhile lands before anyone reviews it).
+            .task(id: activeTab?.id) { await watchActivePR() }
+            .onReceive(NotificationCenter.default.publisher(
+                for: NSApplication.didBecomeActiveNotification)) { _ in
+                guard let tab = activeTab else { return }
+                Task { await model.refreshOpenPR(tab.pr.number, in: tab.projectID) }
+            }
             .onAppear { consumePendingPR() }
             .onChange(of: model.pendingPR) { consumePendingPR() }
         }
@@ -630,12 +639,24 @@ struct GlobalPRsView: View {
             .padding(.leading, 2)
         }
     }
-    private func startReview(_ pr: GitHubService.PullRequest, project: ProjectRecord) {
+    /// Polls the active tab's PR while the PR tab is on screen — cancelled
+    /// by a tab switch (the next tab starts its own) or leaving the view.
+    private func watchActivePR() async {
+        guard let tab = activeTab else { return }
+        repeat {
+            await model.refreshOpenPR(tab.pr.number, in: tab.projectID)
+            try? await Task.sleep(for: .seconds(60))
+        } while !Task.isCancelled
+    }
+
+    /// `fresh`: a new session takes over the PR instead of the one it has.
+    private func startReview(_ pr: GitHubService.PullRequest, project: ProjectRecord,
+                             fresh: Bool = false) {
         guard !model.isLaunchingReview(forPR: pr.number, in: project.id) else { return }
         // A review pins its tab: browsing the list must not take it away.
         model.openPRTab(pr, in: project.id)
         Task {
-            if await model.launchPRReviewSession(pr, in: project.id) != nil {
+            if await model.launchPRReviewSession(pr, in: project.id, fresh: fresh) != nil {
                 // Stay in the PR tab: the session opens in the drawer, and the
                 // PR list steps aside to give the diff room.
                 withAnimation(.hover) {
@@ -739,10 +760,33 @@ struct GlobalPRsView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(DefaultTheme.secondaryText)
                 }
+            } else if model.reviewSession(forPR: pr.number, in: project.id) != nil {
+                // Reopens the PR's session; the chevron starts over in a new
+                // one (new brief, Settings' /setup-pr-review, empty context).
+                HStack(spacing: 2) {
+                    AccentButton("Review session", systemImage: "sparkles") {
+                        startReview(pr, project: project)
+                    }
+                    Menu {
+                        Button {
+                            startReview(pr, project: project, fresh: true)
+                        } label: {
+                            Label("New review session", systemImage: "plus.bubble")
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(DefaultTheme.accentText)
+                            .frame(width: 22, height: 30)
+                            .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 7))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Review this PR in a fresh session — the current one stays in the sidebar")
+                }
             } else {
-                AccentButton(model.reviewSession(forPR: pr.number, in: project.id) != nil
-                             ? "Review session" : "Start review",
-                             systemImage: "sparkles") {
+                AccentButton("Start review", systemImage: "sparkles") {
                     startReview(pr, project: project)
                 }
             }

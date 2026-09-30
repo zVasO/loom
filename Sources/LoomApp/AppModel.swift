@@ -1121,13 +1121,19 @@ public final class AppModel {
 
     /// The PR tab's quick action: ONE review session per PR — reattached when
     /// it exists (resumed if dormant), created otherwise: PR checked out in a
-    /// dedicated worktree, claude launched bare, badge "PR #n".
+    /// dedicated worktree, claude launched bare, badge "PR #n". `fresh`
+    /// skips the reattach: a NEW session takes over the PR, the previous one
+    /// stays where it is (sidebar, CODE REVIEW).
     public func launchPRReviewSession(_ pr: GitHubService.PullRequest,
-                                      in projectID: ProjectID) async -> SessionID? {
-        if let existing = reviewSession(forPR: pr.number, in: projectID) {
+                                      in projectID: ProjectID,
+                                      fresh: Bool = false) async -> SessionID? {
+        if !fresh, let existing = reviewSession(forPR: pr.number, in: projectID) {
             if !sessions.contains(where: { $0.id == existing }) {
                 await resumeDormant(existing)
             }
+            // A reattached review reviews the PR as GitHub has it NOW: the
+            // worktree follows the head, and the command follows Settings.
+            await syncReviewWorktree(for: existing, pr: pr, in: projectID)
             // A review whose command never went in (a boot too slow for the
             // old gate, the app quit meanwhile) gets it now — once.
             scheduleReviewSetupIfNeeded(for: existing, number: pr.number)
@@ -1137,29 +1143,16 @@ public final class AppModel {
         let key = prKey(pr.number, projectID)
         prReviewLaunching.insert(key)
         defer { prReviewLaunching.remove(key) }
-        let worktree: URL
+        let checkout: GitHubService.PRCheckout
         do {
-            worktree = try await GitHubService().checkoutPR(pr.number, repo: repo,
-                                                            readOnly: reviewWorktreesReadOnly)
+            checkout = try await GitHubService().syncPRWorktree(pr.number, repo: repo,
+                                                                readOnly: reviewWorktreesReadOnly)
         } catch {
             startupError = "Could not check out PR #\(pr.number): \(Self.ghErrorText(error))"
             return nil
         }
-        // The /setup-pr-review command, rewritten at every launch so the text
-        // in Settings is what claude reads. Installed even when it will not be
-        // typed automatically: the user can call it.
-        let commandMarkdown = PRReviewCommand.render(
-            template: reviewSetupCommandTemplate,
-            pr: .init(number: pr.number, title: pr.title, url: pr.url,
-                      base: pr.baseBranch.isEmpty ? "main" : pr.baseBranch, head: pr.branch))
-        do {
-            try await GitHubService().installCommand(named: PRReviewCommand.name,
-                                                     markdown: commandMarkdown, in: worktree)
-        } catch {
-            // A missing command is not a missing review: the session launches
-            // without it, and says why.
-            startupError = "Could not install /\(PRReviewCommand.name): \(Self.ghErrorText(error))"
-        }
+        let worktree = checkout.path
+        await installReviewCommand(for: pr, in: worktree)
         do {
             let sessionID = SessionID()
             let token = UUID().uuidString
@@ -1192,12 +1185,142 @@ public final class AppModel {
                                         state: .starting, projectID: projectID,
                                         branch: pr.branch, badges: ["PR #\(pr.number)"]))
             rememberReviewSession(id, forPR: pr.number, in: projectID)
+            reviewedHead[id] = checkout.head
             reloadPersistedSessions()
             scheduleReviewSetupIfNeeded(for: id, number: pr.number)
             return id
         } catch {
             startupError = String(describing: error)
             return nil
+        }
+    }
+
+    /// The /setup-pr-review command, rewritten at every launch AND every
+    /// reattach, so the text in Settings is what claude reads. Installed even
+    /// when it will not be typed automatically: the user can call it.
+    private func installReviewCommand(for pr: GitHubService.PullRequest, in worktree: URL) async {
+        let commandMarkdown = PRReviewCommand.render(
+            template: reviewSetupCommandTemplate,
+            pr: .init(number: pr.number, title: pr.title, url: pr.url,
+                      base: pr.baseBranch.isEmpty ? "main" : pr.baseBranch, head: pr.branch))
+        do {
+            try await GitHubService().installCommand(named: PRReviewCommand.name,
+                                                     markdown: commandMarkdown, in: worktree)
+        } catch {
+            // A missing command is not a missing review: the session launches
+            // without it, and says why.
+            startupError = "Could not install /\(PRReviewCommand.name): \(Self.ghErrorText(error))"
+        }
+    }
+
+    /// The head each review session was last told about — a push is
+    /// announced once, whoever noticed it first (reattach, poll).
+    @ObservationIgnored private var reviewedHead: [SessionID: String] = [:]
+    /// Review worktrees being brought to their PR's head.
+    @ObservationIgnored private var prSyncing: Set<String> = []
+
+    /// Brings a review session's worktree to the PR's current head and
+    /// reinstalls its command. A head that moved is announced to claude:
+    /// its context still describes the old diff.
+    private func syncReviewWorktree(for id: SessionID, pr: GitHubService.PullRequest,
+                                    in projectID: ProjectID, quietly: Bool = false) async {
+        guard let repo = projectRepo(projectID) else { return }
+        let key = prKey(pr.number, projectID)
+        // One sync per worktree at a time: two fetches racing on the same
+        // worktree fight over its index lock.
+        guard !prReviewLaunching.contains(key), !prSyncing.contains(key) else { return }
+        prSyncing.insert(key)
+        // The poll syncs in the background: no "Preparing…" in the toolbar.
+        if !quietly { prReviewLaunching.insert(key) }
+        defer {
+            prSyncing.remove(key)
+            if !quietly { prReviewLaunching.remove(key) }
+        }
+        let checkout: GitHubService.PRCheckout
+        do {
+            checkout = try await GitHubService().syncPRWorktree(pr.number, repo: repo,
+                                                                readOnly: reviewWorktreesReadOnly)
+        } catch {
+            // Offline, gh hiccup: the session is still there, on its old head.
+            if !quietly {
+                startupError = "Could not update PR #\(pr.number): \(Self.ghErrorText(error))"
+            }
+            return
+        }
+        await installReviewCommand(for: pr, in: checkout.path)
+        let previous = reviewedHead[id] ?? checkout.previousHead
+        reviewedHead[id] = checkout.head
+        if let previous, previous != checkout.head {
+            notifyHeadMoved(id, number: pr.number, from: previous, to: checkout.head)
+        }
+    }
+
+    /// Tells a review session the PR moved under it — once the agent is
+    /// ready (never mid-turn), and behind a setup command still on its way.
+    private func notifyHeadMoved(_ id: SessionID, number: Int, from old: String, to new: String) {
+        guard sessions.contains(where: { $0.id == id }) else { return }
+        let message = "PR #\(number) moved on GitHub: \(old.prefix(7)) → \(new.prefix(7)). "
+            + "The worktree is now on \(new.prefix(7)). Re-read what changed "
+            + "(git diff \(old.prefix(12))..HEAD) before continuing the review."
+        Task { [weak self] in
+            guard let self else { return }
+            await self.awaitReviewSetup(for: id)
+            // A session that never loaded the PR has nothing stale to correct.
+            guard self.reviewSetupSubmitted.contains(id.rawValue.uuidString)
+                    || !self.reviewSetupCommandEnabled else { return }
+            _ = await self.submitWhenReady(message, to: id)
+        }
+    }
+
+    /// Forgets what the model holds about ONE PR — its row moved on GitHub.
+    private func invalidatePRCaches(_ number: Int, in projectID: ProjectID) {
+        let key = prKey(number, projectID)
+        prDetailCache[key] = nil
+        prDiffCache[key] = nil
+        diffProducts[key] = nil
+        prTourCache[key] = nil
+        prCommentsCache[key] = nil
+        prFileViewsCache[key] = nil
+    }
+
+    /// When each open PR was last checked against GitHub.
+    @ObservationIgnored private var prCheckedAt: [String: Date] = [:]
+
+    /// Keeps an open PR true to GitHub: refetches its row and, when it moved
+    /// (new head, new comments, new reviews), drops its caches — the
+    /// workspace reloads on the new row — and brings its live review
+    /// session's worktree to the new head. Throttled: tab switches and
+    /// app activations call it freely.
+    public func refreshOpenPR(_ number: Int, in projectID: ProjectID) async {
+        let key = prKey(number, projectID)
+        if let last = prCheckedAt[key], Date().timeIntervalSince(last) < 20 { return }
+        prCheckedAt[key] = Date()
+        guard let repo = projectRepo(projectID),
+              let fresh = try? await GitHubService().pullRequest(number, repo: nil, in: repo),
+              let tab = prTabs.tab(PRTab.key(projectID, number)) else { return }
+        let old = tab.pr
+        if fresh != old {
+            if fresh.headSHA != old.headSHA || fresh.updatedAt != old.updatedAt {
+                invalidatePRCaches(number, in: projectID)
+            }
+            prTabs.refresh(from: [fresh], in: projectID)
+            savePRTabs()
+            for (listKey, entry) in prLists where listKey.projectID == projectID {
+                guard entry.prs.contains(where: { $0.number == number }) else { continue }
+                prLists[listKey] = PRListCache.Entry(
+                    fetchedAt: entry.fetchedAt,
+                    prs: entry.prs.map { $0.number == number ? fresh : $0 },
+                    query: entry.query)
+            }
+            savePRListCache()
+        }
+        // Against what the SESSION last saw, not the tab's previous row: a
+        // list refresh may have moved the row already, never the worktree.
+        if !fresh.headSHA.isEmpty,
+           let id = reviewSession(forPR: number, in: projectID),
+           sessions.contains(where: { $0.id == id }),
+           reviewedHead[id] != fresh.headSHA {
+            await syncReviewWorktree(for: id, pr: fresh, in: projectID, quietly: true)
         }
     }
 
