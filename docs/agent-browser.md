@@ -83,6 +83,9 @@ Chaque action répond l'instantané de la page qui en résulte. Depuis un shell 
 - Panneau masqué, la page tourne mais WebKit suspend son rendu (animations,
   `requestAnimationFrame`) : `### Page` l'indique.
 - Les captures ne voient pas WebGL ni la vidéo.
+- Un bouton « Copier » que l'agent clique écrit dans votre presse-papiers, comme
+  si vous l'aviez cliqué : Loom ne le restaure pas, faute de distinguer cette
+  copie d'une des vôtres faite au même moment.
 - Une capture pleine page fait défiler la page tranche par tranche, puis la
   remet où elle était : un en-tête fixe apparaît dans chaque tranche, et au-delà
   de 8 000 pixels CSS la capture s'arrête.
