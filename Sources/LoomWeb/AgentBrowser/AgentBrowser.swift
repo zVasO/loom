@@ -1205,7 +1205,7 @@ public final class AgentBrowser: NSObject {
     private func respond(_ result: String?, tab: BrowserTabsModel.TabID, webView: WKWebView,
                          snapshot: String?) -> AgentResult {
         let runtime = runtimes[tab]
-        let counts = runtime?.console.counts ?? (0, 0)
+        let counts = runtime?.console.counts ?? (errors: 0, warnings: 0)
         let hidden = webView.window == nil || !(webView.window?.occlusionState.contains(.visible) ?? false)
         let page = AgentPageSummary(url: webView.url?.absoluteString ?? controller.model.tab(tab)?.url.absoluteString ?? "",
                                     title: webView.title ?? "", httpStatus: runtime?.httpStatus,
