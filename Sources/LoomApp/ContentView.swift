@@ -2559,6 +2559,11 @@ struct SessionDetailView: View {
                 let layout = sideLayout(width: geo.size.width)
                 let split = panel.isOpen && layout.showsPanel
                 let columnWidth = split ? layout.terminalWidth : geo.size.width
+                // The other shape's grid, measured from the same pane: both
+                // launch grids follow the window, whichever is on screen.
+                let other: (role: TerminalPaneRole, width: CGFloat)? = split
+                    ? (.session, geo.size.width)
+                    : (layout.showsPanel ? (.sessionSplit, layout.terminalWidth) : nil)
                 // The side panel SPLITS: an overlay would hide claude's input
                 // box, and the terminal's window-wide mouse monitors would take
                 // the page's clicks and wheel. Each open, close or drag end is
@@ -2575,7 +2580,8 @@ struct SessionDetailView: View {
                         // recreates the terminal (no focus grab, no first-fit race).
                         TerminalPane(model: model, sessionID: sessionID,
                                      role: split ? .sessionSplit : .session,
-                                     fitSuspended: panelDrag != nil)
+                                     fitSuspended: panelDrag != nil,
+                                     otherShape: other)
                         if gitShown {
                             gitPanel
                                 .frame(width: min(380, columnWidth))
@@ -2586,12 +2592,14 @@ struct SessionDetailView: View {
                     .frame(width: columnWidth)
                     .clipped()
                     if split {
-                        SidePanelResizeHandle()
+                        // Draggable only when a drag can move it: a window too
+                        // narrow for both pins the panel at its minimum.
+                        SidePanelResizeHandle(isEnabled: layout.fits)
                             .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                                 .updating($panelDrag) { value, drag, _ in
                                     drag = PanelDrag(startWidth: drag?.startWidth ?? layout.panelWidth,
                                                      translation: value.translation.width)
-                                })
+                                }, including: layout.fits ? .all : .subviews)
                         SessionSidePanelView(model: model, parentID: parentID)
                             .frame(width: layout.panelWidth)
                     }
@@ -2607,10 +2615,13 @@ struct SessionDetailView: View {
             if let drag {
                 lastDraggedWidth = drag.width
             } else if let width = lastDraggedWidth {
-                // Ended or cancelled alike: the panel stays where it was left.
+                // Ended or cancelled alike: the panel stays where it was left —
+                // remembered only when the drag could move it (a window too
+                // narrow for both pins the panel, and must not erase the width
+                // chosen in a wider one).
                 let settled = SidePanelLayout.resolve(available: detailWidth, preferredPanelWidth: width,
                                                       terminalMinimum: Self.terminalMinimum)
-                storedPanelWidth = Double(settled.showsPanel ? settled.panelWidth : width)
+                if settled.fits { storedPanelWidth = Double(settled.panelWidth) }
                 lastDraggedWidth = nil
             }
         }

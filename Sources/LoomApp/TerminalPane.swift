@@ -1,3 +1,4 @@
+import AppKit
 import LoomCore
 import LoomTerminal
 import LoomUI
@@ -16,16 +17,21 @@ struct TerminalPane: View {
     /// drag ends, then the pane fits once — a drag with pauses used to apply
     /// one resize, hence one repaint of the conversation, per pause.
     let fitSuspended: Bool
+    /// The pane's other shape (with the side panel open: the full width; with
+    /// it closed: the split's), whose grid is remembered from the same fit —
+    /// the launch grid of either shape never goes stale while the other shows.
+    let otherShape: (role: TerminalPaneRole, width: CGFloat)?
     /// Seeded from the model's cache: a live session's pane paints its retained
     /// screen in its first commit, no spinner, no actor round trip first.
     @State private var surface: TerminalSurface?
 
     init(model: AppModel, sessionID: SessionID, role: TerminalPaneRole = .session,
-         fitSuspended: Bool = false) {
+         fitSuspended: Bool = false, otherShape: (role: TerminalPaneRole, width: CGFloat)? = nil) {
         self.model = model
         self.sessionID = sessionID
         self.role = role
         self.fitSuspended = fitSuspended
+        self.otherShape = otherShape
         _surface = State(initialValue: model.cachedSurface(for: sessionID))
     }
     @State private var paneSize: CGSize = .zero
@@ -82,6 +88,11 @@ struct TerminalPane: View {
                         let grid = TerminalMetrics.grid(fitting: paneSize)
                         surface.resize(cols: grid.cols, rows: grid.rows)
                         model.noteTerminalGrid(cols: grid.cols, rows: grid.rows, role: role)
+                        if let otherShape {
+                            let other = TerminalMetrics.grid(fitting: CGSize(width: otherShape.width,
+                                                                             height: paneSize.height))
+                            model.noteTerminalGrid(cols: other.cols, rows: other.rows, role: otherShape.role)
+                        }
                         badge = "\(grid.cols)×\(grid.rows)"
                     }
                     // Keystrokes go to the agent's field (first responder).
@@ -113,6 +124,10 @@ struct TerminalPane: View {
                         selection = .all(history: surface.history,
                                          historyBase: surface.historyBase,
                                          screen: surface.screen)
+                        // The keyboard follows the selection: ⌘C copies from
+                        // whoever has it, and a page or an address bar beside
+                        // the terminal may. Freed, the terminal reclaims it.
+                        NSApp.keyWindow?.makeFirstResponder(nil)
                     }
                     // claude's boot takes seconds — never a silent black screen.
                     // Gated on real output: the pane's own first fit bumps the

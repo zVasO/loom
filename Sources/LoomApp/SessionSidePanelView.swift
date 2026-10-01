@@ -115,6 +115,8 @@ struct SessionSidePanelView: View {
 /// hit area overlaps neither the terminal (whose mouse monitors would take the
 /// press, and send it to claude) nor the web view.
 struct SidePanelResizeHandle: View {
+    var isEnabled = true
+
     var body: some View {
         ZStack {
             Color.clear
@@ -128,7 +130,7 @@ struct SidePanelResizeHandle: View {
         // set(), not push()/pop(): a hover whose exit is missed would leave
         // the resize cursor stuck on the stack.
         .onHover { inside in
-            (inside ? NSCursor.resizeLeftRight : NSCursor.arrow).set()
+            (inside && isEnabled ? NSCursor.resizeLeftRight : NSCursor.arrow).set()
         }
     }
 }
