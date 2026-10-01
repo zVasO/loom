@@ -15,7 +15,8 @@ import Foundation
 public enum APIProtocol {
     /// Bumped on any change a client could observe: a method's shape, an
     /// error code, the envelope. `loom.version` answers it.
-    public static let version = 1
+    /// v2: `timeout` and `unavailable` errors, per-method waiting budgets.
+    public static let version = 2
 
     /// Environment of every agent Loom hosts: where the socket is and the
     /// token that names its own session. The CLI reads both.
@@ -49,6 +50,31 @@ public enum APIMethod: String, CaseIterable, Sendable {
         case .sessionsList: return true
         default: return false
         }
+    }
+
+    /// Whether the global token may call it at all. Anything an agent shell
+    /// can reach through `loom --global` — the token sits in a file the user
+    /// owns — must never act inside ANOTHER session: such methods answer
+    /// their session's own token only.
+    public var allowsGlobalScope: Bool {
+        switch self {
+        default: return true
+        }
+    }
+
+    /// The app's own deadline for answering, when the method may wait on
+    /// something slow (a page loading); nil = it answers at once.
+    public var appDeadline: Duration? {
+        switch self {
+        default: return nil
+        }
+    }
+
+    /// How long a client waits for the answer. Always 5 s past the app's
+    /// deadline: the app gives up first and says so (`timeout`), and a late
+    /// answer never races the client closing its end.
+    public var clientTimeout: Duration {
+        appDeadline.map { $0 + .seconds(5) } ?? .seconds(5)
     }
 }
 
@@ -125,6 +151,12 @@ public struct APIError: Error, Codable, Equatable, Sendable {
         case notFound
         /// The write collides with what exists (a badge name already taken).
         case conflict
+        /// The app gave up waiting — a page load, an element, a dialog. The
+        /// request may have had effects before the deadline.
+        case timeout
+        /// The feature is off or its target is not there: a setting turned it
+        /// off, the session is not running.
+        case unavailable
         case internalError
     }
 

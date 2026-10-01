@@ -29,7 +29,9 @@ extension AppModel {
     }
 
     /// One request, one response — errors included, never a throw past here.
-    func handleAPIRequest(_ scope: APIScope, _ request: APIRequest) -> APIResponse {
+    /// Async: a method may wait on something slow (ADR-0014's browser), on
+    /// the main actor without blocking it.
+    func handleAPIRequest(_ scope: APIScope, _ request: APIRequest) async -> APIResponse {
         guard let method = APIMethod(rawValue: request.method) else {
             return APIResponse(id: request.id, error: APIError(
                 code: .unknownMethod, message: "unknown method \(request.method)"))
@@ -37,6 +39,10 @@ extension AppModel {
         if method.requiresGlobalScope, scope != .global {
             return APIResponse(id: request.id, error: APIError(
                 code: .forbidden, message: "\(method.rawValue) needs the global token"))
+        }
+        if !method.allowsGlobalScope, scope == .global {
+            return APIResponse(id: request.id, error: APIError(
+                code: .forbidden, message: "\(method.rawValue) answers the session's own token only"))
         }
         do {
             switch method {
@@ -57,7 +63,9 @@ extension AppModel {
             case .sessionSetTitle:
                 let params = try request.decodeParams(APISetTitleParams.self)
                 let id = try targetSession(scope, named: params.sessionId)
-                let title = params.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                // One line, printable, bounded: the title is also a
+                // notification's title (APILimits).
+                let title = APILimits.sanitizedTitle(params.title)
                 guard !title.isEmpty else {
                     throw APIError(code: .invalidParams, message: "title must not be empty")
                 }
@@ -66,6 +74,9 @@ extension AppModel {
             case .sessionSetBadges:
                 let params = try request.decodeParams(APISetBadgesParams.self)
                 let id = try targetSession(scope, named: params.sessionId)
+                if let problem = APILimits.badgeProblem(params.badges) {
+                    throw APIError(code: .invalidParams, message: problem)
+                }
                 setBadges(params.badges, for: id)
                 return .ok(request.id, try apiSession(id))
             case .badgeList:
@@ -75,6 +86,15 @@ extension AppModel {
                 let name = params.name.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !name.isEmpty else {
                     throw APIError(code: .invalidParams, message: "name must not be empty")
+                }
+                guard name.count <= APILimits.badgeNameMaxLength,
+                      !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+                    throw APIError(code: .invalidParams,
+                                   message: "a badge name is one short line (\(APILimits.badgeNameMaxLength) characters at most)")
+                }
+                guard badgeDefinitions.count < APILimits.catalogMaxCount else {
+                    throw APIError(code: .conflict,
+                                   message: "the badge catalog is full (\(APILimits.catalogMaxCount)): reuse a badge")
                 }
                 let color = params.colorHex ?? Self.defaultBadgeColorHex
                 guard APIBadge.isValidColor(color) else {
@@ -98,7 +118,7 @@ extension AppModel {
     /// The session a request means: its own under a session token (a name
     /// that differs is forbidden, not "not found" — the token never learns
     /// whether the other exists); a required name under the global token.
-    private func targetSession(_ scope: APIScope, named sessionId: String?) throws -> SessionID {
+    func targetSession(_ scope: APIScope, named sessionId: String?) throws -> SessionID {
         switch scope {
         case .session(let own):
             if let sessionId, sessionId.lowercased() != own.rawValue.uuidString.lowercased() {

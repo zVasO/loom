@@ -383,6 +383,86 @@ struct AgentsAPISocketTests {
         #expect(delivered.value == 1, "a hook line on the same server still reaches the handler")
     }
 
+    /// A server whose handler takes its time, per request id.
+    private func slowServer(at url: URL, delays: [String: Duration],
+                            answer: @escaping @Sendable (APIRequest) -> APIResponse = { .ok($0.id, ["who": $0.id]) })
+        -> HookSocketServer {
+        HookSocketServer(
+            socketPath: url,
+            validate: { _ in nil }, handler: { _, _ in },
+            authorize: { token in token == "session-token" ? .session(SessionID()) : nil },
+            requests: { _, request in
+                if let delay = delays[request.id] { try? await Task.sleep(for: delay) }
+                return answer(request)
+            })
+    }
+
+    @Test("a multi-megabyte answer arrives whole, well within its budget")
+    func grandeReponseIntacte() async throws {
+        let url = socketURL()
+        let blob = String(repeating: "x", count: 2_000_000)
+        let server = slowServer(at: url, delays: [:], answer: { .ok($0.id, ["blob": blob]) })
+        try server.start()
+        defer { server.stop() }
+
+        let client = APIClient(socketPath: url.path, token: "session-token", timeout: .seconds(3))
+        let response = try await blocking { try client.send(APIRequest(id: "big", method: .sessionGet)) }
+        #expect(response.result?["blob"]?.stringValue?.count == 2_000_000)
+    }
+
+    @Test("an answer written after its asker gave up never reaches the next client of that descriptor")
+    func reponseTardiveNeVaPasAuVoisin() async throws {
+        let url = socketURL()
+        // A answers at ~1.5 s, after its client gave up at 0.3 s; B, connected
+        // once A's descriptor is closed (and likely reused), answers at ~2 s:
+        // B is still waiting when A's late answer is written.
+        let server = slowServer(at: url, delays: ["A": .milliseconds(1500), "B": .milliseconds(1600)])
+        try server.start()
+        defer { server.stop() }
+
+        let impatient = APIClient(socketPath: url.path, token: "session-token", timeout: .milliseconds(300))
+        await #expect(throws: APIClient.ClientError.timedOut) {
+            try await blocking { try impatient.send(APIRequest(id: "A", method: .sessionGet)) }
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        let patient = APIClient(socketPath: url.path, token: "session-token", timeout: .seconds(5))
+        let response = try await blocking { try patient.send(APIRequest(id: "B", method: .sessionGet)) }
+        #expect(response.id == "B")
+        #expect(response.result?["who"]?.stringValue == "B")
+
+        // And the server survived writing to a client that was gone.
+        let after = try await blocking { try patient.send(APIRequest(id: "C", method: .sessionGet)) }
+        #expect(after.result?["who"]?.stringValue == "C")
+    }
+
+    @Test("an answer bearing another id is refused by the client")
+    func identifiantDifferentRefuse() async throws {
+        let url = socketURL()
+        let server = slowServer(at: url, delays: [:], answer: { _ in .ok("someone-else", ["x": 1]) })
+        try server.start()
+        defer { server.stop() }
+
+        let client = APIClient(socketPath: url.path, token: "session-token", timeout: .seconds(2))
+        await #expect(throws: APIClient.ClientError.malformedResponse) {
+            try await blocking { try client.send(APIRequest(id: "mine", method: .sessionGet)) }
+        }
+    }
+
+    @Test("an explicit client timeout wins over the method's budget")
+    func delaiExpliciteRespecte() async throws {
+        let url = socketURL()
+        let server = slowServer(at: url, delays: ["slow": .seconds(2)])
+        try server.start()
+        defer { server.stop() }
+
+        let client = APIClient(socketPath: url.path, token: "session-token", timeout: .milliseconds(200))
+        let started = ContinuousClock.now
+        await #expect(throws: APIClient.ClientError.timedOut) {
+            try await blocking { try client.send(APIRequest(id: "slow", method: .sessionGet)) }
+        }
+        #expect(ContinuousClock.now - started < .seconds(1))
+    }
+
     private final class Counter: @unchecked Sendable {
         private let lock = NSLock()
         private var count = 0

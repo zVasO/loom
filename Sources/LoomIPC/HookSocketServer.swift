@@ -25,7 +25,13 @@ public final class HookSocketServer: @unchecked Sendable {
     /// Answers a request under its scope. Runs off the IPC queue — on
     /// whatever actor the handler needs — and its answer goes back to the
     /// connection that asked, if it is still there.
+    /// A handler may take seconds (a page loading in the agent's browser):
+    /// the connection is tagged, so a late answer never reaches a stranger.
     public typealias RequestHandler = @Sendable (_ scope: APIScope, _ request: APIRequest) async -> APIResponse
+
+    /// A client that sends this much without a newline is not speaking the
+    /// protocol: it is dropped rather than buffered without end.
+    public static let maxLineBytes = 8 << 20
 
     private let socketPath: URL
     private let validate: Validate
@@ -35,9 +41,13 @@ public final class HookSocketServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "app.loom.ipc")
     private var listeningDescriptor: Int32 = -1
     private var acceptSource: DispatchSourceRead?
-    /// Per client: its read source, the bytes not yet delivered, and how far
-    /// into them the last drain looked without finding a newline.
-    private var connections: [Int32: (source: DispatchSourceRead, buffer: Data, scanned: Int)] = [:]
+    /// Per client: its read source, the bytes not yet delivered, how far into
+    /// them the last drain looked without finding a newline, and the
+    /// connection's generation — a descriptor number is reused by the next
+    /// client the moment its previous owner hangs up.
+    private var connections: [Int32: (source: DispatchSourceRead, buffer: Data, scanned: Int,
+                                      generation: UInt64)] = [:]
+    private var nextGeneration: UInt64 = 0
 
     public init(socketPath: URL, validate: @escaping Validate, handler: @escaping Handler,
                 authorize: Authorize? = nil, requests: RequestHandler? = nil) {
@@ -113,10 +123,18 @@ public final class HookSocketServer: @unchecked Sendable {
     private func acceptConnection() {
         let client = accept(listeningDescriptor, nil, nil)
         guard client >= 0 else { return }
+        // A reply written after the client hung up must fail, not kill Loom;
+        // and a client that stops reading must not stall this queue — every
+        // session's hooks go through it.
+        var noSigPipe: Int32 = 1
+        setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+        var sendTimeout = timeval(tv_sec: 2, tv_usec: 0)
+        setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &sendTimeout, socklen_t(MemoryLayout<timeval>.size))
         let source = DispatchSource.makeReadSource(fileDescriptor: client, queue: queue)
         source.setEventHandler { [weak self] in self?.readFrom(client) }
         source.setCancelHandler { close(client) }
-        connections[client] = (source, Data(), 0)
+        nextGeneration += 1
+        connections[client] = (source, Data(), 0, nextGeneration)
         source.activate()
     }
 
@@ -130,6 +148,9 @@ public final class HookSocketServer: @unchecked Sendable {
         }
         connections[client]?.buffer.append(contentsOf: chunk[0..<count])
         drainLines(from: client)
+        if let pending = connections[client]?.buffer.count, pending > Self.maxLineBytes {
+            drop(client)
+        }
     }
 
     /// Lines are cut out of the connection's buffer IN PLACE. The buffer is
@@ -191,28 +212,37 @@ public final class HookSocketServer: @unchecked Sendable {
             let id = (request as? [String: Any])?["id"] as? String ?? ""
             reply(APIResponse(id: id, error: APIError(code: .invalidRequest,
                                                       message: "not a request: {id, method, params}")),
-                  to: client)
+                  to: client, generation: connections[client]?.generation)
             return
         }
+        let generation = connections[client]?.generation
         Task { [weak self] in
             let response = await requests(scope, decoded)
-            self?.queue.async { self?.reply(response, to: client) }
+            self?.queue.async { self?.reply(response, to: client, generation: generation) }
         }
     }
 
     /// On the IPC queue. A client gone since it asked gets nothing — its
-    /// descriptor may already belong to someone else.
-    private func reply(_ response: APIResponse, to client: Int32) {
-        guard connections[client] != nil,
+    /// descriptor may already belong to someone else, which the generation
+    /// tells apart.
+    private func reply(_ response: APIResponse, to client: Int32, generation: UInt64?) {
+        guard let connection = connections[client], connection.generation == generation,
               let line = try? APIEnvelope.responseLine(response) else { return }
-        line.withUnsafeBytes { buffer in
+        let complete = line.withUnsafeBytes { buffer -> Bool in
             var offset = 0
             while offset < buffer.count {
                 let written = write(client, buffer.baseAddress! + offset, buffer.count - offset)
-                guard written > 0 else { return }
-                offset += written
+                if written > 0 {
+                    offset += written
+                } else if written < 0, errno == EINTR {
+                    continue
+                } else {
+                    return false   // gone, or not reading (SO_SNDTIMEO): give up on it
+                }
             }
+            return true
         }
+        if !complete { drop(client) }
     }
 
     private func drop(_ client: Int32) {

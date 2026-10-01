@@ -69,6 +69,41 @@ struct APIProtocolTests {
         }
     }
 
+    @Test("protocol v2: the new error codes decode")
+    func versionDeuxEtNouveauxCodes() throws {
+        #expect(APIProtocol.version == 2)
+        for code in ["timeout", "unavailable"] {
+            let line = Data(#"{"id":"r","error":{"code":"\#(code)","message":"m"}}"#.utf8)
+            #expect(try APIEnvelope.decodeResponse(line).error?.code.rawValue == code)
+        }
+    }
+
+    @Test("every method's client waits at least 5 s, and 5 s past the app's own deadline")
+    func budgetsDesMethodes() {
+        for method in APIMethod.allCases {
+            #expect(method.clientTimeout >= .seconds(5), "\(method.rawValue)")
+            if let deadline = method.appDeadline {
+                #expect(method.clientTimeout >= deadline + .seconds(5),
+                        "\(method.rawValue): the app must give up before the client does")
+            }
+        }
+    }
+
+    @Test("a title written through the API is one bounded, printable line")
+    func titreAssaini() {
+        #expect(APILimits.sanitizedTitle("  Fix\nlogin\tflow  ") == "Fix login flow")
+        #expect(APILimits.sanitizedTitle("a\u{0007}b\u{001B}[31m") == "ab[31m")
+        #expect(APILimits.sanitizedTitle(String(repeating: "x", count: 200)).count == APILimits.titleMaxLength)
+        #expect(APILimits.sanitizedTitle("\n\t ").isEmpty)
+    }
+
+    @Test("badges are bounded in number and in length")
+    func badgesBornes() {
+        #expect(APILimits.badgeProblem(["review", "wip"]) == nil)
+        #expect(APILimits.badgeProblem(Array(repeating: "b", count: APILimits.badgesPerSession + 1)) != nil)
+        #expect(APILimits.badgeProblem([String(repeating: "x", count: APILimits.badgeNameMaxLength + 1)]) != nil)
+    }
+
     @Test("a badge color is #RRGGBB, nothing else")
     func couleurDeBadge() {
         #expect(APIBadge.isValidColor("#4CC38A"))

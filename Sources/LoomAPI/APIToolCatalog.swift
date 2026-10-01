@@ -115,7 +115,8 @@ public enum APIToolCatalog {
             }
             lines.append("")
         }
-        lines.append("Errors: `invalidRequest`, `unknownMethod`, `invalidParams`, `forbidden`, `notFound`, `conflict`, `internalError`.")
+        lines.append("Errors: `invalidRequest`, `unknownMethod`, `invalidParams`, `forbidden`, `notFound`, "
+                     + "`conflict`, `timeout`, `unavailable`, `internalError`.")
         return lines.joined(separator: "\n") + "\n"
     }
 
