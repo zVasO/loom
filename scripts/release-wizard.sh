@@ -241,9 +241,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppTransportSecurity</key><dict>
+    <key>NSAllowsArbitraryLoadsInWebContent</key><true/>
+  </dict>
 </dict></plist>
 PLIST
 say "✓ $APP assemblé (version ${VERSION})"
+say "  ATS : les vues web chargent http (le serveur de dev de l'agent, 127.0.0.1 compris — ADR-0014) ; URLSession reste en HTTPS."
 pause
 
 # ── Stage 5 : signature Hardened Runtime ──────────────────────────────────

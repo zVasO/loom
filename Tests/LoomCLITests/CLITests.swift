@@ -34,6 +34,35 @@ struct CLIParseTests {
         #expect(archived.archived)
     }
 
+    @Test("browser verbs: the tool by its short name, JSON or its one obvious value")
+    func verbesNavigateur() throws {
+        #expect(try CLI.parse(["browser", "navigate", "localhost:5173"]).0
+                == .browser(.browserNavigate, .object(["url": .string("localhost:5173")])))
+        #expect(try CLI.parse(["browser", "browser_click", "e12"]).0
+                == .browser(.browserClick, .object(["target": .string("e12")])))
+        #expect(try CLI.parse(["browser", "type", #"{"target":"e5","text":"milk","submit":true}"#]).0
+                == .browser(.browserType, .object(["target": .string("e5"), "text": .string("milk"),
+                                                   "submit": .bool(true)])))
+        #expect(try CLI.parse(["browser", "press_key", "Shift+Tab"]).0
+                == .browser(.browserPressKey, .object(["key": .string("Shift+Tab")])))
+        #expect(try CLI.parse(["browser", "evaluate", "()", "=>", "document.title"]).0
+                == .browser(.browserEvaluate, .object(["function": .string("() => document.title")])))
+        #expect(try CLI.parse(["browser", "handle_dialog", "accept"]).0
+                == .browser(.browserHandleDialog, .object(["accept": .bool(true)])))
+        let (shot, options) = try CLI.parse(["browser", "take_screenshot", "--out", "s.png"])
+        #expect(shot == .browser(.browserScreenshot, .object([:])))
+        #expect(options.out == "s.png")
+    }
+
+    @Test("browser usage errors are said plainly")
+    func erreursNavigateur() {
+        #expect(throws: CLI.ParseError.missingArgument("browser tool (see loom docs)")) { try CLI.parse(["browser"]) }
+        #expect(throws: CLI.ParseError.unknownCommand("browser fly")) { try CLI.parse(["browser", "fly"]) }
+        #expect(throws: CLI.ParseError.missingValue("--out")) { try CLI.parse(["browser", "snapshot", "--out"]) }
+        #expect(throws: CLI.ParseError.self) { try CLI.parse(["browser", "type", "hello"]) }
+        #expect(throws: CLI.ParseError.self) { try CLI.parse(["browser", "navigate", "{not json"]) }
+    }
+
     @Test("a missing argument or an unknown verb is a usage error, said plainly")
     func erreursDUsage() {
         #expect(throws: CLI.ParseError.missingArgument("title")) { try CLI.parse(["session", "title"]) }
@@ -51,6 +80,7 @@ struct CLIParseTests {
         var help = ""
         #expect(CLI.run(["--help"], environment: [:], output: { help += $0 }, error: { _ in }) == 0)
         #expect(help.contains("loom badge add <name>"))
+        #expect(help.contains("loom browser <tool>"))
     }
 
     @Test("without a socket or a token, the run says what is missing and exits 2")

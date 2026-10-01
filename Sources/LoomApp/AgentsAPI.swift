@@ -4,9 +4,9 @@ import LoomPersistence
 import Foundation
 
 // The app's side of the agents API (ADR-0010): the methods, answered on the
-// main actor with the same calls the UI makes. Metadata only — a title, a
-// list of badges, the catalog — never a state: the reducer has four sources
-// and the API is not one.
+// main actor with the same calls the UI makes. Metadata — a title, a list of
+// badges, the catalog — and the session's own browser (ADR-0014); never a
+// state: the reducer has four sources and the API is not one.
 
 extension AppModel {
 
@@ -79,6 +79,11 @@ extension AppModel {
                 }
                 setBadges(params.badges, for: id)
                 return .ok(request.id, try apiSession(id))
+            case .browserNavigate, .browserNavigateBack, .browserSnapshot, .browserClick, .browserType,
+                 .browserSelectOption, .browserHover, .browserPressKey, .browserWaitFor, .browserScreenshot,
+                 .browserConsole, .browserNetwork, .browserEvaluate, .browserHandleDialog, .browserTabs,
+                 .browserClose:
+                return try await handleBrowserRequest(method, request, scope: scope)
             case .badgeList:
                 return .ok(request.id, APIBadgeListResult(badges: apiBadges))
             case .badgeCreate:

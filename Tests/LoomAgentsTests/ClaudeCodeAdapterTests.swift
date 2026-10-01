@@ -1,5 +1,6 @@
 import Testing
 import LoomAgents
+import LoomAPI
 import LoomCore
 import Foundation
 
@@ -240,6 +241,55 @@ struct ClaudeCodeAdapterTests {
         ])) == nil, "a notification with no state value is ignored")
         #expect(ClaudeCodeAdapter.interpret(Data("not json".utf8)) == nil,
                 "a corrupted payload never produces a transition")
+    }
+
+    private func wired(_ tools: ClaudeCodeAdapter.ToolOptions = .init()) -> ClaudeCodeAdapter {
+        ClaudeCodeAdapter(hooks: .init(helper: URL(fileURLWithPath: "/tmp/loom-hook"),
+                                       socket: URL(fileURLWithPath: "/tmp/loom.sock"),
+                                       cli: URL(fileURLWithPath: "/tmp/loom")),
+                          tools: tools)
+    }
+
+    @Test("Loom's tools are pre-approved by name, at launch and at resume, the hooks kept")
+    func outilsLoomPreapprouves() throws {
+        for command in [wired().launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok"),
+                        wired().resumeCommand(session: SessionID(), hookToken: "tok")] {
+            let parsed = try settings(of: command)
+            let permissions = try #require(parsed["permissions"] as? [String: Any])
+            let allow = try #require(permissions["allow"] as? [String])
+            #expect(allow == APIToolCatalog.preapprovedRules(browser: true))
+            #expect(allow.contains("mcp__loom__browser_navigate"))
+            #expect(!allow.contains("mcp__loom"), "never the whole server")
+            #expect(parsed["hooks"] != nil)
+        }
+    }
+
+    @Test("pre-approval off, or no MCP server to approve: no permissions key")
+    func pasDePreapprobation() throws {
+        let off = wired(.init(browser: true, preapproved: false))
+            .launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok")
+        #expect(try settings(of: off)["permissions"] == nil)
+        let noCLI = ClaudeCodeAdapter(hooks: .init(helper: URL(fileURLWithPath: "/tmp/loom-hook"),
+                                                   socket: URL(fileURLWithPath: "/tmp/loom.sock")))
+            .launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok")
+        #expect(try settings(of: noCLI)["permissions"] == nil)
+    }
+
+    @Test("browser tools off: the MCP server is told, and they are not pre-approved")
+    func outilsNavigateurDesactives() throws {
+        let command = wired(.init(browser: false, preapproved: true))
+            .launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok")
+        let index = try #require(command.arguments.firstIndex(of: "--mcp-config"))
+        let config = try #require(try JSONSerialization.jsonObject(
+            with: Data(command.arguments[index + 1].utf8)) as? [String: Any])
+        let loom = try #require((config["mcpServers"] as? [String: Any])?["loom"] as? [String: Any])
+        #expect((loom["env"] as? [String: String])?["LOOM_BROWSER_TOOLS"] == "0")
+        let allow = try #require((try settings(of: command)["permissions"] as? [String: Any])?["allow"] as? [String])
+        #expect(!allow.contains { $0.contains("browser_") })
+
+        let on = wired().launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok")
+        let onIndex = try #require(on.arguments.firstIndex(of: "--mcp-config"))
+        #expect(!on.arguments[onIndex + 1].contains("LOOM_BROWSER_TOOLS"))
     }
 }
 

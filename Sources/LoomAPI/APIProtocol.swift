@@ -22,6 +22,18 @@ public enum APIProtocol {
     /// token that names its own session. The CLI reads both.
     public static let socketEnvironmentKey = "LOOM_SOCKET"
     public static let sessionTokenEnvironmentKey = "LOOM_SESSION_TOKEN"
+    /// "0" in the MCP server's environment: the browser tools are turned off
+    /// in Loom's Settings, and `loom mcp` does not list them.
+    public static let browserToolsEnvironmentKey = "LOOM_BROWSER_TOOLS"
+
+    /// Where the app writes the agent browser's screenshots (ADR-0014), beside
+    /// its socket: the one place the app and `loom mcp` agree on. The MCP
+    /// server reads an image there and nowhere else.
+    public static func screenshotsDirectory(socketPath: String) -> URL {
+        URL(fileURLWithPath: socketPath).deletingLastPathComponent()
+            .appendingPathComponent("agent-browser", isDirectory: true)
+            .appendingPathComponent("screenshots", isDirectory: true)
+    }
 }
 
 /// Who is asking — decided by the token the server saw, never by the request.
@@ -42,6 +54,26 @@ public enum APIMethod: String, CaseIterable, Sendable {
     case sessionSetBadges = "session.setBadges"
     case badgeList = "badge.list"
     case badgeCreate = "badge.create"
+    // The session's own browser (ADR-0014), Playwright MCP's tool surface.
+    case browserNavigate = "browser.navigate"
+    case browserNavigateBack = "browser.navigateBack"
+    case browserSnapshot = "browser.snapshot"
+    case browserClick = "browser.click"
+    case browserType = "browser.type"
+    case browserSelectOption = "browser.selectOption"
+    case browserHover = "browser.hover"
+    case browserPressKey = "browser.pressKey"
+    case browserWaitFor = "browser.waitFor"
+    case browserScreenshot = "browser.screenshot"
+    case browserConsole = "browser.console"
+    case browserNetwork = "browser.network"
+    case browserEvaluate = "browser.evaluate"
+    case browserHandleDialog = "browser.handleDialog"
+    case browserTabs = "browser.tabs"
+    case browserClose = "browser.close"
+
+    /// Drives the session's own browser.
+    public var isBrowser: Bool { rawValue.hasPrefix("browser.") }
 
     /// Listing every session is the orchestrator's view: a session token,
     /// scoped to itself, never sees its neighbours.
@@ -57,15 +89,23 @@ public enum APIMethod: String, CaseIterable, Sendable {
     /// owns — must never act inside ANOTHER session: such methods answer
     /// their session's own token only.
     public var allowsGlobalScope: Bool {
-        switch self {
-        default: return true
-        }
+        // The browser acts inside its project's profile — logins included.
+        !isBrowser
     }
 
     /// The app's own deadline for answering, when the method may wait on
-    /// something slow (a page loading); nil = it answers at once.
+    /// something slow (a page loading); nil = it answers at once. Each holds
+    /// its command's worst case: a load (30 s), a wait (30 s), plus the
+    /// snapshot that follows.
     public var appDeadline: Duration? {
         switch self {
+        case .browserNavigate, .browserWaitFor, .browserTabs: return .seconds(35)
+        case .browserType, .browserEvaluate: return .seconds(30)
+        case .browserNavigateBack, .browserClick, .browserSelectOption, .browserHover,
+             .browserPressKey, .browserHandleDialog: return .seconds(25)
+        case .browserScreenshot: return .seconds(20)
+        case .browserSnapshot: return .seconds(15)
+        case .browserConsole, .browserNetwork, .browserClose: return .seconds(10)
         default: return nil
         }
     }

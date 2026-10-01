@@ -11,12 +11,18 @@ public struct BrowserPanelView: View {
     /// What the empty panel suggests: ⌘T means "new browser" in a stack tab,
     /// but beside a terminal it keeps its stack meaning — only + opens a tab.
     private let emptyHint: String
+    /// What + opens when the address bar is empty: GitHub in the user's
+    /// browser; a blank page in the agent's, where a GitHub login would be
+    /// the agent's to use.
+    private let newTabAddress: String
     private let onVisit: ((String, String) -> Void)?
 
     public init(controller: BrowserController, emptyHint: String = "⌘T or + to open a tab",
+                newTabAddress: String = "github.com",
                 onVisit: ((String, String) -> Void)? = nil) {
         self.controller = controller
         self.emptyHint = emptyHint
+        self.newTabAddress = newTabAddress
         self.onVisit = onVisit
     }
 
@@ -32,7 +38,7 @@ public struct BrowserPanelView: View {
                         controller.navigateActive(to: address)
                     }
                 Button {
-                    controller.openTab(urlString: address.isEmpty ? "github.com" : address)
+                    controller.openTab(urlString: address.isEmpty ? newTabAddress : address)
                 } label: { Image(systemName: "plus") }
                 // Only a web address goes to the system: a file: URL handed
                 // to NSWorkspace would open — or run — whatever it names.
@@ -73,7 +79,7 @@ public struct BrowserPanelView: View {
             }
         }
         .onAppear {
-            controller.onVisit = onVisit
+            if controller.kind == .user { controller.onVisit = onVisit }
             controller.materialize()
         }
         .onChange(of: controller.activeWebView?.url) { _, url in

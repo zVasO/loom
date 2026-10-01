@@ -18,6 +18,9 @@ swift run -c release LoomApp    # IMPORTANT : release — le debug est 10-50× p
 
 Tests : `swift test` (process réels, repos Git réels, sockets réels).
 SDK des extensions et exemple Jira : `cd Examples/extensions && npm test`.
+Scripts du navigateur de l'agent : `node --test Tests/AgentBrowserJS/*.test.mjs`
+(sur un vrai DOM si Playwright est installé) ; WebKit lui-même :
+`LOOM_AUTOTEST=agent-browser swift run LoomApp` (rapport dans `/tmp/loom-agent-browser-report.json`).
 
 Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 étapes).
 
@@ -50,6 +53,15 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   un navigateur de la pile à côté du terminal de la session, sans jamais
   réduire le terminal sous 80 colonnes de lui-même ni le redimensionner pendant
   un glisser.
+- **Navigateur de l'agent** (ADR-0014) : chaque session claude a son propre
+  navigateur, à côté de son terminal, sur un profil isolé par projet (jamais les
+  cookies de l'utilisateur ; privé pour les revues), piloté par les outils MCP
+  `browser_*` au format de Playwright MCP — naviguer, instantané d'accessibilité à
+  références, cliquer, taper, touches, attendre, console, requêtes, capture,
+  JavaScript, dialogues, onglets — et par `loom browser <outil>`. L'agent ouvre le
+  panneau sur son navigateur la première fois qu'il s'en sert. Outils
+  pré-autorisés par défaut, coupables dans les Réglages. Guide :
+  [`docs/agent-browser.md`](docs/agent-browser.md).
 - **Persistance** : GRDB, migrations versionnées (v1→v4), journal des transitions
   avec source, marquage `interrupted` au relancement.
 - **Extensions** (ADR-0011) : pages web tierces dans un onglet « Extensions »,
@@ -80,7 +92,8 @@ Packages SPM aux frontières imposées (§6.1 du cahier des charges, ADR-0009) :
 Exécutables compagnons : `loom-hook` (hooks) et `loom` (CLI + serveur MCP de
 l'API agents, ADR-0010 ; sa logique vit dans `LoomCLI`). Dans une session,
 `loom docs` imprime la référence de l'API ; `loom mcp` la sert en outils MCP,
-branché par `--mcp-config` au lancement.
+branché par `--mcp-config` au lancement. Le navigateur de l'agent vit dans
+`LoomWeb/AgentBrowser` (ADR-0014).
 
 Aucun service ne dépend de l'UI ; l'UI ne voit que des valeurs (`TerminalScreen`),
 jamais le moteur. Tout accès moteur est confiné à la queue sérielle de sa session.

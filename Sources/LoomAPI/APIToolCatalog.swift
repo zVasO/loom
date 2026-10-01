@@ -5,6 +5,14 @@ import Foundation
 // lists it, `loom docs` prints it, and neither adds a word of its own.
 
 public struct APIToolSpec: Sendable, Equatable {
+    /// How a result reaches the agent.
+    public enum ResultFormat: Sendable, Equatable {
+        /// The method's JSON, compact.
+        case json
+        /// An `APIToolContent`: Markdown shown as is, an image as an image.
+        case content
+    }
+
     public var method: APIMethod
     /// The MCP tool name: `[a-zA-Z0-9_-]`, so dots become underscores.
     public var name: String
@@ -13,6 +21,11 @@ public struct APIToolSpec: Sendable, Equatable {
     public var inputSchema: JSONValue
     /// How the CLI spells it, for the reference.
     public var cliUsage: String
+    public var resultFormat: ResultFormat = .json
+    /// Claude Code runs it without asking when Loom pre-approves its tools
+    /// (Settings). No default: every tool added must decide — one that
+    /// destroys or launches anything must not be.
+    public var preapprovable: Bool
 }
 
 public enum APIToolCatalog {
@@ -22,13 +35,13 @@ public enum APIToolCatalog {
             method: .version, name: "loom_version",
             description: "Loom's protocol and app versions. A cheap way to check the socket answers.",
             inputSchema: object([:]),
-            cliUsage: "loom version"),
+            cliUsage: "loom version", preapprovable: true),
         APIToolSpec(
             method: .sessionGet, name: "loom_session_get",
             description: "The session you run in: title, state, branch, worktree path, badges. "
                 + "Under a session token, sessionId is yours and may be omitted.",
             inputSchema: object(["sessionId": sessionIdProperty]),
-            cliUsage: "loom session get"),
+            cliUsage: "loom session get", preapprovable: true),
         APIToolSpec(
             method: .sessionSetTitle, name: "loom_session_set_title",
             description: "Renames the session in Loom's sidebar and Mission Control. "
@@ -36,7 +49,7 @@ public enum APIToolCatalog {
             inputSchema: object(["sessionId": sessionIdProperty,
                                  "title": string("The new title, non-empty.")],
                                 required: ["title"]),
-            cliUsage: "loom session title <title>"),
+            cliUsage: "loom session title <title>", preapprovable: true),
         APIToolSpec(
             method: .sessionSetBadges, name: "loom_session_set_badges",
             description: "Replaces the session's badges with this list, in this order; an empty list clears them. "
@@ -46,12 +59,12 @@ public enum APIToolCatalog {
                                                     "items": .object(["type": .string("string")]),
                                                     "description": .string("Badge names, in display order.")])],
                                 required: ["badges"]),
-            cliUsage: "loom badge set <name>… | loom badge add <name> | loom badge remove <name> | loom badge clear"),
+            cliUsage: "loom badge set <name>… | loom badge add <name> | loom badge remove <name> | loom badge clear", preapprovable: true),
         APIToolSpec(
             method: .badgeList, name: "loom_badge_list",
             description: "The badge catalog: every name a session may wear, with its color.",
             inputSchema: object([:]),
-            cliUsage: "loom badge list"),
+            cliUsage: "loom badge list", preapprovable: true),
         APIToolSpec(
             method: .badgeCreate, name: "loom_badge_create",
             description: "Adds a badge to the catalog. Fails with `conflict` when the name exists. "
@@ -59,18 +72,135 @@ public enum APIToolCatalog {
             inputSchema: object(["name": string("The badge name, short and lowercase by convention."),
                                  "colorHex": string("#RRGGBB; Loom's muted default when omitted.")],
                                 required: ["name"]),
-            cliUsage: "loom badge create <name> [--color #RRGGBB]"),
+            cliUsage: "loom badge create <name> [--color #RRGGBB]", preapprovable: true),
         APIToolSpec(
             method: .sessionsList, name: "loom_sessions_list",
             description: "Every session Loom knows, archived ones on request. Needs the global token: "
                 + "a session token is refused with `forbidden`.",
             inputSchema: object(["includeArchived": .object(["type": .string("boolean"),
                                                              "description": .string("Archived sessions too.")])]),
-            cliUsage: "loom sessions [--archived] (global token)"),
+            cliUsage: "loom sessions [--archived] (global token)", preapprovable: true),
+    ] + browserTools
+
+    /// The session's own browser (ADR-0014). Every tool answers Markdown in
+    /// Playwright MCP's sections (### Page, ### Snapshot…); the actions also
+    /// answer the page's new snapshot, so one call both acts and shows.
+    static let browserTools: [APIToolSpec] = [
+        browser(.browserNavigate, "browser_navigate",
+                "Navigate your browser to a URL and answer the page's snapshot. A bare host:port on "
+                + "localhost or 127.0.0.1 opens in http (a dev server); other bare hosts in https. "
+                + "Only http(s) — no file:, data: or javascript:.",
+                ["url": string("The address, e.g. localhost:5173 or https://example.com/login.")],
+                required: ["url"], cli: #"loom browser navigate localhost:5173"#),
+        browser(.browserNavigateBack, "browser_navigate_back", "Go back to the previous page.",
+                [:], cli: "loom browser navigate_back"),
+        browser(.browserSnapshot, "browser_snapshot",
+                "Capture an accessibility snapshot of the current page: its elements as YAML, each "
+                + "interactive one with a ref (e12) the other tools take. Better than a screenshot "
+                + "for acting. A ref is valid until the next snapshot; refs of an element stay the "
+                + "same while its role and name do. Pass a target to snapshot one element's subtree.",
+                ["target": targetProperty(optional: true), "ref": refAlias,
+                 "depth": number("How many levels deep to describe (all by default).")],
+                cli: "loom browser snapshot"),
+        browser(.browserClick, "browser_click",
+                "Click an element: waits until it is visible, enabled, steady and not covered (5 s), "
+                + "then clicks its center. Answers the new snapshot, or the dialog the click opened.",
+                ["element": elementProperty, "target": targetProperty(optional: false), "ref": refAlias,
+                 "doubleClick": boolean("A double click."),
+                 "button": enumeration(["left", "right", "middle"], "The mouse button, left by default."),
+                 "modifiers": array(enumeration(["Alt", "Control", "ControlOrMeta", "Meta", "Shift"], "A key held."),
+                                    "Keys held during the click.")],
+                cli: #"loom browser click e12"#),
+        browser(.browserType, "browser_type",
+                "Replace an editable field's text, as typing would (React and Vue see it), "
+                + "then optionally press Enter.",
+                ["element": elementProperty, "target": targetProperty(optional: false), "ref": refAlias,
+                 "text": string("The text the field ends up with."),
+                 "submit": boolean("Press Enter afterwards (submits a form).")],
+                required: ["text"], cli: #"loom browser type '{"target":"e5","text":"milk","submit":true}'"#),
+        browser(.browserSelectOption, "browser_select_option",
+                "Choose options of a <select>, by value or by visible label. For a custom dropdown, "
+                + "click it, then click the option.",
+                ["element": elementProperty, "target": targetProperty(optional: false), "ref": refAlias,
+                 "values": array(.object(["type": .string("string")]), "Values or labels; several for a multiple select.")],
+                required: ["values"], cli: #"loom browser select_option '{"target":"e7","values":["Blue"]}'"#),
+        browser(.browserHover, "browser_hover",
+                "Move the pointer over an element (JavaScript hover handlers run; CSS :hover does not).",
+                ["element": elementProperty, "target": targetProperty(optional: false), "ref": refAlias],
+                cli: "loom browser hover e9"),
+        browser(.browserPressKey, "browser_press_key",
+                "Press a key in the focused element: Enter, Tab, Escape, Backspace, Arrow keys, a "
+                + "character, with modifiers (Shift+Tab, ControlOrMeta+a).",
+                ["key": string("The key, Playwright's syntax.")], required: ["key"],
+                cli: "loom browser press_key Enter"),
+        browser(.browserWaitFor, "browser_wait_for",
+                "Wait for some time, or for a text to appear or disappear on the page (30 s at most).",
+                ["time": number("Seconds to wait."), "text": string("Wait until this text is visible."),
+                 "textGone": string("Wait until this text is gone."),
+                 "timeout": number("Seconds to wait for the text, 10 by default.")],
+                cli: #"loom browser wait_for '{"text":"Saved"}'"#),
+        browser(.browserScreenshot, "browser_take_screenshot",
+                "Take a screenshot of the visible page, or of one element. For looking, not for "
+                + "acting: use browser_snapshot to act.",
+                ["element": elementProperty, "target": targetProperty(optional: true), "ref": refAlias,
+                 "type": enumeration(["png", "jpeg"], "The format, png by default.")],
+                cli: "loom browser take_screenshot --out shot.png"),
+        browser(.browserConsole, "browser_console_messages",
+                "The console messages, uncaught errors and failed loads of the current page.",
+                ["level": enumeration(["error", "warning", "info", "debug"],
+                                      "The lowest level shown, info by default (more severe ones included)."),
+                 "all": boolean("Also the messages from before the last navigation.")],
+                cli: "loom browser console_messages"),
+        browser(.browserNetwork, "browser_network_requests",
+                "The current page's main document and fetch/XHR requests, with their status.",
+                ["filter": string("Only the requests whose URL contains this.")],
+                cli: "loom browser network_requests"),
+        browser(.browserEvaluate, "browser_evaluate",
+                "Run a JavaScript function in the page and answer its result as JSON. With a target, "
+                + "the element is its argument: (element) => element.textContent.",
+                ["function": string("() => { … } or (element) => { … }; may be async."),
+                 "element": elementProperty, "target": targetProperty(optional: true), "ref": refAlias],
+                required: ["function"], cli: #"loom browser evaluate '() => document.title'"#),
+        browser(.browserHandleDialog, "browser_handle_dialog",
+                "Answer the alert, confirm or prompt the page is waiting on (see ### Modal state).",
+                ["accept": boolean("OK (true) or Cancel (false)."),
+                 "promptText": string("The text to answer a prompt with.")],
+                required: ["accept"], cli: #"loom browser handle_dialog '{"accept":true}'"#),
+        browser(.browserTabs, "browser_tabs",
+                "List, open, select or close your browser's tabs.",
+                ["action": enumeration(["list", "new", "select", "close"], "What to do."),
+                 "index": number("The tab, for select and close (close: the current one by default)."),
+                 "url": string("The address a new tab opens.")],
+                required: ["action"], cli: "loom browser tabs list"),
+        browser(.browserClose, "browser_close",
+                "Close every tab of your browser. Its profile (cookies, storage) is kept.",
+                [:], cli: "loom browser close"),
     ]
+
+    private static func browser(_ method: APIMethod, _ name: String, _ description: String,
+                                _ properties: [String: JSONValue], required: [String] = [],
+                                cli: String) -> APIToolSpec {
+        var fields = properties
+        fields["sessionId"] = string("Omit it: your own session. The browser answers its session's token only.")
+        return APIToolSpec(method: method, name: name, description: description,
+                           inputSchema: object(fields, required: required), cliUsage: cli,
+                           resultFormat: .content, preapprovable: true)
+    }
 
     public static func spec(for method: APIMethod) -> APIToolSpec {
         all.first { $0.method == method }!   // every method is listed: a missing one is a programming error
+    }
+
+    /// The tools a session's MCP server lists: without the browser's when
+    /// they are turned off in Loom's Settings.
+    public static func tools(browser: Bool) -> [APIToolSpec] {
+        browser ? all : all.filter { !$0.method.isBrowser }
+    }
+
+    /// The MCP tool names Loom may pre-approve, as Claude Code's permission
+    /// rules spell them (`mcp__<server>__<tool>`).
+    public static func preapprovedRules(server: String = "loom", browser: Bool) -> [String] {
+        tools(browser: browser).filter(\.preapprovable).map { "mcp__\(server)__\($0.name)" }
     }
 
     public static func spec(named name: String) -> APIToolSpec? {
@@ -79,7 +209,9 @@ public enum APIToolCatalog {
 
     /// What an agent should know before its first call — the MCP `instructions`
     /// and the top of `loom docs`.
-    public static let instructions = """
+    public static let instructions = agentInstructions(browser: true)
+
+    static let sessionInstructions = """
     You are running inside Loom, a macOS app that hosts coding-agent sessions. \
     Loom shows each session as a card with a title and badges. You may rename your \
     own session and set its badges so the person supervising sees where you are \
@@ -87,6 +219,21 @@ public enum APIToolCatalog {
     session's state, start or stop sessions, or touch other sessions with your \
     own token. Prefer badges from the catalog over creating new ones.
     """
+
+    static let browserInstructions = """
+    You also have your own browser, shown beside your terminal in Loom: use the \
+    browser_* tools to test what you build — open your dev server \
+    (`localhost:5173` is opened in http), act on the page, read its console and \
+    requests. Work from browser_snapshot: it lists the page's elements with refs \
+    (e12) that browser_click, browser_type and the others take; a ref is valid \
+    only until the next snapshot. Screenshots are for looking, not for acting. \
+    Its cookies and storage belong to this project's agent profile, never the \
+    person's own browser. Events are synthetic: no CSS :hover, no native drag.
+    """
+
+    public static func agentInstructions(browser: Bool) -> String {
+        browser ? sessionInstructions + "\n\n" + browserInstructions : sessionInstructions
+    }
 
     /// The reference, as Markdown — what `loom docs` prints.
     public static func markdown() -> String {
@@ -107,7 +254,10 @@ public enum APIToolCatalog {
                 lines.append("- Parameters:")
                 for key in fields.keys.sorted() {
                     let field = fields[key]!
-                    let kind = field["type"]?.stringValue ?? "any"
+                    var kind = field["type"]?.stringValue ?? "any"
+                    if case .array(let values)? = field["enum"] {
+                        kind += " (" + values.compactMap(\.stringValue).joined(separator: " | ") + ")"
+                    }
                     let text = field["description"]?.stringValue ?? ""
                     let mark = required.contains(key) ? " (required)" : ""
                     lines.append("  - `\(key)` — \(kind)\(mark). \(text)")
@@ -115,6 +265,9 @@ public enum APIToolCatalog {
             }
             lines.append("")
         }
+        lines.append("Browser tools answer Markdown (### Page, ### Snapshot, ### Modal state…); "
+                     + "the CLI prints it, and `--out <file>` saves a screenshot.")
+        lines.append("")
         lines.append("Errors: `invalidRequest`, `unknownMethod`, `invalidParams`, `forbidden`, `notFound`, "
                      + "`conflict`, `timeout`, `unavailable`, `internalError`.")
         return lines.joined(separator: "\n") + "\n"
@@ -128,6 +281,33 @@ public enum APIToolCatalog {
     private static func string(_ description: String) -> JSONValue {
         .object(["type": .string("string"), "description": .string(description)])
     }
+
+    private static func boolean(_ description: String) -> JSONValue {
+        .object(["type": .string("boolean"), "description": .string(description)])
+    }
+
+    private static func number(_ description: String) -> JSONValue {
+        .object(["type": .string("number"), "description": .string(description)])
+    }
+
+    private static func enumeration(_ values: [String], _ description: String) -> JSONValue {
+        .object(["type": .string("string"), "enum": .array(values.map(JSONValue.string)),
+                 "description": .string(description)])
+    }
+
+    private static func array(_ items: JSONValue, _ description: String) -> JSONValue {
+        .object(["type": .string("array"), "items": items, "description": .string(description)])
+    }
+
+    private static func targetProperty(optional: Bool) -> JSONValue {
+        string("A ref from the latest browser_snapshot (e12), or a CSS selector matching one element."
+               + (optional ? "" : " Required (or ref)."))
+    }
+
+    private static let refAlias = string("Same as target (Playwright's older name).")
+
+    private static let elementProperty = string(
+        "A human-readable description of the element, echoed back (\"Submit button\").")
 
     private static func object(_ properties: [String: JSONValue], required: [String] = []) -> JSONValue {
         var schema: [String: JSONValue] = [

@@ -201,6 +201,17 @@ struct ContentView: View {
             applyTheme()
         }
         .task {
+            // The agent's browser against real WebKit (ADR-0014): a report in
+            // /tmp/loom-agent-browser-report.json, the exit code says it all.
+            if ProcessInfo.processInfo.environment["LOOM_AUTOTEST"] == "agent-browser" {
+                let fixtures = ProcessInfo.processInfo.environment["LOOM_AUTOTEST_FIXTURES"]
+                    .map { URL(fileURLWithPath: $0) }
+                    ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                        .appendingPathComponent("Tests/AgentBrowserJS/fixtures")
+                let passed = await AgentBrowserSelfTest.run(fixturesDirectory: fixtures,
+                                                            reportPath: "/tmp/loom-agent-browser-report.json")
+                exit(passed ? 0 : 1)
+            }
             // Autonomous repro (diagnostics): LOOM_AUTOTEST=1 simulates the
             // "+" click two seconds after launch — same code path.
             guard ProcessInfo.processInfo.environment["LOOM_AUTOTEST"] == "1" else { return }
@@ -2135,6 +2146,7 @@ struct SessionsView: View {
                 item: item,
                 childCount: shells.count + dormantShells.count + panes.count,
                 isSelected: selected == .session(item.id),
+                agentBrowsing: model.agentBrowsers[item.id]?.activity?.isRunning == true,
                 onSelect: {
                     if item.isDormant {
                         Task {
@@ -2706,17 +2718,25 @@ struct SessionDetailView: View {
                 .background(DefaultTheme.surface)
                 .preferredColorScheme(DefaultTheme.colorScheme)
             }
-            // The browser beside the terminal (the stack's side panel).
-            GhostButton(systemImage: "sidebar.right") {
-                model.toggleSidePanel(for: parentID)
-            }
-            .overlay(alignment: .topTrailing) {
-                if panel.isOpen {
-                    Circle().fill(DefaultTheme.accent).frame(width: 5, height: 5)
-                        .offset(x: -3, y: 5)
+            // The browser beside the terminal (the stack's side panel). A
+            // pulsing dot: the agent is using its browser out of sight — the
+            // click shows it.
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                let agentOffscreen = model.isAgentBrowserActiveOffscreen(parentID)
+                GhostButton(systemImage: "sidebar.right") {
+                    model.toggleSidePanel(for: parentID)
                 }
+                .overlay(alignment: .topTrailing) {
+                    if agentOffscreen {
+                        PulsingDot().offset(x: -3, y: 5)
+                    } else if panel.isOpen {
+                        Circle().fill(DefaultTheme.accent).frame(width: 5, height: 5)
+                            .offset(x: -3, y: 5)
+                    }
+                }
+                .help(agentOffscreen ? "claude is using its browser — show it (⌘⇧B)"
+                      : panel.isOpen ? "Hide the browser (⌘⇧B)" : "Show a browser beside the terminal (⌘⇧B)")
             }
-            .help(panel.isOpen ? "Hide the browser (⌘⇧B)" : "Show a browser beside the terminal (⌘⇧B)")
             GhostButton("Git", systemImage: "arrow.triangle.branch") {
                 withAnimation(.hover) { gitShown.toggle() }
                 if gitShown { Task { gitData = await model.gitPanel(for: sessionID) } }
@@ -3065,11 +3085,29 @@ struct HoverIconButton: View {
 
 // MARK: - Stack parent card (icons on hover — terminal, browser)
 
+/// The agent is busy out of sight: an accent dot breathing — never the
+/// needs-input hue, which means something else (THM-08).
+struct PulsingDot: View {
+    @State private var dim = false
+
+    var body: some View {
+        Circle().fill(DefaultTheme.accent)
+            .frame(width: 6, height: 6)
+            .opacity(dim ? 0.3 : 1)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { dim = true }
+            }
+            .allowsHitTesting(false)
+    }
+}
+
 struct SidebarSessionCard: View, Equatable {
     let model: AppModel
     let item: AppModel.SessionItem
     let childCount: Int
     let isSelected: Bool
+    /// Its agent is driving its browser right now (ADR-0014).
+    var agentBrowsing = false
     let onSelect: () -> Void
     let onNewTerminal: () -> Void
     let onOpenBrowser: () -> Void
@@ -3083,6 +3121,7 @@ struct SidebarSessionCard: View, Equatable {
     /// on every session transition, and ~25 of these used to re-run each time.
     static func == (lhs: SidebarSessionCard, rhs: SidebarSessionCard) -> Bool {
         lhs.item == rhs.item && lhs.childCount == rhs.childCount && lhs.isSelected == rhs.isSelected
+            && lhs.agentBrowsing == rhs.agentBrowsing
     }
 
     var body: some View {
@@ -3116,6 +3155,12 @@ struct SidebarSessionCard: View, Equatable {
             }
             HStack(spacing: 6) {
                 StatusLabel(item.state)
+                if agentBrowsing {
+                    Image(systemName: "globe")
+                        .font(.system(size: 9))
+                        .foregroundStyle(DefaultTheme.accent)
+                        .help("claude is using its browser")
+                }
                 if childCount > 0 {
                     HStack(spacing: 2) {
                         Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))

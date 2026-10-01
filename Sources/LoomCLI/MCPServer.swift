@@ -15,9 +15,25 @@ public struct MCPServer {
     public static let serverName = "loom"
 
     private let call: Call
+    private let tools: [APIToolSpec]
+    private let instructions: String
+    /// Where the app writes images; a result pointing anywhere else is not read.
+    private let imageRoot: URL?
+    private let readFile: (URL) -> Data?
 
-    public init(call: @escaping Call) {
+    /// `tools`: what this session may call — the browser's are left out when
+    /// Loom's Settings turned them off. Still no business logic: the server
+    /// maps a result's shape to MCP content blocks, nothing more (ADR-0010).
+    public init(call: @escaping Call,
+                tools: [APIToolSpec] = APIToolCatalog.all,
+                instructions: String = APIToolCatalog.instructions,
+                imageRoot: URL? = nil,
+                readFile: @escaping (URL) -> Data? = { try? Data(contentsOf: $0) }) {
         self.call = call
+        self.tools = tools
+        self.instructions = instructions
+        self.imageRoot = imageRoot
+        self.readFile = readFile
     }
 
     /// Reads stdin line by line until it closes, answers on stdout. Notifications
@@ -63,25 +79,28 @@ public struct MCPServer {
                 "capabilities": .object(["tools": .object([:])]),
                 "serverInfo": .object(["name": .string(Self.serverName),
                                        "version": .string("\(APIProtocol.version)")]),
-                "instructions": .string(APIToolCatalog.instructions),
+                "instructions": .string(instructions),
             ]))
         case "ping":
             guard let id else { return nil }
             return Self.result(id: id, .object([:]))
         case "tools/list":
             guard let id else { return nil }
-            return Self.result(id: id, .object(["tools": .array(APIToolCatalog.all.map(Self.tool))]))
+            return Self.result(id: id, .object(["tools": .array(tools.map(Self.tool))]))
         case "tools/call":
             guard let id else { return nil }
             guard let name = params["name"]?.stringValue else {
                 return Self.errorResponse(id: id, code: -32602, message: "tools/call needs a name")
             }
-            guard let spec = APIToolCatalog.spec(named: name) else {
+            guard let spec = tools.first(where: { $0.name == name }) else {
                 return Self.errorResponse(id: id, code: -32602, message: "unknown tool \(name)")
             }
             let arguments = params["arguments"] ?? .object([:])
             do {
                 let answer = try call(spec.method, arguments)
+                if spec.resultFormat == .content, let content = try? answer.decode(APIToolContent.self) {
+                    return Self.result(id: id, contentResult(content))
+                }
                 return Self.result(id: id, Self.toolResult(text: Self.compact(answer), isError: false))
             } catch let error as APIError {
                 return Self.result(id: id, Self.toolResult(text: "\(error.code.rawValue): \(error.message)",
@@ -102,6 +121,24 @@ public struct MCPServer {
         .object(["name": .string(spec.name),
                  "description": .string(spec.description),
                  "inputSchema": spec.inputSchema])
+    }
+
+    /// Markdown as is; an image the app wrote, as an image block — read only
+    /// from the screenshots directory (APIImageFile), never from a path a
+    /// result merely names.
+    func contentResult(_ content: APIToolContent) -> JSONValue {
+        var blocks: [JSONValue] = [.object(["type": .string("text"), "text": .string(content.text)])]
+        if let image = content.image {
+            if let root = imageRoot, let file = APIImageFile.validated(image, root: root),
+               let data = readFile(file) {
+                blocks.append(.object(["type": .string("image"), "data": .string(data.base64EncodedString()),
+                                       "mimeType": .string(image.mimeType)]))
+            } else {
+                blocks.append(.object(["type": .string("text"),
+                                       "text": .string("(The screenshot is at \(image.path).)")]))
+            }
+        }
+        return .object(["content": .array(blocks), "isError": .bool(false)])
     }
 
     static func toolResult(text: String, isError: Bool) -> JSONValue {

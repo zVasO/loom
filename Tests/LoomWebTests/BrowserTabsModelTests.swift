@@ -81,9 +81,21 @@ struct AdresseOuRechercheTests {
                 == "https://www.google.com/search?q=swiftterm")
     }
 
-    @Test("localhost remains an address")
+    @Test("localhost remains an address — in http, where dev servers listen")
     func localhost() {
         #expect(BrowserController.normalize("localhost:5173")?.absoluteString
-                == "https://localhost:5173")
+                == "http://localhost:5173")
+    }
+
+    @Test("every loopback host is http; an explicit https stays; a lookalike is a search")
+    func boucleLocaleEnHttp() {
+        #expect(BrowserController.normalize("127.0.0.1:8000/api")?.absoluteString == "http://127.0.0.1:8000/api")
+        #expect(BrowserController.normalize("[::1]:5173")?.absoluteString == "http://[::1]:5173")
+        #expect(BrowserController.normalize("app.localhost:3000")?.absoluteString == "http://app.localhost:3000")
+        #expect(BrowserController.normalize("0.0.0.0:3000")?.absoluteString == "http://0.0.0.0:3000")
+        #expect(BrowserController.normalize("https://localhost:8443")?.absoluteString == "https://localhost:8443")
+        #expect(BrowserController.normalize("localhostfoo")?.absoluteString
+                == "https://www.google.com/search?q=localhostfoo")
+        #expect(BrowserController.normalize("about:blank")?.absoluteString == "about:blank")
     }
 }

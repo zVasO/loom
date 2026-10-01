@@ -35,7 +35,9 @@ let package = Package(
         // Web extensions (ADR-0011): manifest, permissions, the bridge and its guards — pure,
         // testable; the WebKit host lives in LoomWeb, the wiring in LoomApp.
         .target(name: "LoomExtensions", dependencies: ["LoomCore", "LoomAPI"]),
-        .target(name: "LoomWeb", dependencies: ["LoomCore", "LoomUI", "LoomExtensions"]),
+        // LoomAPI: the agent's browser maps the API's browser methods to its
+        // commands where the tests reach the mapping (ADR-0014).
+        .target(name: "LoomWeb", dependencies: ["LoomCore", "LoomUI", "LoomExtensions", "LoomAPI"]),
         .target(name: "LoomPersistence", dependencies: ["LoomCore", "LoomTerminal", "LoomAgents", .product(name: "GRDB", package: "GRDB.swift")]),
         .target(name: "LoomIPC", dependencies: ["LoomCore", "LoomAPI"]),
         // The helper the agents' hooks call (ADR-0005): stdin → socket, no dependencies.
@@ -62,13 +64,13 @@ let package = Package(
         .testTarget(name: "LoomCoreTests", dependencies: ["LoomCore"]),
         .testTarget(name: "LoomAPITests", dependencies: ["LoomAPI", "LoomCore"]),
         .testTarget(name: "LoomCLITests", dependencies: ["LoomCLI", "LoomAPI", "LoomIPC", "LoomCore"]),
-        .testTarget(name: "LoomAgentsTests", dependencies: ["LoomAgents"]),
+        .testTarget(name: "LoomAgentsTests", dependencies: ["LoomAgents", "LoomAPI"]),
         .testTarget(name: "LoomTerminalTests", dependencies: ["LoomTerminal", "LoomTerminalTestSupport", "LoomAgents"]),
         .testTarget(name: "LoomSessionsTests", dependencies: ["LoomSessions", "LoomTerminalTestSupport"]),
         .testTarget(name: "LoomIPCTests", dependencies: ["LoomIPC", "LoomAPI", "LoomCore"]),
         .testTarget(name: "LoomGitTests", dependencies: ["LoomGit", "LoomCore"]),
         .testTarget(name: "LoomPersistenceTests", dependencies: ["LoomPersistence"]),
-        .testTarget(name: "LoomWebTests", dependencies: ["LoomWeb"]),
+        .testTarget(name: "LoomWebTests", dependencies: ["LoomWeb", "LoomAPI"]),
         .testTarget(name: "LoomExtensionsTests", dependencies: ["LoomExtensions", "LoomAPI", "LoomCore"]),
         .testTarget(name: "LoomUITests", dependencies: ["LoomUI", "LoomTerminal", "LoomGit"]),
     ]

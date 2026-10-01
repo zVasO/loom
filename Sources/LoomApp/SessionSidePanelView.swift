@@ -25,8 +25,8 @@ struct SessionSidePanelView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Menu {
-                if model.hasAgentBrowser(parentID) {
-                    Button { model.showInSidePanel(.agent, for: parentID) } label: {
+                if model.hasAgentBrowser(parentID) || canHaveAgentBrowser {
+                    Button { model.showAgentBrowser(for: parentID) } label: {
                         Label("Agent browser", systemImage: "sparkles")
                     }
                     Divider()
@@ -81,10 +81,30 @@ struct SessionSidePanelView: View {
         }
     }
 
+    /// A running claude session, browser tools on: its agent may have one.
+    private var canHaveAgentBrowser: Bool {
+        model.agentBrowserToolsEnabled
+            && model.sessions.contains { $0.id == parentID && !$0.isShell }
+    }
+
     /// The agent's browser — absent until the stack has one.
     @ViewBuilder
     private var agentContent: some View {
-        emptyState
+        if let browser = model.agentBrowsers[parentID] {
+            AgentBrowserPanelView(browser: browser, caption: model.agentBrowserCaption(for: parentID))
+                .id(ObjectIdentifier(browser))
+        } else {
+            VStack(spacing: 8) {
+                Text("The agent's browser")
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                Text("It opens the first time claude uses it — or pick it in the menu above to sign in to your app first.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.mutedText)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 300)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 
     private var emptyState: some View {

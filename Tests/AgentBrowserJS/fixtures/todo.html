@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Todos</title>
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .card { cursor: pointer; padding: 6px; border: 1px solid #ccc; margin-top: 8px; }
+  #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); display: none; }
+  #overlay.shown { display: block; }
+</style>
+</head>
+<body>
+<!-- One page that exercises what the agent browser must handle: a
+     framework-style controlled input, clicks, a confirm(), console output,
+     a failing request, focus moves, and something covering the page. -->
+<h1>Todos</h1>
+<nav><a href="#docs">Docs</a></nav>
+<form id="add" class="row">
+  <label for="new">New todo</label>
+  <input id="new" placeholder="What needs to be done?">
+  <button type="submit">Add</button>
+</form>
+<ul id="list"></ul>
+<p>Count: <span id="count">0</span></p>
+<button id="clear" type="button">Clear done</button>
+<button id="boom" type="button">Log an error</button>
+<button id="fetch" type="button">Load remote</button>
+<button id="cover" type="button">Cover the page</button>
+<div class="card" id="card">Clickable card</div>
+<select id="color" aria-label="Color">
+  <option value="r">Red</option>
+  <option value="g">Green</option>
+  <option value="b">Blue</option>
+</select>
+<p id="status" role="status"></p>
+<div id="overlay"></div>
+<script>
+  // A React-style value tracker: the framework remembers the last value it
+  // set through the property, and only treats an input event as a change
+  // when the DOM value differs from it. Setting .value from the page's own
+  // scripts is invisible to it — exactly what breaks naive automation.
+  window.events = [];
+  window.state = { draft: "", todos: [] };
+  const input = document.getElementById("new");
+  const native = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  let tracked = "";
+  Object.defineProperty(input, "value", {
+    configurable: true,
+    get() { return native.get.call(this); },
+    set(v) { tracked = String(v); native.set.call(this, v); },
+  });
+  input.addEventListener("input", () => {
+    const now = native.get.call(input);
+    if (now !== tracked) { tracked = now; window.state.draft = now; window.events.push("change:" + now); }
+  });
+  input.addEventListener("keydown", (e) => window.events.push("keydown:" + e.key + ":" + e.keyCode));
+
+  function render() {
+    const list = document.getElementById("list");
+    list.textContent = "";
+    for (const todo of window.state.todos) {
+      const li = document.createElement("li");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = todo.done;
+      box.setAttribute("aria-label", todo.text);
+      box.addEventListener("change", () => { todo.done = box.checked; window.events.push("toggle:" + todo.text); });
+      li.append(box, " " + todo.text);
+      list.append(li);
+    }
+    document.getElementById("count").textContent = String(window.state.todos.length);
+  }
+
+  document.getElementById("add").addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!window.state.draft) return;
+    window.state.todos.push({ text: window.state.draft, done: false });
+    window.state.draft = "";
+    input.value = "";
+    render();
+    window.events.push("submit");
+  });
+  document.getElementById("clear").addEventListener("click", () => {
+    if (confirm("Clear the done todos?")) {
+      window.state.todos = window.state.todos.filter((t) => !t.done);
+      render();
+      window.events.push("cleared");
+    } else {
+      window.events.push("kept");
+    }
+  });
+  document.getElementById("boom").addEventListener("click", () => {
+    console.error("Something broke", { code: 42 });
+    setTimeout(() => { throw new Error("uncaught in timer"); }, 0);
+  });
+  document.getElementById("fetch").addEventListener("click", () => {
+    fetch("/missing.json").then((r) => { document.getElementById("status").textContent = "HTTP " + r.status; })
+      .catch((e) => { document.getElementById("status").textContent = "failed"; });
+  });
+  document.getElementById("cover").addEventListener("click", () => {
+    document.getElementById("overlay").classList.add("shown");
+  });
+  document.getElementById("card").addEventListener("click", () => window.events.push("card"));
+  document.getElementById("color").addEventListener("change", (e) => window.events.push("color:" + e.target.value));
+  window.addEventListener("resize", () => window.events.push("resize"));
+</script>
+</body>
+</html>

@@ -118,12 +118,12 @@ C'est le différenciateur produit : la fiabilité de `working` / `needs_input` /
 | ID | Exigence | Priorité |
 |---|---|---|
 | WEB-01 | Navigateur basé **WKWebView** : barre d'adresse avec suggestion depuis l'historique, back/forward, reload, ouverture dans le navigateur système, copie d'URL. | P0 |
-| WEB-02 | **Persistance des sessions web** : `WKWebsiteDataStore` persistant partagé par toute l'app (cookies, localStorage, IndexedDB) survivant aux relances — l'utilisateur connecté à GitHub le reste. Profils multiples via data stores identifiés : P2. | P0 |
+| WEB-02 | **Persistance des sessions web** : `WKWebsiteDataStore` persistant partagé par toute l'app (cookies, localStorage, IndexedDB) survivant aux relances — l'utilisateur connecté à GitHub le reste. Profils multiples via data stores identifiés : P2. (Révisé pour le navigateur de l'agent : ADR-0014 — un store par projet, jamais celui-ci.) | P0 |
 | WEB-03 | Onglets navigateur au niveau app (fenêtre/panneau navigateur global) et ouverture contextuelle depuis une session (ex. lien cliqué dans le terminal → choix « navigateur intégré / navigateur système », mémorisable). | P1 |
 | WEB-04 | User-agent Safari standard configuré (`customUserAgent`) pour éviter les blocages OAuth ; les flux d'authentification qui refusent les webviews basculent vers `ASWebAuthenticationSession` ou le navigateur système. | P0 |
 | WEB-05 | Hygiène mémoire : au plus N webviews vivantes (défaut 4, LRU) ; les onglets au-delà sont suspendus (URL + scroll conservés, rechargés à l'affichage — la session cookie garantit la continuité de connexion). | P0 |
 | WEB-06 | Téléchargements gérés (WKDownloadDelegate) vers ~/Downloads avec notification. | P1 |
-| WEB-07 | Aucune injection de script dans les pages, aucune interception de contenu au-delà des besoins de navigation. Les données du data store ne quittent jamais la machine. | P0 |
+| WEB-07 | Aucune injection de script dans les pages, aucune interception de contenu au-delà des besoins de navigation. Les données du data store ne quittent jamais la machine. (Révisé pour le navigateur de l'agent : ADR-0014 — les navigateurs de l'utilisateur restent sans injection.) | P0 |
 
 ### 4.7 Transcripts et données (DAT)
 

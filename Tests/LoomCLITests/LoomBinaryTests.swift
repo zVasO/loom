@@ -43,7 +43,22 @@ struct LoomBinaryTests {
                 if method.requiresGlobalScope, scope != .global {
                     return APIResponse(id: request.id, error: APIError(code: .forbidden, message: "global only"))
                 }
+                if !method.allowsGlobalScope, scope == .global {
+                    return APIResponse(id: request.id, error: APIError(code: .forbidden, message: "session only"))
+                }
                 switch method {
+                case .browserScreenshot:
+                    // Like the app: a PNG under the screenshots directory beside the socket.
+                    let directory = APIProtocol.screenshotsDirectory(socketPath: url.path)
+                        .appendingPathComponent(session.rawValue.uuidString)
+                    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    let file = directory.appendingPathComponent("000001.png")
+                    try? Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).write(to: file)
+                    return .ok(request.id, APIToolContent(
+                        text: "### Result\nScreenshot of the visible page",
+                        image: APIImageRef(path: file.path, mimeType: "image/png", width: 1, height: 1)))
+                case .browserSnapshot:
+                    return .ok(request.id, APIToolContent(text: "### Snapshot\n```yaml\n- button \"Add\" [ref=e1]\n```"))
                 case .badgeList:
                     return .ok(request.id, APIBadgeListResult(badges: [APIBadge(name: "review", colorHex: "#4CC38A")]))
                 case .sessionGet:
@@ -169,5 +184,75 @@ struct LoomBinaryTests {
         } else {
             Issue.record("no content in the call result")
         }
+    }
+
+    @Test("`loom browser snapshot` prints the Markdown the agent would read, not JSON")
+    func snapshotImprimeDuTexte() throws {
+        let url = socketURL()
+        let server = appLikeServer(at: url, session: SessionID())
+        try server.start()
+        defer { server.stop() }
+
+        let result = try run(["browser", "snapshot"],
+                             environment: ["LOOM_SOCKET": url.path, "LOOM_SESSION_TOKEN": "session-token"])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.hasPrefix("### Snapshot\n```yaml\n- button \"Add\" [ref=e1]"))
+    }
+
+    @Test("`loom browser take_screenshot --out` copies the image Loom wrote")
+    func captureCopieeVersOut() throws {
+        let url = socketURL()
+        let server = appLikeServer(at: url, session: SessionID())
+        try server.start()
+        defer {
+            server.stop()
+            try? FileManager.default.removeItem(at: APIProtocol.screenshotsDirectory(socketPath: url.path))
+        }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("loom-shot-\(UUID().uuidString.prefix(6)).png")
+        defer { try? FileManager.default.removeItem(at: out) }
+
+        let result = try run(["browser", "take_screenshot", "--out", out.path],
+                             environment: ["LOOM_SOCKET": url.path, "LOOM_SESSION_TOKEN": "session-token"])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.contains("Saved to \(out.path)"))
+        let data = try Data(contentsOf: out)
+        #expect(data.starts(with: [0x89, 0x50, 0x4E, 0x47]))
+    }
+
+    @Test("the global token never drives a session's browser")
+    func navigateurSansTokenGlobal() throws {
+        let url = socketURL()
+        let server = appLikeServer(at: url, session: SessionID())
+        try server.start()
+        defer { server.stop() }
+
+        let result = try run(["browser", "snapshot", "--global", "--session", UUID().uuidString,
+                              "--socket", url.path, "--token", "global-token"])
+        #expect(result.status == 1)
+        #expect(result.stderr.contains("forbidden"))
+    }
+
+    @Test("`loom mcp` with the browser tools off lists only the metadata tools")
+    func mcpSansNavigateur() throws {
+        let url = socketURL()
+        let server = appLikeServer(at: url, session: SessionID())
+        try server.start()
+        defer { server.stop() }
+
+        let script = [
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}"#,
+            #"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        ].joined(separator: "\n") + "\n"
+        let result = try run(["mcp"], environment: ["LOOM_SOCKET": url.path, "LOOM_SESSION_TOKEN": "session-token",
+                                                    "LOOM_BROWSER_TOOLS": "0"], stdin: script)
+        #expect(result.status == 0, "\(result.stderr)")
+        let lines = result.stdout.split(separator: "\n")
+        let list = try JSONDecoder().decode(JSONValue.self, from: Data(lines[1].utf8))
+        guard case .array(let tools)? = list["result"]?["tools"] else {
+            Issue.record("no tools in \(lines[1])")
+            return
+        }
+        #expect(tools.count == APIToolCatalog.tools(browser: false).count)
+        #expect(!tools.contains { $0["name"]?.stringValue?.hasPrefix("browser_") == true })
     }
 }

@@ -136,10 +136,36 @@ extension AppModel {
         saveAgentRevealed()
     }
 
-    // MARK: - The agent's browser (ADR-0014) — none before it exists
+    // MARK: - The agent's browser (ADR-0014)
 
-    func hasAgentBrowser(_ parent: SessionID) -> Bool { false }
+    func hasAgentBrowser(_ parent: SessionID) -> Bool {
+        agentBrowsers[parent] != nil
+    }
 
-    /// The agent is driving its browser and the panel does not show it.
-    func isAgentBrowserActiveOffscreen(_ parent: SessionID) -> Bool { false }
+    /// The agent drives (or just drove) its browser and the panel does not
+    /// show it: the Browser button says so, and its click shows it.
+    func isAgentBrowserActiveOffscreen(_ parent: SessionID) -> Bool {
+        guard let activity = agentBrowsers[parent]?.activity else { return false }
+        let recent = activity.isRunning || Date().timeIntervalSince(activity.at) < Self.agentActivityWindow
+        let state = sidePanel(for: parent)
+        return recent && !(state.isOpen && state.source == .agent)
+    }
+
+    /// How long after its last command the agent counts as busy.
+    static let agentActivityWindow: TimeInterval = 6
+
+    /// The agent touched a page: the panel opens on its browser — once, and
+    /// never for a review (its terminal is the PR drawer's, out of sight).
+    func noteAgentBrowserUse(for parent: SessionID) {
+        guard !codeReviewSessionIDs.contains(parent) else { return }
+        var state = sidePanel(for: parent)
+        if state.agentDidUseBrowser() { updateSidePanel(state, for: parent) }
+    }
+
+    /// The user picks the agent's browser in the panel — creating it, so a
+    /// login to the app under test can happen before the agent arrives.
+    func showAgentBrowser(for parent: SessionID) {
+        guard agentBrowser(for: parent, create: true) != nil else { return }
+        showInSidePanel(.agent, for: parent)
+    }
 }

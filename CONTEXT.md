@@ -32,8 +32,20 @@ _Avoid_ : onglet (terme UI, pas domaine)
 **Worktree** :
 Checkout Git isolé créé pour une session, sur sa propre branche. Détruit ou conservé indépendamment de la session.
 
+**Navigateur de l'agent** :
+Le navigateur propre à une session, que son agent pilote par les outils `browser_*` (ADR-0014) : distinct des navigateurs « Web n » de l'utilisateur, il s'affiche dans le panneau latéral. Il exécute des scripts dans ses pages — le seul de Loom à le faire.
+_Avoid_ : navigateur de test, bot, navigateur headless
+
+**Profil web de l'agent** :
+Le stockage WebKit (cookies, localStorage, IndexedDB) des navigateurs d'agent d'un même projet, persistant d'une session à l'autre ; privé et oublié pour une session sans projet ou une revue. Jamais celui de l'utilisateur.
+_Avoid_ : profil (seul — WEB-02 réserve « profils » à ceux de l'utilisateur), session web, cookies
+
+**Instantané de page** :
+L'arbre d'accessibilité d'une page en texte (YAML), avec une **référence** (`e12`) par élément visible : ce que l'agent lit pour agir. Une référence ne vaut que pour le dernier instantané.
+_Avoid_ : snapshot (c'est celui du terminal, ADR-0008), capture (une capture est une image), DOM
+
 **Panneau latéral** :
-Le navigateur affiché à droite du terminal d'une pile, dans l'onglet Sessions : un des navigateurs de la pile, choisi dans son en-tête. Il appartient à la pile, pas à l'onglet — un terminal secondaire montre le même. L'ouvrir, le fermer ou finir de le redimensionner coûte un redimensionnement du terminal, jamais plus.
+Le navigateur affiché à droite du terminal d'une pile, dans l'onglet Sessions : un des navigateurs de la pile ou le navigateur de l'agent, choisi dans son en-tête ; l'agent l'ouvre sur le sien la première fois qu'il s'en sert. Il appartient à la pile, pas à l'onglet — un terminal secondaire montre le même. L'ouvrir, le fermer ou finir de le redimensionner coûte un redimensionnement du terminal, jamais plus.
 _Avoid_ : split view, tiroir (le tiroir est celui de l'onglet PR)
 
 **Transcript** :

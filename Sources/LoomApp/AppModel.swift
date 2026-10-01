@@ -208,7 +208,7 @@ public final class AppModel {
     private(set) var manager: SessionManager?
     private let replyHandler = NotificationReplyHandler()
     private var hookServer: HookSocketServer?
-    private let supportDirectory: URL
+    let supportDirectory: URL
     private var socketURL: URL { supportDirectory.appendingPathComponent("loom.sock") }
 
     /// Web extensions (ADR-0011): `<support>/extensions/`.
@@ -356,7 +356,9 @@ public final class AppModel {
                           hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
                                        socket: socketURL,
                                        cli: Self.companionBinaryURL(named: "loom",
-                                                                    fallback: supportDirectory)))
+                                                                    fallback: supportDirectory)),
+                          tools: .init(browser: agentBrowserToolsEnabled,
+                                       preapproved: preapprovesLoomTools))
     }
 
     /// In development, `loom-hook` is a sibling product of the app; packaged,
@@ -486,6 +488,7 @@ public final class AppModel {
             reloadPersistedSessions()
             restoreStackChildren()
             restoreSidePanels()
+            pruneAgentScreenshots()
             reindexAllSessions()
         } catch {
             if case IPCError.anotherInstanceRunning = error {
@@ -1995,6 +1998,10 @@ public final class AppModel {
     /// (SidePanelModel.swift).
     var sidePanels: [SessionID: SidePanelState] = [:]
 
+    /// Each session agent's own browser (ADR-0014), created on its first use
+    /// (AgentBrowserAPI.swift).
+    var agentBrowsers: [SessionID: AgentBrowser] = [:]
+
     /// Each open creates a dedicated pane, child of the session (or global if nil).
     @discardableResult
     public func openBrowserPane(for parent: SessionID?) -> UUID {
@@ -2260,6 +2267,7 @@ public final class AppModel {
         await manager?.archive(id)
         sessions.removeAll { $0.id == id }
         forgetSidePanel(id)
+        forgetAgentBrowser(id)
         // A live session archived from its card exits through `.archived`, a
         // terminal state the reducer never leaves: no `.completed` follows,
         // so the close path in observeStates never drops its surface.
@@ -2309,6 +2317,8 @@ public final class AppModel {
                     ?? requested ?? nil
                 sessions.removeAll { $0.id == closed }
                 tokenRegistry.unregister(session: closed)
+                // Its agent's browser stays to look at, its pages' processes go.
+                agentBrowsers[closed]?.suspend()
                 nativeExistsCache.removeValue(forKey: closed)   // settled at close: rescan once
                 surfaceCache.removeValue(forKey: closed)
                 saveStackChildren()

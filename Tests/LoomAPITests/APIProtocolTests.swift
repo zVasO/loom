@@ -104,6 +104,71 @@ struct APIProtocolTests {
         #expect(APILimits.badgeProblem([String(repeating: "x", count: APILimits.badgeNameMaxLength + 1)]) != nil)
     }
 
+    @Test("the browser answers its session's own token only, and answers Markdown")
+    func outilsNavigateurPortesParLaSession() {
+        let browser = APIMethod.allCases.filter(\.isBrowser)
+        #expect(browser.count == 16)
+        for method in browser {
+            #expect(!method.allowsGlobalScope, "\(method.rawValue) refuses the global token")
+            #expect(!method.requiresGlobalScope)
+            #expect(method.appDeadline != nil, "\(method.rawValue) has its own deadline")
+            #expect(APIToolCatalog.spec(for: method).resultFormat == .content)
+        }
+        for method in APIMethod.allCases where !method.isBrowser {
+            #expect(method.allowsGlobalScope)
+            #expect(APIToolCatalog.spec(for: method).resultFormat == .json)
+        }
+    }
+
+    @Test("browser tools off: none listed, none pre-approved, nothing said about them")
+    func catalogueSansNavigateur() {
+        #expect(!APIToolCatalog.tools(browser: false).contains { $0.method.isBrowser })
+        #expect(APIToolCatalog.tools(browser: true).count == APIToolCatalog.all.count)
+        #expect(!APIToolCatalog.agentInstructions(browser: false).contains("browser_"))
+        #expect(APIToolCatalog.agentInstructions(browser: true).contains("browser_snapshot"))
+        let rules = APIToolCatalog.preapprovedRules(browser: false)
+        #expect(rules.contains("mcp__loom__loom_session_get"))
+        #expect(!rules.contains { $0.contains("browser_") })
+        #expect(APIToolCatalog.preapprovedRules(browser: true).contains("mcp__loom__browser_click"))
+        #expect(!APIToolCatalog.preapprovedRules(browser: true).contains("mcp__loom"),
+                "never the whole server: a tool added later is not pre-approved by default")
+    }
+
+    @Test("the browser tools' schemas require what the method cannot do without")
+    func schemasNavigateurRequis() {
+        func required(_ method: APIMethod) -> Set<String> {
+            guard case .array(let names)? = APIToolCatalog.spec(for: method).inputSchema["required"] else { return [] }
+            return Set(names.compactMap(\.stringValue))
+        }
+        #expect(required(.browserNavigate) == ["url"])
+        #expect(required(.browserType) == ["text"])
+        #expect(required(.browserPressKey) == ["key"])
+        #expect(required(.browserEvaluate) == ["function"])
+        #expect(required(.browserHandleDialog) == ["accept"])
+        #expect(APIToolCatalog.spec(named: "browser_take_screenshot")?.method == .browserScreenshot)
+    }
+
+    @Test("a client reads an image only under the screenshots directory, symlinks resolved")
+    func imageSousLeDossier() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loom-shots-\(UUID().uuidString.prefix(6))")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let inside = root.appendingPathComponent("000001.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: inside)
+        let image = APIImageRef(path: inside.path, mimeType: "image/png", width: 1, height: 1)
+        #expect(APIImageFile.validated(image, root: root) != nil)
+        #expect(APIImageFile.validated(APIImageRef(path: "/etc/hosts", mimeType: "image/png", width: 1, height: 1),
+                                       root: root) == nil)
+        #expect(APIImageFile.validated(APIImageRef(path: root.path + "/../x.png", mimeType: "image/png",
+                                                   width: 1, height: 1), root: root) == nil)
+        #expect(APIImageFile.validated(APIImageRef(path: inside.path, mimeType: "text/plain", width: 1, height: 1),
+                                       root: root) == nil)
+        #expect(APIImageFile.validated(image, root: root, sizeOf: { _ in APIImageFile.maxBytes + 1 }) == nil)
+        #expect(APIProtocol.screenshotsDirectory(socketPath: "/support/loom.sock").path
+                == "/support/agent-browser/screenshots")
+    }
+
     @Test("a badge color is #RRGGBB, nothing else")
     func couleurDeBadge() {
         #expect(APIBadge.isValidColor("#4CC38A"))
