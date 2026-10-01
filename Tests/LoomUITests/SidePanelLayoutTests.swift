@@ -28,13 +28,26 @@ struct SidePanelLayoutTests {
         #expect(layout.terminalWidth == 1500 - SidePanelLayout.handleWidth - 500)
     }
 
-    @Test("the panel is bounded by its own minimum and by the terminal's floor")
+    @Test("a dragged panel is bounded by its own minimum and by the terminal's drag floor")
     func panneauBorne() {
-        let wide = SidePanelLayout.resolve(available: 1500, preferredPanelWidth: 2000, terminalMinimum: floor)
-        #expect(wide.terminalWidth == floor, "the terminal keeps its 80 columns")
-        #expect(wide.fits)
+        let wide = SidePanelLayout.resolve(available: 1500, preferredPanelWidth: 2000, terminalMinimum: floor,
+                                           terminalDragFloor: 310)
+        #expect(wide.terminalWidth == 310, "the user may squeeze the terminal, down to its drag floor")
+        #expect(!wide.fits, "under 80 columns: no automatic reveal would do this")
         let narrow = SidePanelLayout.resolve(available: 1500, preferredPanelWidth: 100, terminalMinimum: floor)
         #expect(narrow.panelWidth == SidePanelLayout.minimumPanelWidth)
+    }
+
+    @Test("in a window too narrow for both, the user can still drag the divider")
+    func dragDansUneFenetreEtroite() {
+        let wider = SidePanelLayout.resolve(available: 815, preferredPanelWidth: 450, terminalMinimum: floor,
+                                            terminalDragFloor: 310)
+        #expect(wider.panelWidth == 450)
+        #expect(wider.terminalWidth == 815 - SidePanelLayout.handleWidth - 450)
+        let narrower = SidePanelLayout.resolve(available: 815, preferredPanelWidth: 300, terminalMinimum: floor,
+                                               terminalDragFloor: 310)
+        #expect(narrower.panelWidth == 300)
+        #expect(narrower.terminalWidth > wider.terminalWidth)
     }
 
     @Test("too narrow for both: the panel keeps its minimum and says it does not fit")
@@ -48,7 +61,7 @@ struct SidePanelLayoutTests {
 
     @Test("a degenerate width shows no split at all — the terminal is never fitted to a sliver")
     func largeurDegenereeSansSplit() {
-        for available: CGFloat in [0, 300, 520] {
+        for available: CGFloat in [0, 300, 460] {
             let layout = SidePanelLayout.resolve(available: available, preferredPanelWidth: 400,
                                                  terminalMinimum: floor)
             #expect(!layout.showsPanel, "\(available) pt")

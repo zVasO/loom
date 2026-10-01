@@ -2516,8 +2516,10 @@ struct SessionDetailView: View {
         var width: CGFloat { startWidth - translation }
     }
 
-    /// The terminal never shrinks under 80 columns on the panel's account.
+    /// The terminal never shrinks under 80 columns on the panel's account —
+    /// unless the user drags it narrower, down to 40.
     private static let terminalMinimum = TerminalMetrics.width(forColumns: 80)
+    private static let terminalDragFloor = TerminalMetrics.width(forColumns: 40)
 
     private var item: AppModel.SessionItem? {
         model.sessions.first { $0.id == sessionID }
@@ -2534,7 +2536,8 @@ struct SessionDetailView: View {
         let preferred = panelDrag?.width ?? lastDraggedWidth
             ?? (storedPanelWidth > 0 ? CGFloat(storedPanelWidth) : nil)
         return SidePanelLayout.resolve(available: width, preferredPanelWidth: preferred,
-                                       terminalMinimum: Self.terminalMinimum)
+                                       terminalMinimum: Self.terminalMinimum,
+                                       terminalDragFloor: Self.terminalDragFloor)
     }
 
     /// The agent asked for its browser while this stack was not split: the
@@ -2604,14 +2607,14 @@ struct SessionDetailView: View {
                     .frame(width: columnWidth)
                     .clipped()
                     if split {
-                        // Draggable only when a drag can move it: a window too
-                        // narrow for both pins the panel at its minimum.
-                        SidePanelResizeHandle(isEnabled: layout.fits)
+                        // Always draggable: the width the user picks is theirs,
+                        // even under the terminal's 80 columns (down to 40).
+                        SidePanelResizeHandle()
                             .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                                 .updating($panelDrag) { value, drag, _ in
                                     drag = PanelDrag(startWidth: drag?.startWidth ?? layout.panelWidth,
                                                      translation: value.translation.width)
-                                }, including: layout.fits ? .all : .subviews)
+                                })
                         SessionSidePanelView(model: model, parentID: parentID)
                             .frame(width: layout.panelWidth)
                     }
@@ -2627,13 +2630,12 @@ struct SessionDetailView: View {
             if let drag {
                 lastDraggedWidth = drag.width
             } else if let width = lastDraggedWidth {
-                // Ended or cancelled alike: the panel stays where it was left —
-                // remembered only when the drag could move it (a window too
-                // narrow for both pins the panel, and must not erase the width
-                // chosen in a wider one).
+                // Ended or cancelled alike: the panel stays where it was left,
+                // and is remembered.
                 let settled = SidePanelLayout.resolve(available: detailWidth, preferredPanelWidth: width,
-                                                      terminalMinimum: Self.terminalMinimum)
-                if settled.fits { storedPanelWidth = Double(settled.panelWidth) }
+                                                      terminalMinimum: Self.terminalMinimum,
+                                                      terminalDragFloor: Self.terminalDragFloor)
+                if settled.showsPanel { storedPanelWidth = Double(settled.panelWidth) }
                 lastDraggedWidth = nil
             }
         }

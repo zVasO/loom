@@ -6,7 +6,9 @@ import CoreGraphics
 /// Every width the terminal column takes reaches the PTY, and claude answers
 /// each resize by repainting its whole conversation (commit 8becfee): the
 /// layout therefore never shrinks the terminal under the width of 80 columns
-/// on its own, and refuses a split it cannot give a real terminal at all.
+/// on its own — its default share, an agent's reveal — and refuses a split
+/// it cannot give a real terminal at all. A width the user dragged to is
+/// theirs: kept down to the terminal's drag floor.
 public struct SidePanelLayout: Equatable, Sendable {
     public let terminalWidth: CGFloat
     public let panelWidth: CGFloat
@@ -26,7 +28,7 @@ public struct SidePanelLayout: Equatable, Sendable {
     }
 
     /// Below this a browser is not worth showing.
-    public static let minimumPanelWidth: CGFloat = 360
+    public static let minimumPanelWidth: CGFloat = 300
     /// The drag handle's own slot: its hit area overlaps neither the terminal
     /// (whose mouse monitors would take the press) nor the web view.
     public static let handleWidth: CGFloat = 8
@@ -39,10 +41,13 @@ public struct SidePanelLayout: Equatable, Sendable {
     /// - Parameters:
     ///   - available: the detail's width.
     ///   - preferredPanelWidth: the width the user dragged to; nil = default share.
-    ///   - terminalMinimum: the terminal's floor — 80 columns in the app.
+    ///   - terminalMinimum: the terminal's floor on its own — 80 columns in the app.
+    ///   - terminalDragFloor: how narrow the user may drag the terminal — 40
+    ///     columns in the app; never under `terminalFloor`.
     public static func resolve(available: CGFloat,
                                preferredPanelWidth: CGFloat?,
                                terminalMinimum: CGFloat,
+                               terminalDragFloor: CGFloat = SidePanelLayout.terminalFloor,
                                minimumPanelWidth: CGFloat = SidePanelLayout.minimumPanelWidth,
                                handleWidth: CGFloat = SidePanelLayout.handleWidth,
                                defaultFraction: CGFloat = SidePanelLayout.defaultPanelFraction) -> SidePanelLayout {
@@ -50,9 +55,18 @@ public struct SidePanelLayout: Equatable, Sendable {
             return SidePanelLayout(terminalWidth: max(0, available), panelWidth: 0,
                                    fits: false, showsPanel: false)
         }
+        if let preferredPanelWidth {
+            // The user's own width: the terminal gives way down to the drag
+            // floor (or what the panel's minimum leaves, if less).
+            let floor = max(terminalFloor, min(terminalDragFloor, available - handleWidth - minimumPanelWidth))
+            let panel = min(max(preferredPanelWidth, minimumPanelWidth), available - handleWidth - floor)
+            let terminal = available - handleWidth - panel
+            return SidePanelLayout(terminalWidth: terminal, panelWidth: panel,
+                                   fits: terminal >= terminalMinimum, showsPanel: true)
+        }
         let largestPanel = available - handleWidth - terminalMinimum
         if largestPanel >= minimumPanelWidth {
-            let wanted = preferredPanelWidth ?? (available * defaultFraction).rounded()
+            let wanted = (available * defaultFraction).rounded()
             let panel = min(max(wanted, minimumPanelWidth), largestPanel)
             return SidePanelLayout(terminalWidth: available - handleWidth - panel, panelWidth: panel,
                                    fits: true, showsPanel: true)
