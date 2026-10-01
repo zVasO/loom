@@ -52,6 +52,16 @@ struct CLIParseTests {
         let (shot, options) = try CLI.parse(["browser", "take_screenshot", "--out", "s.png"])
         #expect(shot == .browser(.browserScreenshot, .object([:])))
         #expect(options.out == "s.png")
+        #expect(try CLI.parse(["browser", "tabs", "list"]).0
+                == .browser(.browserTabs, .object(["action": .string("list")])))
+        #expect(try CLI.parse(["browser", "tabs", "select", "1"]).0
+                == .browser(.browserTabs, .object(["action": .string("select"), "index": .number(1)])))
+        #expect(try CLI.parse(["browser", "tabs", "new", "localhost:8080"]).0
+                == .browser(.browserTabs, .object(["action": .string("new"), "url": .string("localhost:8080")])))
+        #expect(try CLI.parse(["browser", "wait_for", "3"]).0
+                == .browser(.browserWaitFor, .object(["time": .number(3)])), "a number is seconds")
+        #expect(try CLI.parse(["browser", "wait_for", "Saved"]).0
+                == .browser(.browserWaitFor, .object(["text": .string("Saved")])))
     }
 
     @Test("browser usage errors are said plainly")
@@ -61,6 +71,11 @@ struct CLIParseTests {
         #expect(throws: CLI.ParseError.missingValue("--out")) { try CLI.parse(["browser", "snapshot", "--out"]) }
         #expect(throws: CLI.ParseError.self) { try CLI.parse(["browser", "type", "hello"]) }
         #expect(throws: CLI.ParseError.self) { try CLI.parse(["browser", "navigate", "{not json"]) }
+        #expect(throws: CLI.ParseError.self) { try CLI.parse(["browser", "tabs", "select", "first"]) }
+        #expect(throws: CLI.ParseError.self, "--out is the screenshot's") {
+            try CLI.parse(["browser", "snapshot", "--out", "s.png"])
+        }
+        #expect(throws: CLI.ParseError.self) { try CLI.parse(["sessions", "--out", "s.png"]) }
     }
 
     @Test("a missing argument or an unknown verb is a usage error, said plainly")

@@ -22,6 +22,13 @@ public enum AgentScreenshot {
         return Array(sorted.dropLast(keep))
     }
 
+    /// The highest sequence already in `directory` — a previous run's files —
+    /// or 0: the numbering goes on after it.
+    static func lastSequence(in directory: URL) -> Int {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        return names.compactMap { Int($0.prefix { $0.isNumber }) }.max() ?? 0
+    }
+
     /// A snapshot of `rect` (view coordinates; nil = the visible page).
     @MainActor
     static func capture(_ webView: WKWebView, rect: CGRect?) async throws -> NSImage {
@@ -76,7 +83,8 @@ public enum AgentScreenshot {
             throw AgentError.failed("the screenshot could not be written to \(url.path)")
         }
         let existing = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
-        for name in pruned(existing) {
+        // Never the file just written: the agent is about to read it.
+        for name in pruned(existing) where name != url.lastPathComponent {
             try? manager.removeItem(at: directory.appendingPathComponent(name))
         }
         return url

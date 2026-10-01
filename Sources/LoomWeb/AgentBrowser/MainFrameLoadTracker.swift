@@ -19,7 +19,7 @@ public struct MainFrameLoadTracker: Sendable {
     /// A load the engine asked for, and when: one that never starts was a
     /// same-document navigation (or nothing at all).
     private var requestedAt: Double?
-    /// The last real failure, cleared by the next start.
+    /// The last real failure, cleared by the next request or start.
     public private(set) var lastError: String?
 
     /// No start within this of a request: the load was same-document.
@@ -29,6 +29,7 @@ public struct MainFrameLoadTracker: Sendable {
 
     public mutating func requested(at time: Double) {
         requestedAt = time
+        lastError = nil
     }
 
     public mutating func started(_ id: NavigationID?) {
@@ -56,11 +57,13 @@ public struct MainFrameLoadTracker: Sendable {
         if !cancelled { lastError = message }
     }
 
-    public mutating func terminated() {
+    /// `reloading`: false once a page keeps crashing — it stays stopped.
+    public mutating func terminated(reloading: Bool = true) {
         provisional.removeAll()
         committed.removeAll()
         requestedAt = nil
-        lastError = "the page's process stopped (it is being reloaded)"
+        lastError = reloading ? "the page's process stopped (it is being reloaded)"
+            : "the page's process keeps stopping; it was not reloaded — browser_navigate loads it again"
     }
 
     /// Nothing loading — and a requested load either started or never will.

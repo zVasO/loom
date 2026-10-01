@@ -68,6 +68,29 @@ struct HookSocketServerTests {
         #expect(received.all().isEmpty, "an unknown token never gets past the server")
     }
 
+    @Test("a payload or request that is not a JSON object is ignored, and the server lives on")
+    func formesInvalidesIgnorees() async throws {
+        let url = socketURL()
+        let id = SessionID()
+        let received = Received()
+        let server = HookSocketServer(
+            socketPath: url,
+            validate: { token in token == "token-42" ? id : nil },
+            handler: { session, payload in received.append((session, payload)) })
+        try server.start()
+        defer { server.stop() }
+
+        // JSONSerialization raises on these — an exception `try?` cannot catch.
+        try sendLine(#"{"token":"token-42","payload":1}"#, to: url)
+        try sendLine(#"{"token":"token-42","payload":"text"}"#, to: url)
+        try sendLine(#"{"token":"token-42","payload":null}"#, to: url)
+        try sendLine(#"{"token":"token-42","payload":{"hook_event_name":"Stop"}}"#, to: url)
+
+        let delivered = await pollUntil { received.all().count == 1 }
+        #expect(delivered, "the valid line after the malformed ones is still delivered")
+        #expect(received.all().count == 1)
+    }
+
     @Test("multiple lines on a single connection: one delivery each")
     func plusieursLignesUneConnexion() async throws {
         let url = socketURL()
@@ -337,6 +360,51 @@ struct AgentsAPISocketTests {
         let response = try APIEnvelope.decodeResponse(Data(reply.trimmingCharacters(in: .newlines).utf8))
         #expect(response.id == "bad", "the id is echoed when the line carried one")
         #expect(response.error?.code == .invalidRequest)
+    }
+
+    @Test("a request that is not an object is answered invalidRequest, never a crash")
+    func requeteScalaire() async throws {
+        let url = socketURL()
+        let server = echoServer(at: url, session: SessionID())
+        try server.start()
+        defer { server.stop() }
+        for body in ["null", "42", #""text""#] {
+            let reply = try await rawExchange(#"{"token":"session-token","request":"# + body + "}", at: url)
+            let response = try APIEnvelope.decodeResponse(Data(reply.trimmingCharacters(in: .newlines).utf8))
+            #expect(response.error?.code == .invalidRequest, "request \(body)")
+        }
+    }
+
+    /// One raw line out, one line back.
+    private func rawExchange(_ line: String, at url: URL) async throws -> String {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        defer { close(fd) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        url.path.withCString { path in
+            withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+                buffer.baseAddress!.assumingMemoryBound(to: CChar.self)
+                    .update(from: path, count: min(strlen(path) + 1, buffer.count))
+            }
+        }
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        #expect(connected == 0)
+        let bytes = Array((line + "\n").utf8)
+        #expect(write(fd, bytes, bytes.count) == bytes.count)
+        return try await blocking { () -> String in
+            var received = [UInt8]()
+            var chunk = [UInt8](repeating: 0, count: 1024)
+            while !received.contains(UInt8(ascii: "\n")) {
+                let count = read(fd, &chunk, chunk.count)
+                guard count > 0 else { break }
+                received.append(contentsOf: chunk[0..<count])
+            }
+            return String(decoding: received, as: UTF8.self)
+        }
     }
 
     @Test("hooks keep flowing on a server that also answers requests")

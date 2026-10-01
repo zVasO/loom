@@ -105,6 +105,12 @@ public final class BrowserController: NSObject {
         reconcileWebViews()
     }
 
+    /// Every tab closed at once, every web view released in one reconcile.
+    func closeAll() {
+        model.closeAll()
+        reconcileWebViews()
+    }
+
     public func navigateActive(to urlString: String) {
         guard let url = Self.normalize(urlString), let active = model.activeTab else {
             openTab(urlString: urlString)

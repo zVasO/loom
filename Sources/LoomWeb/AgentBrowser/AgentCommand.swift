@@ -88,16 +88,6 @@ public enum AgentCommand: Equatable, Sendable {
         }
     }
 
-    /// Needs the page's script thread, which a pending dialog holds.
-    public var needsPageThread: Bool {
-        switch self {
-        case .console, .network, .handleDialog, .tabs, .close, .navigate, .navigateBack, .screenshot:
-            return false
-        default:
-            return true
-        }
-    }
-
     /// Opens a tab when none exists.
     public var createsBrowser: Bool {
         switch self {

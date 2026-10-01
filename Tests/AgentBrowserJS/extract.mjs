@@ -18,6 +18,7 @@ function literal(name) {
 
 export const helperSource = () => literal("helper");
 export const pageHookSource = () => literal("pageHook");
+export const relaySource = () => literal("relay");
 export const serializerSource = () => literal("serializer");
 
 /** The helper's pure functions, in a bare context: no DOM needed. */

@@ -125,11 +125,11 @@ public final class HookSocketServer: @unchecked Sendable {
         guard client >= 0 else { return }
         // A reply written after the client hung up must fail, not kill Loom;
         // and a client that stops reading must not stall this queue — every
-        // session's hooks go through it.
+        // session's hooks go through it: non-blocking, each reply bounded as
+        // a whole (see reply).
         var noSigPipe: Int32 = 1
         setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
-        var sendTimeout = timeval(tv_sec: 2, tv_usec: 0)
-        setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &sendTimeout, socklen_t(MemoryLayout<timeval>.size))
+        _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) | O_NONBLOCK)
         let source = DispatchSource.makeReadSource(fileDescriptor: client, queue: queue)
         source.setEventHandler { [weak self] in self?.readFrom(client) }
         source.setCancelHandler { close(client) }
@@ -141,6 +141,8 @@ public final class HookSocketServer: @unchecked Sendable {
     private func readFrom(_ client: Int32) {
         var chunk = [UInt8](repeating: 0, count: 4096)
         let count = read(client, &chunk, chunk.count)
+        // Non-blocking: nothing to read yet is not a hang-up.
+        if count < 0, errno == EAGAIN || errno == EINTR { return }
         guard count > 0 else {
             connections[client]?.source.cancel()
             connections[client] = nil
@@ -183,9 +185,12 @@ public final class HookSocketServer: @unchecked Sendable {
             return   // corrupted line: silence, never a delivery
         }
         if let payload = fields[APIEnvelope.hookPayloadKey] {
+            // A scalar payload would raise in JSONSerialization — an
+            // Objective-C exception no `try?` catches.
             guard let session = validate(token),
+                  JSONSerialization.isValidJSONObject(payload),
                   let payloadData = try? JSONSerialization.data(withJSONObject: payload) else {
-                return   // unknown token: silence, never a delivery
+                return   // unknown token or malformed payload: silence, never a delivery
             }
             handler(session, payloadData)
         } else if let request = fields[APIEnvelope.requestKey] {
@@ -207,7 +212,8 @@ public final class HookSocketServer: @unchecked Sendable {
             drop(client)
             return
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: request),
+        guard JSONSerialization.isValidJSONObject(request),
+              let data = try? JSONSerialization.data(withJSONObject: request),
               let decoded = try? JSONDecoder().decode(APIRequest.self, from: data) else {
             let id = (request as? [String: Any])?["id"] as? String ?? ""
             reply(APIResponse(id: id, error: APIError(code: .invalidRequest,
@@ -224,10 +230,12 @@ public final class HookSocketServer: @unchecked Sendable {
 
     /// On the IPC queue. A client gone since it asked gets nothing — its
     /// descriptor may already belong to someone else, which the generation
-    /// tells apart.
+    /// tells apart. A reply holds the queue `replyDeadline` at most, however
+    /// slowly its client reads: past it, the client is dropped.
     private func reply(_ response: APIResponse, to client: Int32, generation: UInt64?) {
         guard let connection = connections[client], connection.generation == generation,
               let line = try? APIEnvelope.responseLine(response) else { return }
+        let giveUp = ContinuousClock.now + Self.replyDeadline
         let complete = line.withUnsafeBytes { buffer -> Bool in
             var offset = 0
             while offset < buffer.count {
@@ -236,14 +244,24 @@ public final class HookSocketServer: @unchecked Sendable {
                     offset += written
                 } else if written < 0, errno == EINTR {
                     continue
+                } else if written < 0, errno == EAGAIN {
+                    let left = ContinuousClock.now.duration(to: giveUp)
+                    guard left > .zero else { return false }
+                    let milliseconds = left.components.seconds * 1_000
+                        + left.components.attoseconds / 1_000_000_000_000_000
+                    var poller = pollfd(fd: client, events: Int16(POLLOUT), revents: 0)
+                    if poll(&poller, 1, max(Int32(clamping: milliseconds), 1)) < 0, errno != EINTR { return false }
                 } else {
-                    return false   // gone, or not reading (SO_SNDTIMEO): give up on it
+                    return false   // gone: give up on it
                 }
             }
             return true
         }
         if !complete { drop(client) }
     }
+
+    /// The whole of one reply, written to a client that reads slowly.
+    static let replyDeadline: Duration = .seconds(2)
 
     private func drop(_ client: Int32) {
         connections[client]?.source.cancel()

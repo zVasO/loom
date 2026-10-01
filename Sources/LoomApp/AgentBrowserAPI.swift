@@ -63,7 +63,7 @@ extension AppModel {
         if let existing = agentBrowsers[parent] { return existing }
         guard create, agentBrowserToolsEnabled,
               let item = sessions.first(where: { $0.id == parent }), !item.isShell else { return nil }
-        let isReview = codeReviewSessionIDs.contains(parent)
+        let isReview = runsUntrustedCode(parent)
         let profile = AgentBrowserProfile.kind(projectID: item.projectID?.rawValue, isReview: isReview)
         let viewport = CGSize(width: storedSidePanelWidth ?? 640, height: 900)
         let browser = AgentBrowser(profile: profile, environment: .init(
@@ -81,7 +81,7 @@ extension AppModel {
             let name = project(sessions.first { $0.id == parent }?.projectID)?.name ?? "this project"
             return "Agent profile · \(name) — claude can use whatever you sign in to here"
         case .private:
-            return codeReviewSessionIDs.contains(parent)
+            return runsUntrustedCode(parent)
                 ? "Private profile — code under review, nothing is kept"
                 : "Private profile — nothing is kept"
         }
@@ -90,7 +90,7 @@ extension AppModel {
     /// Settings: everything the agents' browsers kept, every profile.
     public func clearAgentBrowserData() async {
         for browser in agentBrowsers.values { await browser.clearData() }
-        await AgentBrowserProfile.clearProjectStores(projects.map(\.id.rawValue))
+        await AgentBrowserProfile.clearAllProjectStores()
     }
 
     // MARK: - Files

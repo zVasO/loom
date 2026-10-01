@@ -11,7 +11,7 @@ import WebKit
 public enum AgentScripts {
 
     /// The page's world, document start, every frame: console, uncaught
-    /// errors and fetch/XHR, posted to `messageHandlerName`.
+    /// errors and fetch/XHR, dispatched as DOM events for `relay`.
     public static let pageHook = #"""
 (() => {
 "use strict";
@@ -23,26 +23,14 @@ const KEY = Symbol.for("loom.agent.hook");
 if (window[KEY]) return;
 try { Object.defineProperty(window, KEY, { value: true }); } catch (_) { return; }
 
-const handlers = window.webkit && window.webkit.messageHandlers;
-const channel = handlers && handlers.loomAgent;
-if (!channel) return;
-const post = channel.postMessage.bind(channel);
-
-// A page in a tight loop must not flood Loom: 200 messages a second, the
-// rest counted. Loom applies its own limit as well.
-let tokens = 200;
-let refilled = Date.now();
-let dropped = 0;
+// No channel to Loom in this world: messages cross to Loom's own world as
+// DOM events, where the relay checks their size and rate before posting —
+// a page that floods them costs its own process, never Loom's.
+const EVENT = "loom-agent-hook";
 function send(message) {
-  const now = Date.now();
-  tokens = Math.min(200, tokens + (now - refilled) * 0.2);
-  refilled = now;
-  if (tokens < 1) { dropped++; return; }
-  tokens -= 1;
   try {
-    if (dropped) { post({ t: "dropped", n: dropped }); dropped = 0; }
-    post(message);
-  } catch (_) { /* the channel is gone with the page */ }
+    document.dispatchEvent(new CustomEvent(EVENT, { detail: JSON.stringify(message) }));
+  } catch (_) { /* the document is going away */ }
 }
 
 const MAX_ARG = 500;
@@ -157,8 +145,26 @@ window.addEventListener("unhandledrejection", (event) => {
   } catch (_) {}
 });
 
-let sequence = 0;
+// Ids unique per document: Loom keys requests by frame origin and id, and
+// sibling frames of one origin (or opaque ones) share a key prefix.
+let sequence = Math.floor(Math.random() * 2 ** 19) * 2 ** 20;
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+
+// What this document has in flight: a frame that goes away (reloaded,
+// removed) leaves nothing pending in Loom's log.
+const pending = new Set();
+function started(message) {
+  pending.add(message.id);
+  send(message);
+}
+function ended(message) {
+  if (!pending.delete(message.id)) return;
+  send(message);
+}
+window.addEventListener("pagehide", () => {
+  for (const id of pending) send({ t: "res", id, error: "abandoned by navigation", ms: 0 });
+  pending.clear();
+});
 
 const originalFetch = window.fetch;
 if (typeof originalFetch === "function") {
@@ -171,18 +177,18 @@ if (typeof originalFetch === "function") {
       url = String(input && typeof input === "object" && "url" in input ? input.url : input);
       url = new URL(url, document.baseURI).href;
     } catch (_) {}
-    send({ t: "req", id, kind: "fetch", method, url: clip(url, MAX_ARG) });
-    const started = now();
+    started({ t: "req", id, kind: "fetch", method, url: clip(url, MAX_ARG) });
+    const begun = now();
     let promise;
     try {
       promise = Reflect.apply(originalFetch, this, arguments);
     } catch (error) {
-      send({ t: "res", id, error: clip(String(error && error.message || error), 300), ms: 0 });
+      ended({ t: "res", id, error: clip(String(error && error.message || error), 300), ms: 0 });
       throw error;
     }
     promise.then(
-      (response) => send({ t: "res", id, status: response.status, ms: Math.round(now() - started) }),
-      (error) => send({ t: "res", id, error: clip(String(error && error.message || error), 300), ms: Math.round(now() - started) }));
+      (response) => ended({ t: "res", id, status: response.status, ms: Math.round(now() - begun) }),
+      (error) => ended({ t: "res", id, error: clip(String(error && error.message || error), 300), ms: Math.round(now() - begun) }));
     return promise;
   };
 }
@@ -202,17 +208,76 @@ if (XHR) {
     const info = requests.get(this);
     if (info) {
       const id = ++sequence;
-      const started = now();
-      send({ t: "req", id, kind: "xhr", method: info.method, url: clip(info.url, MAX_ARG) });
+      const begun = now();
+      started({ t: "req", id, kind: "xhr", method: info.method, url: clip(info.url, MAX_ARG) });
       this.addEventListener("loadend", () => {
         const failed = this.status === 0;
-        send(failed ? { t: "res", id, error: "network error", ms: Math.round(now() - started) }
-                    : { t: "res", id, status: this.status, ms: Math.round(now() - started) });
+        ended(failed ? { t: "res", id, error: "network error", ms: Math.round(now() - begun) }
+                     : { t: "res", id, status: this.status, ms: Math.round(now() - begun) });
       });
     }
     return Reflect.apply(sendRequest, this, arguments);
   };
 }
+})();
+"""#
+
+    /// Loom's world, document start, every frame: the page hook's events,
+    /// checked for size and rate, posted to `messageHandlerName` — a handler
+    /// that exists in Loom's world only.
+    public static let relay = #"""
+(() => {
+"use strict";
+// Loom's own world, document start, every frame: the only path from the page
+// hook to Loom. The message handler exists in this world alone — a page
+// cannot post to it, only dispatch events this relay reads: strings of at
+// most 4 KB, 200 a second (the rest counted), JSON objects only. A response
+// passes when its request did, so a chatty page never leaves one pending.
+if (globalThis.__loomAgentRelay) return;
+globalThis.__loomAgentRelay = true;
+const handlers = globalThis.webkit && globalThis.webkit.messageHandlers;
+const channel = handlers && handlers.loomAgent;
+if (!channel) return;
+
+const EVENT = "loom-agent-hook";
+const MAX_DETAIL = 4096;
+const MAX_ADMITTED = 2000;
+let tokens = 200;
+let refilled = Date.now();
+let dropped = 0;
+const admitted = new Set();
+
+function post(message) {
+  try { channel.postMessage(message); } catch (_) { /* the frame is going away */ }
+}
+
+function admit() {
+  const now = Date.now();
+  tokens = Math.min(200, tokens + (now - refilled) * 0.2);
+  refilled = now;
+  if (tokens < 1) { dropped++; return false; }
+  tokens -= 1;
+  if (dropped) { post({ t: "dropped", n: dropped }); dropped = 0; }
+  return true;
+}
+
+document.addEventListener(EVENT, (event) => {
+  const detail = event.detail;
+  if (typeof detail !== "string" || detail.length > MAX_DETAIL) return;
+  let message;
+  try { message = JSON.parse(detail); } catch (_) { return; }
+  if (!message || typeof message !== "object" || Array.isArray(message)) return;
+  if (message.t === "res") {
+    if (admitted.delete(message.id)) post(message);
+    return;
+  }
+  if (!admit()) return;
+  if (message.t === "req") {
+    if (admitted.size >= MAX_ADMITTED) admitted.delete(admitted.values().next().value);
+    admitted.add(message.id);
+  }
+  post(message);
+}, true);
 })();
 """#
 
@@ -1276,12 +1341,37 @@ function waitText(args) {
   return { error: { code: "invalid", message: "text or textGone is required" } };
 }
 
+/** `el`'s box in the top document's viewport: the offsets of the same-origin
+ * frames it sits in added, clipped to each frame. */
+function topRect(el) {
+  const r = el.getBoundingClientRect();
+  let left = r.left, top = r.top, right = r.right, bottom = r.bottom;
+  for (let view = el.ownerDocument.defaultView; view && view.frameElement;
+       view = view.frameElement.ownerDocument.defaultView) {
+    const frame = view.frameElement;
+    const outer = frame.getBoundingClientRect();
+    const style = styleOf(frame) || {};
+    const dx = outer.left + frame.clientLeft + (parseFloat(style.paddingLeft) || 0);
+    const dy = outer.top + frame.clientTop + (parseFloat(style.paddingTop) || 0);
+    left = Math.max(left, 0) + dx;
+    top = Math.max(top, 0) + dy;
+    right = Math.min(right, view.innerWidth) + dx;
+    bottom = Math.min(bottom, view.innerHeight) + dy;
+  }
+  return { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+}
+
 function rect(args) {
   const resolved = resolveTarget(args.target);
   if (resolved.error) return resolved;
   const el = resolved.element;
-  if (!inViewport(el)) el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-  return { ok: true, rect: box(el.getBoundingClientRect()), description: describe(el) };
+  let r = topRect(el);
+  if (!(r.width > 0 && r.height > 0 && r.top < window.innerHeight && r.left < window.innerWidth
+        && r.top + r.height > 0 && r.left + r.width > 0)) {
+    el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    r = topRect(el);
+  }
+  return { ok: true, rect: box(r), description: describe(el) };
 }
 
 function pageInfo() {

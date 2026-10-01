@@ -103,6 +103,9 @@ public enum CLI {
         }
         guard let first = words.first else { return (.help, options) }
         let rest = Array(words.dropFirst())
+        if options.out != nil, first != "browser" {
+            throw ParseError.invalidArgument("--out applies to browser take_screenshot only")
+        }
         switch (first, rest.first ?? "") {
         case ("help", _): return (.help, options)
         case ("docs", _): return (.docs, options)
@@ -132,6 +135,9 @@ public enum CLI {
             guard let spec = APIToolCatalog.spec(named: name), spec.method.isBrowser else {
                 throw ParseError.unknownCommand("browser \(tool)")
             }
+            if options.out != nil, spec.method != .browserScreenshot {
+                throw ParseError.invalidArgument("--out applies to browser take_screenshot only")
+            }
             let params = try browserParams(name: name, argument: rest.dropFirst().joined(separator: " "))
             return (.browser(spec.method, params), options)
         default: throw ParseError.unknownCommand(words.joined(separator: " "))
@@ -144,7 +150,7 @@ public enum CLI {
         "browser_navigate": "url", "browser_snapshot": "target", "browser_click": "target",
         "browser_hover": "target", "browser_press_key": "key", "browser_wait_for": "text",
         "browser_take_screenshot": "target", "browser_console_messages": "level",
-        "browser_network_requests": "filter", "browser_evaluate": "function", "browser_tabs": "action",
+        "browser_network_requests": "filter", "browser_evaluate": "function",
     ]
 
     static func browserParams(name: String, argument: String) throws -> JSONValue {
@@ -156,6 +162,26 @@ public enum CLI {
                 throw ParseError.invalidArgument("the parameters of \(name) are not a JSON object: \(text)")
             }
             return value
+        }
+        if name == "browser_tabs" {
+            // `tabs list`, `tabs new localhost:5173`, `tabs select 1`, `tabs close 0`:
+            // the action decides what the rest is.
+            let parts = text.split(separator: " ", maxSplits: 1).map(String.init)
+            var params: [String: JSONValue] = ["action": .string(parts[0])]
+            if parts.count == 2 {
+                let value = parts[1].trimmingCharacters(in: .whitespaces)
+                if parts[0] == "new" {
+                    params["url"] = .string(value)
+                } else if let index = Int(value) {
+                    params["index"] = .number(Double(index))
+                } else {
+                    throw ParseError.invalidArgument("tabs \(parts[0]) takes a tab index, or JSON")
+                }
+            }
+            return .object(params)
+        }
+        if name == "browser_wait_for", let seconds = Double(text) {
+            return .object(["time": .number(seconds)])   // `wait_for 2`: seconds, not the text "2"
         }
         if name == "browser_handle_dialog" {
             switch text {
@@ -218,6 +244,10 @@ public enum CLI {
             if case .browser = command, let content = try? result.decode(APIToolContent.self) {
                 // Markdown for a reader, not JSON — what the agent would see.
                 output(content.text + "\n")
+                if options.out != nil, content.image == nil {
+                    error("loom: --out: this answer carries no image\n")
+                    return 1
+                }
                 if let image = content.image {
                     guard let out = options.out else {
                         output("Image: \(image.path)\n")
@@ -227,9 +257,15 @@ public enum CLI {
                         error("loom: the screenshot is not where Loom writes them: \(image.path)\n")
                         return 1
                     }
-                    let destination = URL(fileURLWithPath: out)
-                    try? FileManager.default.removeItem(at: destination)
-                    try FileManager.default.copyItem(at: file, to: destination)
+                    // Never deletes anything: a directory gets the file inside
+                    // it; a file is replaced whole or not at all.
+                    var destination = URL(fileURLWithPath: (out as NSString).expandingTildeInPath)
+                    var isDirectory: ObjCBool = false
+                    if FileManager.default.fileExists(atPath: destination.path, isDirectory: &isDirectory),
+                       isDirectory.boolValue {
+                        destination.appendPathComponent(file.lastPathComponent)
+                    }
+                    try Data(contentsOf: file).write(to: destination, options: .atomic)
                     output("Saved to \(destination.path)\n")
                 }
                 return 0

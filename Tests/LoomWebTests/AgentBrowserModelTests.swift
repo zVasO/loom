@@ -161,6 +161,10 @@ struct AgentLogsTests {
                 "a page cannot forge a document entry")
         #expect(AgentHookMessage.parse(["t": "console", "level": "shout", "text": "x"] as [String: Any]) == nil)
         #expect(AgentHookMessage.parse("not a dictionary") == nil)
+        #expect(AgentHookMessage.parse(["t": "dropped", "n": Int.max] as [String: Any]) == nil,
+                "a forged count never reaches Loom's arithmetic")
+        #expect(AgentHookMessage.parse(["t": "dropped", "n": 999_999_999] as [String: Any]) == .dropped(1_000_000))
+        #expect(AgentHookMessage.parse(["t": "res", "id": 9e18] as [String: Any]) == nil)
         if case .console(_, let text, _)? = AgentHookMessage.parse(
             ["t": "console", "level": "info", "text": String(repeating: "y", count: 10_000)] as [String: Any]) {
             #expect(text.count == ConsoleLog.maxText)
@@ -235,6 +239,19 @@ struct MainFrameLoadTrackerTests {
         tracker.started(nil)
         tracker.terminated()
         #expect(tracker.isSettled(at: 2))
+        tracker.terminated(reloading: false)
+        #expect(tracker.lastError?.contains("not reloaded") == true)
+    }
+
+    @Test("a new request forgets the last failure: it never fails a later load that worked")
+    func echecOublie() {
+        var tracker = MainFrameLoadTracker()
+        let token = Token()
+        let nav = ObjectIdentifier(token)
+        tracker.started(nav)
+        tracker.failed(nav, cancelled: false, message: "unknown host nowhere.invalid")
+        tracker.requested(at: 5)
+        #expect(tracker.lastError == nil, "a same-document load never starts: nothing else would clear it")
     }
 }
 

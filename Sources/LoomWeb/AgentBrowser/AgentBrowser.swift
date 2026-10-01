@@ -53,12 +53,15 @@ public final class AgentBrowser: NSObject {
     @ObservationIgnored private var queueTail: Task<Void, Never>?
     @ObservationIgnored private var running: Task<AgentResult, Error>?
     @ObservationIgnored private var queueGeneration = 0
+    @ObservationIgnored private var cancelledReason = "the browser's commands were cancelled"
     @ObservationIgnored private var screenshotSequence = 0
     @ObservationIgnored private var messageProxy: AgentMessageProxy?
 
-    /// Project stores whose leftovers (service workers, caches) were cleared
-    /// in this run — once, before any page of any session uses them.
-    private static var clearedStores: Set<UUID> = []
+    /// Each project store's leftovers (service workers, caches) cleared once
+    /// per app run, shared by every session of the project: no page of the
+    /// store loads before it ends (see the navigation policy).
+    private static var storePreparations: [UUID: Task<Void, Never>] = [:]
+    private static var preparedStores: Set<UUID> = []
 
     /// The dialog the current tab is blocked on.
     public var activeDialog: AgentModalState? {
@@ -74,6 +77,13 @@ public final class AgentBrowser: NSObject {
         controller.attach(engine: self)
         controller.onVisit = nil   // the agent's pages never enter the user's history
         messageProxy = AgentMessageProxy(owner: self)
+        if case .project(let identifier) = profile, Self.storePreparations[identifier] == nil {
+            let store = dataStore
+            Self.storePreparations[identifier] = Task { @MainActor in
+                await AgentBrowserProfile.clearCaches(of: store)
+                Self.preparedStores.insert(identifier)
+            }
+        }
     }
 
     // MARK: - Commands
@@ -85,31 +95,54 @@ public final class AgentBrowser: NSObject {
         let job = Task<AgentResult, Error> { @MainActor [weak self] in
             _ = await previous?.value
             guard let self else { throw AgentError.unavailable("the browser was closed") }
-            guard generation == self.queueGeneration else {
-                throw AgentError.unavailable("the browser's commands were cancelled")
+            guard generation == self.queueGeneration, !Task.isCancelled else {
+                throw AgentError.unavailable(self.cancelledReason)
+            }
+            // Its turn came too late: it never acts on the page only to
+            // report a timeout.
+            guard ContinuousClock.now < deadline - .seconds(1) else {
+                throw AgentError.timeout("another browser command was still running when this one's time ran out; it did not run")
             }
             return try await self.runNow(command, deadline: deadline)
         }
         queueTail = Task { _ = try? await job.value }
+        // The caller's wait is bounded even while the job queues or overruns:
+        // the app answers before the client gives up (APIProtocol.clientTimeout).
+        let answer = OneShot<AgentResult>()
+        let forward = Task { @MainActor in
+            do {
+                let value = try await job.value
+                answer.resolve(.success(value))
+            } catch {
+                answer.resolve(.failure(error))
+            }
+        }
+        let backstop = Task { @MainActor in
+            do { try await Task.sleep(until: deadline + .seconds(2), clock: .continuous) } catch { return }
+            answer.resolve(.failure(AgentError.timeout("another browser command was still running when this one's time ran out")))
+        }
+        defer {
+            backstop.cancel()
+            _ = forward
+        }
         return try await withTaskCancellationHandler {
-            try await job.value
+            try await answer.value()
         } onCancel: {
             job.cancel()
         }
     }
 
     /// Pending and running commands fail at once (the tools were turned off,
-    /// the session ended).
+    /// the session ended); a running one's script calls end with its task.
     public func cancelAll(_ reason: String) {
         queueGeneration += 1
+        cancelledReason = reason
         running?.cancel()
-        for tab in Array(runtimes.keys) {
-            interruptCalls(tab, AgentInterruption.crashed)
-        }
         activity = activity.map { AgentActivity(summary: reason, isRunning: false, at: $0.at) }
     }
 
     private func runNow(_ command: AgentCommand, deadline: ContinuousClock.Instant) async throws -> AgentResult {
+        let generation = queueGeneration
         activity = AgentActivity(summary: Self.summary(of: command), isRunning: true, at: Date())
         let window = controller.activeTab.flatMap { controller.webView(for: $0) }?.window
         let responder = window?.firstResponder
@@ -137,7 +170,10 @@ public final class AgentBrowser: NSObject {
             if ContinuousClock.now >= deadline {
                 throw AgentError.timeout("the command did not finish in time")
             }
+            if generation != queueGeneration { throw AgentError.unavailable(cancelledReason) }
             throw AgentError.unavailable("the command was cancelled")
+        } catch is AgentJS.HelperMissing {
+            throw AgentError.failed("Loom's helper could not be loaded in this page")
         } catch let interruption as AgentInterruption {
             throw Self.error(for: interruption)
         }
@@ -156,6 +192,10 @@ public final class AgentBrowser: NSObject {
     }
 
     private func execute(_ command: AgentCommand, deadline: ContinuousClock.Instant) async throws -> AgentResult {
+        // A tab the user opened, or one brought back, loads only once the
+        // store is clean: no command reads a page before.
+        await prepareStore()
+        try Task.checkCancellation()
         switch command {
         case .navigate(let url):
             return try await navigate(to: url, deadline: deadline)
@@ -186,12 +226,12 @@ public final class AgentBrowser: NSObject {
         case .screenshot(let target, let format):
             return try await screenshot(target: target, format: format, deadline: deadline)
         case .console(let level, let all):
-            let (tab, webView) = try currentPage()
+            let (tab, webView) = try await currentPage(deadline: deadline)
             let text = runtimes[tab]?.console.render(level: level, all: all, limit: environment.limits.consoleChars)
                 ?? "No console messages."
             return respond(text, tab: tab, webView: webView, snapshot: nil)
         case .network(let filter):
-            let (tab, webView) = try currentPage()
+            let (tab, webView) = try await currentPage(deadline: deadline)
             let text = runtimes[tab]?.network.render(filter: filter, limit: environment.limits.networkChars)
                 ?? "No requests since the page loaded."
             return respond(text, tab: tab, webView: webView, snapshot: nil)
@@ -202,7 +242,7 @@ public final class AgentBrowser: NSObject {
         case .tabs(let action):
             return try await tabs(action, deadline: deadline)
         case .close:
-            for tab in controller.tabs { controller.close(tab.id) }
+            controller.closeAll()
             return AgentResult(text: "### Result\nClosed every tab of the agent's browser. Its profile (cookies, storage) is kept.")
         }
     }
@@ -210,19 +250,30 @@ public final class AgentBrowser: NSObject {
     // MARK: - Navigation
 
     private func navigate(to url: URL, deadline: ContinuousClock.Instant) async throws -> AgentResult {
-        await prepareStore()
         let tab: BrowserTabsModel.TabID
-        if let active = controller.activeTab, controller.webView(for: active) != nil {
+        if let active = controller.activeTab {
             tab = active
-            if runtimes[tab]?.calls.inFlight ?? 0 > 0 {
-                // A script from an earlier command never yielded: a fresh
-                // process instead of queueing behind it.
-                controller.load(url, in: tab)
-                controller.recreateWebView(for: tab)
-                note(tab, "The previous page was stuck in a script: it was replaced by a fresh one.")
+            if let current = controller.webView(for: active) {
+                if dialogs[tab] != nil {
+                    // Leaving the page answers its dialog, as a browser does:
+                    // the load then runs instead of queueing behind it.
+                    dismissDialog(tab)
+                    note(tab, "The page's dialog was dismissed by the navigation.")
+                }
+                if await isStuck(tab, current) {
+                    // A script from an earlier command never yielded: a fresh
+                    // process instead of queueing behind it.
+                    controller.load(url, in: tab)
+                    controller.recreateWebView(for: tab)
+                    note(tab, "The previous page was stuck in a script: it was replaced by a fresh one.")
+                } else {
+                    didRequestLoad(controller.load(url, in: tab), tab: tab)
+                }
             } else {
-                let navigation = controller.load(url, in: tab)
-                didRequestLoad(navigation, tab: tab)
+                // Released (the session ended, then resumed): the tab comes
+                // back at the new address — the old page is never fetched.
+                controller.load(url, in: tab)
+                controller.materialize()
             }
         } else {
             tab = controller.openTab(url: url)
@@ -239,7 +290,9 @@ public final class AgentBrowser: NSObject {
     }
 
     private func navigateBack(deadline: ContinuousClock.Instant) async throws -> AgentResult {
-        let (tab, webView) = try currentPage()
+        let (tab, webView) = try await currentPage(deadline: deadline)
+        // The page's process is blocked on its dialog: the load would wait too.
+        try refuseWhileDialog(tab)
         guard webView.canGoBack else { throw AgentError.invalid("there is nothing to go back to") }
         let mark = navigationMark(tab)
         let navigation = webView.goBack()
@@ -253,7 +306,7 @@ public final class AgentBrowser: NSObject {
     // MARK: - Reading
 
     private func snapshot(target: String?, depth: Int?, deadline: ContinuousClock.Instant) async throws -> AgentResult {
-        let (tab, webView) = try currentPage()
+        let (tab, webView) = try await currentPage(deadline: deadline)
         try refuseWhileDialog(tab)
         var args: [String: Any] = ["budget": environment.limits.snapshotChars]
         if let target { args["target"] = target }
@@ -264,7 +317,7 @@ public final class AgentBrowser: NSObject {
 
     private func waitFor(time: Double?, text: String?, textGone: String?, timeout: Double,
                          deadline: ContinuousClock.Instant) async throws -> AgentResult {
-        let (tab, webView) = try currentPage()
+        let (tab, webView) = try await currentPage(deadline: deadline)
         if let time, time > 0 { try await pause(.milliseconds(Int(time * 1000))) }
         var result = time.map { "Waited \($0) s" } ?? ""
         if text != nil || textGone != nil {
@@ -296,11 +349,16 @@ public final class AgentBrowser: NSObject {
 
     private func screenshot(target: AgentTarget?, format: ImageFormat,
                             deadline: ContinuousClock.Instant) async throws -> AgentResult {
-        let (tab, webView) = try currentPage()
+        let (tab, webView) = try await currentPage(deadline: deadline)
+        // A JS dialog blocks the page's process, and its drawing with it; a
+        // file chooser does not.
+        if let kind = dialogs[tab]?.kind {
+            if case .fileChooser = kind {} else { try refuseWhileDialog(tab) }
+        }
         ensureFrame(webView)
         var rect: CGRect?
         var what = "the visible page"
-        if let target, dialogs[tab] == nil {
+        if let target {
             let answer = try await helper("rect", ["target": target.target], tab: tab, webView: webView,
                                           deadline: deadline)
             guard let box = answer["rect"] as? [String: Any],
@@ -318,6 +376,11 @@ public final class AgentBrowser: NSObject {
         guard let data = AgentScreenshot.encode(image, pixels: pixels, format: format) else {
             throw AgentError.failed("the screenshot could not be encoded")
         }
+        if screenshotSequence == 0 {
+            // A resumed session's folder holds a previous run's files: the
+            // numbering goes on after them, never under (they would be pruned).
+            screenshotSequence = AgentScreenshot.lastSequence(in: environment.screenshotsDirectory)
+        }
         screenshotSequence += 1
         let url = try AgentScreenshot.write(data, in: environment.screenshotsDirectory,
                                             sequence: screenshotSequence, format: format)
@@ -332,7 +395,7 @@ public final class AgentBrowser: NSObject {
 
     private func act(on target: AgentTarget, readiness: String, op: String, args: [String: Any],
                      verb: String, deadline: ContinuousClock.Instant) async throws -> AgentResult {
-        let (tab, webView) = try currentPage()
+        let (tab, webView) = try await currentPage(deadline: deadline)
         try refuseWhileDialog(tab)
         let ready = try await waitUntilActionable(target, action: readiness, tab: tab, webView: webView,
                                                   deadline: deadline)
@@ -346,11 +409,12 @@ public final class AgentBrowser: NSObject {
             // The action navigated: the load is followed below.
         }
         try await settle(after: mark, tab: tab, deadline: deadline)
+        noteFailedLoad(since: mark, tab: tab)
         return await respondWithSnapshot("\(verb) \(described)", tab: tab, webView: webView, deadline: deadline)
     }
 
     private func pressKey(_ key: KeySpec, deadline: ContinuousClock.Instant) async throws -> AgentResult {
-        let (tab, webView) = try currentPage()
+        let (tab, webView) = try await currentPage(deadline: deadline)
         try refuseWhileDialog(tab)
         let mark = navigationMark(tab)
         let args = (try? JSONEncoder().encode(key)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
@@ -362,6 +426,7 @@ public final class AgentBrowser: NSObject {
         } catch AgentInterruption.navigated {
         }
         try await settle(after: mark, tab: tab, deadline: deadline)
+        noteFailedLoad(since: mark, tab: tab)
         let name = Self.keyName(key)
         return await respondWithSnapshot("Pressed \(name)" + (focused.isEmpty ? "" : " — focus: \(focused)"),
                                          tab: tab, webView: webView, deadline: deadline)
@@ -396,7 +461,7 @@ public final class AgentBrowser: NSObject {
 
     private func evaluate(_ function: String, target: AgentTarget?,
                           deadline: ContinuousClock.Instant) async throws -> AgentResult {
-        let (tab, webView) = try currentPage()
+        let (tab, webView) = try await currentPage(deadline: deadline)
         try refuseWhileDialog(tab)
         var nonce = ""
         if let target {
@@ -413,18 +478,26 @@ public final class AgentBrowser: NSObject {
                            snapshot: nil)
         }
         let limit = environment.limits.evaluateChars
-        let shown = output.count > limit ? String(output.prefix(limit)) + "\n… (cut at \(limit) characters)" : output
+        let head = output.prefix(limit)   // never a walk over a huge answer
+        let shown = head.endIndex == output.endIndex ? output : String(head) + "\n… (cut at \(limit) characters)"
         return respond("```json\n\(shown)\n```", tab: tab, webView: webView, snapshot: nil)
     }
 
     private func handleDialog(accept: Bool, promptText: String?, deadline: ContinuousClock.Instant) async throws -> AgentResult {
-        let (tab, webView) = try currentPage()
+        let (tab, webView) = try await currentPage(deadline: deadline)
+        guard answers[tab] != nil, dialogs[tab] != nil else {
+            if let other = controller.tabs.firstIndex(where: { dialogs[$0.id] != nil }) {
+                throw AgentError.invalid("no dialog is open on this tab; tab \(other) has one — browser_tabs select \(other), then answer it")
+            }
+            throw AgentError.invalid("no dialog is open")
+        }
         guard let answer = answers.removeValue(forKey: tab), let dialog = dialogs.removeValue(forKey: tab) else {
             throw AgentError.invalid("no dialog is open")
         }
         let mark = navigationMark(tab)
         answer.respond(accept: accept, text: promptText)
         try await settle(after: mark, tab: tab, deadline: deadline)
+        noteFailedLoad(since: mark, tab: tab)
         let what: String
         switch dialog.kind {
         case .fileChooser: what = "Cancelled the file chooser"
@@ -441,10 +514,11 @@ public final class AgentBrowser: NSObject {
             }
             return AgentResult(text: "### Open tabs\n" + (lines.isEmpty ? "No tab is open." : lines.joined(separator: "\n")))
         case .new(let url):
-            await prepareStore()
             let tab = controller.openTab(url: url ?? URL(string: "about:blank")!)
             guard let webView = controller.webView(for: tab) else { throw AgentError.unavailable("the tab could not open") }
             try await waitForLoad(tab: tab, limit: .seconds(30), deadline: deadline)
+            // As browser_navigate: the tab stays, the failure is the answer.
+            if let error = runtimes[tab]?.tracker.lastError { throw AgentError.failed(error) }
             return await respondWithSnapshot("Opened a new tab", tab: tab, webView: webView, deadline: deadline)
         case .select(let index):
             guard controller.tabs.indices.contains(index) else {
@@ -453,7 +527,12 @@ public final class AgentBrowser: NSObject {
             let id = controller.tabs[index].id
             controller.activate(id)
             guard let webView = controller.webView(for: id) else { throw AgentError.unavailable("the tab could not open") }
-            if runtimes[id]?.calls.inFlight ?? 0 > 0 { controller.recreateWebView(for: id) }
+            // A call blocked on the tab's own dialog waits, it is not stuck:
+            // a fresh view would dismiss the dialog and reload the page.
+            if dialogs[id] == nil, await isStuck(id, webView) {
+                controller.recreateWebView(for: id)
+                note(id, "The page was stuck in a script: it was replaced by a fresh one.")
+            }
             try await waitForLoad(tab: id, limit: .seconds(10), deadline: deadline)
             return await respondWithSnapshot("Selected tab \(index)", tab: id,
                                              webView: controller.webView(for: id) ?? webView, deadline: deadline)
@@ -487,7 +566,8 @@ public final class AgentBrowser: NSObject {
         try await pause(.milliseconds(300))
         if dialogs[tab] != nil { return }
         let tracker = runtimes[tab]?.tracker
-        if (tracker?.startedCount ?? 0) > mark.started || tracker?.isLoading == true {
+        if (tracker?.startedCount ?? 0) > mark.started || tracker?.isLoading == true
+            || controller.webView(for: tab)?.isLoading == true {
             try await waitForLoad(tab: tab, limit: .seconds(10), deadline: deadline)
         } else {
             try await waitForNetworkIdle(tab: tab, after: mark.network, limit: .seconds(5), deadline: deadline)
@@ -500,10 +580,14 @@ public final class AgentBrowser: NSObject {
         while ContinuousClock.now < end {
             if dialogs[tab] != nil { return }
             guard let tracker = runtimes[tab]?.tracker else { return }
-            if tracker.isSettled(at: Self.clock()) { return }
+            // WebKit's own flag, true from load()/goBack() until the load
+            // starts and ends: a cold process can take longer than the
+            // tracker's grace to start the first one.
+            let pending = controller.webView(for: tab)?.isLoading ?? false
+            if !pending, tracker.isSettled(at: Self.clock()) { return }
             try await pause(.milliseconds(50))
         }
-        if runtimes[tab]?.tracker.isLoading == true {
+        if runtimes[tab]?.tracker.isLoading == true || controller.webView(for: tab)?.isLoading == true {
             note(tab, "The page was still loading when the wait ended.")
         }
     }
@@ -541,8 +625,8 @@ public final class AgentBrowser: NSObject {
                                           deadline: deadline)
             do {
                 return try AgentJS.decode(answer)
-            } catch is AgentJS.HelperMissing where attempt == 0 {
-                try await injectHelper(webView, tab: tab, deadline: deadline)
+            } catch is AgentJS.HelperMissing {
+                if attempt == 0 { try await injectHelper(webView, tab: tab, deadline: deadline) }
             }
         }
         throw AgentError.failed("Loom's helper could not be loaded in this page")
@@ -562,6 +646,11 @@ public final class AgentBrowser: NSObject {
     private func callJS(_ webView: WKWebView, tab: BrowserTabsModel.TabID, body: String,
                         arguments: [String: Any], world: WKContentWorld,
                         deadline: ContinuousClock.Instant) async throws -> String {
+        // A page blocked on a dialog would run the script once the dialog is
+        // answered, long after the command reported: refused before it starts.
+        try refuseWhileDialog(tab)
+        try Task.checkCancellation()
+        guard ContinuousClock.now < deadline else { throw AgentInterruption.deadline }
         let box = OneShot<String>()
         let key = ObjectIdentifier(box)
         let calls = runtimes[tab]?.calls
@@ -580,8 +669,32 @@ public final class AgentBrowser: NSObject {
             box.resolve(.failure(AgentInterruption.deadline))
         }
         defer { timer.cancel() }
-        if dialogs[tab] != nil { box.resolve(.failure(AgentInterruption.dialogOpened)) }
         return try await box.value()
+    }
+
+    /// Stuck: a call is still pending AND the page cannot answer a trivial
+    /// one within a second. A browser_evaluate awaiting a promise has
+    /// yielded — its page answers, and keeps its history and storage.
+    private func isStuck(_ tab: BrowserTabsModel.TabID, _ webView: WKWebView) async -> Bool {
+        guard runtimes[tab]?.calls.inFlight ?? 0 > 0, dialogs[tab] == nil else { return false }
+        do {
+            _ = try await callJS(webView, tab: tab, body: "return 1;", arguments: [:], world: AgentScripts.world,
+                                 deadline: ContinuousClock.now + .seconds(1))
+            // A trivial answer came: the earlier call is waiting on the page
+            // (a promise), not blocking it.
+            return false
+        } catch AgentInterruption.deadline {
+            return true
+        } catch {
+            return false   // navigated, crashed, cancelled: not a script that never yields
+        }
+    }
+
+    /// A load the action started, and that failed: said in its answer.
+    private func noteFailedLoad(since mark: NavigationMark, tab: BrowserTabsModel.TabID) {
+        guard let tracker = runtimes[tab]?.tracker, tracker.startedCount > mark.started,
+              let error = tracker.lastError else { return }
+        note(tab, "The page load it started failed: \(error)")
     }
 
     private func interruptCalls(_ tab: BrowserTabsModel.TabID, _ reason: AgentInterruption) {
@@ -595,21 +708,29 @@ public final class AgentBrowser: NSObject {
         case .deadline: return .timeout("the page did not answer in time")
         case .dialogOpened: return .conflict("a dialog is open: answer it with browser_handle_dialog")
         case .navigated: return .failed("the page navigated away during the command")
-        case .crashed: return .unavailable("the page's process stopped; it is being reloaded")
+        case .crashed: return .unavailable("the page's process stopped during the command")
+        case .closed(let unloaded):
+            return .unavailable(unloaded
+                ? "the tab was unloaded during the command; select it again with browser_tabs"
+                : "the tab was closed during the command")
         }
     }
 
     // MARK: - Answers
 
-    private func currentPage() throws -> (BrowserTabsModel.TabID, WKWebView) {
+    /// The current tab's page — brought back, and loaded, if the session's
+    /// end released it.
+    private func currentPage(deadline: ContinuousClock.Instant) async throws -> (BrowserTabsModel.TabID, WKWebView) {
         guard let tab = controller.activeTab else {
             throw AgentError.unavailable("No page is open yet — start with browser_navigate")
         }
+        let restored = controller.webView(for: tab) == nil
         controller.materialize()
         guard let webView = controller.webView(for: tab) else {
             throw AgentError.unavailable("the page is not loaded — call browser_navigate")
         }
         ensureFrame(webView)
+        if restored { try await waitForLoad(tab: tab, limit: .seconds(10), deadline: deadline) }
         return (tab, webView)
     }
 
@@ -706,11 +827,11 @@ public final class AgentBrowser: NSObject {
 
     // MARK: - Lifecycle
 
-    /// Once per project store and app run, before any page uses it.
+    /// Once per project store and app run, before any page uses it: every
+    /// session of the project waits for the same clearing.
     private func prepareStore() async {
-        guard case .project(let identifier) = profile, !Self.clearedStores.contains(identifier) else { return }
-        Self.clearedStores.insert(identifier)
-        await AgentBrowserProfile.clearCaches(of: dataStore)
+        guard case .project(let identifier) = profile else { return }
+        await Self.storePreparations[identifier]?.value
     }
 
     /// Everything the agent's browser kept for its profile.
@@ -728,8 +849,7 @@ public final class AgentBrowser: NSObject {
     /// The session is gone for good.
     public func tearDown() {
         cancelAll("The session was archived.")
-        for tab in controller.tabs { controller.close(tab.id) }
-        controller.releaseWebViews()
+        controller.closeAll()
     }
 
     /// The user answers the current tab's dialog from the panel.
@@ -743,19 +863,21 @@ public final class AgentBrowser: NSObject {
 
     fileprivate func received(_ message: AgentHookMessage, from webView: WKWebView, frameKey: String) {
         guard let tab = controller.tabID(of: webView), runtimes[tab] != nil else { return }
-        guard runtimes[tab]?.limiter.admit(at: Self.clock()) == true else {
-            runtimes[tab]?.droppedMessages += 1
+        // A response only completes an entry an admitted request created: it
+        // never needs a token, and a dropped one would leave the request
+        // pending — every later wait for a quiet network would run out.
+        if case .response(let id, let status, let error, let durationMs) = message {
+            runtimes[tab]?.network.finished(key: "\(frameKey)#\(id)", status: status, error: error, durationMs: durationMs)
             return
         }
+        guard runtimes[tab]?.limiter.admit(at: Self.clock()) == true else { return }
         switch message {
         case .console(let level, let text, let location):
             runtimes[tab]?.console.append(level: level, text: text, location: location)
         case .request(let id, let kind, let method, let url):
             runtimes[tab]?.network.started(key: "\(frameKey)#\(id)", kind: kind, method: method, url: url)
-        case .response(let id, let status, let error, let durationMs):
-            runtimes[tab]?.network.finished(key: "\(frameKey)#\(id)", status: status, error: error, durationMs: durationMs)
-        case .dropped(let count):
-            runtimes[tab]?.droppedMessages += count
+        case .response, .dropped:
+            break
         }
     }
 
@@ -773,7 +895,17 @@ public final class AgentBrowser: NSObject {
             return
         }
         answers.removeValue(forKey: tab)?.dismiss()
-        let host = frame.securityOrigin.host.isEmpty ? (webView.url?.host() ?? "this page") : frame.securityOrigin.host
+        // The dialog's own frame speaks: a data: or sandboxed iframe (an
+        // opaque origin) never passes for the page under test.
+        let topHost = webView.url?.host() ?? "this page"
+        let host: String
+        if !frame.securityOrigin.host.isEmpty {
+            host = frame.securityOrigin.host
+        } else if frame.isMainFrame {
+            host = topHost
+        } else {
+            host = "A frame embedded in \(topHost)"
+        }
         dialogs[tab] = AgentModalState(kind: kind, message: message, host: host)
         answers[tab] = answer
         interruptCalls(tab, .dialogOpened)
@@ -826,12 +958,17 @@ extension AgentBrowser: BrowserTabEngine {
         // panel shows it or not (rendering itself still pauses when hidden).
         configuration.preferences.inactiveSchedulingPolicy = .none
         let content = WKUserContentController()
+        // The relay first: it listens before the hook can speak.
+        content.addUserScript(WKUserScript(source: AgentScripts.relay, injectionTime: .atDocumentStart,
+                                           forMainFrameOnly: false, in: AgentScripts.world))
         content.addUserScript(WKUserScript(source: AgentScripts.pageHook, injectionTime: .atDocumentStart,
                                            forMainFrameOnly: false, in: .page))
         content.addUserScript(WKUserScript(source: AgentScripts.helper, injectionTime: .atDocumentStart,
                                            forMainFrameOnly: true, in: AgentScripts.world))
+        // Loom's world only: no page script can post to it, or flood the
+        // main thread with what it would deliver.
         if let messageProxy {
-            content.add(messageProxy, contentWorld: .page, name: AgentScripts.messageHandlerName)
+            content.add(messageProxy, contentWorld: AgentScripts.world, name: AgentScripts.messageHandlerName)
         }
         configuration.userContentController = content
         let webView = WKWebView(frame: CGRect(origin: .zero, size: environment.initialViewport),
@@ -845,7 +982,8 @@ extension AgentBrowser: BrowserTabEngine {
     }
 
     func didRelease(_ webView: WKWebView, tab: BrowserTabsModel.TabID) {
-        interruptCalls(tab, .crashed)
+        // Released while its tab stays in the model: unloaded, not closed.
+        interruptCalls(tab, .closed(unloaded: controller.model.tab(tab) != nil))
         dismissDialog(tab)
         webView.uiDelegate = nil
         webView.navigationDelegate = nil
@@ -872,7 +1010,17 @@ extension AgentBrowser: WKNavigationDelegate {
         let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
         switch AgentNavigationPolicy.decide(url: navigationAction.request.url, isMainFrame: isMainFrame) {
         case .allow:
-            decisionHandler(.allow)
+            // No request of a project store before its leftovers are gone:
+            // WebKit sends nothing until the policy is decided.
+            if case .project(let identifier) = profile, !Self.preparedStores.contains(identifier),
+               let preparation = Self.storePreparations[identifier] {
+                Task { @MainActor in
+                    await preparation.value
+                    decisionHandler(.allow)
+                }
+            } else {
+                decisionHandler(.allow)
+            }
         case .cancel:
             decisionHandler(.cancel)
             if isMainFrame, let tab {
@@ -914,7 +1062,12 @@ extension AgentBrowser: WKNavigationDelegate {
             runtimes[tab]?.network.document(url: document.url, status: document.status)
             runtimes[tab]?.pendingDocument = nil
         }
-        // A new document: scripts running in the old one will never answer.
+        // A new document: a dialog or chooser of the old one can no longer
+        // be answered, and scripts running in it will never answer.
+        if dialogs[tab] != nil {
+            dismissDialog(tab)
+            note(tab, "A dialog of the previous page was dismissed.")
+        }
         interruptCalls(tab, .navigated)
     }
 
@@ -943,12 +1096,20 @@ extension AgentBrowser: WKNavigationDelegate {
     /// The page's process died (memory, a crash): reloaded, and whatever
     /// waited on it is told.
     public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        guard let tab = controller.tabID(of: webView) else { return }
-        runtimes[tab]?.tracker.terminated()
+        guard let tab = controller.tabID(of: webView), runtimes[tab] != nil else { return }
+        let now = Self.clock()
+        runtimes[tab]?.crashTimes.removeAll { now - $0 > 60 }
+        runtimes[tab]?.crashTimes.append(now)
+        let reload = (runtimes[tab]?.crashTimes.count ?? 0) <= 2
+        runtimes[tab]?.tracker.terminated(reloading: reload)
         interruptCalls(tab, .crashed)
         dismissDialog(tab)
-        note(tab, "The page's process stopped; it was reloaded.")
-        webView.reload()
+        if reload {
+            note(tab, "The page's process stopped; it was reloaded.")
+            webView.reload()
+        } else {
+            note(tab, "The page's process keeps stopping; it was not reloaded — browser_navigate loads it again.")
+        }
     }
 
     /// Server trust takes WebKit's own decision; any other challenge (a
@@ -1037,7 +1198,9 @@ private struct TabRuntime {
     var pending: [ObjectIdentifier: OneShot<String>] = [:]
     let calls = CallCounter()
     var dialogCount = 0
-    var droppedMessages = 0
+    /// When the page's process stopped, the last minute: a page that keeps
+    /// crashing is not reloaded forever.
+    var crashTimes: [Double] = []
 }
 
 /// A dialog's completion, called exactly once: WebKit raises if one is

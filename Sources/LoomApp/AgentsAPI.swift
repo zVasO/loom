@@ -77,7 +77,11 @@ extension AppModel {
                 if let problem = APILimits.badgeProblem(params.badges) {
                     throw APIError(code: .invalidParams, message: problem)
                 }
-                setBadges(params.badges, for: id)
+                // A PR session's "PR #n" is Loom's (it files the session under
+                // code review): the agent may add badges around it, never
+                // take it off.
+                let kept = badges(of: id).filter { Self.wearsPRBadge([$0]) }
+                setBadges(kept + params.badges.filter { !kept.contains($0) }, for: id)
                 return .ok(request.id, try apiSession(id))
             case .browserNavigate, .browserNavigateBack, .browserSnapshot, .browserClick, .browserType,
                  .browserSelectOption, .browserHover, .browserPressKey, .browserWaitFor, .browserScreenshot,

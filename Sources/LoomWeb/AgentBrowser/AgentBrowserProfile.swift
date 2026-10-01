@@ -63,17 +63,30 @@ public enum AgentBrowserProfile {
         await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
     }
 
+    /// Every agent profile on disk emptied — removed projects' included. Only
+    /// the agent's browser uses identifier stores in Loom; none is created.
+    @MainActor
+    public static func clearAllProjectStores() async {
+        for identifier in await existingStoreIdentifiers() {
+            await clearAll(of: WKWebsiteDataStore(forIdentifier: identifier))
+        }
+    }
+
+    @MainActor
+    static func existingStoreIdentifiers() async -> [UUID] {
+        await withCheckedContinuation { continuation in
+            WKWebsiteDataStore.fetchAllDataStoreIdentifiers { identifiers in
+                continuation.resume(returning: identifiers)
+            }
+        }
+    }
+
     /// Every project store that exists on disk among these projects', emptied
     /// — never creating one that does not.
     @MainActor
     public static func clearProjectStores(_ projects: [UUID]) async {
         let wanted = Set(projects.map(storeIdentifier(forProject:)))
-        let existing: [UUID] = await withCheckedContinuation { continuation in
-            WKWebsiteDataStore.fetchAllDataStoreIdentifiers { identifiers in
-                continuation.resume(returning: identifiers)
-            }
-        }
-        for identifier in existing where wanted.contains(identifier) {
+        for identifier in await existingStoreIdentifiers() where wanted.contains(identifier) {
             await clearAll(of: WKWebsiteDataStore(forIdentifier: identifier))
         }
     }

@@ -84,6 +84,9 @@ public struct AgentBrowserPanelView: View {
                 TextField("", text: $promptText)
                     .textFieldStyle(.roundedBorder)
                     .onAppear { promptText = defaultText ?? "" }
+                    // Return answers only from the banner's own field: a
+                    // window-wide default button would take claude's Return.
+                    .onSubmit { browser.answerDialog(accept: true, text: promptText) }
             }
             HStack {
                 Spacer()
@@ -91,7 +94,6 @@ public struct AgentBrowserPanelView: View {
                     Button("Cancel") { browser.answerDialog(accept: false, text: nil) }
                 }
                 Button("OK") { browser.answerDialog(accept: true, text: promptText) }
-                    .keyboardShortcut(.defaultAction)
             }
         }
         .padding(12)

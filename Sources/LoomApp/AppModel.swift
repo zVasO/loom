@@ -1127,6 +1127,35 @@ public final class AppModel {
         return ids
     }
 
+    /// Sessions that run code Loom does not trust with a profile (ADR-0014):
+    /// every PR review and guide, and a review of one of them. Decided from
+    /// what the app writes and the agent cannot — never from badges alone,
+    /// which the agents API lets a session rewrite.
+    private static let untrustedSessionsKey = "loom.agents.untrustedSessions"
+
+    func markRunsUntrustedCode(_ id: SessionID) {
+        var raw = UserDefaults.standard.stringArray(forKey: Self.untrustedSessionsKey) ?? []
+        guard !raw.contains(id.rawValue.uuidString) else { return }
+        raw.append(id.rawValue.uuidString)
+        UserDefaults.standard.set(raw, forKey: Self.untrustedSessionsKey)
+    }
+
+    func runsUntrustedCode(_ id: SessionID) -> Bool {
+        let key = id.rawValue.uuidString
+        if (UserDefaults.standard.stringArray(forKey: Self.untrustedSessionsKey) ?? []).contains(key) { return true }
+        if prSessionHistoryMap.values.contains(where: { $0.contains(key) }) { return true }
+        let active = (UserDefaults.standard.dictionary(forKey: "loom.pr.sessions") as? [String: String]) ?? [:]
+        if active.values.contains(key) { return true }
+        // Sessions from before the mark: a PR checkout is <repo>-worktrees/pr-N.
+        if let path = allRecords.first(where: { $0.id == id })?.worktreePath {
+            let url = URL(fileURLWithPath: path)
+            if url.lastPathComponent.hasPrefix("pr-"),
+               url.deletingLastPathComponent().lastPathComponent.hasSuffix("-worktrees") { return true }
+        }
+        // A badge can only add privacy, never take it away.
+        return codeReviewSessionIDs.contains(id)
+    }
+
     /// "PR #648" — the badge the PR tab gives its sessions.
     static func wearsPRBadge(_ badges: [String]) -> Bool {
         badges.contains { badge in
@@ -1246,6 +1275,8 @@ public final class AppModel {
             // The record must know it runs in a worktree: the git panel and
             // the ship actions read worktreePath, and a nil left them blind.
             spec.worktree = .existing(path: worktree, branch: pr.branch)
+            // Before the session exists: no API call of it can come first.
+            markRunsUntrustedCode(sessionID)
             let id = try await manager.launch(spec)
             await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
@@ -1592,6 +1623,7 @@ public final class AppModel {
             spec.title = "PR #\(number) · guide"
             spec.badges = ["PR #\(number)"]
             spec.worktree = .existing(path: worktree, branch: nil)
+            markRunsUntrustedCode(sessionID)
             let id = try await manager.launch(spec)
             await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
@@ -1633,6 +1665,7 @@ public final class AppModel {
             spec.sessionID = sessionID
             spec.title = "Review · \(record.title)"
             spec.badges = ["review"]
+            if runsUntrustedCode(id) { markRunsUntrustedCode(sessionID) }
             let reviewID = try await manager.launch(spec)
             await cacheSurface(for: reviewID)
             tokenRegistry.register(token: token, session: reviewID)

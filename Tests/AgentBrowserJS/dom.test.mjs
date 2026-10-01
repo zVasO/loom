@@ -11,7 +11,7 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
-import { helperSource, pageHookSource, fixturesDirectory } from "./extract.mjs";
+import { helperSource, pageHookSource, relaySource, fixturesDirectory } from "./extract.mjs";
 
 async function loadPlaywright() {
   try { return await import("playwright"); } catch (_) { /* not local */ }
@@ -33,6 +33,10 @@ let base;
 before(async () => {
   if (skip) return;
   server = createServer((request, response) => {
+    if (request.url === "/never-answers") {
+      request.on("close", () => response.destroy());   // held open until the page goes
+      return;
+    }
     if (request.url === "/" || request.url.startsWith("/todo")) {
       response.writeHead(200, { "content-type": "text/html" });
       response.end(readFileSync(resolve(fixturesDirectory, "todo.html")));
@@ -53,11 +57,14 @@ after(async () => {
 
 async function openTodo() {
   const page = await browser.newPage({ viewport: { width: 900, height: 900 } });
-  // The page hook posts to webkit.messageHandlers; a stand-in collects.
+  // The relay posts to webkit.messageHandlers; a stand-in collects. (In
+  // WebKit the relay and the handler live in Loom's world, the hook in the
+  // page's; Chromium here runs all three in one.)
   await page.addInitScript(() => {
     window.__posted = [];
     window.webkit = { messageHandlers: { loomAgent: { postMessage: (m) => window.__posted.push(m) } } };
   });
+  await page.addInitScript(relaySource());
   await page.addInitScript(pageHookSource());
   await page.addInitScript(helperSource());
   await page.goto(base + "/todo");
@@ -190,6 +197,71 @@ test("waiting for text answers in one shot; the page hook reports console and re
   assert.ok(request, "the fetch was reported");
   const response = posted.find((m) => m.t === "res" && m.id === request.id);
   assert.equal(response.status, 404);
+  await page.close();
+});
+
+test("the relay: bounded, rate-limited, and a response always follows its request", { skip }, async () => {
+  const page = await openTodo();
+  const posted = await page.evaluate(async () => {
+    window.__posted.length = 0;
+    const fire = (detail) => document.dispatchEvent(new CustomEvent("loom-agent-hook", { detail }));
+    fire({ t: "console", level: "info", text: "an object, not a string" });
+    fire(JSON.stringify({ t: "console", level: "info", text: "x".repeat(5000) }));
+    fire("not json");
+    fire(JSON.stringify({ t: "res", id: 77, status: 200 }));          // no request: dropped
+    const id = 4242;
+    fire(JSON.stringify({ t: "req", id, kind: "fetch", method: "GET", url: "http://x/slow" }));
+    for (let i = 0; i < 1000; i++) fire(JSON.stringify({ t: "console", level: "info", text: "spam " + i }));
+    fire(JSON.stringify({ t: "res", id, status: 204 }));               // past the bucket: kept
+    fire(JSON.stringify({ t: "res", id, status: 204 }));               // twice: once only
+    return window.__posted.slice();
+  });
+  assert.ok(!posted.some((m) => m.text === "an object, not a string"), "only strings cross");
+  assert.ok(!posted.some((m) => typeof m.text === "string" && m.text.length > 4096), "oversized detail dropped");
+  assert.ok(!posted.some((m) => m.t === "res" && m.id === 77), "a response without its request is dropped");
+  const spam = posted.filter((m) => m.t === "console").length;
+  assert.ok(spam < 260, "the flood is cut near 200: " + spam);
+  assert.equal(posted.filter((m) => m.t === "res" && m.id === 4242).length, 1, "the response passed, once");
+  await page.close();
+});
+
+test("request ids are unique per document; a leaving document abandons what it had in flight", { skip }, async () => {
+  const page = await openTodo();
+  const ids = await page.evaluate(async () => {
+    window.__posted.length = 0;
+    await fetch("/missing-a.json");
+    await fetch("/missing-b.json");
+    return window.__posted.filter((m) => m.t === "req").map((m) => m.id);
+  });
+  assert.equal(ids.length, 2);
+  assert.ok(ids[0] > 2 ** 20, "a random per-document base, not 1: " + ids[0]);
+  assert.equal(ids[1], ids[0] + 1);
+  const abandoned = await page.evaluate(async () => {
+    window.__posted.length = 0;
+    fetch("/never-answers").catch(() => {});
+    await new Promise((done) => setTimeout(done, 20));
+    window.dispatchEvent(new PageTransitionEvent("pagehide"));
+    return window.__posted.filter((m) => m.t === "res").map((m) => m.error);
+  });
+  assert.ok(abandoned.includes("abandoned by navigation"), JSON.stringify(abandoned));
+  await page.close();
+});
+
+test("an element's box inside a same-origin frame is in the top viewport's coordinates", { skip }, async () => {
+  const page = await openTodo();
+  await page.evaluate(() => new Promise((done) => {
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "position:absolute; left:100px; top:200px; width:300px; height:150px; border:5px solid red";
+    frame.srcdoc = "<body style='margin:0'><button style='margin:10px 20px'>Inner</button></body>";
+    frame.onload = done;
+    document.body.prepend(frame);
+  }));
+  const yaml = (await run(page, "snapshot", { budget: 20000 })).yaml;
+  const inner = refOf(yaml, /button "Inner"/);
+  const answer = await run(page, "rect", { target: inner });
+  assert.equal(answer.ok, true, JSON.stringify(answer));
+  assert.equal(answer.rect.x, 100 + 5 + 20 - (await page.evaluate(() => window.scrollX)));
+  assert.equal(answer.rect.y, 200 + 5 + 10 - (await page.evaluate(() => window.scrollY)));
   await page.close();
 });
 

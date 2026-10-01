@@ -175,7 +175,7 @@ public enum AgentHookMessage: Equatable, Sendable {
             (fields[key] as? String).map { String($0.prefix(max)) }
         }
         func int(_ key: String) -> Int? {
-            if let value = fields[key] as? Int { return value }
+            if let value = fields[key] as? Int, value.magnitude < 1_000_000_000_000 { return value }
             if let value = fields[key] as? Double, value.isFinite, abs(value) < 1e12 { return Int(value) }
             return nil
         }
@@ -192,7 +192,7 @@ public enum AgentHookMessage: Equatable, Sendable {
             guard let id = int("id") else { return nil }
             return .response(id: id, status: int("status"), error: string("error", max: 300), durationMs: int("ms"))
         case "dropped":
-            return int("n").map { .dropped(max(0, $0)) }
+            return int("n").map { .dropped(min(max(0, $0), 1_000_000)) }
         default:
             return nil
         }

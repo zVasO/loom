@@ -49,6 +49,9 @@ enum AgentInterruption: Error, Equatable {
     case dialogOpened
     case navigated
     case crashed
+    /// The tab's web view was released: the tab closed, or unloaded (too
+    /// many live tabs, the session ended).
+    case closed(unloaded: Bool)
 }
 
 /// Talking to the page: the helper in Loom's content world, the agent's own
@@ -87,7 +90,7 @@ enum AgentJS {
         case .javaScriptResultTypeIsUnsupported:
             return AgentError.failed("the script answered something that is not JSON")
         case .webContentProcessTerminated, .webViewInvalidated:
-            return AgentError.unavailable("the page's process stopped; it is being reloaded")
+            return AgentError.unavailable("the page's process stopped during the command")
         default:
             return AgentError.failed(error.localizedDescription)
         }

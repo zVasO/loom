@@ -50,6 +50,16 @@ struct BrowserTabsModelTests {
         #expect(model.tabs.count == 1)
         #expect(model.activeTab != a)
     }
+
+    @Test("closing every tab at once revives none on the way")
+    func fermetureDeTous() {
+        var model = BrowserTabsModel(maxLiveTabs: 2)
+        for name in ["a", "b", "c", "d"] { model.openTab(url: URL(string: "https://\(name).example")!) }
+        model.closeAll()
+        #expect(model.tabs.isEmpty)
+        #expect(model.liveTabIDs.isEmpty)
+        #expect(model.activeTab == nil)
+    }
 }
 
 /// WEB-06: the address bar accepts WORDS — a search engine (Google) takes

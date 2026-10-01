@@ -27,8 +27,8 @@ d'une session à l'autre : connectez-vous une fois à l'app testée (choisissez
 « Agent browser » dans l'en-tête du panneau), l'agent le restera. Tout ce que vous
 connectez ici, l'agent peut s'en servir — n'y ouvrez pas vos comptes personnels.
 
-Une session sans projet et toute revue de PR ont un profil **privé**, oublié à la
-fin. Les caches et service workers d'un profil de projet sont vidés au premier usage
+Une session sans projet et toute revue ou tout guide de PR ont un profil **privé**,
+oublié à la fin. Les caches et service workers d'un profil de projet sont vidés au premier usage
 de chaque lancement de Loom. **Réglages ▸ Agents ▸ Clear agent browser data** vide
 tous les profils d'agent.
 
@@ -61,7 +61,8 @@ Chaque action répond l'instantané de la page qui en résulte. Depuis un shell 
 - Panneau masqué, la page tourne mais WebKit suspend son rendu (animations,
   `requestAnimationFrame`) : `### Page` l'indique.
 - Les captures ne voient pas WebGL ni la vidéo.
-- L'envoi de fichiers n'est pas encore là : un sélecteur de fichier s'annule.
+- L'envoi de fichiers n'est pas encore là : un sélecteur de fichier attend
+  `browser_handle_dialog`, qui l'annule.
 
 ## Dépannage
 

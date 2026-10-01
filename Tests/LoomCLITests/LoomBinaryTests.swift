@@ -219,6 +219,30 @@ struct LoomBinaryTests {
         #expect(data.starts(with: [0x89, 0x50, 0x4E, 0x47]))
     }
 
+    @Test("`--out` naming a directory saves inside it and deletes nothing")
+    func captureVersUnDossier() throws {
+        let url = socketURL()
+        let server = appLikeServer(at: url, session: SessionID())
+        try server.start()
+        defer {
+            server.stop()
+            try? FileManager.default.removeItem(at: APIProtocol.screenshotsDirectory(socketPath: url.path))
+        }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loom-out-\(UUID().uuidString.prefix(6))", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let marker = directory.appendingPathComponent("keep.txt")
+        try Data("mine".utf8).write(to: marker)
+
+        let result = try run(["browser", "take_screenshot", "--out", directory.path],
+                             environment: ["LOOM_SOCKET": url.path, "LOOM_SESSION_TOKEN": "session-token"])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(FileManager.default.fileExists(atPath: marker.path), "what was in the directory stays")
+        let saved = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".png") }
+        #expect(saved.count == 1)
+    }
+
     @Test("the global token never drives a session's browser")
     func navigateurSansTokenGlobal() throws {
         let url = socketURL()

@@ -67,8 +67,9 @@ public struct AgentModalState: Equatable, Sendable {
 
     public var kind: Kind
     public var message: String
-    /// The page's host: what the banner says, so a page cannot pass its
-    /// words off as Loom's.
+    /// The origin of the dialog's frame ("A frame embedded in <host>" for an
+    /// opaque one): what the banner says, so a page cannot pass its words
+    /// off as Loom's, nor an embedded frame as the page under test.
     public var host: String
 
     public init(kind: Kind, message: String, host: String) {
@@ -88,7 +89,7 @@ public struct AgentModalState: Equatable, Sendable {
             }
             return "- [\"\(name)\" dialog with message \(Self.quoted(message))]: can be handled by browser_handle_dialog"
         case .fileChooser(let multiple):
-            return "- [File chooser\(multiple ? " (multiple files)" : "")]: can be handled by browser_file_upload"
+            return "- [File chooser\(multiple ? " (multiple files)" : "")]: file uploads are not supported yet; cancel it with browser_handle_dialog"
         }
     }
 
