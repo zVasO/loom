@@ -205,3 +205,19 @@ test("a stamped element is found by the page-world function, then unmarked", { s
   assert.equal(text, "Add");
   await page.close();
 });
+
+test("form fields: a checkbox to a state, a slider to a value, keys one by one", { skip }, async () => {
+  const page = await openTodo();
+  const { yaml } = await run(page, "snapshot", {});
+  const terms = refOf(yaml, /checkbox "I agree"/);
+  assert.equal((await run(page, "setChecked", { target: terms, checked: true })).checked, true);
+  assert.equal((await run(page, "setChecked", { target: terms, checked: true })).checked, true, "already: untouched");
+  await run(page, "setValue", { target: refOf(yaml, /slider "Volume"/), value: "7" });
+  const field = refOf(yaml, /textbox "New todo"/);
+  await run(page, "focusField", { target: field, clear: true });
+  await run(page, "typeKeys", { keys: [..."tea"].map((c) => ({ key: c, code: "Key" + c.toUpperCase(), keyCode: c.toUpperCase().charCodeAt(0), text: c })) });
+  const state = await page.evaluate(() => ({ events: window.events, draft: window.state.draft }));
+  assert.deepEqual(state.events.filter((e) => /^(terms|volume)/.test(e)), ["terms:true", "volume:7"]);
+  assert.equal(state.draft, "tea", "each key typed its character");
+  await page.close();
+});

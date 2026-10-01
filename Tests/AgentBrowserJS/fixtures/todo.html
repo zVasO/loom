@@ -34,6 +34,9 @@
   <option value="g">Green</option>
   <option value="b">Blue</option>
 </select>
+<label><input id="terms" type="checkbox"> I agree</label>
+<label for="volume">Volume</label>
+<input id="volume" type="range" min="0" max="10" value="2">
 <p id="status" role="status"></p>
 <div id="overlay"></div>
 <script>
@@ -105,6 +108,8 @@
   document.getElementById("card").addEventListener("click", () => window.events.push("card"));
   document.getElementById("color").addEventListener("change", (e) => window.events.push("color:" + e.target.value));
   window.addEventListener("resize", () => window.events.push("resize"));
+  document.getElementById("terms").addEventListener("change", (e) => window.events.push("terms:" + e.target.checked));
+  document.getElementById("volume").addEventListener("change", (e) => window.events.push("volume:" + e.target.value));
 </script>
 </body>
 </html>

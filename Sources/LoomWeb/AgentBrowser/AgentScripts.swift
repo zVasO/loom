@@ -371,6 +371,9 @@ const NAME_FROM_CONTENT = new Set(["button", "cell", "checkbox", "columnheader",
   "menuitem", "menuitemcheckbox", "menuitemradio", "option", "radio", "row", "rowheader", "switch", "tab",
   "tooltip", "treeitem"]);
 
+const INTERACTIVE_SELECTOR = "a[href], button, input, select, textarea, iframe, img, summary, [role], "
+  + "[tabindex], [contenteditable=''], [contenteditable='true'], [onclick]";
+
 const INTERACTIVE_ROLES = new Set(["button", "checkbox", "combobox", "link", "listbox", "menuitem",
   "menuitemcheckbox", "menuitemradio", "option", "radio", "searchbox", "slider", "spinbutton", "switch",
   "tab", "textbox", "treeitem"]);
@@ -742,7 +745,9 @@ function collectChildren(el, ctx) {
       const inline = /^inline/.test(display) && !roleOf(child) && !child.shadowRoot
         && child.localName !== "img" && child.localName !== "br" && child.localName !== "iframe"
         && !child.hasAttribute("onclick") && !(child.hasAttribute("tabindex") && child.tabIndex >= 0)
-        && !(styleOf(child).cursor === "pointer" && styleOf(el) && styleOf(el).cursor !== "pointer");
+        && !(styleOf(child).cursor === "pointer" && styleOf(el) && styleOf(el).cursor !== "pointer")
+        // A <label> around its checkbox: the control must stay a node of its own.
+        && !child.querySelector(INTERACTIVE_SELECTOR);
       if (inline && !isHiddenForNames(child)) {
         // Inline text formatting (<b>, <span>) stays part of the sentence.
         text += " " + contentText(child) + " ";
@@ -1203,6 +1208,55 @@ function pressKey(spec) {
   return { ok: true, focused: describe(now) };
 }
 
+/** A checkbox or radio to a state: clicked only when it differs. */
+function setChecked(args) {
+  const resolved = resolveTarget(args.target);
+  if (resolved.error) return resolved;
+  const el = resolved.element;
+  const input = el.localName === "input" ? el : (el.control || el.querySelector && el.querySelector("input"));
+  const current = input ? input.checked : el.getAttribute("aria-checked") === "true";
+  const wanted = !!args.checked;
+  if (current !== wanted) pointerSequence(el, {});
+  const now = input ? input.checked : el.getAttribute("aria-checked") === "true";
+  return { ok: true, description: describe(el), checked: now };
+}
+
+/** A range (slider) or any input whose value is set directly. */
+function setValue(args) {
+  const resolved = resolveTarget(args.target);
+  if (resolved.error) return resolved;
+  const el = resolved.element;
+  if (el.localName !== "input" && el.localName !== "textarea") {
+    return { error: { code: "notEditable", message: describe(el) + " has no value to set" } };
+  }
+  el.focus({ preventScroll: true });
+  el.value = String(args.value);
+  const view = el.ownerDocument.defaultView;
+  el.dispatchEvent(new view.Event("input", { bubbles: true, composed: true }));
+  el.dispatchEvent(new view.Event("change", { bubbles: true }));
+  return { ok: true, description: describe(el), value: el.value };
+}
+
+/** Focuses the field and clears it — before characters are typed one by one. */
+function focusField(args) {
+  const resolved = resolveTarget(args.target);
+  if (resolved.error) return resolved;
+  const field = editableIn(resolved.element);
+  if (!field) return { error: { code: "notEditable", message: describe(resolved.element) + " is not an editable field" } };
+  field.focus({ preventScroll: true });
+  if (args.clear) {
+    selectAllIn(field);
+    insertText(field, "");
+  }
+  return { ok: true, description: describe(field) };
+}
+
+/** Each key of `keys` as a press — for type-ahead handlers that watch keys. */
+function typeKeys(args) {
+  for (const spec of args.keys || []) pressKey(spec);
+  return { ok: true };
+}
+
 // ---------------------------------------------------------------- reading
 
 function visibleText(doc) {
@@ -1249,7 +1303,8 @@ function stamp(args) {
   return { ok: true, nonce, description: describe(resolved.element) };
 }
 
-const OPS = { snapshot, prepare, click, hover, type, selectOption, pressKey, waitText, rect, pageInfo, stamp };
+const OPS = { snapshot, prepare, click, hover, type, selectOption, pressKey, waitText, rect, pageInfo, stamp,
+  setChecked, setValue, focusField, typeKeys };
 
 async function run(op, argsJSON) {
   try {

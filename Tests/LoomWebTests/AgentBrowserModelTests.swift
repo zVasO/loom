@@ -379,3 +379,87 @@ struct AgentEvaluateTests {
         #expect(AgentScripts.evaluateBody(function: "document.title").contains("() => (\ndocument.title\n)"))
     }
 }
+
+@Suite("Agent browser — uploads")
+struct AgentUploadPolicyTests {
+
+    private let policy = AgentUploadPolicy(roots: [URL(fileURLWithPath: "/work/app"),
+                                                  URL(fileURLWithPath: "/support/agent-browser/uploads/s1")])
+
+    private func files(_ existing: Set<String>, folders: Set<String> = []) -> (URL) -> (exists: Bool, isDirectory: Bool) {
+        { url in (existing.contains(url.path) || folders.contains(url.path), folders.contains(url.path)) }
+    }
+
+    @Test("files under the roots pass; anything else is said plainly")
+    func racines() {
+        let probe = files(["/work/app/fixtures/a.png", "/etc/hosts", "/work/application/x"], folders: ["/work/app/src"])
+        #expect(policy.validate(["/work/app/fixtures/a.png"], allowsMultiple: false, exists: probe)
+                == .success([URL(fileURLWithPath: "/work/app/fixtures/a.png")]))
+        #expect(policy.validate(["/etc/hosts"], allowsMultiple: false, exists: probe) == .failure(.outside("/etc/hosts")))
+        #expect(policy.validate(["/work/application/x"], allowsMultiple: false, exists: probe)
+                == .failure(.outside("/work/application/x")), "a sibling sharing the prefix is outside")
+        #expect(policy.validate(["/work/app/src"], allowsMultiple: false, exists: probe) == .failure(.directory("/work/app/src")))
+        #expect(policy.validate(["/work/app/nope"], allowsMultiple: false, exists: probe) == .failure(.missing("/work/app/nope")))
+        #expect(policy.validate(["/work/app/../../etc/hosts"], allowsMultiple: false, exists: probe)
+                == .failure(.outside("/work/app/../../etc/hosts")), "dot-dot resolved first")
+    }
+
+    @Test("several files only where the input takes several")
+    func plusieurs() {
+        let probe = files(["/work/app/a", "/work/app/b"])
+        #expect(policy.validate(["/work/app/a", "/work/app/b"], allowsMultiple: false, exists: probe) == .failure(.tooMany))
+        #expect(policy.validate(["/work/app/a", "/work/app/b"], allowsMultiple: true, exists: probe)
+                == .success([URL(fileURLWithPath: "/work/app/a"), URL(fileURLWithPath: "/work/app/b")]))
+    }
+}
+
+@Suite("Agent browser — local sites only")
+struct AgentNetworkRulesTests {
+
+    private func rules(_ hosts: String = "") throws -> [[String: Any]] {
+        let json = AgentNetworkRules.json(allowedHosts: AgentNetworkRules.parse(hosts).hosts)
+        return try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]])
+    }
+
+    private func filters(_ rules: [[String: Any]]) -> [String] {
+        rules.compactMap { ($0["trigger"] as? [String: Any])?["url-filter"] as? String }
+    }
+
+    private func allowed(_ url: String, by rules: [[String: Any]]) -> Bool {
+        // WebKit's semantics: the last matching rule wins.
+        var blocked = false
+        for rule in rules {
+            guard let filter = (rule["trigger"] as? [String: Any])?["url-filter"] as? String,
+                  url.range(of: filter, options: .regularExpression) != nil else { continue }
+            blocked = ((rule["action"] as? [String: Any])?["type"] as? String) == "block"
+        }
+        return !blocked
+    }
+
+    @Test("everything remote is blocked, the machine's own addresses are not")
+    func boucleLocaleSeulement() throws {
+        let list = try rules()
+        #expect(Array(filters(list).prefix(2)) == ["^https?://", "^wss?://"])
+        #expect(!filters(list).contains { $0.contains("|") }, "WebKit's url-filter has no alternation")
+        for url in ["http://localhost:5173/", "http://127.0.0.1:8000/api", "ws://localhost:5173/hmr",
+                    "http://app.localhost:3000/", "http://[::1]:5173/", "https://localhost/"] {
+            #expect(allowed(url, by: list), "\(url)")
+        }
+        for url in ["https://example.com/", "http://localhost.evil.com/", "https://evil.com/?localhost:",
+                    "wss://example.com/socket"] {
+            #expect(!allowed(url, by: list), "\(url)")
+        }
+        #expect(allowed("data:text/html,x", by: list), "inline content is not a network load")
+    }
+
+    @Test("allowed hosts open exactly what they name")
+    func hotesAutorises() throws {
+        let list = try rules("api.example.com, *.staging.dev")
+        #expect(allowed("https://api.example.com/v1", by: list))
+        #expect(allowed("https://eu.staging.dev/", by: list))
+        #expect(!allowed("https://staging.dev/", by: list), "a wildcard excludes its own domain")
+        #expect(!allowed("https://api.example.com.evil.net/", by: list))
+        #expect(!allowed("https://example.com/", by: list))
+        #expect(AgentNetworkRules.parse("ok.dev, *, 10.0.0.1").invalid == ["*", "10.0.0.1"])
+    }
+}
