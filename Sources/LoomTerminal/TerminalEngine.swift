@@ -110,13 +110,19 @@ public struct TerminalModes: Sendable, Equatable {
     /// The kitty keyboard protocol flags the program pushed (`CSI > flags u`).
     /// Empty = legacy xterm encoding.
     public var keyboardEnhancement: KeyboardEnhancement
+    /// DECTCEM (`CSI ?25 h` / `l`): whether the program wants the cursor
+    /// shown. A TUI hides it while it draws its own markers (a `❯` on the
+    /// selected row); drawing ours anyway put a block on another line.
+    public var cursorVisible: Bool
 
     public init(applicationCursorKeys: Bool = false, bracketedPaste: Bool = false,
-                mouseReporting: Bool = false, keyboardEnhancement: KeyboardEnhancement = []) {
+                mouseReporting: Bool = false, keyboardEnhancement: KeyboardEnhancement = [],
+                cursorVisible: Bool = true) {
         self.applicationCursorKeys = applicationCursorKeys
         self.bracketedPaste = bracketedPaste
         self.mouseReporting = mouseReporting
         self.keyboardEnhancement = keyboardEnhancement
+        self.cursorVisible = cursorVisible
     }
 
     public static let none = TerminalModes()

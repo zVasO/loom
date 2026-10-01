@@ -13,7 +13,12 @@ public final class SwiftTermEngine: TerminalEngine {
 
     private final class HeadlessDelegate: TerminalDelegate {
         var onSend: ((ArraySlice<UInt8>) -> Void)?
+        /// DECTCEM (`CSI ?25 l` / `h`). SwiftTerm keeps its own flag
+        /// internal and only reports the switches through these two calls.
+        var cursorHidden = false
         func send(source: Terminal, data: ArraySlice<UInt8>) { onSend?(data) }
+        func showCursor(source: Terminal) { cursorHidden = false }
+        func hideCursor(source: Terminal) { cursorHidden = true }
     }
 
     private let terminal: Terminal
@@ -32,6 +37,12 @@ public final class SwiftTermEngine: TerminalEngine {
 
     public func feed(_ bytes: ArraySlice<UInt8>) {
         terminal.feed(buffer: bytes)
+        // A full (RIS) or soft (DECSTR) reset shows the cursor again without
+        // going through the delegate: a `reset` after a crashed TUI must not
+        // leave the shell cursorless.
+        if headlessDelegate.cursorHidden, Self.endsWithCursorReset(bytes) {
+            headlessDelegate.cursorHidden = false
+        }
         if let updated = terminal.getUpdateRange() {
             dirtyRows.insert(integersIn: updated.startY...updated.endY)
             terminal.clearUpdateRange()
@@ -50,6 +61,24 @@ public final class SwiftTermEngine: TerminalEngine {
 
     public var mouseReporting: Bool { terminal.mouseMode != .off }
 
+    /// Whether the chunk's LAST word on the cursor is a reset — `ESC c`
+    /// (RIS) or `CSI ! p` (DECSTR) — rather than a `CSI ?25 h/l`, which the
+    /// delegate has already recorded.
+    static func endsWithCursorReset(_ bytes: ArraySlice<UInt8>) -> Bool {
+        var reset = false
+        var index = bytes.startIndex
+        while let escape = bytes[index...].firstIndex(of: 0x1B) {
+            let rest = bytes[(escape + 1)...]
+            if rest.first == 0x63 || rest.starts(with: [0x5B, 0x21, 0x70]) {   // ESC c, ESC [ ! p
+                reset = true
+            } else if rest.starts(with: [0x5B, 0x3F, 0x32, 0x35]) {             // ESC [ ? 2 5
+                reset = false
+            }
+            index = escape + 1
+        }
+        return reset
+    }
+
     /// What the program negotiated, read straight off the emulator. SwiftTerm
     /// answers the kitty `CSI ? u` probe itself, so a program that pushes
     /// flags expects `CSI … u` reports from then on — the encoder must know.
@@ -58,7 +87,8 @@ public final class SwiftTermEngine: TerminalEngine {
                       bracketedPaste: terminal.bracketedPasteMode,
                       mouseReporting: terminal.mouseMode != .off,
                       keyboardEnhancement: KeyboardEnhancement(
-                          rawValue: terminal.keyboardEnhancementFlags.rawValue))
+                          rawValue: terminal.keyboardEnhancementFlags.rawValue),
+                      cursorVisible: !headlessDelegate.cursorHidden)
     }
 
     /// SwiftTerm remembers the state and emits `CSI I` / `CSI O` only while the

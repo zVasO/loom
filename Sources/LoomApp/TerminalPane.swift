@@ -44,6 +44,7 @@ struct TerminalPane: View {
             if let surface {
                 TerminalScreenView(screen: surface.screen, history: surface.history,
                                    historyBase: surface.historyBase,
+                                   cursorVisible: surface.modes.cursorVisible,
                                    selection: $selection,
                                    onCopied: { badge = copiedBadge($0) })
                     // TRM-02: the view announces its grid. Measured from a

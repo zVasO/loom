@@ -77,16 +77,21 @@ public struct TerminalScreenView: View {
     /// Absolute scrollback index of history[0] — STABLE row identity, so the
     /// diff skips untouched history lines instead of re-checking 400 per frame.
     public let historyBase: Int
+    /// DECTCEM: a program that hid the cursor (a TUI drawing its own `❯`)
+    /// gets no block from us.
+    public let cursorVisible: Bool
     @Binding public var selection: TerminalSelection
     /// How many characters copy-on-select put on the pasteboard.
     private let onCopied: ((Int) -> Void)?
 
     public init(screen: TerminalScreen, history: [TerminalLine] = [], historyBase: Int = 0,
+                cursorVisible: Bool = true,
                 selection: Binding<TerminalSelection> = .constant(.empty),
                 onCopied: ((Int) -> Void)? = nil) {
         self.screen = screen
         self.history = history
         self.historyBase = historyBase
+        self.cursorVisible = cursorVisible
         self._selection = selection
         self.onCopied = onCopied
     }
@@ -139,7 +144,8 @@ public struct TerminalScreenView: View {
                         let index = absolute - historyBase
                         let onScreen = index - history.count
                         TerminalRow(line: contentLine(index) ?? TerminalLine(cells: []),
-                                    cursorCol: onScreen == screen.cursor.row ? screen.cursor.col : nil,
+                                    cursorCol: cursorVisible && onScreen == screen.cursor.row
+                                      ? screen.cursor.col : nil,
                                     height: cell.height)
                             .equatable()
                     }
@@ -437,9 +443,21 @@ struct TerminalRow: View, Equatable {
             var runEnd = runStart + 1
             while runEnd < cells.count, cells[runEnd].style == style { runEnd += 1 }
             var piece = AttributedString(String(cells[runStart..<runEnd].map(\.character)))
-            piece.foregroundColor = DefaultTheme.terminalColor(style.foreground, isBackground: false)
-            let background = DefaultTheme.terminalColor(style.background, isBackground: true)
-            if background != .clear { piece.backgroundColor = background }
+            if style.attributes.contains(.inverse) {
+                // Reverse video — how a TUI with the cursor hidden draws its
+                // own caret and highlights: the colours swap, the default
+                // ones becoming the pane's background and text.
+                piece.foregroundColor = style.background == .default
+                    ? DefaultTheme.contentBackground
+                    : DefaultTheme.terminalColor(style.background, isBackground: false)
+                piece.backgroundColor = style.foreground == .default
+                    ? DefaultTheme.primaryText
+                    : DefaultTheme.terminalColor(style.foreground, isBackground: false)
+            } else {
+                piece.foregroundColor = DefaultTheme.terminalColor(style.foreground, isBackground: false)
+                let background = DefaultTheme.terminalColor(style.background, isBackground: true)
+                if background != .clear { piece.backgroundColor = background }
+            }
             if style.attributes.contains(.bold) {
                 piece.font = boldFont
             }
