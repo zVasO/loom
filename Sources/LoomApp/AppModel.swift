@@ -1331,21 +1331,46 @@ public final class AppModel {
     /// When each open PR was last checked against GitHub.
     @ObservationIgnored private var prCheckedAt: [String: Date] = [:]
 
+    /// Bumped by a manual refresh: the workspace reloads on it even when
+    /// GitHub reports nothing new.
+    private var prReloadGenerations: [String: Int] = [:]
+    /// PRs a manual refresh is running for — the toolbar's spinner.
+    public private(set) var prRefreshing: Set<String> = []
+
+    public func prReloadGeneration(_ number: Int, in projectID: ProjectID) -> Int {
+        prReloadGenerations[prKey(number, projectID)] ?? 0
+    }
+
+    public func isRefreshingPR(_ number: Int, in projectID: ProjectID) -> Bool {
+        prRefreshing.contains(prKey(number, projectID))
+    }
+
     /// Keeps an open PR true to GitHub: refetches its row and, when it moved
     /// (new head, new comments, new reviews), drops its caches — the
     /// workspace reloads on the new row — and brings its live review
     /// session's worktree to the new head. Throttled: tab switches and
-    /// app activations call it freely.
-    public func refreshOpenPR(_ number: Int, in projectID: ProjectID) async {
+    /// app activations call it freely. `force` is the refresh button: no
+    /// throttle, everything reloaded, the worktree fetched whatever the
+    /// head says.
+    public func refreshOpenPR(_ number: Int, in projectID: ProjectID, force: Bool = false) async {
         let key = prKey(number, projectID)
-        if let last = prCheckedAt[key], Date().timeIntervalSince(last) < 20 { return }
+        if !force, let last = prCheckedAt[key], Date().timeIntervalSince(last) < 20 { return }
+        if force {
+            guard !prRefreshing.contains(key) else { return }
+            prRefreshing.insert(key)
+        }
+        defer { if force { prRefreshing.remove(key) } }
         prCheckedAt[key] = Date()
         guard let repo = projectRepo(projectID),
               let fresh = try? await GitHubService().pullRequest(number, repo: nil, in: repo),
               let tab = prTabs.tab(PRTab.key(projectID, number)) else { return }
         let old = tab.pr
+        if force {
+            invalidatePRCaches(number, in: projectID)
+            prReloadGenerations[key, default: 0] += 1
+        }
         if fresh != old {
-            if fresh.headSHA != old.headSHA || fresh.updatedAt != old.updatedAt {
+            if !force, fresh.headSHA != old.headSHA || fresh.updatedAt != old.updatedAt {
                 invalidatePRCaches(number, in: projectID)
             }
             prTabs.refresh(from: [fresh], in: projectID)
@@ -1364,7 +1389,7 @@ public final class AppModel {
         if !fresh.headSHA.isEmpty,
            let id = reviewSession(forPR: number, in: projectID),
            sessions.contains(where: { $0.id == id }),
-           reviewedHead[id] != fresh.headSHA {
+           force || reviewedHead[id] != fresh.headSHA {
             await syncReviewWorktree(for: id, pr: fresh, in: projectID, quietly: true)
         }
     }

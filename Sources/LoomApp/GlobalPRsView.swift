@@ -790,6 +790,18 @@ struct GlobalPRsView: View {
                     startReview(pr, project: project)
                 }
             }
+            if !model.isLaunchingReview(forPR: pr.number, in: project.id) {
+                // The poll runs every minute; this is "now": PR, diff,
+                // comments, and the review worktree fetched again.
+                if model.isRefreshingPR(pr.number, in: project.id) {
+                    ProgressView().controlSize(.small).frame(width: 26)
+                } else {
+                    HoverIconButton(systemImage: "arrow.clockwise",
+                                    help: "Refresh from GitHub — PR, diff, comments, review worktree") {
+                        Task { await model.refreshOpenPR(pr.number, in: project.id, force: true) }
+                    }
+                }
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(DefaultTheme.background)
