@@ -55,12 +55,19 @@ public enum AgentBrowserSelfTest {
             }
         }
         func ref(_ yaml: String, _ pattern: String) -> String? {
-            guard let line = yaml.split(separator: "\n").first(where: { $0.range(of: pattern, options: .regularExpression) != nil }),
+            // Lines with a ref only: a label's text line names the same words.
+            guard let line = yaml.split(separator: "\n").first(where: {
+                      $0.contains("[ref=") && $0.range(of: pattern, options: .regularExpression) != nil }),
                   let range = line.range(of: #"\[ref=(e\d+)\]"#, options: .regularExpression) else { return nil }
             return String(line[range].dropFirst(5).dropLast())
         }
+        /// The page's own answer only — the ```json block, not the ### Page
+        /// section Swift writes around it.
         func evaluate(_ function: String) async -> String {
-            text(await send(.evaluate(function: function, target: nil)))
+            let answer = text(await send(.evaluate(function: function, target: nil)))
+            guard let open = answer.range(of: "```json\n"),
+                  let close = answer.range(of: "\n```", range: open.upperBound..<answer.endIndex) else { return answer }
+            return String(answer[open.upperBound..<close.lowerBound])
         }
 
         // 1. Navigate: the page loads, the snapshot names it.
@@ -165,8 +172,8 @@ public enum AgentBrowserSelfTest {
 
         // 12. A laptop's width in a narrower view: the page sees 1280 CSS pixels.
         let wide = text(await send(.resize(.css(1_280))))
-        let innerWidth = await evaluate("() => window.innerWidth")
-        record("resize", innerWidth.contains("1280") && wide.contains("Viewport: 1280×"), wide + "\n" + innerWidth)
+        let innerWidth = await evaluate("() => 'iw=' + window.innerWidth")
+        record("resize", innerWidth.contains("\"iw=1280\"") && wide.contains("Viewport: 1280×"), wide + "\n" + innerWidth)
         _ = await send(.resize(.fit))
 
         // 13. The whole page: taller than the view, put back where it was.
@@ -174,8 +181,8 @@ public enum AgentBrowserSelfTest {
         switch await send(.screenshot(target: nil, format: .png, fullPage: true)) {
         case .success(let answer):
             let tall = (answer.image?.height ?? 0) > (answer.image?.width ?? 0)
-            let scrolled = await evaluate("() => window.scrollY")
-            record("full-page screenshot", tall && scrolled.contains("100"),
+            let scrolled = await evaluate("() => 'sy=' + window.scrollY")
+            record("full-page screenshot", tall && scrolled.contains("\"sy=100\""),
                    "\(answer.image.map { "\($0.width)×\($0.height)" } ?? "no image"), scrollY \(scrolled)")
         case .failure(let error):
             record("full-page screenshot", false, "\(error)")
@@ -183,7 +190,7 @@ public enum AgentBrowserSelfTest {
 
         // 14. A file chooser answered with a file the policy allows.
         let withPhoto = text(await send(.snapshot(target: nil, depth: nil)))
-        if let input = ref(withPhoto, #"Photo"#) {
+        if let input = ref(withPhoto, #"button "Photo""#) {
             let opened = text(await send(.click(AgentTarget(target: input), doubleClick: false, button: .left,
                                                 modifiers: [])))
             let outside = text(await send(.fileUpload(paths: ["/etc/hosts"])))

@@ -157,6 +157,8 @@ public enum AgentCommand: Equatable, Sendable {
         switch self {
         case .navigate: return true
         case .tabs(.new): return true
+        // A width set before any page: kept for the project, the next page has it.
+        case .resize: return true
         default: return false
         }
     }

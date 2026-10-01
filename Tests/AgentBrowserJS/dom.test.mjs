@@ -283,6 +283,59 @@ test("a full-page capture scrolls the top document at once, and reads where it w
   await page.close();
 });
 
+test("a custom checkbox re-rendered by its framework a turn later reads as set", { skip }, async () => {
+  const page = await openTodo();
+  await page.evaluate(() => {
+    const box = document.createElement("div");
+    box.setAttribute("role", "checkbox");
+    box.setAttribute("aria-checked", "false");
+    box.setAttribute("aria-label", "Newsletter");
+    box.tabIndex = 0;
+    box.textContent = "Newsletter";
+    let on = false;
+    // As Vue or Lit do: the state now, the DOM in a microtask.
+    box.addEventListener("click", () => { on = !on; queueMicrotask(() => box.setAttribute("aria-checked", String(on))); });
+    document.body.prepend(box);
+  });
+  const { yaml } = await run(page, "snapshot", { budget: 20000 });
+  const answer = await run(page, "setChecked", { target: refOf(yaml, /checkbox "Newsletter"/), checked: true });
+  assert.equal(answer.checked, true, JSON.stringify(answer));
+  await page.close();
+});
+
+test("a page whose body scrolls itself is as tall as its window, for a full-page capture", { skip }, async () => {
+  const page = await openTodo();
+  await page.evaluate(() => {
+    document.documentElement.style.cssText = "overflow:hidden;height:100%";
+    document.body.style.cssText = "height:100%;overflow:auto;margin:0";
+    const tall = document.createElement("div");
+    tall.style.height = "5000px";
+    document.body.append(tall);
+  });
+  const info = await run(page, "pageInfo");
+  assert.equal(info.scrollHeight, info.height, "what window.scrollTo can reach");
+  await page.close();
+});
+
+test("an embedded frame's relay admits far less than the page's", { skip }, async () => {
+  const page = await openTodo();
+  const posted = await page.evaluate(() => new Promise((done) => {
+    const frame = document.createElement("iframe");
+    frame.srcdoc = "<p>inner</p>";
+    frame.onload = () => {
+      const inner = frame.contentWindow;
+      for (let i = 0; i < 300; i++) {
+        inner.document.dispatchEvent(new inner.CustomEvent("loom-agent-hook",
+          { detail: JSON.stringify({ t: "console", level: "info", text: "f" + i }) }));
+      }
+      done(inner.__posted.filter((m) => m.t === "console").length);
+    };
+    document.body.append(frame);
+  }));
+  assert.ok(posted > 0 && posted <= 25, "about 20 from a frame: " + posted);
+  await page.close();
+});
+
 test("a stamped element is found by the page-world function, then unmarked", { skip }, async () => {
   const page = await openTodo();
   const { yaml } = await run(page, "snapshot", {});

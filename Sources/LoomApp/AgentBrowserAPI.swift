@@ -176,24 +176,39 @@ extension AppModel {
 
     // MARK: - Profiles on disk
 
-    /// The stores the agents' browsers created: the sweep deletes only these,
-    /// never an identifier store something else of the app might own.
-    private static let agentStoresKey = "loom.agentBrowser.stores"
+    /// The stores the agents' browsers of THIS support directory created,
+    /// kept beside the database they are checked against: the sweep deletes
+    /// only these — never an identifier store of another Loom instance
+    /// (LOOM_SUPPORT_DIR shares WebKit's stores and the defaults domain).
+    private var agentStoresFile: URL {
+        supportDirectory.appendingPathComponent("agent-browser/stores.json")
+    }
 
     private var registeredAgentStores: [UUID] {
-        (UserDefaults.standard.stringArray(forKey: Self.agentStoresKey) ?? []).compactMap(UUID.init(uuidString:))
+        guard let data = try? Data(contentsOf: agentStoresFile),
+              let names = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+        return names.compactMap(UUID.init(uuidString:))
+    }
+
+    private func saveAgentStores(_ stores: [UUID]) {
+        let file = agentStoresFile
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        if let data = try? JSONEncoder().encode(stores.map(\.uuidString)) {
+            try? data.write(to: file, options: .atomic)
+        }
     }
 
     private func registerAgentStore(_ identifier: UUID) {
         var stores = registeredAgentStores
         guard !stores.contains(identifier) else { return }
         stores.append(identifier)
-        UserDefaults.standard.set(stores.map(\.uuidString), forKey: Self.agentStoresKey)
+        saveAgentStores(stores)
     }
 
     private func unregisterAgentStores(_ identifiers: Set<UUID>) {
-        let stores = registeredAgentStores.filter { !identifiers.contains($0) }
-        UserDefaults.standard.set(stores.map(\.uuidString), forKey: Self.agentStoresKey)
+        saveAgentStores(registeredAgentStores.filter { !identifiers.contains($0) })
     }
 
     /// At launch, before any agent browser: the profiles of projects removed
@@ -206,8 +221,8 @@ extension AppModel {
         guard !orphans.isEmpty else { return }
         Task { @MainActor in
             var gone: Set<UUID> = []
-            for identifier in orphans where await AgentBrowserProfile.removeStore(identifier) {
-                gone.insert(identifier)
+            for identifier in orphans {
+                if await AgentBrowserProfile.removeStore(identifier) { gone.insert(identifier) }
             }
             unregisterAgentStores(gone)
         }

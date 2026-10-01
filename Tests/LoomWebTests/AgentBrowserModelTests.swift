@@ -588,4 +588,15 @@ struct AgentNetworkRulesTests {
         }
         #expect(!AgentNetworkRules.allows(nil, allowedHosts: hosts))
     }
+
+    @Test("local-only refuses network addresses only: an inline frame loads nothing")
+    func cadresEnLigne() {
+        let access = AgentNetworkAccess.localOnly(allowedHosts: [])
+        for url in ["data:text/html,<p>preview</p>", "blob:http://localhost:5173/6f1e", "about:srcdoc", "about:blank"] {
+            #expect(!AgentNetworkRules.refuses(URL(string: url), under: access), "\(url)")
+        }
+        #expect(AgentNetworkRules.refuses(URL(string: "https://example.com/"), under: access))
+        #expect(AgentNetworkRules.refuses(URL(string: "WSS://example.com/socket"), under: access))
+        #expect(!AgentNetworkRules.refuses(URL(string: "https://example.com/"), under: .open))
+    }
 }

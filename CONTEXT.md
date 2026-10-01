@@ -41,7 +41,7 @@ Le stockage WebKit (cookies, localStorage, IndexedDB) des navigateurs d'agent d'
 _Avoid_ : profil (seul — WEB-02 réserve « profils » à ceux de l'utilisateur), session web, cookies
 
 **Mode sites locaux** :
-Le réglage qui borne les navigateurs d'agent aux adresses de la machine (localhost, 127.0.0.1) et aux hôtes listés : chaque chargement — page, script, requête, socket — filtré par WebKit. Désactivé par défaut.
+Le réglage qui borne les navigateurs d'agent aux adresses de la machine (localhost, 127.0.0.1) et aux hôtes listés : chaque chargement http(s) et ws(s) — page, script, requête, socket — filtré par WebKit ; WebRTC et la résolution DNS anticipée coupés. Désactivé par défaut. Il ne borne que les pages, pas les autres outils de l'agent.
 _Avoid_ : pare-feu, sandbox, mode hors ligne
 
 **Instantané de page** :

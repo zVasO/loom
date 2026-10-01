@@ -64,6 +64,15 @@ public enum AgentNetworkRules {
         return LoopbackHost.isLoopback(host) || allowedHosts.contains { $0.matches(host: host) }
     }
 
+    /// What `access` refuses to navigate to: network schemes only — a data:,
+    /// blob: or srcdoc frame loads nothing (AgentNavigationPolicy keeps those
+    /// to subframes).
+    public static func refuses(_ url: URL?, under access: AgentNetworkAccess) -> Bool {
+        guard case .localOnly(let hosts) = access,
+              let scheme = url?.scheme?.lowercased(), ["http", "https", "ws", "wss"].contains(scheme) else { return false }
+        return !allows(url, allowedHosts: hosts)
+    }
+
     /// The hosts the person typed, one per line or comma-separated; the
     /// invalid ones named so the field can say why.
     public static func parse(_ text: String) -> (hosts: [HostPattern], invalid: [String]) {

@@ -114,16 +114,20 @@ public final class AgentBrowser: NSObject {
     // MARK: - Local sites only
 
     /// The setting changed (or the browser starts): the rules every web view
-    /// carries, compiled once per rule set. Pages already loaded keep what
-    /// they loaded; every load after this goes through the new rules.
+    /// carries, compiled once per rule set. Never a moment without rules on a
+    /// page that had them: the ones in force stay until the new ones replace
+    /// them in the same turn. Turned on, the open pages are made again — with
+    /// no peer connections (WebRTC bypasses the rules), loading only once the
+    /// rules are on.
     public func setNetworkAccess(_ access: AgentNetworkAccess) {
         guard access != networkAccess else { return }
+        let wasOpen = networkAccess == .open
         networkAccess = access
         rulesFailure = nil
-        contentRules = nil
-        for webView in liveWebViews { webView.configuration.userContentController.removeAllContentRuleLists() }
         guard case .localOnly(let hosts) = access else {
             rulesPreparation = nil
+            contentRules = nil
+            for webView in liveWebViews { webView.configuration.userContentController.removeAllContentRuleLists() }
             return
         }
         let json = AgentNetworkRules.json(allowedHosts: hosts)
@@ -131,12 +135,36 @@ public final class AgentBrowser: NSObject {
             let compiled = await Self.compile(json)
             guard let self, self.networkAccess == access else { return }
             if let list = compiled.list {
+                for webView in self.liveWebViews {
+                    let content = webView.configuration.userContentController
+                    content.removeAllContentRuleLists()
+                    content.add(list)
+                }
                 self.contentRules = list
-                for webView in self.liveWebViews { webView.configuration.userContentController.add(list) }
             } else {
+                // Fail closed: navigations are refused (finishAllowing); the
+                // rules in force, if any, stay on the pages.
                 self.rulesFailure = compiled.error ?? "unknown error"
             }
             self.rulesPreparation = nil
+        }
+        if wasOpen, !liveWebViews.isEmpty {
+            // Before this, the pages ran free: they start again under the
+            // mode, their loads held until the rules are on.
+            controller.releaseWebViews()
+            controller.materialize()
+        }
+    }
+
+    /// Local-only mode leaves no way around its rules that WebKit offers to
+    /// turn off: peer connections (WebRTC's sockets are not loads) and DNS
+    /// prefetching. WebKit's own preferences, through key-value coding — set
+    /// only where the running WebKit has them.
+    private static func closeSideChannels(_ preferences: WKPreferences) {
+        for (key, setter) in [("peerConnectionEnabled", "_setPeerConnectionEnabled:"),
+                              ("DNSPrefetchingEnabled", "_setDNSPrefetchingEnabled:")]
+        where preferences.responds(to: NSSelectorFromString(setter)) {
+            preferences.setValue(false, forKey: key)
         }
     }
 
@@ -173,8 +201,22 @@ public final class AgentBrowser: NSObject {
 
     /// Outside what local-only mode allows: the navigation's URL, refused.
     private func refusedByNetworkAccess(_ url: URL?) -> Bool {
-        guard case .localOnly(let hosts) = networkAccess else { return false }
-        return !AgentNetworkRules.allows(url, allowedHosts: hosts)
+        AgentNetworkRules.refuses(url, under: networkAccess)
+    }
+
+    /// Before the engine touches a tab for `url`: refused outright when the
+    /// mode forbids it, rather than a load WebKit drops without a word.
+    private func refuseOutsideNetworkAccess(_ url: URL) async throws {
+        guard networkAccess != .open else { return }
+        for wait in pendingPreparations { await wait.value }
+        try Task.checkCancellation()
+        if refusedByNetworkAccess(url) {
+            throw AgentError.invalid("\(url.host() ?? url.absoluteString) is outside local sites only "
+                                     + "(Loom's Settings ▸ Agents lists the hosts it lets through)")
+        }
+        if let rulesFailure {
+            throw AgentError.unavailable("the local-only rules could not be set up (\(rulesFailure)): nothing loads")
+        }
     }
 
     // MARK: - Commands
@@ -348,6 +390,7 @@ public final class AgentBrowser: NSObject {
     // MARK: - Navigation
 
     private func navigate(to url: URL, deadline: ContinuousClock.Instant) async throws -> AgentResult {
+        try await refuseOutsideNetworkAccess(url)
         let tab: BrowserTabsModel.TabID
         if let active = controller.activeTab {
             tab = active
@@ -358,7 +401,9 @@ public final class AgentBrowser: NSObject {
                     dismissDialog(tab)
                     note(tab, "The page's dialog was dismissed by the navigation.")
                 }
-                if await isStuck(tab, current) {
+                let stuck = await isStuck(tab, current)
+                try Task.checkCancellation()
+                if stuck {
                     // A script from an earlier command never yielded: a fresh
                     // process instead of queueing behind it.
                     controller.load(url, in: tab)
@@ -450,9 +495,7 @@ public final class AgentBrowser: NSObject {
         let (tab, webView) = try await currentPage(deadline: deadline)
         // A JS dialog blocks the page's process, and its drawing with it; a
         // file chooser does not.
-        if let kind = dialogs[tab]?.kind {
-            if case .fileChooser = kind {} else { try refuseWhileDialog(tab) }
-        }
+        if blocksPage(tab) { try refuseWhileDialog(tab) }
         ensureFrame(webView)
         // The page's CSS pixels are the view's points times its zoom (a set width).
         let zoom = max(webView.pageZoom, 0.1)
@@ -629,6 +672,7 @@ public final class AgentBrowser: NSObject {
             }
             return AgentResult(text: "### Open tabs\n" + (lines.isEmpty ? "No tab is open." : lines.joined(separator: "\n")))
         case .new(let url):
+            if let url { try await refuseOutsideNetworkAccess(url) }
             let tab = controller.openTab(url: url ?? URL(string: "about:blank")!)
             guard let webView = controller.webView(for: tab) else { throw AgentError.unavailable("the tab could not open") }
             try await waitForLoad(tab: tab, limit: .seconds(30), deadline: deadline)
@@ -644,7 +688,10 @@ public final class AgentBrowser: NSObject {
             guard let webView = controller.webView(for: id) else { throw AgentError.unavailable("the tab could not open") }
             // A call blocked on the tab's own dialog waits, it is not stuck:
             // a fresh view would dismiss the dialog and reload the page.
-            if dialogs[id] == nil, await isStuck(id, webView) {
+            var stuck = false
+            if dialogs[id] == nil { stuck = await isStuck(id, webView) }
+            try Task.checkCancellation()
+            if stuck {
                 controller.recreateWebView(for: id)
                 note(id, "The page was stuck in a script: it was replaced by a fresh one.")
             }
@@ -840,41 +887,65 @@ public final class AgentBrowser: NSObject {
         let total = min(max(scrollHeight, viewportHeight), Self.fullPageMaxHeight)
         let zoom = max(webView.pageZoom, 0.1)
         var slices: [AgentScreenshot.Slice] = []
+        var covered: CGFloat = 0
+        var stuck = false
         do {
-            var top: CGFloat = 0
-            while top < total {
+            while covered < total {
+                let top = covered
                 let scrolled = try await helper("scrollTo", ["x": startX, "y": Double(top)], tab: tab,
                                                 webView: webView, deadline: deadline)
                 let actual = CGFloat(scrolled["y"] as? Double ?? Double(top))
                 try await pause(.milliseconds(120))   // a frame to paint the new position
                 let image = try await AgentScreenshot.capture(webView, rect: nil)
-                let bottom = min(top + viewportHeight, total)
-                // The slice [top, bottom) of the page, in a view that shows [actual, actual + viewport).
+                // The slice [top, bottom) of the page, in a view that shows
+                // [actual, actual + viewport): never past what it shows — a
+                // page that shrank, or would not scroll, ends the capture.
+                var bottom = min(top + viewportHeight, total)
+                if actual + viewportHeight < bottom {
+                    bottom = actual + viewportHeight
+                    stuck = true
+                }
+                // A scroll snapped past `top` (beyond a pixel's rounding) leaves
+                // a band unseen: the capture ends there rather than skip it.
+                guard bottom > top, actual <= top + 1 else { stuck = true; break }
                 slices.append(AgentScreenshot.Slice(image: NSImageBox(image: image),
-                                                    sourceTop: (top - actual) * zoom,
+                                                    sourceTop: max(0, top - actual) * zoom,
                                                     sourceHeight: (bottom - top) * zoom,
                                                     pageTop: top, pageHeight: bottom - top))
-                top = bottom
+                covered = bottom
+                if stuck { break }
             }
         } catch {
-            await scrollBack(x: startX, y: startY, tab: tab, webView: webView)
+            await scrollBackUncancelled(x: startX, y: startY, tab: tab, webView: webView)
             throw error
         }
         // Put back: the agent's next action expects the page where it was.
-        await scrollBack(x: startX, y: startY, tab: tab, webView: webView)
-        let size = CGSize(width: width, height: total)
+        await scrollBackUncancelled(x: startX, y: startY, tab: tab, webView: webView)
+        guard covered > 0 else { throw AgentError.failed("the page could not be captured") }
+        let size = CGSize(width: width, height: covered)
         let pixels = AgentScreenshot.targetSize(for: size, maxEdge: environment.limits.imageMaxEdge)
         guard let data = AgentScreenshot.encode(slices: slices, pageSize: size, pixels: pixels, format: format) else {
             throw AgentError.failed("the screenshot could not be encoded")
         }
-        let cut = scrollHeight > Self.fullPageMaxHeight
-            ? " (cut at \(Int(Self.fullPageMaxHeight)) of \(Int(scrollHeight)) CSS pixels)" : ""
-        return (data, pixels, "the whole page, \(Int(width))×\(Int(total)) CSS pixels\(cut)")
+        let cut: String
+        if stuck {
+            cut = " (cut: the page would not scroll further)"
+        } else if scrollHeight > Self.fullPageMaxHeight {
+            cut = " (cut at \(Int(Self.fullPageMaxHeight)) of \(Int(scrollHeight)) CSS pixels)"
+        } else {
+            cut = ""
+        }
+        return (data, pixels, "the whole page, \(Int(width))×\(Int(covered)) CSS pixels\(cut)")
     }
 
-    private func scrollBack(x: Double, y: Double, tab: BrowserTabsModel.TabID, webView: WKWebView) async {
-        _ = try? await helper("scrollTo", ["x": x, "y": y], tab: tab, webView: webView,
-                              deadline: ContinuousClock.now + .seconds(2))
+    /// In a task of its own: a capture cut short by its deadline or a cancel
+    /// still puts the page back (a cancelled task's script calls end at once).
+    private func scrollBackUncancelled(x: Double, y: Double, tab: BrowserTabsModel.TabID,
+                                       webView: WKWebView) async {
+        await Task { @MainActor [weak self] in
+            _ = try? await self?.helper("scrollTo", ["x": x, "y": y], tab: tab, webView: webView,
+                                        deadline: ContinuousClock.now + .seconds(2))
+        }.value
     }
 
     /// A full-page capture stops there: past it, the image would be scaled
@@ -983,7 +1054,8 @@ public final class AgentBrowser: NSObject {
                         deadline: ContinuousClock.Instant) async throws -> String {
         // A page blocked on a dialog would run the script once the dialog is
         // answered, long after the command reported: refused before it starts.
-        try refuseWhileDialog(tab)
+        // A file chooser blocks nothing.
+        if blocksPage(tab) { try refuseWhileDialog(tab) }
         try Task.checkCancellation()
         guard ContinuousClock.now < deadline else { throw AgentInterruption.deadline }
         let box = OneShot<String>()
@@ -1067,6 +1139,14 @@ public final class AgentBrowser: NSObject {
         ensureFrame(webView)
         if restored { try await waitForLoad(tab: tab, limit: .seconds(10), deadline: deadline) }
         return (tab, webView)
+    }
+
+    /// A JS dialog holds the page's script thread (and its drawing); a file
+    /// chooser leaves the page running.
+    private func blocksPage(_ tab: BrowserTabsModel.TabID) -> Bool {
+        guard let kind = dialogs[tab]?.kind else { return false }
+        if case .fileChooser = kind { return false }
+        return true
     }
 
     private func refuseWhileDialog(_ tab: BrowserTabsModel.TabID) throws {
@@ -1221,6 +1301,15 @@ public final class AgentBrowser: NSObject {
         }
     }
 
+    /// The page flooded the channel (AgentMessageProxy): nothing more is
+    /// recorded from it until its next document.
+    fileprivate func channelCut(for webView: WKWebView) {
+        guard let tab = controller.tabID(of: webView), runtimes[tab] != nil else { return }
+        runtimes[tab]?.channelCut = true
+        note(tab, "The page sent console and network messages faster than Loom reads them: they are no longer "
+             + "recorded until it navigates.")
+    }
+
     private func park(_ answer: DialogAnswer, kind: AgentModalState.Kind, message: String,
                       frame: WKFrameInfo, webView: WKWebView) {
         guard let tab = controller.tabID(of: webView), runtimes[tab] != nil else {
@@ -1292,6 +1381,7 @@ extension AgentBrowser: BrowserTabEngine {
     func makeWebView(for tab: BrowserTabsModel.TabID) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = dataStore
+        if networkAccess != .open { Self.closeSideChannels(configuration.preferences) }
         // Popups only from what the agent clicks — its clicks carry the gesture.
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         // Off screen, the page keeps running: the agent drives it whether the
@@ -1332,6 +1422,7 @@ extension AgentBrowser: BrowserTabEngine {
         interruptCalls(tab, .closed(unloaded: controller.model.tab(tab) != nil))
         dismissDialog(tab)
         NotificationCenter.default.removeObserver(self, name: NSView.frameDidChangeNotification, object: webView)
+        messageProxy?.forget(webView.configuration.userContentController)
         webView.uiDelegate = nil
         webView.navigationDelegate = nil
         webView.configuration.userContentController.removeAllScriptMessageHandlers()
@@ -1431,6 +1522,12 @@ extension AgentBrowser: WKNavigationDelegate {
             runtimes[tab]?.httpStatus = document.status
             runtimes[tab]?.network.document(url: document.url, status: document.status)
             runtimes[tab]?.pendingDocument = nil
+        }
+        if runtimes[tab]?.channelCut == true, let messageProxy {
+            // A new document: the channel a flood cut is open again.
+            webView.configuration.userContentController.add(messageProxy, contentWorld: AgentScripts.world,
+                                                            name: AgentScripts.messageHandlerName)
+            runtimes[tab]?.channelCut = false
         }
         // A new document: a dialog or chooser of the old one can no longer
         // be answered, and scripts running in it will never answer.
@@ -1579,6 +1676,8 @@ private struct TabRuntime {
     /// When the page's process stopped, the last minute: a page that keeps
     /// crashing is not reloaded forever.
     var crashTimes: [Double] = []
+    /// The page flooded its channel: the handler is off until the next document.
+    var channelCut = false
 }
 
 /// A dialog's completion, called exactly once: WebKit raises if one is
@@ -1615,12 +1714,36 @@ private enum DialogAnswer {
 /// controller retains its handlers.
 final class AgentMessageProxy: NSObject, WKScriptMessageHandler {
     weak var owner: AgentBrowser?
+    /// Messages per web view in the current second. The relay bounds each
+    /// frame; a page that multiplies its frames to flood anyway has its
+    /// channel cut — WebKit decodes every message on the main thread.
+    private var windows: [ObjectIdentifier: (start: TimeInterval, count: Int)] = [:]
+    static let floodPerSecond = 2_000
 
     init(owner: AgentBrowser) {
         self.owner = owner
     }
 
+    func forget(_ userContentController: WKUserContentController) {
+        windows[ObjectIdentifier(userContentController)] = nil
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        let key = ObjectIdentifier(userContentController)
+        let now = ProcessInfo.processInfo.systemUptime
+        var window = windows[key] ?? (now, 0)
+        if now - window.start >= 1 { window = (now, 0) }
+        window.count += 1
+        windows[key] = window
+        if window.count > Self.floodPerSecond {
+            windows[key] = nil
+            userContentController.removeScriptMessageHandler(forName: AgentScripts.messageHandlerName,
+                                                             contentWorld: AgentScripts.world)
+            if let webView = message.webView {
+                MainActor.assumeIsolated { owner?.channelCut(for: webView) }
+            }
+            return
+        }
         guard let parsed = AgentHookMessage.parse(message.body), let webView = message.webView else { return }
         // A frame of another origin is named by its origin only: a URL's path
         // and query can carry tokens.

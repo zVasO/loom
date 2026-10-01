@@ -231,8 +231,11 @@ if (XHR) {
 // Loom's own world, document start, every frame: the only path from the page
 // hook to Loom. The message handler exists in this world alone — a page
 // cannot post to it, only dispatch events this relay reads: strings of at
-// most 4 KB, 200 a second (the rest counted), JSON objects only. A response
-// passes when its request did, so a chatty page never leaves one pending.
+// most 4 KB, JSON objects only, 200 a second from the page itself and 20
+// from each frame it embeds (the rest counted) — a page cannot multiply its
+// budget by its frames much; Loom cuts the channel of one that still floods.
+// A response passes when its request did, so a chatty page never leaves one
+// pending.
 if (globalThis.__loomAgentRelay) return;
 globalThis.__loomAgentRelay = true;
 const handlers = globalThis.webkit && globalThis.webkit.messageHandlers;
@@ -242,7 +245,10 @@ if (!channel) return;
 const EVENT = "loom-agent-hook";
 const MAX_DETAIL = 4096;
 const MAX_ADMITTED = 2000;
-let tokens = 200;
+let isTop = true;
+try { isTop = window === window.top; } catch (_) { isTop = false; }
+const RATE = isTop ? 200 : 20;
+let tokens = RATE;
 let refilled = Date.now();
 let dropped = 0;
 const admitted = new Set();
@@ -253,7 +259,7 @@ function post(message) {
 
 function admit() {
   const now = Date.now();
-  tokens = Math.min(200, tokens + (now - refilled) * 0.2);
+  tokens = Math.min(RATE, tokens + (now - refilled) * RATE / 1000);
   refilled = now;
   if (tokens < 1) { dropped++; return false; }
   tokens -= 1;
@@ -1273,17 +1279,31 @@ function pressKey(spec) {
   return { ok: true, focused: describe(now) };
 }
 
-/** A checkbox or radio to a state: clicked only when it differs. */
-function setChecked(args) {
+/** One turn of the page's scheduler: its microtasks, then a task — where
+ * Vue, Svelte, Lit and React re-render. A message, not a timer: a hidden
+ * page's timers are throttled. */
+function nextTurn(view) {
+  return new Promise((resolve) => {
+    const channel = new view.MessageChannel();
+    channel.port1.onmessage = () => resolve();
+    channel.port2.postMessage(0);
+  });
+}
+
+/** A checkbox or radio to a state: clicked only when it differs, read once
+ * the page had its turn to re-render (a custom one's aria-checked). */
+async function setChecked(args) {
   const resolved = resolveTarget(args.target);
   if (resolved.error) return resolved;
   const el = resolved.element;
   const input = el.localName === "input" ? el : (el.control || el.querySelector && el.querySelector("input"));
-  const current = input ? input.checked : el.getAttribute("aria-checked") === "true";
+  const read = () => input ? input.checked : el.getAttribute("aria-checked") === "true";
   const wanted = !!args.checked;
-  if (current !== wanted) pointerSequence(el, {});
-  const now = input ? input.checked : el.getAttribute("aria-checked") === "true";
-  return { ok: true, description: describe(el), checked: now };
+  if (read() !== wanted) {
+    pointerSequence(el, {});
+    await nextTurn(el.ownerDocument.defaultView || window);
+  }
+  return { ok: true, description: describe(el), checked: read() };
 }
 
 /** A range (slider) or any input whose value is set directly. */
@@ -1376,12 +1396,13 @@ function rect(args) {
 
 function pageInfo() {
   const doc = document.documentElement;
-  const body = document.body;
   return {
     ok: true, url: location.href, title: document.title,
     width: window.innerWidth, height: window.innerHeight,
-    scrollWidth: Math.max(doc ? doc.scrollWidth : 0, body ? body.scrollWidth : 0),
-    scrollHeight: Math.max(doc ? doc.scrollHeight : 0, body ? body.scrollHeight : 0),
+    // What window.scrollTo can reach: a page whose <body> scrolls itself is
+    // as tall as its window.
+    scrollWidth: (document.scrollingElement || doc || { scrollWidth: 0 }).scrollWidth,
+    scrollHeight: (document.scrollingElement || doc || { scrollHeight: 0 }).scrollHeight,
     scrollX: window.scrollX, scrollY: window.scrollY,
     visibility: document.visibilityState,
   };

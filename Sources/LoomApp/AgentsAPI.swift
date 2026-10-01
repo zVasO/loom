@@ -74,14 +74,20 @@ extension AppModel {
             case .sessionSetBadges:
                 let params = try request.decodeParams(APISetBadgesParams.self)
                 let id = try targetSession(scope, named: params.sessionId)
-                if let problem = APILimits.badgeProblem(params.badges) {
+                // A PR session's "PR #n" is Loom's (it files the session under
+                // code review): the agent may set badges around it, never take
+                // it off — nor give itself one, which would then stick.
+                let kept = badges(of: id).filter { Self.wearsPRBadge([$0]) }
+                let added = params.badges.filter { !kept.contains($0) }
+                if added.contains(where: { Self.wearsPRBadge([$0]) }) {
+                    throw APIError(code: .invalidParams,
+                                   message: "\"PR #n\" badges are Loom's: the PR tab gives them")
+                }
+                let merged = kept + added
+                if let problem = APILimits.badgeProblem(merged) {
                     throw APIError(code: .invalidParams, message: problem)
                 }
-                // A PR session's "PR #n" is Loom's (it files the session under
-                // code review): the agent may add badges around it, never
-                // take it off.
-                let kept = badges(of: id).filter { Self.wearsPRBadge([$0]) }
-                setBadges(kept + params.badges.filter { !kept.contains($0) }, for: id)
+                setBadges(merged, for: id)
                 return .ok(request.id, try apiSession(id))
             case .browserNavigate, .browserNavigateBack, .browserSnapshot, .browserClick, .browserType,
                  .browserSelectOption, .browserHover, .browserPressKey, .browserWaitFor, .browserScreenshot,

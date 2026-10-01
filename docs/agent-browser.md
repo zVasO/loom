@@ -45,11 +45,15 @@ profils d'agent.
 borne les navigateurs d'agent aux adresses de votre machine — `localhost`,
 `127.0.0.1`, `*.localhost`, `[::1]` — et aux hôtes que vous listez dessous
 (`api.example.com`, `*.staging.example.com`) : l'API ou la page de connexion dont
-l'app testée a besoin. Pages, scripts, images, requêtes et WebSockets passent tous
-par ces règles, appliquées par WebKit, donc hors de portée de l'agent comme de la
-page. Une page refusée l'est avec un mot dans `### Events`. Le réglage vaut
-aussitôt pour les chargements suivants ; si les règles ne peuvent être mises en
-place, rien ne charge.
+l'app testée a besoin ; la liste s'applique à la touche Entrée. Pages, scripts,
+images, requêtes et WebSockets passent tous par ces règles, appliquées par WebKit,
+donc hors de portée de l'agent comme de la page. `browser_navigate` vers une
+adresse refusée échoue en le disant ; une page qui s'y rend d'elle-même est
+arrêtée, avec un mot dans `### Events`. Activé, le mode recharge les pages ouvertes
+sous ses règles ; changer la liste garde les anciennes règles jusqu'à ce que les
+nouvelles les remplacent ; si elles ne peuvent être mises en place, rien ne charge.
+WebRTC et la résolution DNS anticipée, qui échappent aux règles, sont coupés dans
+ce mode quand WebKit le permet.
 
 ## Les outils
 
@@ -83,6 +87,9 @@ Chaque action répond l'instantané de la page qui en résulte. Depuis un shell 
 - Panneau masqué, la page tourne mais WebKit suspend son rendu (animations,
   `requestAnimationFrame`) : `### Page` l'indique.
 - Les captures ne voient pas WebGL ni la vidéo.
+- Une page qui envoie des messages de console par rafales (des centaines de
+  cadres, chacun au plafond) voit leur enregistrement coupé jusqu'à sa navigation
+  suivante : `### Events` le dit.
 - Un bouton « Copier » que l'agent clique écrit dans votre presse-papiers, comme
   si vous l'aviez cliqué : Loom ne le restaure pas, faute de distinguer cette
   copie d'une des vôtres faite au même moment.
@@ -108,6 +115,8 @@ Les outils de Loom tournent sans demande de permission par défaut (Réglages �
 Agents ▸ Run Loom's tools without asking), pour qu'un test ne s'arrête pas à
 chaque clic. Une page peut chercher à manipuler l'agent par son texte : le profil
 isolé, la navigation limitée à http(s), le profil privé des revues et, si vous
-l'activez, le mode sites locaux bornent ce qu'elle obtiendrait — avec lui, ce
-que l'agent a lu ne peut partir que vers votre machine et les hôtes listés. Le texte des pages, les instantanés et les captures restent
+l'activez, le mode sites locaux bornent ce qu'elle obtiendrait — avec lui, les
+pages de l'agent ne chargent rien d'ailleurs que de votre machine et des hôtes
+listés. Les autres outils de l'agent (son shell, WebFetch) restent sous les
+permissions de Claude Code. Le texte des pages, les instantanés et les captures restent
 dans les transcripts de Claude Code (`~/.claude/projects`) et de Loom.

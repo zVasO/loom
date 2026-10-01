@@ -27,7 +27,9 @@ struct SettingsPage: View {
     @AppStorage("loom.agents.browserTools") private var browserToolsOn = true
     @AppStorage("loom.agents.preapproveLoomTools") private var preapproveOn = true
     @AppStorage("loom.agents.localOnly") private var localOnlyOn = false
-    @AppStorage("loom.agents.allowedHosts") private var allowedHosts = ""
+    /// Edited here, applied on Return or when the field goes: never a
+    /// half-typed list in force.
+    @State private var hostsDraft = ""
     @State private var agentDataCleared = false
     @State private var removalCandidate: InstalledExtension?
 
@@ -151,6 +153,11 @@ struct SettingsPage: View {
 
     // MARK: Agents (ADR-0014)
 
+    private func commitHosts() {
+        guard hostsDraft != model.agentBrowsersAllowedHosts else { return }
+        model.agentBrowsersAllowedHosts = hostsDraft
+    }
+
     private var agentsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Agents")
@@ -184,15 +191,17 @@ struct SettingsPage: View {
                 }
                 .toggleStyle(.switch)
                 .onChange(of: localOnlyOn) { _, on in model.agentBrowsersLocalOnly = on }
-                Text("The agents' browsers open your machine's own addresses (localhost, 127.0.0.1) and the hosts below, nothing else — pages, scripts, requests and sockets alike, enforced by WebKit. A page the agent reads can then send what it saw nowhere but to your machine. Applies at once.")
+                Text("The agents' browsers load from your machine's own addresses (localhost, 127.0.0.1) and the hosts below, nothing else: pages, scripts, images, requests and web sockets, filtered by WebKit. WebRTC and DNS prefetching are turned off where WebKit allows it. Open pages start again under the mode when it is turned on. The agent's other tools stay under Claude Code's own permissions.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
                 if localOnlyOn {
-                    TextField("api.example.com, *.staging.example.com", text: $allowedHosts)
+                    TextField("api.example.com, *.staging.example.com", text: $hostsDraft)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12))
-                        .onSubmit { model.agentBrowsersAllowedHosts = allowedHosts }
-                    let invalid = AgentNetworkRules.parse(allowedHosts).invalid
+                        .onAppear { hostsDraft = model.agentBrowsersAllowedHosts }
+                        .onSubmit { commitHosts() }
+                        .onDisappear { commitHosts() }
+                    let invalid = AgentNetworkRules.parse(hostsDraft).invalid
                     Text(invalid.isEmpty
                          ? "Hosts the app under test needs (its API, its login), comma-separated; Return applies them."
                          : "Not a host name, ignored: " + invalid.joined(separator: ", "))
