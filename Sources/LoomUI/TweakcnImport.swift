@@ -150,31 +150,73 @@ public enum TweakcnImport {
     }
 
     /// Where a theme's registry file lives, from what the user pasted: the
-    /// registry URL itself, the editor's URL (`tweakcn.com/themes/<name>`),
-    /// or a bare name. Anything else is refused rather than guessed.
+    /// registry URL itself, the editor's URL (`tweakcn.com/themes/<name>`,
+    /// `tweakcn.com/editor/theme?theme=<name>`), or a bare name. Anything
+    /// else is refused rather than guessed. The first of `registryURLs`.
     public static func registryURL(for input: String) -> URL? {
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
-        if text.contains("://") || text.hasPrefix("tweakcn.com") {
-            guard let url = URL(string: text.contains("://") ? text : "https://" + text),
-                  url.host?.hasSuffix("tweakcn.com") == true else { return nil }
-            let parts = url.path.split(separator: "/").map(String.init)
-            if parts.count >= 3, parts[0] == "r", parts[1] == "themes", parts[2].hasSuffix(".json") {
-                return url
-            }
-            if let name = parts.last, !name.isEmpty, name != "themes", name != "editor" {
-                return registry(name.hasSuffix(".json") ? String(name.dropLast(5)) : name)
-            }
-            return nil
-        }
-        guard !text.contains(where: \.isWhitespace), !text.contains("/") else { return nil }
-        return registry(text)
+        registryURLs(for: input).first
     }
 
-    private static func registry(_ name: String) -> URL? {
-        let slug = name.lowercased()
-        guard slug.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else { return nil }
-        return URL(string: "https://tweakcn.com/r/themes/\(slug).json")
+    /// Every address the registry file may answer at, most likely first.
+    /// Built-in themes live at `/r/themes/<name>.json`; community themes
+    /// at `/r/themes/<id>` — no extension, still JSON. A pasted registry
+    /// URL is tried exactly as given, then with the other spelling.
+    public static func registryURLs(for input: String) -> [URL] {
+        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return [] }
+        if text.contains("://") || text.hasPrefix("tweakcn.com") || text.hasPrefix("www.tweakcn.com") {
+            guard let url = URL(string: text.contains("://") ? text : "https://" + text),
+                  url.host?.hasSuffix("tweakcn.com") == true else { return [] }
+            let parts = url.path.split(separator: "/").map(String.init)
+            // /r/themes/<slug>[.json] — the registry itself.
+            if parts.count >= 3, parts[0] == "r", parts[1] == "themes" {
+                return registry(parts[2], keepCase: true, asGiven: true)
+            }
+            // The editor: ?theme=<slug>.
+            if let theme = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "theme" })?.value, !theme.isEmpty {
+                return registry(theme, keepCase: true)
+            }
+            // /themes/<slug> — a theme's page, built-in or community.
+            if let name = parts.last, !name.isEmpty, name != "themes", name != "editor", name != "theme" {
+                return registry(name, keepCase: true)
+            }
+            return []
+        }
+        guard !text.contains(where: \.isWhitespace), !text.contains("/") else { return [] }
+        return registry(text, keepCase: false)
+    }
+
+    /// `<slug>.json` and `<slug>` — the given spelling first for a pasted
+    /// registry URL, the built-ins' `.json` first otherwise. A typed name is
+    /// lowercased (`Modern-Minimal`); a slug read off a URL is kept as is —
+    /// a community id is an identifier, not a name.
+    private static func registry(_ name: String, keepCase: Bool, asGiven: Bool = false) -> [URL] {
+        let hasExtension = name.lowercased().hasSuffix(".json")
+        let bare = hasExtension ? String(name.dropLast(5)) : name
+        let slug = keepCase ? bare : bare.lowercased()
+        guard !slug.isEmpty,
+              slug.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else { return [] }
+        let withExtension = URL(string: "https://tweakcn.com/r/themes/\(slug).json")
+        let without = URL(string: "https://tweakcn.com/r/themes/\(slug)")
+        // A pasted registry URL without the extension is tried as given first.
+        let ordered = asGiven && !hasExtension ? [without, withExtension] : [withExtension, without]
+        return ordered.compactMap { $0 }
+    }
+
+    /// The name a fetched theme takes: its registry title or name,
+    /// prettified, else the URL's. A community theme's id (`cmqx9le2j…`)
+    /// names nothing: "Community theme" instead.
+    public static func displayName(_ registryName: String, url: URL) -> String {
+        let candidate = registryName == "Imported theme" ? themeName(from: url) : prettify(registryName)
+        return looksLikeID(candidate) ? "Community theme" : candidate
+    }
+
+    /// A generated identifier rather than a name: long, one word, letters
+    /// and digits mixed.
+    static func looksLikeID(_ text: String) -> Bool {
+        text.count >= 16 && !text.contains(" ") && !text.contains("-")
+            && text.contains(where: \.isNumber) && text.contains(where: \.isLetter)
     }
 
     /// The name the registry URL implies — for a file downloaded by name.
@@ -197,6 +239,7 @@ public enum TweakcnImport {
     /// never a hole. The four state colours keep Loom's semantics (THM-08):
     /// shadcn has no "success" green, and a theme must not make failed green.
     public static func tokens(from vars: Variables, dark: Bool) -> ThemeTokens {
+        let vars = resolvingReferences(vars)
         let base = dark ? ThemeFamily.loom.dark : ThemeFamily.loom.light
         func color(_ names: String..., fallback: String) -> String {
             for name in names {
@@ -229,6 +272,58 @@ public enum TweakcnImport {
             stateIdle: base.stateIdle)
     }
 
+    /// `var(--name)` (and `var(--name, fallback)`) replaced by the value it
+    /// points at, nested ones included: community themes alias their
+    /// variables (`--sidebar: var(--background)`), and an unresolved alias
+    /// silently fell back to Loom's colours.
+    static func resolvingReferences(_ vars: Variables) -> Variables {
+        var resolved = vars
+        for _ in 0..<6 {
+            var changed = false
+            for (name, value) in resolved where value.contains("var(") {
+                let substituted = substitute(value, in: resolved)
+                if substituted != value {
+                    resolved[name] = substituted
+                    changed = true
+                }
+            }
+            if !changed { break }
+        }
+        return resolved
+    }
+
+    private static func substitute(_ value: String, in vars: Variables) -> String {
+        var result = ""
+        var rest = value[...]
+        while let open = rest.range(of: "var(") {
+            result += rest[..<open.lowerBound]
+            // The matching ")" — a fallback may hold parentheses of its own.
+            var depth = 1
+            var index = open.upperBound
+            while index < rest.endIndex, depth > 0 {
+                if rest[index] == "(" { depth += 1 }
+                if rest[index] == ")" { depth -= 1 }
+                if depth > 0 { index = rest.index(after: index) }
+            }
+            guard index < rest.endIndex else { return value }
+            let inside = rest[open.upperBound..<index]
+            let pieces = inside.split(separator: ",", maxSplits: 1).map {
+                $0.trimmingCharacters(in: .whitespaces)
+            }
+            let name = pieces.first.map { $0.hasPrefix("--") ? String($0.dropFirst(2)) : $0 } ?? ""
+            if let target = vars[name], !target.contains("var(--\(name)") {
+                result += target
+            } else if pieces.count > 1 {
+                result += pieces[1]
+            } else {
+                // Unknown and no fallback: left for the next pass, or unparsed.
+                result += rest[open.lowerBound...index]
+            }
+            rest = rest[rest.index(after: index)...]
+        }
+        return result + rest
+    }
+
     /// A family from the two variable sets.
     public static func family(named name: String, light: Variables, dark: Variables) -> ThemeFamily {
         ThemeFamily(name: name.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -253,9 +348,14 @@ public enum CSSColor {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !value.isEmpty else { return nil }
         if value.hasPrefix("#") {
-            guard let c = ThemeTokens.rgb(String(value.prefix(7))) else { return nil }
+            // #RGB, #RGBA, #RRGGBB, #RRGGBBAA — the alpha is dropped.
+            let digits = value.dropFirst()
+            let colour = digits.count == 4 ? String(digits.prefix(3))
+                       : digits.count == 8 ? String(digits.prefix(6)) : String(digits)
+            guard let c = ThemeTokens.rgb("#" + colour) else { return nil }
             return ThemeTokens.hex(red: c.red, green: c.green, blue: c.blue)
         }
+        if let named = named[value] { return named }
         if let parsed = call(value) {
             let (function, arguments) = parsed
             switch function {
@@ -288,6 +388,11 @@ public enum CSSColor {
         }
         return nil
     }
+
+    /// The keywords themes actually write.
+    private static let named: [String: String] = [
+        "white": "#FFFFFF", "black": "#000000",
+    ]
 
     struct Number {
         let value: Double

@@ -142,6 +142,45 @@ struct TweakcnImportTests {
         #expect(TweakcnImport.prettify("modern_minimal") == "Modern Minimal")
     }
 
+    @Test("a community theme's registry URL is fetched as given — no .json — then with it")
+    func communityRegistryURL() {
+        let id = "cmqx9le2j000504l49jgxe1d0"
+        let bare = URL(string: "https://tweakcn.com/r/themes/\(id)")!
+        let json = URL(string: "https://tweakcn.com/r/themes/\(id).json")!
+        #expect(TweakcnImport.registryURLs(for: "https://tweakcn.com/r/themes/\(id)") == [bare, json])
+        #expect(TweakcnImport.registryURLs(for: "https://tweakcn.com/themes/\(id)") == [json, bare])
+        #expect(TweakcnImport.registryURLs(for: "https://tweakcn.com/editor/theme?theme=\(id)") == [json, bare])
+        #expect(TweakcnImport.registryURLs(for: "https://tweakcn.com/r/themes/modern-minimal.json").first
+                == URL(string: "https://tweakcn.com/r/themes/modern-minimal.json"))
+        #expect(TweakcnImport.displayName(id, url: bare) == "Community theme")
+        #expect(TweakcnImport.displayName("Sunset Horizon", url: bare) == "Sunset Horizon")
+        #expect(TweakcnImport.displayName("Imported theme", url: json) == "Community theme")
+    }
+
+    @Test("var() aliases resolve to the colour they point at")
+    func references() {
+        let vars: TweakcnImport.Variables = [
+            "background": "oklch(1 0 0)", "sidebar": "var(--background)",
+            "card": "var(--sidebar)", "border": "var(--missing, #e5e5e5)",
+            "primary": "hsl(var(--brand))", "brand": "210 40% 98%",
+        ]
+        let resolved = TweakcnImport.resolvingReferences(vars)
+        #expect(resolved["sidebar"] == "oklch(1 0 0)")
+        #expect(resolved["card"] == "oklch(1 0 0)", "an alias of an alias")
+        #expect(resolved["border"] == "#e5e5e5", "the fallback when the target is missing")
+        #expect(CSSColor.parse(resolved["primary"] ?? "") == "#F8FAFC")
+        let tokens = TweakcnImport.tokens(from: vars, dark: false)
+        #expect(tokens.surface == "#FFFFFF" && tokens.cardBorder == "#E5E5E5")
+    }
+
+    @Test("hex with alpha and colour keywords")
+    func hexAlphaAndKeywords() {
+        #expect(CSSColor.parse("#3b82f680") == "#3B82F6")
+        #expect(CSSColor.parse("#fff8") == "#FFFFFF")
+        #expect(CSSColor.parse("white") == "#FFFFFF")
+        #expect(CSSColor.parse("black") == "#000000")
+    }
+
     @Test("pasted text is CSS when it carries variables")
     func looksLikeCSS() {
         #expect(TweakcnImport.looksLikeCSS(":root { --background: #fff; }"))

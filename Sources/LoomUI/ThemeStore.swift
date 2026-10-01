@@ -383,17 +383,36 @@ public final class ThemeStore {
             let (light, dark) = try TweakcnImport.parseCSS(text)
             return TweakcnImport.family(named: "Imported theme", light: light, dark: dark)
         }
-        guard let url = TweakcnImport.registryURL(for: text) else {
+        let candidates = TweakcnImport.registryURLs(for: text)
+        guard let first = candidates.first else {
             throw TweakcnImport.ImportError.badURL(text)
         }
-        let (data, response) = try await URLSession.shared.data(from: url)
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw TweakcnImport.ImportError.notFound(url.absoluteString)
+        // Built-ins answer at <name>.json, community themes at <id> — JSON
+        // either way, whatever the extension: every address is tried, and
+        // the first that parses as a registry file wins.
+        var failure: Error = TweakcnImport.ImportError.notFound(first.absoluteString)
+        for url in candidates {
+            let data: Data
+            do {
+                let (body, response) = try await URLSession.shared.data(from: url)
+                if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                    failure = TweakcnImport.ImportError.notFound(url.absoluteString)
+                    continue
+                }
+                data = body
+            } catch {
+                failure = error
+                continue
+            }
+            do {
+                let parsed = try TweakcnImport.parseRegistry(data)
+                let name = TweakcnImport.displayName(parsed.name, url: url)
+                return TweakcnImport.family(named: name, light: parsed.light, dark: parsed.dark)
+            } catch {
+                failure = error
+            }
         }
-        let parsed = try TweakcnImport.parseRegistry(data)
-        let name = parsed.name == "Imported theme" ? TweakcnImport.themeName(from: url)
-                                                   : TweakcnImport.prettify(parsed.name)
-        return TweakcnImport.family(named: name, light: parsed.light, dark: parsed.dark)
+        throw failure
     }
 
     // MARK: Global theme and appearance
