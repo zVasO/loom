@@ -179,8 +179,14 @@ public enum AgentResponseBuilder {
         }
         let fixed = (head + tail).joined(separator: "\n\n").count
         var sections = head
-        // A modal blocks the page: there is no snapshot to take meanwhile.
-        if modal == nil, let snapshot, !snapshot.isEmpty {
+        // A JS dialog blocks the page: there is no snapshot to take
+        // meanwhile. A file chooser leaves it running — its snapshot shows.
+        let blocking: Bool = {
+            guard let modal else { return false }
+            if case .fileChooser = modal.kind { return false }
+            return true
+        }()
+        if !blocking, let snapshot, !snapshot.isEmpty {
             // Room for the fences, the separators and the cut notice too.
             let room = max(0, limits.responseChars - fixed - 160)
             var body = snapshot

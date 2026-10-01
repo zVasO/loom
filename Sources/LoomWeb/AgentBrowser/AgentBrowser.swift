@@ -156,11 +156,12 @@ public final class AgentBrowser: NSObject {
             // mode, their loads held until the rules are on. A command on
             // them ends first — it would hold a page outside the mode.
             cancelAll("Local sites only was turned on: the pages were loaded again under it.")
+            let hadDialog = Set(dialogs.keys)
             controller.releaseWebViews()
             controller.materialize()
             for tab in controller.tabs where controller.webView(for: tab.id) != nil {
-                note(tab.id, "Local sites only was turned on: the page was loaded again under it "
-                     + "(a dialog it had was dismissed).")
+                note(tab.id, "Local sites only was turned on: the page was loaded again under it"
+                     + (hadDialog.contains(tab.id) ? " (its dialog was dismissed)." : "."))
             }
         }
     }
@@ -1193,7 +1194,7 @@ public final class AgentBrowser: NSObject {
     private func respondWithSnapshot(_ result: String, tab: BrowserTabsModel.TabID, webView: WKWebView,
                                      deadline: ContinuousClock.Instant) async -> AgentResult {
         var yaml: String?
-        if dialogs[tab] == nil, ContinuousClock.now < deadline - .milliseconds(500) {
+        if !blocksPage(tab), ContinuousClock.now < deadline - .milliseconds(500) {
             let answer = try? await helper("snapshot", ["budget": environment.limits.actionSnapshotChars],
                                            tab: tab, webView: webView, deadline: deadline - .milliseconds(300))
             yaml = answer?["yaml"] as? String

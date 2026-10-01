@@ -317,6 +317,10 @@ struct AgentResponseTests {
         #expect(text.contains("- Visibility: hidden"))
         let chooser = AgentModalState(kind: .fileChooser(multiple: true), message: "", host: "localhost")
         #expect(chooser.line == "- [File chooser (multiple files)]: can be handled by browser_file_upload")
+        let beside = AgentResponseBuilder.render(result: nil, page: page, tabs: [], modal: chooser,
+                                                 snapshot: "- button \"Upload\" [ref=e3]", events: [])
+        #expect(beside.contains("### Modal state") && beside.contains("### Snapshot"),
+                "a file chooser leaves the page running: its snapshot shows")
     }
 
     @Test("a set width shows in CSS pixels, and says the page is scaled")
