@@ -209,6 +209,25 @@ struct SwiftTermEngineTests {
         }
     }
 
+    // A TUI (Ink, claude) hides the cursor while it draws its own `❯`
+    // marker: the pane must not draw a block on another row.
+    @Test("DECTCEM hides and shows the cursor; a reset shows it again")
+    func cursorVisibility() {
+        let engine = makeEngine()
+        queue.sync {
+            #expect(engine.modes.cursorVisible, "shown by default")
+            engine.feed(ArraySlice("\u{1B}[?25l".utf8))
+            #expect(!engine.modes.cursorVisible)
+            engine.feed(ArraySlice("\u{1B}[?25h".utf8))
+            #expect(engine.modes.cursorVisible)
+            engine.feed(ArraySlice("\u{1B}[?25l".utf8))
+            engine.feed(ArraySlice("\u{1B}c".utf8))
+            #expect(engine.modes.cursorVisible, "RIS shows the cursor without telling the delegate")
+            engine.feed(ArraySlice("\u{1B}[!p\u{1B}[?25l".utf8))
+            #expect(!engine.modes.cursorVisible, "a hide after the reset wins")
+        }
+    }
+
     @Test("the cursor follows positioning sequences")
     func positionnementCurseur() {
         let engine = makeEngine()
