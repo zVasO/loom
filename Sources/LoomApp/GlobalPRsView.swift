@@ -790,6 +790,18 @@ struct GlobalPRsView: View {
                     startReview(pr, project: project)
                 }
             }
+            if !model.isLaunchingReview(forPR: pr.number, in: project.id) {
+                // The poll runs every minute; this is "now": PR, diff,
+                // comments, and the review worktree fetched again.
+                if model.isRefreshingPR(pr.number, in: project.id) {
+                    ProgressView().controlSize(.small).frame(width: 26)
+                } else {
+                    HoverIconButton(systemImage: "arrow.clockwise",
+                                    help: "Refresh from GitHub — PR, diff, comments, review worktree") {
+                        Task { await model.refreshOpenPR(pr.number, in: project.id, force: true) }
+                    }
+                }
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(DefaultTheme.background)
@@ -919,19 +931,49 @@ extension GlobalPRsView {
     }
 
     fileprivate func embeddedSession(_ sessionID: SessionID) -> some View {
-        VStack(spacing: 0) {
+        let tab = activeTab
+        let project = tab.flatMap { tab in gitProjects.first { $0.id == tab.projectID } }
+        let reviews = tab.map { model.reviewSessions(forPR: $0.pr.number, in: $0.projectID) } ?? []
+        return VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 10))
                     .foregroundStyle(DefaultTheme.accent)
-                Text(model.sessions.first { $0.id == sessionID }?.title ?? "Review session")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(DefaultTheme.primaryText)
-                    .lineLimit(1)
-                if let state = model.sessions.first(where: { $0.id == sessionID })?.state {
-                    StatusLabel(state)
+                if reviews.count > 1, let tab {
+                    // One tab per review of this PR: the fresh ones and the
+                    // ones before them, a click away.
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(Array(reviews.enumerated()), id: \.element) { index, id in
+                                ReviewSessionTab(
+                                    label: "Review \(index + 1)",
+                                    help: sessionTitle(id),
+                                    state: model.sessions.first { $0.id == id }?.state,
+                                    isActive: id == sessionID) {
+                                    Task {
+                                        await model.selectReviewSession(id, forPR: tab.pr.number,
+                                                                        in: tab.projectID)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Text(sessionTitle(sessionID))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                        .lineLimit(1)
+                    if let state = model.sessions.first(where: { $0.id == sessionID })?.state {
+                        StatusLabel(state)
+                    }
+                    Spacer()
                 }
-                Spacer()
+                if let tab, let project {
+                    HoverIconButton(systemImage: "plus", help: "New review session") {
+                        startReview(tab.pr, project: project, fresh: true)
+                    }
+                    .disabled(model.isLaunchingReview(forPR: tab.pr.number, in: project.id))
+                }
                 HoverIconButton(systemImage: "arrow.up.forward.square",
                                 help: "Open in the Sessions tab") {
                     onOpenSession(sessionID)
@@ -941,7 +983,53 @@ extension GlobalPRsView {
             .background(DefaultTheme.background)
             Divider().overlay(DefaultTheme.cardBorder)
             TerminalPane(model: model, sessionID: sessionID, role: .review)
+                .id(sessionID)
         }
+    }
+
+    private func sessionTitle(_ id: SessionID) -> String {
+        model.sessions.first { $0.id == id }?.title
+            ?? model.allRecords.first { $0.id == id }?.title
+            ?? "Review session"
+    }
+}
+
+/// A review session in the drawer's tab row: its state dot, "Review n".
+/// Dormant sessions have no state: a hollow dot, resumed on click.
+private struct ReviewSessionTab: View {
+    let label: String
+    let help: String
+    let state: SessionState?
+    let isActive: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(state.map { DefaultTheme.badgeColor(for: $0) } ?? .clear)
+                    .overlay(Circle().stroke(state == nil ? DefaultTheme.mutedText : .clear,
+                                             lineWidth: 1))
+                    .frame(width: 6, height: 6)
+                Text(label)
+                    .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
+                                                         : DefaultTheme.secondaryText)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(isActive ? DefaultTheme.surfaceRaised
+                        : hovered ? DefaultTheme.surfaceRaised.opacity(0.6) : .clear,
+                        in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6)
+                .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
     }
 }
 

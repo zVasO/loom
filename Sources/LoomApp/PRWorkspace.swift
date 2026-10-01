@@ -164,9 +164,10 @@ struct PRWorkspaceView: View {
             verdictBar
         }
         .background(DefaultTheme.background)
-        // The head and the update stamp are in the id: a PR that moved on
-        // GitHub (the model dropped its caches) reloads on the spot.
-        .task(id: "\(pr.number)#\(pr.headSHA)#\(pr.updatedAt)#\(colorScheme == .dark)") {
+        // The head, the update stamp and the refresh button's generation
+        // are in the id: a PR that moved on GitHub, or a manual refresh (the
+        // model dropped its caches either way), reloads on the spot.
+        .task(id: "\(pr.number)#\(pr.headSHA)#\(pr.updatedAt)#\(model.prReloadGeneration(pr.number, in: project.id))#\(colorScheme == .dark)") {
             if loadedNumber != pr.number {
                 loadedNumber = pr.number
                 prDetail = nil

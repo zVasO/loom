@@ -20,6 +20,21 @@ struct ThemeFamilyTests {
         }
     }
 
+    @Test("a raised surface on the wrong side of the surfaces is brought back")
+    func raisedSurfaceIsSanitized() {
+        var tokens = ThemeFamily.loom.dark
+        #expect(tokens.sanitized == tokens, "a consistent variant is left untouched")
+        tokens.surfaceRaised = "#FAF9F5"
+        let palette = ThemePalette(name: "Imported", isLight: false, tokens: tokens)
+        let raised = palette.tokens.surfaceRaised
+        #expect(abs(ThemeTokens.luminance(raised) - ThemeTokens.luminance(tokens.surface)) < 0.1,
+                "a near-white chip colour no longer paints dark-theme editors")
+        for family in ThemeFamily.builtins {
+            #expect(family.light.sanitized == family.light, Comment(rawValue: family.name + " light"))
+            #expect(family.dark.sanitized == family.dark, Comment(rawValue: family.name + " dark"))
+        }
+    }
+
     @Test("every token of every variant is a #RRGGBB colour")
     func tokensAreHex() {
         for family in ThemeFamily.builtins {

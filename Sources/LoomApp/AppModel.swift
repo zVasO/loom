@@ -1111,12 +1111,53 @@ public final class AppModel {
         }
     }
 
+    /// Makes `id` the PR's ACTIVE review session (`loom.pr.sessions`: what
+    /// the drawer, the poll and the quick actions talk to) and files it in
+    /// the PR's history — the drawer's tabs.
     private func rememberReviewSession(_ id: SessionID, forPR number: Int, in projectID: ProjectID) {
+        let key = prKey(number, projectID)
         var map = (UserDefaults.standard.dictionary(forKey: "loom.pr.sessions")
                    as? [String: String]) ?? [:]
-        map[prKey(number, projectID)] = id.rawValue.uuidString
+        var history = prSessionHistoryMap
+        var ids = history[key] ?? []
+        // A PR reviewed before the history existed: its session is tab 1.
+        if ids.isEmpty, let previous = map[key] { ids = [previous] }
+        if !ids.contains(id.rawValue.uuidString) { ids.append(id.rawValue.uuidString) }
+        history[key] = ids
+        UserDefaults.standard.set(history, forKey: Self.prSessionHistoryKey)
+        prSessionHistory = history
+        map[key] = id.rawValue.uuidString
         UserDefaults.standard.set(map, forKey: "loom.pr.sessions")
         prSessionMap = map
+    }
+
+    /// Every review session a PR had, in creation order: `loom.pr.reviewSessions`.
+    private static let prSessionHistoryKey = "loom.pr.reviewSessions"
+    private var prSessionHistory: [String: [String]]?
+    private var prSessionHistoryMap: [String: [String]] {
+        prSessionHistory ?? (UserDefaults.standard.dictionary(forKey: Self.prSessionHistoryKey)
+                             as? [String: [String]]) ?? [:]
+    }
+
+    /// The PR's review sessions that still exist (live or resumable), oldest
+    /// first — one drawer tab each. A PR from before the history: its
+    /// active session alone.
+    public func reviewSessions(forPR number: Int, in projectID: ProjectID) -> [SessionID] {
+        let raw = prSessionHistoryMap[prKey(number, projectID)] ?? []
+        let ids = raw.compactMap { UUID(uuidString: $0) }.map { SessionID($0) }
+            .filter { id in sessions.contains { $0.id == id } || allRecords.contains { $0.id == id } }
+        if ids.isEmpty, let active = reviewSession(forPR: number, in: projectID) { return [active] }
+        return ids
+    }
+
+    /// A drawer tab clicked: that session becomes the PR's active one,
+    /// resumed first when it went dormant.
+    public func selectReviewSession(_ id: SessionID, forPR number: Int,
+                                    in projectID: ProjectID) async {
+        if !sessions.contains(where: { $0.id == id }) {
+            await resumeDormant(id)
+        }
+        rememberReviewSession(id, forPR: number, in: projectID)
     }
 
     /// The PR tab's quick action: ONE review session per PR — reattached when
@@ -1173,7 +1214,11 @@ public final class AppModel {
                 hookToken: token)
             spec.projectID = projectID
             spec.sessionID = sessionID
-            spec.title = "PR #\(pr.number) · review"
+            // The second review of a PR and on say which one they are: the
+            // sidebar lists them side by side.
+            let ordinal = reviewSessions(forPR: pr.number, in: projectID).count + 1
+            let title = ordinal == 1 ? "PR #\(pr.number) · review" : "PR #\(pr.number) · review \(ordinal)"
+            spec.title = title
             spec.badges = ["PR #\(pr.number)"]
             // The record must know it runs in a worktree: the git panel and
             // the ship actions read worktreePath, and a nil left them blind.
@@ -1181,7 +1226,7 @@ public final class AppModel {
             let id = try await manager.launch(spec)
             await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
-            sessions.append(SessionItem(id: id, title: "PR #\(pr.number) · review",
+            sessions.append(SessionItem(id: id, title: title,
                                         state: .starting, projectID: projectID,
                                         branch: pr.branch, badges: ["PR #\(pr.number)"]))
             rememberReviewSession(id, forPR: pr.number, in: projectID)
@@ -1286,21 +1331,46 @@ public final class AppModel {
     /// When each open PR was last checked against GitHub.
     @ObservationIgnored private var prCheckedAt: [String: Date] = [:]
 
+    /// Bumped by a manual refresh: the workspace reloads on it even when
+    /// GitHub reports nothing new.
+    private var prReloadGenerations: [String: Int] = [:]
+    /// PRs a manual refresh is running for — the toolbar's spinner.
+    public private(set) var prRefreshing: Set<String> = []
+
+    public func prReloadGeneration(_ number: Int, in projectID: ProjectID) -> Int {
+        prReloadGenerations[prKey(number, projectID)] ?? 0
+    }
+
+    public func isRefreshingPR(_ number: Int, in projectID: ProjectID) -> Bool {
+        prRefreshing.contains(prKey(number, projectID))
+    }
+
     /// Keeps an open PR true to GitHub: refetches its row and, when it moved
     /// (new head, new comments, new reviews), drops its caches — the
     /// workspace reloads on the new row — and brings its live review
     /// session's worktree to the new head. Throttled: tab switches and
-    /// app activations call it freely.
-    public func refreshOpenPR(_ number: Int, in projectID: ProjectID) async {
+    /// app activations call it freely. `force` is the refresh button: no
+    /// throttle, everything reloaded, the worktree fetched whatever the
+    /// head says.
+    public func refreshOpenPR(_ number: Int, in projectID: ProjectID, force: Bool = false) async {
         let key = prKey(number, projectID)
-        if let last = prCheckedAt[key], Date().timeIntervalSince(last) < 20 { return }
+        if !force, let last = prCheckedAt[key], Date().timeIntervalSince(last) < 20 { return }
+        if force {
+            guard !prRefreshing.contains(key) else { return }
+            prRefreshing.insert(key)
+        }
+        defer { if force { prRefreshing.remove(key) } }
         prCheckedAt[key] = Date()
         guard let repo = projectRepo(projectID),
               let fresh = try? await GitHubService().pullRequest(number, repo: nil, in: repo),
               let tab = prTabs.tab(PRTab.key(projectID, number)) else { return }
         let old = tab.pr
+        if force {
+            invalidatePRCaches(number, in: projectID)
+            prReloadGenerations[key, default: 0] += 1
+        }
         if fresh != old {
-            if fresh.headSHA != old.headSHA || fresh.updatedAt != old.updatedAt {
+            if !force, fresh.headSHA != old.headSHA || fresh.updatedAt != old.updatedAt {
                 invalidatePRCaches(number, in: projectID)
             }
             prTabs.refresh(from: [fresh], in: projectID)
@@ -1319,7 +1389,7 @@ public final class AppModel {
         if !fresh.headSHA.isEmpty,
            let id = reviewSession(forPR: number, in: projectID),
            sessions.contains(where: { $0.id == id }),
-           reviewedHead[id] != fresh.headSHA {
+           force || reviewedHead[id] != fresh.headSHA {
             await syncReviewWorktree(for: id, pr: fresh, in: projectID, quietly: true)
         }
     }

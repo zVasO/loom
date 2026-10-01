@@ -13,6 +13,7 @@ public enum ClaudeThemeExport {
     /// Claude's colour tokens, from Loom's. What is not listed falls through
     /// to the `base` preset — which matches the palette's lightness.
     public static func overrides(for tokens: ThemeTokens) -> [String: String] {
+        let tokens = tokens.sanitized
         let mix: (String, String, Double) -> String = { ThemeTokens.mix($0, with: $1, amount: $2) }
         let pane = tokens.contentBackground
         let promptBorder = mix(tokens.cardBorder, tokens.mutedText, 0.5)

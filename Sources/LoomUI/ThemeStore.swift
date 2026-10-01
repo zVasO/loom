@@ -89,6 +89,18 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
     }
 
     public var isLight: Bool { Self.luminance(background) > 0.4 }
+
+    /// The tokens with `surfaceRaised` brought back to the surfaces' side: a
+    /// raised surface is a step above `surface`, never its opposite. Some
+    /// imported themes (tweakcn's Claude) carry a near-white chip colour
+    /// in a dark variant; painted under dark-theme text it hid the editors,
+    /// tabs and hovers that sit on it.
+    public var sanitized: ThemeTokens {
+        guard abs(Self.luminance(surfaceRaised) - Self.luminance(surface)) > 0.4 else { return self }
+        var tokens = self
+        tokens.surfaceRaised = Self.mix(surface, with: primaryText, amount: 0.07)
+        return tokens
+    }
 }
 
 // MARK: - Palette
@@ -120,6 +132,7 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
     public let stateIdle: Color
 
     public init(name: String, isLight: Bool, tokens: ThemeTokens) {
+        let tokens = tokens.sanitized
         self.name = name
         self.isLight = isLight
         self.tokens = tokens
@@ -370,17 +383,36 @@ public final class ThemeStore {
             let (light, dark) = try TweakcnImport.parseCSS(text)
             return TweakcnImport.family(named: "Imported theme", light: light, dark: dark)
         }
-        guard let url = TweakcnImport.registryURL(for: text) else {
+        let candidates = TweakcnImport.registryURLs(for: text)
+        guard let first = candidates.first else {
             throw TweakcnImport.ImportError.badURL(text)
         }
-        let (data, response) = try await URLSession.shared.data(from: url)
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw TweakcnImport.ImportError.notFound(url.absoluteString)
+        // Built-ins answer at <name>.json, community themes at <id> — JSON
+        // either way, whatever the extension: every address is tried, and
+        // the first that parses as a registry file wins.
+        var failure: Error = TweakcnImport.ImportError.notFound(first.absoluteString)
+        for url in candidates {
+            let data: Data
+            do {
+                let (body, response) = try await URLSession.shared.data(from: url)
+                if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                    failure = TweakcnImport.ImportError.notFound(url.absoluteString)
+                    continue
+                }
+                data = body
+            } catch {
+                failure = error
+                continue
+            }
+            do {
+                let parsed = try TweakcnImport.parseRegistry(data)
+                let name = TweakcnImport.displayName(parsed.name, url: url)
+                return TweakcnImport.family(named: name, light: parsed.light, dark: parsed.dark)
+            } catch {
+                failure = error
+            }
         }
-        let parsed = try TweakcnImport.parseRegistry(data)
-        let name = parsed.name == "Imported theme" ? TweakcnImport.themeName(from: url)
-                                                   : TweakcnImport.prettify(parsed.name)
-        return TweakcnImport.family(named: name, light: parsed.light, dark: parsed.dark)
+        throw failure
     }
 
     // MARK: Global theme and appearance
