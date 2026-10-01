@@ -37,8 +37,12 @@ Le navigateur propre à une session, que son agent pilote par les outils `browse
 _Avoid_ : navigateur de test, bot, navigateur headless
 
 **Profil web de l'agent** :
-Le stockage WebKit (cookies, localStorage, IndexedDB) des navigateurs d'agent d'un même projet, persistant d'une session à l'autre ; privé et oublié pour une session sans projet ou une revue. Jamais celui de l'utilisateur.
+Le stockage WebKit (cookies, localStorage, IndexedDB) des navigateurs d'agent d'un même projet, persistant d'une session à l'autre ; privé et oublié pour une session sans projet ou une revue. Jamais celui de l'utilisateur. Supprimé avec son projet.
 _Avoid_ : profil (seul — WEB-02 réserve « profils » à ceux de l'utilisateur), session web, cookies
+
+**Mode sites locaux** :
+Le réglage qui borne les navigateurs d'agent aux adresses de la machine (localhost, 127.0.0.1) et aux hôtes listés : chaque chargement — page, script, requête, socket — filtré par WebKit. Désactivé par défaut.
+_Avoid_ : pare-feu, sandbox, mode hors ligne
 
 **Instantané de page** :
 L'arbre d'accessibilité d'une page en texte (YAML), avec une **référence** (`e12`) par élément visible : ce que l'agent lit pour agir. Une référence ne vaut que pour le dernier instantané.

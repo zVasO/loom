@@ -2,6 +2,7 @@ import LoomAgents
 import LoomCore
 import LoomExtensions
 import LoomUI
+import LoomWeb
 import SwiftUI
 
 /// The in-app Settings page (gear icon): general, remappable shortcuts,
@@ -25,6 +26,8 @@ struct SettingsPage: View {
     /// the switches showing what was just set.
     @AppStorage("loom.agents.browserTools") private var browserToolsOn = true
     @AppStorage("loom.agents.preapproveLoomTools") private var preapproveOn = true
+    @AppStorage("loom.agents.localOnly") private var localOnlyOn = false
+    @AppStorage("loom.agents.allowedHosts") private var allowedHosts = ""
     @State private var agentDataCleared = false
     @State private var removalCandidate: InstalledExtension?
 
@@ -173,6 +176,29 @@ struct SettingsPage: View {
                 Text("Claude Code runs Loom's own tools (mcp__loom__…: your session's title, badges and browser) without a permission prompt, so a browser test does not stop at every click. Your own deny rules still apply. Off: Claude Code asks, as for any MCP tool. Applies to sessions started or resumed after the change.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
+                Divider().overlay(DefaultTheme.cardBorder)
+                Toggle(isOn: $localOnlyOn) {
+                    Text("Agent browser: local sites only")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                .onChange(of: localOnlyOn) { _, on in model.agentBrowsersLocalOnly = on }
+                Text("The agents' browsers open your machine's own addresses (localhost, 127.0.0.1) and the hosts below, nothing else — pages, scripts, requests and sockets alike, enforced by WebKit. A page the agent reads can then send what it saw nowhere but to your machine. Applies at once.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                if localOnlyOn {
+                    TextField("api.example.com, *.staging.example.com", text: $allowedHosts)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12))
+                        .onSubmit { model.agentBrowsersAllowedHosts = allowedHosts }
+                    let invalid = AgentNetworkRules.parse(allowedHosts).invalid
+                    Text(invalid.isEmpty
+                         ? "Hosts the app under test needs (its API, its login), comma-separated; Return applies them."
+                         : "Not a host name, ignored: " + invalid.joined(separator: ", "))
+                        .font(.system(size: 11))
+                        .foregroundStyle(invalid.isEmpty ? DefaultTheme.secondaryText : DefaultTheme.danger)
+                }
                 Divider().overlay(DefaultTheme.cardBorder)
                 HStack(spacing: 10) {
                     GhostButton("Clear agent browser data", systemImage: "trash") {

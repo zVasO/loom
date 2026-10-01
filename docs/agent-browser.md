@@ -33,9 +33,23 @@ d'une session à l'autre : connectez-vous une fois à l'app testée (choisissez
 connectez ici, l'agent peut s'en servir — n'y ouvrez pas vos comptes personnels.
 
 Une session sans projet et toute revue ou tout guide de PR ont un profil **privé**,
-oublié à la fin. Les caches et service workers d'un profil de projet sont vidés au premier usage
-de chaque lancement de Loom. **Réglages ▸ Agents ▸ Clear agent browser data** vide
-tous les profils d'agent.
+oublié à la fin. Les caches et service workers d'un profil de projet sont vidés au
+premier usage de chaque lancement de Loom, avant qu'une de ses pages ne charge.
+Retirer un projet supprime son profil (au lancement suivant si une session s'en
+sert encore). **Réglages ▸ Agents ▸ Clear agent browser data** vide tous les
+profils d'agent.
+
+## Sites locaux seulement
+
+**Réglages ▸ Agents ▸ Agent browser: local sites only** (désactivé par défaut)
+borne les navigateurs d'agent aux adresses de votre machine — `localhost`,
+`127.0.0.1`, `*.localhost`, `[::1]` — et aux hôtes que vous listez dessous
+(`api.example.com`, `*.staging.example.com`) : l'API ou la page de connexion dont
+l'app testée a besoin. Pages, scripts, images, requêtes et WebSockets passent tous
+par ces règles, appliquées par WebKit, donc hors de portée de l'agent comme de la
+page. Une page refusée l'est avec un mot dans `### Events`. Le réglage vaut
+aussitôt pour les chargements suivants ; si les règles ne peuvent être mises en
+place, rien ne charge.
 
 ## Les outils
 
@@ -90,6 +104,7 @@ Chaque action répond l'instantané de la page qui en résulte. Depuis un shell 
 Les outils de Loom tournent sans demande de permission par défaut (Réglages ▸
 Agents ▸ Run Loom's tools without asking), pour qu'un test ne s'arrête pas à
 chaque clic. Une page peut chercher à manipuler l'agent par son texte : le profil
-isolé, la navigation limitée à http(s) et le profil privé des revues bornent ce
-qu'elle obtiendrait. Le texte des pages, les instantanés et les captures restent
+isolé, la navigation limitée à http(s), le profil privé des revues et, si vous
+l'activez, le mode sites locaux bornent ce qu'elle obtiendrait — avec lui, ce
+que l'agent a lu ne peut partir que vers votre machine et les hôtes listés. Le texte des pages, les instantanés et les captures restent
 dans les transcripts de Claude Code (`~/.claude/projects`) et de Loom.

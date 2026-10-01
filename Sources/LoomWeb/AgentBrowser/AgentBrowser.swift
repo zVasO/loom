@@ -33,14 +33,18 @@ public final class AgentBrowser: NSObject {
         public var uploadRoots: [URL]
         /// The page's width the project last chose.
         public var viewportWidth: ViewportWidth
+        /// "Local sites only" (Settings ▸ Agents).
+        public var networkAccess: AgentNetworkAccess
         public var limits: AgentBrowserLimits
 
         public init(screenshotsDirectory: URL, initialViewport: CGSize, uploadRoots: [URL] = [],
-                    viewportWidth: ViewportWidth = .fit, limits: AgentBrowserLimits = AgentBrowserLimits()) {
+                    viewportWidth: ViewportWidth = .fit, networkAccess: AgentNetworkAccess = .open,
+                    limits: AgentBrowserLimits = AgentBrowserLimits()) {
             self.screenshotsDirectory = screenshotsDirectory
             self.initialViewport = initialViewport
             self.uploadRoots = uploadRoots
             self.viewportWidth = viewportWidth
+            self.networkAccess = networkAccess
             self.limits = limits
         }
     }
@@ -67,6 +71,14 @@ public final class AgentBrowser: NSObject {
     @ObservationIgnored private var cancelledReason = "the browser's commands were cancelled"
     @ObservationIgnored private var screenshotSequence = 0
     @ObservationIgnored private var messageProxy: AgentMessageProxy?
+
+    /// Local-only mode: the compiled rule list on every web view, and no
+    /// navigation while it compiles — none at all if it failed (fail closed).
+    @ObservationIgnored private var networkAccess: AgentNetworkAccess = .open
+    @ObservationIgnored private var contentRules: WKContentRuleList?
+    @ObservationIgnored private var rulesPreparation: Task<Void, Never>?
+    @ObservationIgnored private var rulesFailure: String?
+    private static var compiledRules: [String: WKContentRuleList] = [:]
 
     /// Each project store's leftovers (service workers, caches) cleared once
     /// per app run, shared by every session of the project: no page of the
@@ -96,6 +108,73 @@ public final class AgentBrowser: NSObject {
                 Self.preparedStores.insert(identifier)
             }
         }
+        setNetworkAccess(environment.networkAccess)
+    }
+
+    // MARK: - Local sites only
+
+    /// The setting changed (or the browser starts): the rules every web view
+    /// carries, compiled once per rule set. Pages already loaded keep what
+    /// they loaded; every load after this goes through the new rules.
+    public func setNetworkAccess(_ access: AgentNetworkAccess) {
+        guard access != networkAccess else { return }
+        networkAccess = access
+        rulesFailure = nil
+        contentRules = nil
+        for webView in liveWebViews { webView.configuration.userContentController.removeAllContentRuleLists() }
+        guard case .localOnly(let hosts) = access else {
+            rulesPreparation = nil
+            return
+        }
+        let json = AgentNetworkRules.json(allowedHosts: hosts)
+        rulesPreparation = Task { @MainActor [weak self] in
+            let compiled = await Self.compile(json)
+            guard let self, self.networkAccess == access else { return }
+            if let list = compiled.list {
+                self.contentRules = list
+                for webView in self.liveWebViews { webView.configuration.userContentController.add(list) }
+            } else {
+                self.rulesFailure = compiled.error ?? "unknown error"
+            }
+            self.rulesPreparation = nil
+        }
+    }
+
+    private var liveWebViews: [WKWebView] {
+        controller.tabs.compactMap { controller.webView(for: $0.id) }
+    }
+
+    private static func compile(_ json: String) async -> CompiledRules {
+        if let cached = compiledRules[json] { return CompiledRules(list: cached, error: nil) }
+        guard let store = WKContentRuleListStore.default() else {
+            return CompiledRules(list: nil, error: "WebKit has no rule store")
+        }
+        let compiled = await withCheckedContinuation { (continuation: CheckedContinuation<CompiledRules, Never>) in
+            store.compileContentRuleList(forIdentifier: AgentNetworkRules.identifier(for: json),
+                                         encodedContentRuleList: json) { list, error in
+                continuation.resume(returning: CompiledRules(
+                    list: list, error: list == nil ? (error?.localizedDescription ?? "unknown error") : nil))
+            }
+        }
+        if let list = compiled.list { compiledRules[json] = list }
+        return compiled
+    }
+
+    /// What a navigation waits for: the store's clearing, the rules' compiling.
+    private var pendingPreparations: [Task<Void, Never>] {
+        var waits: [Task<Void, Never>] = []
+        if case .project(let identifier) = profile, !Self.preparedStores.contains(identifier),
+           let preparation = Self.storePreparations[identifier] {
+            waits.append(preparation)
+        }
+        if let rulesPreparation { waits.append(rulesPreparation) }
+        return waits
+    }
+
+    /// Outside what local-only mode allows: the navigation's URL, refused.
+    private func refusedByNetworkAccess(_ url: URL?) -> Bool {
+        guard case .localOnly(let hosts) = networkAccess else { return false }
+        return !AgentNetworkRules.allows(url, allowedHosts: hosts)
     }
 
     // MARK: - Commands
@@ -1231,6 +1310,7 @@ extension AgentBrowser: BrowserTabEngine {
         if let messageProxy {
             content.add(messageProxy, contentWorld: AgentScripts.world, name: AgentScripts.messageHandlerName)
         }
+        if let contentRules { content.add(contentRules) }
         configuration.userContentController = content
         let webView = WKWebView(frame: CGRect(origin: .zero, size: environment.initialViewport),
                                 configuration: configuration)
@@ -1277,16 +1357,26 @@ extension AgentBrowser: WKNavigationDelegate {
         let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
         switch AgentNavigationPolicy.decide(url: navigationAction.request.url, isMainFrame: isMainFrame) {
         case .allow:
-            // No request of a project store before its leftovers are gone:
-            // WebKit sends nothing until the policy is decided.
-            if case .project(let identifier) = profile, !Self.preparedStores.contains(identifier),
-               let preparation = Self.storePreparations[identifier] {
-                Task { @MainActor in
-                    await preparation.value
-                    decisionHandler(.allow)
+            let url = navigationAction.request.url
+            if refusedByNetworkAccess(url) {
+                decisionHandler(.cancel)
+                if isMainFrame, let tab {
+                    note(tab, "Blocked \(url?.absoluteString ?? "a page"): the agent's browser opens local sites only "
+                         + "(Loom's Settings ▸ Agents).")
                 }
+                return
+            }
+            // No request before the store's leftovers are gone and the
+            // local-only rules are on the view: WebKit sends nothing until
+            // the policy is decided.
+            let waits = pendingPreparations
+            if waits.isEmpty {
+                finishAllowing(decisionHandler, tab: tab, isMainFrame: isMainFrame)
             } else {
-                decisionHandler(.allow)
+                Task { @MainActor in
+                    for wait in waits { await wait.value }
+                    self.finishAllowing(decisionHandler, tab: tab, isMainFrame: isMainFrame)
+                }
             }
         case .cancel:
             decisionHandler(.cancel)
@@ -1294,6 +1384,19 @@ extension AgentBrowser: WKNavigationDelegate {
                 note(tab, "Blocked a navigation to \(navigationAction.request.url?.absoluteString ?? "an empty address") — http(s) only.")
             }
         }
+    }
+
+    /// Local-only mode whose rules could not be compiled: nothing loads.
+    private func finishAllowing(_ decisionHandler: @escaping (WKNavigationActionPolicy) -> Void,
+                                tab: BrowserTabsModel.TabID?, isMainFrame: Bool) {
+        if networkAccess != .open, let rulesFailure {
+            decisionHandler(.cancel)
+            if isMainFrame, let tab {
+                note(tab, "Blocked: the local-only rules could not be set up (\(rulesFailure)), so nothing loads.")
+            }
+            return
+        }
+        decisionHandler(.allow)
     }
 
     public func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
@@ -1425,6 +1528,7 @@ extension AgentBrowser: WKUIDelegate {
         let source = controller.tabID(of: webView)
         guard let url = navigationAction.request.url,
               AgentNavigationPolicy.decide(url: url, isMainFrame: true) == .allow,
+              !refusedByNetworkAccess(url),
               url.absoluteString != "about:blank" else {
             if let source { note(source, "Blocked a popup to \(navigationAction.request.url?.absoluteString ?? "an empty page").") }
             return nil
@@ -1448,6 +1552,13 @@ extension AgentBrowser: WKUIDelegate {
 }
 
 // MARK: - Per tab
+
+/// A compiled rule list crossing WebKit's callback: built and read on the
+/// main thread.
+struct CompiledRules: @unchecked Sendable {
+    let list: WKContentRuleList?
+    let error: String?
+}
 
 /// Calls in flight for a tab, counted from WebKit's completions.
 final class CallCounter {

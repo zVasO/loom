@@ -1,6 +1,7 @@
 import Foundation
 import LoomAPI
 import LoomCore
+import LoomPersistence
 import LoomUI
 import LoomWeb
 
@@ -29,6 +30,38 @@ extension AppModel {
     public var preapprovesLoomTools: Bool {
         get { (UserDefaults.standard.object(forKey: "loom.agents.preapproveLoomTools") as? Bool) ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "loom.agents.preapproveLoomTools") }
+    }
+
+    /// Settings: the agents' browsers open the machine's own addresses only,
+    /// and the hosts listed — every load, enforced by WebKit. Off by default.
+    public var agentBrowsersLocalOnly: Bool {
+        get { UserDefaults.standard.bool(forKey: "loom.agents.localOnly") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "loom.agents.localOnly")
+            applyAgentNetworkAccess()
+        }
+    }
+
+    /// Settings: the hosts local-only mode lets through besides the machine
+    /// (an API the app under test calls), as typed.
+    public var agentBrowsersAllowedHosts: String {
+        get { UserDefaults.standard.string(forKey: "loom.agents.allowedHosts") ?? "" }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "loom.agents.allowedHosts")
+            applyAgentNetworkAccess()
+        }
+    }
+
+    var agentNetworkAccess: AgentNetworkAccess {
+        agentBrowsersLocalOnly
+            ? .localOnly(allowedHosts: AgentNetworkRules.parse(agentBrowsersAllowedHosts).hosts)
+            : .open
+    }
+
+    /// Every live browser follows the setting at once.
+    func applyAgentNetworkAccess() {
+        let access = agentNetworkAccess
+        for browser in agentBrowsers.values { browser.setNetworkAccess(access) }
     }
 
     func handleBrowserRequest(_ method: APIMethod, _ request: APIRequest,
@@ -64,13 +97,18 @@ extension AppModel {
         guard create, agentBrowserToolsEnabled,
               let item = sessions.first(where: { $0.id == parent }), !item.isShell else { return nil }
         let isReview = runsUntrustedCode(parent)
-        let profile = AgentBrowserProfile.kind(projectID: item.projectID?.rawValue, isReview: isReview)
+        // A removed project's session browses privately: its profile is
+        // being deleted (sweepAgentStores).
+        let project = item.projectID.flatMap { id in projects.contains { $0.id == id } ? id : nil }
+        let profile = AgentBrowserProfile.kind(projectID: project?.rawValue, isReview: isReview)
+        if case .project(let identifier) = profile { registerAgentStore(identifier) }
         let viewport = CGSize(width: storedSidePanelWidth ?? 640, height: 900)
         let browser = AgentBrowser(profile: profile, environment: .init(
             screenshotsDirectory: agentScreenshotsDirectory(for: parent),
             initialViewport: viewport,
             uploadRoots: agentUploadRoots(for: item),
-            viewportWidth: agentViewportWidth(for: item.projectID)))
+            viewportWidth: agentViewportWidth(for: item.projectID),
+            networkAccess: agentNetworkAccess))
         let projectID = item.projectID
         browser.onViewportChange = { [weak self] width in self?.rememberAgentViewportWidth(width, for: projectID) }
         agentBrowsers[parent] = browser
@@ -134,6 +172,58 @@ extension AppModel {
     public func clearAgentBrowserData() async {
         for browser in agentBrowsers.values { await browser.clearData() }
         await AgentBrowserProfile.clearAllProjectStores()
+    }
+
+    // MARK: - Profiles on disk
+
+    /// The stores the agents' browsers created: the sweep deletes only these,
+    /// never an identifier store something else of the app might own.
+    private static let agentStoresKey = "loom.agentBrowser.stores"
+
+    private var registeredAgentStores: [UUID] {
+        (UserDefaults.standard.stringArray(forKey: Self.agentStoresKey) ?? []).compactMap(UUID.init(uuidString:))
+    }
+
+    private func registerAgentStore(_ identifier: UUID) {
+        var stores = registeredAgentStores
+        guard !stores.contains(identifier) else { return }
+        stores.append(identifier)
+        UserDefaults.standard.set(stores.map(\.uuidString), forKey: Self.agentStoresKey)
+    }
+
+    private func unregisterAgentStores(_ identifiers: Set<UUID>) {
+        let stores = registeredAgentStores.filter { !identifiers.contains($0) }
+        UserDefaults.standard.set(stores.map(\.uuidString), forKey: Self.agentStoresKey)
+    }
+
+    /// At launch, before any agent browser: the profiles of projects removed
+    /// since are deleted. Skipped when the projects could not be read — an
+    /// empty read is not proof every project is gone.
+    func sweepAgentStores() {
+        guard let active = activeProjectRecords() else { return }
+        let orphans = AgentBrowserProfile.orphanedStores(registered: registeredAgentStores,
+                                                         projects: active.map(\.id.rawValue))
+        guard !orphans.isEmpty else { return }
+        Task { @MainActor in
+            var gone: Set<UUID> = []
+            for identifier in orphans where await AgentBrowserProfile.removeStore(identifier) {
+                gone.insert(identifier)
+            }
+            unregisterAgentStores(gone)
+        }
+    }
+
+    /// A project removed: its agents' profile goes with it — now, or at the
+    /// next launch while a running session still browses with it (emptied
+    /// meanwhile).
+    func forgetAgentProfile(of project: ProjectID) async {
+        UserDefaults.standard.removeObject(forKey: "loom.agentBrowser.viewport." + project.rawValue.uuidString)
+        let identifier = AgentBrowserProfile.storeIdentifier(forProject: project.rawValue)
+        if agentBrowsers.values.contains(where: { $0.profile == .project(identifier) }) {
+            await AgentBrowserProfile.clearStore(identifier)
+        } else if await AgentBrowserProfile.removeStore(identifier) {
+            unregisterAgentStores([identifier])
+        }
     }
 
     // MARK: - Files

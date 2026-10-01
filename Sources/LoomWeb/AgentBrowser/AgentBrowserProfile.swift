@@ -81,6 +81,32 @@ public enum AgentBrowserProfile {
         }
     }
 
+    /// The registered stores no current project owns: a removed project's,
+    /// to delete (pure: the identifiers are derived, never stored by project).
+    public static func orphanedStores(registered: [UUID], projects: [UUID]) -> [UUID] {
+        let kept = Set(projects.map(storeIdentifier(forProject:)))
+        return registered.filter { !kept.contains($0) }
+    }
+
+    /// Deletes a store from disk — refused by WebKit while a web view uses
+    /// it. True once it is gone (or never existed).
+    @MainActor
+    public static func removeStore(_ identifier: UUID) async -> Bool {
+        guard await existingStoreIdentifiers().contains(identifier) else { return true }
+        return await withCheckedContinuation { continuation in
+            WKWebsiteDataStore.remove(forIdentifier: identifier) { error in
+                continuation.resume(returning: error == nil)
+            }
+        }
+    }
+
+    /// Empties a store in place, if it exists — never creating it.
+    @MainActor
+    public static func clearStore(_ identifier: UUID) async {
+        guard await existingStoreIdentifiers().contains(identifier) else { return }
+        await clearAll(of: WKWebsiteDataStore(forIdentifier: identifier))
+    }
+
     /// Every project store that exists on disk among these projects', emptied
     /// — never creating one that does not.
     @MainActor

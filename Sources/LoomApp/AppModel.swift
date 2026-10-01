@@ -489,6 +489,7 @@ public final class AppModel {
             restoreStackChildren()
             restoreSidePanels()
             pruneAgentScreenshots()
+            sweepAgentStores()
             reindexAllSessions()
         } catch {
             if case IPCError.anotherInstanceRunning = error {
@@ -1819,10 +1820,17 @@ public final class AppModel {
 
     /// Removes the project from the app (archived in the database): the local
     /// folder and the session records stay intact.
+    /// The projects as the store has them now; nil when it could not say.
+    func activeProjectRecords() -> [ProjectRecord]? {
+        (try? store?.activeProjects()) ?? nil
+    }
+
     public func removeProject(_ id: ProjectID) {
         try? store?.archiveProject(id)
         if selectedProject == id { selectedProject = nil }
         reloadPersistedSessions()
+        // Its agents' profile (logins to the app under test) leaves with it.
+        Task { await forgetAgentProfile(of: id) }
     }
 
     /// The sidebar order belongs to the user (drag and drop): a simple display

@@ -76,6 +76,21 @@ struct AgentBrowserProfileTests {
     }
 }
 
+@Suite("Agent browser — profiles on disk")
+struct AgentProfileSweepTests {
+
+    @Test("the sweep deletes the profiles of removed projects, never a current one's")
+    func profilsOrphelins() {
+        let kept = UUID()
+        let removed = UUID()
+        let registered = [kept, removed].map(AgentBrowserProfile.storeIdentifier(forProject:))
+        #expect(AgentBrowserProfile.orphanedStores(registered: registered, projects: [kept])
+                == [AgentBrowserProfile.storeIdentifier(forProject: removed)])
+        #expect(AgentBrowserProfile.orphanedStores(registered: registered, projects: [kept, removed]).isEmpty)
+        #expect(AgentBrowserProfile.orphanedStores(registered: [], projects: []).isEmpty)
+    }
+}
+
 @Suite("Agent browser — keys")
 struct AgentKeysTests {
 
@@ -541,7 +556,8 @@ struct AgentNetworkRulesTests {
             #expect(allowed(url, by: list), "\(url)")
         }
         for url in ["https://example.com/", "http://localhost.evil.com/", "https://evil.com/?localhost:",
-                    "wss://example.com/socket"] {
+                    "wss://example.com/socket", "http://localhost:5173@evil.com/", "http://localhost@evil.com/",
+                    "http://x.localhost:1@evil.com/", "http://127.0.0.1.evil.com/"] {
             #expect(!allowed(url, by: list), "\(url)")
         }
         #expect(allowed("data:text/html,x", by: list), "inline content is not a network load")
@@ -556,5 +572,20 @@ struct AgentNetworkRulesTests {
         #expect(!allowed("https://api.example.com.evil.net/", by: list))
         #expect(!allowed("https://example.com/", by: list))
         #expect(AgentNetworkRules.parse("ok.dev, *, 10.0.0.1").invalid == ["*", "10.0.0.1"])
+        #expect(!allowed("https://api.example.com:8443@evil.com/", by: list), "a user name is not the host")
+        #expect(allowed("https://api.example.com:8443/v1", by: list))
+    }
+
+    @Test("navigations in local-only mode: the machine, the allowed hosts, about:blank")
+    func navigationsLocales() throws {
+        let hosts = AgentNetworkRules.parse("api.example.com").hosts
+        for url in ["http://localhost:5173/", "http://127.0.0.1:8000/", "http://[::1]:3000/", "about:blank",
+                    "https://api.example.com/login"] {
+            #expect(AgentNetworkRules.allows(URL(string: url), allowedHosts: hosts), "\(url)")
+        }
+        for url in ["https://example.com/", "http://localhost:5173@evil.com/", "https://api.example.com.evil.net/"] {
+            #expect(!AgentNetworkRules.allows(URL(string: url), allowedHosts: hosts), "\(url)")
+        }
+        #expect(!AgentNetworkRules.allows(nil, allowedHosts: hosts))
     }
 }
