@@ -32,6 +32,26 @@ _Avoid_ : onglet (terme UI, pas domaine)
 **Worktree** :
 Checkout Git isolé créé pour une session, sur sa propre branche. Détruit ou conservé indépendamment de la session.
 
+**Navigateur de l'agent** :
+Le navigateur propre à une session, que son agent pilote par les outils `browser_*` (ADR-0014) : distinct des navigateurs « Web n » de l'utilisateur, il s'affiche dans le panneau latéral. Il exécute des scripts dans ses pages — le seul de Loom à le faire.
+_Avoid_ : navigateur de test, bot, navigateur headless
+
+**Profil web de l'agent** :
+Le stockage WebKit (cookies, localStorage, IndexedDB) des navigateurs d'agent d'un même projet, persistant d'une session à l'autre ; privé et oublié pour une session sans projet ou une revue. Jamais celui de l'utilisateur. Supprimé avec son projet.
+_Avoid_ : profil (seul — WEB-02 réserve « profils » à ceux de l'utilisateur), session web, cookies
+
+**Mode sites locaux** :
+Le réglage qui borne les navigateurs d'agent aux adresses de la machine (localhost, 127.0.0.1) et aux hôtes listés : chaque chargement http(s) et ws(s) — page, script, requête, socket — filtré par WebKit ; WebRTC et la résolution DNS anticipée coupés. Désactivé par défaut. Il ne borne que les pages, pas les autres outils de l'agent.
+_Avoid_ : pare-feu, sandbox, mode hors ligne
+
+**Instantané de page** :
+L'arbre d'accessibilité d'une page en texte (YAML), avec une **référence** (`e12`) par élément visible : ce que l'agent lit pour agir. Une référence ne vaut que pour le dernier instantané.
+_Avoid_ : snapshot (c'est celui du terminal, ADR-0008), capture (une capture est une image), DOM
+
+**Panneau latéral** :
+Le navigateur affiché à droite du terminal d'une pile, dans l'onglet Sessions : un des navigateurs de la pile ou le navigateur de l'agent, choisi dans son en-tête ; l'agent l'ouvre sur le sien la première fois qu'il s'en sert. Il appartient à la pile, pas à l'onglet — un terminal secondaire montre le même. L'ouvrir, le fermer ou finir de le redimensionner coûte un redimensionnement du terminal, jamais plus.
+_Avoid_ : split view, tiroir (le tiroir est celui de l'onglet PR)
+
 **Transcript** :
 L'enregistrement intégral et continu de la sortie d'un terminal, conservé après la fin de la session.
 _Avoid_ : log, historique (« historique » = la liste des sessions passées)

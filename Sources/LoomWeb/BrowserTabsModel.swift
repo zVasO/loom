@@ -59,6 +59,14 @@ public struct BrowserTabsModel: Sendable, Equatable {
         if activeTab == id { activeTab = usageOrder.last }
     }
 
+    /// Every tab at once: none is revived on the way, as closing them one by
+    /// one would (each close makes the next least-used one live again).
+    public mutating func closeAll() {
+        tabs.removeAll()
+        usageOrder.removeAll()
+        activeTab = nil
+    }
+
     public mutating func update(_ id: TabID, url: URL? = nil, title: String? = nil) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         if let url { tabs[index].url = url }

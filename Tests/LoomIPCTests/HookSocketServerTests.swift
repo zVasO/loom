@@ -68,6 +68,29 @@ struct HookSocketServerTests {
         #expect(received.all().isEmpty, "an unknown token never gets past the server")
     }
 
+    @Test("a payload or request that is not a JSON object is ignored, and the server lives on")
+    func formesInvalidesIgnorees() async throws {
+        let url = socketURL()
+        let id = SessionID()
+        let received = Received()
+        let server = HookSocketServer(
+            socketPath: url,
+            validate: { token in token == "token-42" ? id : nil },
+            handler: { session, payload in received.append((session, payload)) })
+        try server.start()
+        defer { server.stop() }
+
+        // JSONSerialization raises on these — an exception `try?` cannot catch.
+        try sendLine(#"{"token":"token-42","payload":1}"#, to: url)
+        try sendLine(#"{"token":"token-42","payload":"text"}"#, to: url)
+        try sendLine(#"{"token":"token-42","payload":null}"#, to: url)
+        try sendLine(#"{"token":"token-42","payload":{"hook_event_name":"Stop"}}"#, to: url)
+
+        let delivered = await pollUntil { received.all().count == 1 }
+        #expect(delivered, "the valid line after the malformed ones is still delivered")
+        #expect(received.all().count == 1)
+    }
+
     @Test("multiple lines on a single connection: one delivery each")
     func plusieursLignesUneConnexion() async throws {
         let url = socketURL()
@@ -339,6 +362,51 @@ struct AgentsAPISocketTests {
         #expect(response.error?.code == .invalidRequest)
     }
 
+    @Test("a request that is not an object is answered invalidRequest, never a crash")
+    func requeteScalaire() async throws {
+        let url = socketURL()
+        let server = echoServer(at: url, session: SessionID())
+        try server.start()
+        defer { server.stop() }
+        for body in ["null", "42", #""text""#] {
+            let reply = try await rawExchange(#"{"token":"session-token","request":"# + body + "}", at: url)
+            let response = try APIEnvelope.decodeResponse(Data(reply.trimmingCharacters(in: .newlines).utf8))
+            #expect(response.error?.code == .invalidRequest, "request \(body)")
+        }
+    }
+
+    /// One raw line out, one line back.
+    private func rawExchange(_ line: String, at url: URL) async throws -> String {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        defer { close(fd) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        url.path.withCString { path in
+            withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+                buffer.baseAddress!.assumingMemoryBound(to: CChar.self)
+                    .update(from: path, count: min(strlen(path) + 1, buffer.count))
+            }
+        }
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        #expect(connected == 0)
+        let bytes = Array((line + "\n").utf8)
+        #expect(write(fd, bytes, bytes.count) == bytes.count)
+        return try await blocking { () -> String in
+            var received = [UInt8]()
+            var chunk = [UInt8](repeating: 0, count: 1024)
+            while !received.contains(UInt8(ascii: "\n")) {
+                let count = read(fd, &chunk, chunk.count)
+                guard count > 0 else { break }
+                received.append(contentsOf: chunk[0..<count])
+            }
+            return String(decoding: received, as: UTF8.self)
+        }
+    }
+
     @Test("hooks keep flowing on a server that also answers requests")
     func hooksToujoursLivres() async throws {
         let url = socketURL()
@@ -381,6 +449,86 @@ struct AgentsAPISocketTests {
             try? await Task.sleep(for: .milliseconds(10))
         }
         #expect(delivered.value == 1, "a hook line on the same server still reaches the handler")
+    }
+
+    /// A server whose handler takes its time, per request id.
+    private func slowServer(at url: URL, delays: [String: Duration],
+                            answer: @escaping @Sendable (APIRequest) -> APIResponse = { .ok($0.id, ["who": $0.id]) })
+        -> HookSocketServer {
+        HookSocketServer(
+            socketPath: url,
+            validate: { _ in nil }, handler: { _, _ in },
+            authorize: { token in token == "session-token" ? .session(SessionID()) : nil },
+            requests: { _, request in
+                if let delay = delays[request.id] { try? await Task.sleep(for: delay) }
+                return answer(request)
+            })
+    }
+
+    @Test("a multi-megabyte answer arrives whole, well within its budget")
+    func grandeReponseIntacte() async throws {
+        let url = socketURL()
+        let blob = String(repeating: "x", count: 2_000_000)
+        let server = slowServer(at: url, delays: [:], answer: { .ok($0.id, ["blob": blob]) })
+        try server.start()
+        defer { server.stop() }
+
+        let client = APIClient(socketPath: url.path, token: "session-token", timeout: .seconds(3))
+        let response = try await blocking { try client.send(APIRequest(id: "big", method: .sessionGet)) }
+        #expect(response.result?["blob"]?.stringValue?.count == 2_000_000)
+    }
+
+    @Test("an answer written after its asker gave up never reaches the next client of that descriptor")
+    func reponseTardiveNeVaPasAuVoisin() async throws {
+        let url = socketURL()
+        // A answers at ~1.5 s, after its client gave up at 0.3 s; B, connected
+        // once A's descriptor is closed (and likely reused), answers at ~2 s:
+        // B is still waiting when A's late answer is written.
+        let server = slowServer(at: url, delays: ["A": .milliseconds(1500), "B": .milliseconds(1600)])
+        try server.start()
+        defer { server.stop() }
+
+        let impatient = APIClient(socketPath: url.path, token: "session-token", timeout: .milliseconds(300))
+        await #expect(throws: APIClient.ClientError.timedOut) {
+            try await blocking { try impatient.send(APIRequest(id: "A", method: .sessionGet)) }
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        let patient = APIClient(socketPath: url.path, token: "session-token", timeout: .seconds(5))
+        let response = try await blocking { try patient.send(APIRequest(id: "B", method: .sessionGet)) }
+        #expect(response.id == "B")
+        #expect(response.result?["who"]?.stringValue == "B")
+
+        // And the server survived writing to a client that was gone.
+        let after = try await blocking { try patient.send(APIRequest(id: "C", method: .sessionGet)) }
+        #expect(after.result?["who"]?.stringValue == "C")
+    }
+
+    @Test("an answer bearing another id is refused by the client")
+    func identifiantDifferentRefuse() async throws {
+        let url = socketURL()
+        let server = slowServer(at: url, delays: [:], answer: { _ in .ok("someone-else", ["x": 1]) })
+        try server.start()
+        defer { server.stop() }
+
+        let client = APIClient(socketPath: url.path, token: "session-token", timeout: .seconds(2))
+        await #expect(throws: APIClient.ClientError.malformedResponse) {
+            try await blocking { try client.send(APIRequest(id: "mine", method: .sessionGet)) }
+        }
+    }
+
+    @Test("an explicit client timeout wins over the method's budget")
+    func delaiExpliciteRespecte() async throws {
+        let url = socketURL()
+        let server = slowServer(at: url, delays: ["slow": .seconds(2)])
+        try server.start()
+        defer { server.stop() }
+
+        let client = APIClient(socketPath: url.path, token: "session-token", timeout: .milliseconds(200))
+        let started = ContinuousClock.now
+        await #expect(throws: APIClient.ClientError.timedOut) {
+            try await blocking { try client.send(APIRequest(id: "slow", method: .sessionGet)) }
+        }
+        #expect(ContinuousClock.now - started < .seconds(1))
     }
 
     private final class Counter: @unchecked Sendable {

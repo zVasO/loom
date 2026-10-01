@@ -974,8 +974,17 @@ extension GlobalPRsView {
                     }
                     .disabled(model.isLaunchingReview(forPR: tab.pr.number, in: project.id))
                 }
+                // The review's agent browses out of sight (no side panel in
+                // the drawer): a dot says so, and the Sessions tab shows it.
+                if model.agentBrowsers[sessionID]?.activity?.isRunning == true {
+                    Image(systemName: "globe")
+                        .font(.system(size: 10))
+                        .foregroundStyle(DefaultTheme.accent)
+                        .help("claude is using its browser — open the session to watch")
+                }
                 HoverIconButton(systemImage: "arrow.up.forward.square",
                                 help: "Open in the Sessions tab") {
+                    if model.hasAgentBrowser(sessionID) { model.showInSidePanel(.agent, for: sessionID) }
                     onOpenSession(sessionID)
                 }
             }

@@ -20,6 +20,8 @@ public enum CLI {
         case badgeRemove(String)
         case badgeClear
         case sessions(includeArchived: Bool)
+        /// One of the session browser's tools (ADR-0014), its parameters as JSON.
+        case browser(APIMethod, JSONValue)
     }
 
     public struct Options: Equatable {
@@ -29,6 +31,8 @@ public enum CLI {
         public var sessionId: String?
         public var color: String?
         public var archived = false
+        /// Where a browser screenshot is copied.
+        public var out: String?
         public init() {}
     }
 
@@ -36,12 +40,14 @@ public enum CLI {
         case unknownCommand(String)
         case missingArgument(String)
         case missingValue(String)
+        case invalidArgument(String)
 
         public var description: String {
             switch self {
             case .unknownCommand(let words): return "unknown command: \(words) (see loom --help)"
             case .missingArgument(let what): return "missing \(what) (see loom --help)"
             case .missingValue(let flag): return "\(flag) needs a value"
+            case .invalidArgument(let why): return why
             }
         }
     }
@@ -60,6 +66,9 @@ public enum CLI {
       loom badge remove <name>              remove one badge
       loom badge clear                      remove them all
       loom sessions [--archived]            every session (needs --global)
+      loom browser <tool> [json|value]      your session's browser: navigate localhost:5173,
+                                            snapshot, click e12, press_key Enter… (loom docs)
+                                            --out <file> saves a screenshot
       loom docs                             the API reference, as Markdown
       loom mcp                              serve the API as MCP tools on stdio
 
@@ -80,12 +89,13 @@ public enum CLI {
             case "--help", "-h": return (.help, options)
             case "--global": options.global = true
             case "--archived": options.archived = true
-            case "--socket", "--token", "--session", "--color":
+            case "--socket", "--token", "--session", "--color", "--out":
                 guard let value = iterator.next() else { throw ParseError.missingValue(argument) }
                 switch argument {
                 case "--socket": options.socket = value
                 case "--token": options.token = value
                 case "--session": options.sessionId = value
+                case "--out": options.out = value
                 default: options.color = value
                 }
             default: words.append(argument)
@@ -93,6 +103,9 @@ public enum CLI {
         }
         guard let first = words.first else { return (.help, options) }
         let rest = Array(words.dropFirst())
+        if options.out != nil, first != "browser" {
+            throw ParseError.invalidArgument("--out applies to browser take_screenshot only")
+        }
         switch (first, rest.first ?? "") {
         case ("help", _): return (.help, options)
         case ("docs", _): return (.docs, options)
@@ -116,8 +129,82 @@ public enum CLI {
             guard let name = rest.dropFirst().first else { throw ParseError.missingArgument("badge name") }
             return (.badgeRemove(name), options)
         case ("badge", "clear"): return (.badgeClear, options)
+        case ("browser", _):
+            guard let tool = rest.first else { throw ParseError.missingArgument("browser tool (see loom docs)") }
+            let name = tool.hasPrefix("browser_") ? tool : "browser_" + tool
+            guard let spec = APIToolCatalog.spec(named: name), spec.method.isBrowser else {
+                throw ParseError.unknownCommand("browser \(tool)")
+            }
+            if options.out != nil, spec.method != .browserScreenshot {
+                throw ParseError.invalidArgument("--out applies to browser take_screenshot only")
+            }
+            let params = try browserParams(name: name, argument: rest.dropFirst().joined(separator: " "))
+            return (.browser(spec.method, params), options)
         default: throw ParseError.unknownCommand(words.joined(separator: " "))
         }
+    }
+
+    /// A tool's one obvious parameter, when the argument is not JSON:
+    /// `loom browser navigate localhost:5173`, `loom browser click e12`.
+    static let primaryParameter: [String: String] = [
+        "browser_navigate": "url", "browser_snapshot": "target", "browser_click": "target",
+        "browser_hover": "target", "browser_press_key": "key", "browser_wait_for": "text",
+        "browser_take_screenshot": "target", "browser_console_messages": "level",
+        "browser_network_requests": "filter", "browser_evaluate": "function",
+    ]
+
+    static func browserParams(name: String, argument: String) throws -> JSONValue {
+        let text = argument.trimmingCharacters(in: .whitespaces)
+        if text.isEmpty { return .object([:]) }
+        if text.hasPrefix("{") {
+            guard let value = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)),
+                  case .object = value else {
+                throw ParseError.invalidArgument("the parameters of \(name) are not a JSON object: \(text)")
+            }
+            return value
+        }
+        if name == "browser_tabs" {
+            // `tabs list`, `tabs new localhost:5173`, `tabs select 1`, `tabs close 0`:
+            // the action decides what the rest is.
+            let parts = text.split(separator: " ", maxSplits: 1).map(String.init)
+            var params: [String: JSONValue] = ["action": .string(parts[0])]
+            if parts.count == 2 {
+                let value = parts[1].trimmingCharacters(in: .whitespaces)
+                if parts[0] == "new" {
+                    params["url"] = .string(value)
+                } else if let index = Int(value) {
+                    params["index"] = .number(Double(index))
+                } else {
+                    throw ParseError.invalidArgument("tabs \(parts[0]) takes a tab index, or JSON")
+                }
+            }
+            return .object(params)
+        }
+        if name == "browser_file_upload" {
+            // `file_upload a.png b.png`: absolute paths, one per word.
+            let paths = text.split(separator: " ").map { (String($0) as NSString).expandingTildeInPath }
+            return .object(["paths": .array(paths.map(JSONValue.string))])
+        }
+        if name == "browser_resize" {
+            // `resize 375`, `resize 1280x800`: the width decides.
+            let width = text.lowercased().split(separator: "x").first.flatMap { Int($0) }
+            guard let width else { throw ParseError.invalidArgument("resize takes a width in CSS pixels, or JSON") }
+            return .object(["width": .number(Double(width))])
+        }
+        if name == "browser_wait_for", let seconds = Double(text) {
+            return .object(["time": .number(seconds)])   // `wait_for 2`: seconds, not the text "2"
+        }
+        if name == "browser_handle_dialog" {
+            switch text {
+            case "accept": return .object(["accept": .bool(true)])
+            case "dismiss": return .object(["accept": .bool(false)])
+            default: throw ParseError.invalidArgument("handle_dialog takes accept or dismiss, or JSON")
+            }
+        }
+        guard let key = primaryParameter[name] else {
+            throw ParseError.invalidArgument("\(name) takes its parameters as JSON (see loom docs)")
+        }
+        return .object([key: .string(text)])
     }
 
     /// The whole run: parse, connect, call, print. Returns the exit code.
@@ -151,15 +238,49 @@ public enum CLI {
             error("loom: \(connectionError)\n")
             return 2
         }
+        let screenshots = APIProtocol.screenshotsDirectory(socketPath: connection.socketPath)
         if case .mcp = command {
+            let browser = environment[APIProtocol.browserToolsEnvironmentKey] != "0"
             let server = MCPServer(call: { method, params in
-                try connection.client.call(method, params: params, as: JSONValue.self)
-            })
+                                       try connection.client.call(method, params: params, as: JSONValue.self)
+                                   },
+                                   tools: APIToolCatalog.tools(browser: browser),
+                                   instructions: APIToolCatalog.agentInstructions(browser: browser),
+                                   imageRoot: screenshots)
             server.serve()
             return 0
         }
         do {
             let result = try execute(command, options: options, client: connection.client)
+            if case .browser = command, let content = try? result.decode(APIToolContent.self) {
+                // Markdown for a reader, not JSON — what the agent would see.
+                output(content.text + "\n")
+                if options.out != nil, content.image == nil {
+                    error("loom: --out: this answer carries no image\n")
+                    return 1
+                }
+                if let image = content.image {
+                    guard let out = options.out else {
+                        output("Image: \(image.path)\n")
+                        return 0
+                    }
+                    guard let file = APIImageFile.validated(image, root: screenshots) else {
+                        error("loom: the screenshot is not where Loom writes them: \(image.path)\n")
+                        return 1
+                    }
+                    // Never deletes anything: a directory gets the file inside
+                    // it; a file is replaced whole or not at all.
+                    var destination = URL(fileURLWithPath: (out as NSString).expandingTildeInPath)
+                    var isDirectory: ObjCBool = false
+                    if FileManager.default.fileExists(atPath: destination.path, isDirectory: &isDirectory),
+                       isDirectory.boolValue {
+                        destination.appendPathComponent(file.lastPathComponent)
+                    }
+                    try Data(contentsOf: file).write(to: destination, options: .atomic)
+                    output("Saved to \(destination.path)\n")
+                }
+                return 0
+            }
             output(pretty(result) + "\n")
             return 0
         } catch let apiError as APIError {
@@ -204,6 +325,12 @@ public enum CLI {
         case .sessions(let includeArchived):
             return try client.call(.sessionsList,
                                    APISessionsListParams(includeArchived: includeArchived ? true : nil))
+        case .browser(let method, var params):
+            if let session, case .object(var fields) = params {
+                fields["sessionId"] = .string(session)
+                params = .object(fields)
+            }
+            return try client.call(method, params: params, as: JSONValue.self)
         case .help, .docs, .mcp:
             return .null   // handled before execute
         }

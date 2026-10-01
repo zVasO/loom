@@ -8,10 +8,21 @@ public struct BrowserPanelView: View {
     /// Owned by the caller: tabs survive the view coming and going.
     private let controller: BrowserController
     @State private var address = ""
+    /// What the empty panel suggests: ⌘T means "new browser" in a stack tab,
+    /// but beside a terminal it keeps its stack meaning — only + opens a tab.
+    private let emptyHint: String
+    /// What + opens when the address bar is empty: GitHub in the user's
+    /// browser; a blank page in the agent's, where a GitHub login would be
+    /// the agent's to use.
+    private let newTabAddress: String
     private let onVisit: ((String, String) -> Void)?
 
-    public init(controller: BrowserController, onVisit: ((String, String) -> Void)? = nil) {
+    public init(controller: BrowserController, emptyHint: String = "⌘T or + to open a tab",
+                newTabAddress: String = "github.com",
+                onVisit: ((String, String) -> Void)? = nil) {
         self.controller = controller
+        self.emptyHint = emptyHint
+        self.newTabAddress = newTabAddress
         self.onVisit = onVisit
     }
 
@@ -27,9 +38,11 @@ public struct BrowserPanelView: View {
                         controller.navigateActive(to: address)
                     }
                 Button {
-                    controller.openTab(urlString: address.isEmpty ? "github.com" : address)
+                    controller.openTab(urlString: address.isEmpty ? newTabAddress : address)
                 } label: { Image(systemName: "plus") }
-                if let url = controller.activeWebView?.url {
+                // Only a web address goes to the system: a file: URL handed
+                // to NSWorkspace would open — or run — whatever it names.
+                if let url = controller.activeWebView?.url, BrowserController.isWebAddress(url) {
                     Button {
                         NSWorkspace.shared.open(url)
                     } label: { Image(systemName: "safari") }
@@ -54,16 +67,19 @@ public struct BrowserPanelView: View {
             }
 
             if let webView = controller.activeWebView {
-                WebViewRepresentable(webView: webView)
+                // A container, never the web view itself as the NSView: the
+                // same page moves between a stack tab and the side panel, and
+                // tearing the old host down must not pull it out of the new.
+                ExtensionWebView(webView: webView)
             } else {
                 Spacer()
-                Text("⌘T or + to open a tab")
+                Text(emptyHint)
                     .foregroundStyle(.secondary)
                 Spacer()
             }
         }
         .onAppear {
-            controller.onVisit = onVisit
+            if controller.kind == .user { controller.onVisit = onVisit }
             controller.materialize()
         }
         .onChange(of: controller.activeWebView?.url) { _, url in
@@ -116,9 +132,3 @@ struct BrowserTabButton: View {
     }
 }
 
-/// The webview lives in the controller (LRU); the view merely hosts it.
-struct WebViewRepresentable: NSViewRepresentable {
-    let webView: WKWebView
-    func makeNSView(context: Context) -> WKWebView { webView }
-    func updateNSView(_ nsView: WKWebView, context: Context) {}
-}

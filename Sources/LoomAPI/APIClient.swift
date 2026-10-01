@@ -8,10 +8,12 @@ import Foundation
 public struct APIClient: Sendable {
     public var socketPath: String
     public var token: String
-    /// Ceiling on the wait for a response; the app answers in milliseconds.
-    public var timeout: Duration
+    /// Ceiling on the wait for a response; nil = the method's own budget
+    /// (`APIMethod.clientTimeout`): metadata answers in milliseconds, a page
+    /// load may take seconds.
+    public var timeout: Duration?
 
-    public init(socketPath: String, token: String, timeout: Duration = .seconds(5)) {
+    public init(socketPath: String, token: String, timeout: Duration? = nil) {
         self.socketPath = socketPath
         self.token = token
         self.timeout = timeout
@@ -51,11 +53,22 @@ public struct APIClient: Sendable {
         try call(method, params: try JSONValue.from(params), as: type)
     }
 
-    /// The raw exchange: a response, whatever it carries.
+    /// The raw exchange: a response, whatever it carries, within this
+    /// client's timeout or else the method's budget.
     public func send(_ request: APIRequest) throws -> APIResponse {
+        try send(request, timeout: timeout
+                 ?? APIMethod(rawValue: request.method)?.clientTimeout
+                 ?? .seconds(5))
+    }
+
+    public func send(_ request: APIRequest, timeout: Duration) throws -> APIResponse {
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw ClientError.connectionFailed(errno: errno) }
         defer { close(descriptor) }
+        // A write after Loom hung up must fail, not kill the process — for
+        // `loom mcp`, that would take every Loom tool of the session with it.
+        var noSigPipe: Int32 = 1
+        setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
 
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
@@ -86,7 +99,10 @@ public struct APIClient: Sendable {
         }
 
         var received = Data()
-        var chunk = [UInt8](repeating: 0, count: 4096)
+        // Large reads, and the newline searched only in the bytes just read:
+        // a multi-megabyte answer used to be rescanned from its start after
+        // every 4 KB, quadratic, eating the deadline.
+        var chunk = [UInt8](repeating: 0, count: 65_536)
         let deadline = ContinuousClock.now + timeout
         while true {
             let remaining = ContinuousClock.now.duration(to: deadline)
@@ -100,10 +116,14 @@ public struct APIClient: Sendable {
             let count = read(descriptor, &chunk, chunk.count)
             if count == 0 { throw ClientError.rejected }
             if count < 0 { if errno == EINTR { continue }; throw ClientError.connectionFailed(errno: errno) }
+            let scanFrom = received.endIndex
             received.append(contentsOf: chunk[0..<count])
-            if let newline = received.firstIndex(of: UInt8(ascii: "\n")) {
+            if let newline = received[scanFrom...].firstIndex(of: UInt8(ascii: "\n")) {
                 let lineData = received[received.startIndex..<newline]
-                guard let response = try? APIEnvelope.decodeResponse(Data(lineData)) else {
+                // An answer to another request — one written late, after its
+                // asker gave up, onto a descriptor since reused — is never ours.
+                guard let response = try? APIEnvelope.decodeResponse(Data(lineData)),
+                      response.id == request.id else {
                     throw ClientError.malformedResponse
                 }
                 return response

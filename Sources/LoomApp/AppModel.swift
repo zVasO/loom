@@ -208,7 +208,7 @@ public final class AppModel {
     private(set) var manager: SessionManager?
     private let replyHandler = NotificationReplyHandler()
     private var hookServer: HookSocketServer?
-    private let supportDirectory: URL
+    let supportDirectory: URL
     private var socketURL: URL { supportDirectory.appendingPathComponent("loom.sock") }
 
     /// Web extensions (ADR-0011): `<support>/extensions/`.
@@ -229,6 +229,7 @@ public final class AppModel {
     public private(set) var preferredGrid: TerminalGeometry =
         AppModel.storedGrid(role: .session) ?? .default
     private var preferredReviewGrid: TerminalGeometry? = AppModel.storedGrid(role: .review)
+    private var preferredSplitGrid: TerminalGeometry? = AppModel.storedGrid(role: .sessionSplit)
 
     private static func storedGrid(role: TerminalPaneRole) -> TerminalGeometry? {
         let cols = UserDefaults.standard.integer(forKey: role.colsKey)
@@ -247,7 +248,24 @@ public final class AppModel {
             let cols = TerminalMetrics.grid(fitting: CGSize(width: TerminalPaneRole.defaultReviewDrawerWidth,
                                                             height: 0)).cols
             return TerminalGeometry(cols: cols, rows: max(10, preferredGrid.rows - 2))
+        case .sessionSplit:
+            if let preferredSplitGrid { return preferredSplitGrid }
+            // Never measured: the Sessions grid minus the panel's default
+            // share — the same rows, the split only takes columns.
+            let full = TerminalMetrics.width(forColumns: preferredGrid.cols)
+            let layout = SidePanelLayout.resolve(available: full, preferredPanelWidth: storedSidePanelWidth,
+                                                 terminalMinimum: TerminalMetrics.width(forColumns: 80))
+            guard layout.showsPanel else { return preferredGrid }
+            let cols = TerminalMetrics.grid(fitting: CGSize(width: layout.terminalWidth, height: 0)).cols
+            return TerminalGeometry(cols: cols, rows: preferredGrid.rows)
         }
+    }
+
+    /// The grid a session of this stack is born at: the split's when its side
+    /// panel is open, so a resumed session or a new shell is not resized while
+    /// it boots — the one moment a resize can be missed.
+    func launchGrid(forStack parent: SessionID) -> TerminalGeometry {
+        sidePanels[parent]?.isOpen == true ? preferredGrid(for: .sessionSplit) : preferredGrid
     }
 
     /// Review worktrees are read-only (guard hooks) unless the user opts out —
@@ -320,6 +338,7 @@ public final class AppModel {
         switch role {
         case .session: preferredGrid = grid
         case .review: preferredReviewGrid = grid
+        case .sessionSplit: preferredSplitGrid = grid
         }
         UserDefaults.standard.set(cols, forKey: role.colsKey)
         UserDefaults.standard.set(rows, forKey: role.rowsKey)
@@ -337,7 +356,9 @@ public final class AppModel {
                           hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
                                        socket: socketURL,
                                        cli: Self.companionBinaryURL(named: "loom",
-                                                                    fallback: supportDirectory)))
+                                                                    fallback: supportDirectory)),
+                          tools: .init(browser: agentBrowserToolsEnabled,
+                                       preapproved: preapprovesLoomTools))
     }
 
     /// In development, `loom-hook` is a sibling product of the app; packaged,
@@ -466,6 +487,9 @@ public final class AppModel {
             Task { await self.observeWindows(of: manager) }
             reloadPersistedSessions()
             restoreStackChildren()
+            restoreSidePanels()
+            pruneAgentScreenshots()
+            sweepAgentStores()
             reindexAllSessions()
         } catch {
             if case IPCError.anotherInstanceRunning = error {
@@ -1104,6 +1128,35 @@ public final class AppModel {
         return ids
     }
 
+    /// Sessions that run code Loom does not trust with a profile (ADR-0014):
+    /// every PR review and guide, and a review of one of them. Decided from
+    /// what the app writes and the agent cannot — never from badges alone,
+    /// which the agents API lets a session rewrite.
+    private static let untrustedSessionsKey = "loom.agents.untrustedSessions"
+
+    func markRunsUntrustedCode(_ id: SessionID) {
+        var raw = UserDefaults.standard.stringArray(forKey: Self.untrustedSessionsKey) ?? []
+        guard !raw.contains(id.rawValue.uuidString) else { return }
+        raw.append(id.rawValue.uuidString)
+        UserDefaults.standard.set(raw, forKey: Self.untrustedSessionsKey)
+    }
+
+    func runsUntrustedCode(_ id: SessionID) -> Bool {
+        let key = id.rawValue.uuidString
+        if (UserDefaults.standard.stringArray(forKey: Self.untrustedSessionsKey) ?? []).contains(key) { return true }
+        if prSessionHistoryMap.values.contains(where: { $0.contains(key) }) { return true }
+        let active = (UserDefaults.standard.dictionary(forKey: "loom.pr.sessions") as? [String: String]) ?? [:]
+        if active.values.contains(key) { return true }
+        // Sessions from before the mark: a PR checkout is <repo>-worktrees/pr-N.
+        if let path = allRecords.first(where: { $0.id == id })?.worktreePath {
+            let url = URL(fileURLWithPath: path)
+            if url.lastPathComponent.hasPrefix("pr-"),
+               url.deletingLastPathComponent().lastPathComponent.hasSuffix("-worktrees") { return true }
+        }
+        // A badge can only add privacy, never take it away.
+        return codeReviewSessionIDs.contains(id)
+    }
+
     /// "PR #648" — the badge the PR tab gives its sessions.
     static func wearsPRBadge(_ badges: [String]) -> Bool {
         badges.contains { badge in
@@ -1223,6 +1276,8 @@ public final class AppModel {
             // The record must know it runs in a worktree: the git panel and
             // the ship actions read worktreePath, and a nil left them blind.
             spec.worktree = .existing(path: worktree, branch: pr.branch)
+            // Before the session exists: no API call of it can come first.
+            markRunsUntrustedCode(sessionID)
             let id = try await manager.launch(spec)
             await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
@@ -1569,6 +1624,7 @@ public final class AppModel {
             spec.title = "PR #\(number) · guide"
             spec.badges = ["PR #\(number)"]
             spec.worktree = .existing(path: worktree, branch: nil)
+            markRunsUntrustedCode(sessionID)
             let id = try await manager.launch(spec)
             await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
@@ -1610,6 +1666,7 @@ public final class AppModel {
             spec.sessionID = sessionID
             spec.title = "Review · \(record.title)"
             spec.badges = ["review"]
+            if runsUntrustedCode(id) { markRunsUntrustedCode(sessionID) }
             let reviewID = try await manager.launch(spec)
             await cacheSurface(for: reviewID)
             tokenRegistry.register(token: token, session: reviewID)
@@ -1763,10 +1820,17 @@ public final class AppModel {
 
     /// Removes the project from the app (archived in the database): the local
     /// folder and the session records stay intact.
+    /// The projects as the store has them now; nil when it could not say.
+    func activeProjectRecords() -> [ProjectRecord]? {
+        (try? store?.activeProjects()) ?? nil
+    }
+
     public func removeProject(_ id: ProjectID) {
         try? store?.archiveProject(id)
         if selectedProject == id { selectedProject = nil }
         reloadPersistedSessions()
+        // Its agents' profile (logins to the app under test) leaves with it.
+        Task { await forgetAgentProfile(of: id) }
     }
 
     /// The sidebar order belongs to the user (drag and drop): a simple display
@@ -1843,7 +1907,7 @@ public final class AppModel {
         var spec = SessionManager.SessionSpec(
             command: Command(executable: shell, arguments: ["-l"]),
             workingDirectory: directory,
-            geometry: preferredGrid,
+            geometry: launchGrid(forStack: parent.id),
             samplingInterval: .seconds(1))
         spec.title = name
         spec.projectID = parent.projectID
@@ -1971,6 +2035,14 @@ public final class AppModel {
 
     public private(set) var browserPanes: [BrowserPane] = []
 
+    /// The side panel of each stack, keyed by its parent session
+    /// (SidePanelModel.swift).
+    var sidePanels: [SessionID: SidePanelState] = [:]
+
+    /// Each session agent's own browser (ADR-0014), created on its first use
+    /// (AgentBrowserAPI.swift).
+    var agentBrowsers: [SessionID: AgentBrowser] = [:]
+
     /// Each open creates a dedicated pane, child of the session (or global if nil).
     @discardableResult
     public func openBrowserPane(for parent: SessionID?) -> UUID {
@@ -1983,6 +2055,7 @@ public final class AppModel {
 
     public func closeBrowserPane(_ id: UUID) {
         browserPanes.removeAll { $0.id == id }
+        sidePanelPaneRemoved(id)
         saveStackChildren()
     }
 
@@ -2216,7 +2289,7 @@ public final class AppModel {
                                     userStatusLine: statusLine, theme: theme)
         do {
             try await manager.resume(record, command: command, workingDirectory: directory,
-                                     geometry: preferredGrid,
+                                     geometry: launchGrid(forStack: record.id),
                                      samplingInterval: .milliseconds(500), hookToken: token)
             await cacheSurface(for: record.id)
             tokenRegistry.register(token: token, session: record.id)
@@ -2234,6 +2307,8 @@ public final class AppModel {
     public func archiveSession(_ id: SessionID) async {
         await manager?.archive(id)
         sessions.removeAll { $0.id == id }
+        forgetSidePanel(id)
+        forgetAgentBrowser(id)
         // A live session archived from its card exits through `.archived`, a
         // terminal state the reducer never leaves: no `.completed` follows,
         // so the close path in observeStates never drops its surface.
@@ -2283,6 +2358,8 @@ public final class AppModel {
                     ?? requested ?? nil
                 sessions.removeAll { $0.id == closed }
                 tokenRegistry.unregister(session: closed)
+                // Its agent's browser stays to look at, its pages' processes go.
+                agentBrowsers[closed]?.suspend()
                 nativeExistsCache.removeValue(forKey: closed)   // settled at close: rescan once
                 surfaceCache.removeValue(forKey: closed)
                 saveStackChildren()

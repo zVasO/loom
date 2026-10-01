@@ -4,9 +4,9 @@ import LoomPersistence
 import Foundation
 
 // The app's side of the agents API (ADR-0010): the methods, answered on the
-// main actor with the same calls the UI makes. Metadata only — a title, a
-// list of badges, the catalog — never a state: the reducer has four sources
-// and the API is not one.
+// main actor with the same calls the UI makes. Metadata — a title, a list of
+// badges, the catalog — and the session's own browser (ADR-0014); never a
+// state: the reducer has four sources and the API is not one.
 
 extension AppModel {
 
@@ -29,7 +29,9 @@ extension AppModel {
     }
 
     /// One request, one response — errors included, never a throw past here.
-    func handleAPIRequest(_ scope: APIScope, _ request: APIRequest) -> APIResponse {
+    /// Async: a method may wait on something slow (ADR-0014's browser), on
+    /// the main actor without blocking it.
+    func handleAPIRequest(_ scope: APIScope, _ request: APIRequest) async -> APIResponse {
         guard let method = APIMethod(rawValue: request.method) else {
             return APIResponse(id: request.id, error: APIError(
                 code: .unknownMethod, message: "unknown method \(request.method)"))
@@ -37,6 +39,10 @@ extension AppModel {
         if method.requiresGlobalScope, scope != .global {
             return APIResponse(id: request.id, error: APIError(
                 code: .forbidden, message: "\(method.rawValue) needs the global token"))
+        }
+        if !method.allowsGlobalScope, scope == .global {
+            return APIResponse(id: request.id, error: APIError(
+                code: .forbidden, message: "\(method.rawValue) answers the session's own token only"))
         }
         do {
             switch method {
@@ -57,7 +63,9 @@ extension AppModel {
             case .sessionSetTitle:
                 let params = try request.decodeParams(APISetTitleParams.self)
                 let id = try targetSession(scope, named: params.sessionId)
-                let title = params.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                // One line, printable, bounded: the title is also a
+                // notification's title (APILimits).
+                let title = APILimits.sanitizedTitle(params.title)
                 guard !title.isEmpty else {
                     throw APIError(code: .invalidParams, message: "title must not be empty")
                 }
@@ -66,8 +74,27 @@ extension AppModel {
             case .sessionSetBadges:
                 let params = try request.decodeParams(APISetBadgesParams.self)
                 let id = try targetSession(scope, named: params.sessionId)
-                setBadges(params.badges, for: id)
+                // A PR session's "PR #n" is Loom's (it files the session under
+                // code review): the agent may set badges around it, never take
+                // it off — nor give itself one, which would then stick.
+                let kept = badges(of: id).filter { Self.wearsPRBadge([$0]) }
+                // As they will be stored: " PR #3 " is a PR badge too.
+                let added = SessionRecord.normalizedBadges(params.badges).filter { !kept.contains($0) }
+                if added.contains(where: { Self.wearsPRBadge([$0]) }) {
+                    throw APIError(code: .invalidParams,
+                                   message: "\"PR #n\" badges are Loom's: the PR tab gives them")
+                }
+                let merged = kept + added
+                if let problem = APILimits.badgeProblem(merged) {
+                    throw APIError(code: .invalidParams, message: problem)
+                }
+                setBadges(merged, for: id)
                 return .ok(request.id, try apiSession(id))
+            case .browserNavigate, .browserNavigateBack, .browserSnapshot, .browserClick, .browserType,
+                 .browserSelectOption, .browserHover, .browserPressKey, .browserWaitFor, .browserScreenshot,
+                 .browserConsole, .browserNetwork, .browserEvaluate, .browserHandleDialog, .browserTabs,
+                 .browserClose, .browserFillForm, .browserFileUpload, .browserResize:
+                return try await handleBrowserRequest(method, request, scope: scope)
             case .badgeList:
                 return .ok(request.id, APIBadgeListResult(badges: apiBadges))
             case .badgeCreate:
@@ -75,6 +102,15 @@ extension AppModel {
                 let name = params.name.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !name.isEmpty else {
                     throw APIError(code: .invalidParams, message: "name must not be empty")
+                }
+                guard name.count <= APILimits.badgeNameMaxLength,
+                      !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+                    throw APIError(code: .invalidParams,
+                                   message: "a badge name is one short line (\(APILimits.badgeNameMaxLength) characters at most)")
+                }
+                guard badgeDefinitions.count < APILimits.catalogMaxCount else {
+                    throw APIError(code: .conflict,
+                                   message: "the badge catalog is full (\(APILimits.catalogMaxCount)): reuse a badge")
                 }
                 let color = params.colorHex ?? Self.defaultBadgeColorHex
                 guard APIBadge.isValidColor(color) else {
@@ -98,7 +134,7 @@ extension AppModel {
     /// The session a request means: its own under a session token (a name
     /// that differs is forbidden, not "not found" — the token never learns
     /// whether the other exists); a required name under the global token.
-    private func targetSession(_ scope: APIScope, named sessionId: String?) throws -> SessionID {
+    func targetSession(_ scope: APIScope, named sessionId: String?) throws -> SessionID {
         switch scope {
         case .session(let own):
             if let sessionId, sessionId.lowercased() != own.rawValue.uuidString.lowercased() {

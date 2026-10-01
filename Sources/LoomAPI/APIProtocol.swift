@@ -15,12 +15,25 @@ import Foundation
 public enum APIProtocol {
     /// Bumped on any change a client could observe: a method's shape, an
     /// error code, the envelope. `loom.version` answers it.
-    public static let version = 1
+    /// v2: `timeout` and `unavailable` errors, per-method waiting budgets.
+    public static let version = 2
 
     /// Environment of every agent Loom hosts: where the socket is and the
     /// token that names its own session. The CLI reads both.
     public static let socketEnvironmentKey = "LOOM_SOCKET"
     public static let sessionTokenEnvironmentKey = "LOOM_SESSION_TOKEN"
+    /// "0" in the MCP server's environment: the browser tools are turned off
+    /// in Loom's Settings, and `loom mcp` does not list them.
+    public static let browserToolsEnvironmentKey = "LOOM_BROWSER_TOOLS"
+
+    /// Where the app writes the agent browser's screenshots (ADR-0014), beside
+    /// its socket: the one place the app and `loom mcp` agree on. The MCP
+    /// server reads an image there and nowhere else.
+    public static func screenshotsDirectory(socketPath: String) -> URL {
+        URL(fileURLWithPath: socketPath).deletingLastPathComponent()
+            .appendingPathComponent("agent-browser", isDirectory: true)
+            .appendingPathComponent("screenshots", isDirectory: true)
+    }
 }
 
 /// Who is asking — decided by the token the server saw, never by the request.
@@ -41,6 +54,29 @@ public enum APIMethod: String, CaseIterable, Sendable {
     case sessionSetBadges = "session.setBadges"
     case badgeList = "badge.list"
     case badgeCreate = "badge.create"
+    // The session's own browser (ADR-0014), Playwright MCP's tool surface.
+    case browserNavigate = "browser.navigate"
+    case browserNavigateBack = "browser.navigateBack"
+    case browserSnapshot = "browser.snapshot"
+    case browserClick = "browser.click"
+    case browserType = "browser.type"
+    case browserSelectOption = "browser.selectOption"
+    case browserHover = "browser.hover"
+    case browserPressKey = "browser.pressKey"
+    case browserWaitFor = "browser.waitFor"
+    case browserScreenshot = "browser.screenshot"
+    case browserConsole = "browser.console"
+    case browserNetwork = "browser.network"
+    case browserEvaluate = "browser.evaluate"
+    case browserHandleDialog = "browser.handleDialog"
+    case browserTabs = "browser.tabs"
+    case browserClose = "browser.close"
+    case browserFillForm = "browser.fillForm"
+    case browserFileUpload = "browser.fileUpload"
+    case browserResize = "browser.resize"
+
+    /// Drives the session's own browser.
+    public var isBrowser: Bool { rawValue.hasPrefix("browser.") }
 
     /// Listing every session is the orchestrator's view: a session token,
     /// scoped to itself, never sees its neighbours.
@@ -49,6 +85,39 @@ public enum APIMethod: String, CaseIterable, Sendable {
         case .sessionsList: return true
         default: return false
         }
+    }
+
+    /// Whether the global token may call it at all. Anything an agent shell
+    /// can reach through `loom --global` — the token sits in a file the user
+    /// owns — must never act inside ANOTHER session: such methods answer
+    /// their session's own token only.
+    public var allowsGlobalScope: Bool {
+        // The browser acts inside its project's profile — logins included.
+        !isBrowser
+    }
+
+    /// The app's own deadline for answering, when the method may wait on
+    /// something slow (a page loading); nil = it answers at once. Each holds
+    /// its command's worst case: a load (30 s), a wait (30 s), plus the
+    /// snapshot that follows.
+    public var appDeadline: Duration? {
+        switch self {
+        case .browserFillForm: return .seconds(40)
+        case .browserNavigate, .browserWaitFor, .browserTabs: return .seconds(35)
+        case .browserType, .browserEvaluate: return .seconds(30)
+        case .browserNavigateBack, .browserClick, .browserSelectOption, .browserHover,
+             .browserPressKey, .browserHandleDialog, .browserFileUpload, .browserScreenshot: return .seconds(25)
+        case .browserSnapshot, .browserResize: return .seconds(15)
+        case .browserConsole, .browserNetwork, .browserClose: return .seconds(10)
+        default: return nil
+        }
+    }
+
+    /// How long a client waits for the answer. Always 5 s past the app's
+    /// deadline: the app gives up first and says so (`timeout`), and a late
+    /// answer never races the client closing its end.
+    public var clientTimeout: Duration {
+        appDeadline.map { $0 + .seconds(5) } ?? .seconds(5)
     }
 }
 
@@ -125,6 +194,12 @@ public struct APIError: Error, Codable, Equatable, Sendable {
         case notFound
         /// The write collides with what exists (a badge name already taken).
         case conflict
+        /// The app gave up waiting — a page load, an element, a dialog. The
+        /// request may have had effects before the deadline.
+        case timeout
+        /// The feature is off or its target is not there: a setting turned it
+        /// off, the session is not running.
+        case unavailable
         case internalError
     }
 

@@ -26,12 +26,29 @@ public struct ClaudeCodeAdapter: Sendable {
     static let hookedEvents = ["SessionStart", "UserPromptSubmit", "Stop",
                                "Notification", "PermissionRequest", "SessionEnd"]
 
+    /// Which of Loom's MCP tools a session gets, and whether Claude Code runs
+    /// them without asking (Loom's Settings).
+    public struct ToolOptions: Sendable, Equatable {
+        /// The session's browser tools (ADR-0014).
+        public var browser: Bool
+        /// `permissions.allow` for Loom's own tools: an agent testing in its
+        /// browser does not stop — and flip to needs_input — at every click.
+        public var preapproved: Bool
+
+        public init(browser: Bool = true, preapproved: Bool = true) {
+            self.browser = browser
+            self.preapproved = preapproved
+        }
+    }
+
     public var executable: String
     public var hooks: HookWiring?
+    public var tools: ToolOptions
 
-    public init(executable: String = "claude", hooks: HookWiring? = nil) {
+    public init(executable: String = "claude", hooks: HookWiring? = nil, tools: ToolOptions = ToolOptions()) {
         self.executable = executable
         self.hooks = hooks
+        self.tools = tools
     }
 
     /// The session UUID is IMPOSED on the CLI (`--session-id`): Resume becomes
@@ -49,10 +66,11 @@ public struct ClaudeCodeAdapter: Sendable {
                               theme: String? = nil) -> Command {
         var arguments = ["--session-id", session.rawValue.uuidString]
         if let settings = Self.settingsJSON(wiring: hooks, token: hookToken,
-                                            userStatusLine: userStatusLine, theme: theme) {
+                                            userStatusLine: userStatusLine, theme: theme, tools: tools) {
             arguments.append(contentsOf: ["--settings", settings])
         }
-        if let hooks, let hookToken, let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken) {
+        if let hooks, let hookToken,
+           let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken, browserTools: tools.browser) {
             arguments.append(contentsOf: ["--mcp-config", mcp])
         }
         if let initialPrompt {
@@ -141,10 +159,11 @@ public struct ClaudeCodeAdapter: Sendable {
                               theme: String? = nil) -> Command {
         var arguments = ["--resume", session.rawValue.uuidString]
         if let settings = Self.settingsJSON(wiring: hooks, token: hookToken,
-                                            userStatusLine: userStatusLine, theme: theme) {
+                                            userStatusLine: userStatusLine, theme: theme, tools: tools) {
             arguments.append(contentsOf: ["--settings", settings])
         }
-        if let hooks, let hookToken, let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken) {
+        if let hooks, let hookToken,
+           let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken, browserTools: tools.browser) {
             arguments.append(contentsOf: ["--mcp-config", mcp])
         }
         return Command(executable: executable, arguments: arguments,
@@ -165,14 +184,17 @@ public struct ClaudeCodeAdapter: Sendable {
     /// accepts a JSON string as well as a file, so nothing lands on disk. The
     /// server runs `loom mcp` with the session's socket and token in its
     /// environment; nil without a `loom` binary to run.
-    static func mcpConfigJSON(wiring: HookWiring, token: String) -> String? {
+    static func mcpConfigJSON(wiring: HookWiring, token: String, browserTools: Bool = true) -> String? {
         guard let cli = wiring.cli else { return nil }
+        var environment = apiEnvironment(wiring: wiring, token: token)
+        // Turned off in Settings: `loom mcp` lists no browser tool at all.
+        if !browserTools { environment[APIProtocol.browserToolsEnvironmentKey] = "0" }
         let config: [String: Any] = [
             "mcpServers": [
                 "loom": [
                     "command": cli.path,
                     "args": ["mcp"],
-                    "env": apiEnvironment(wiring: wiring, token: token),
+                    "env": environment,
                 ],
             ],
         ]
@@ -187,10 +209,16 @@ public struct ClaudeCodeAdapter: Sendable {
     /// is wired, the theme when Loom sets one. nil when there is nothing to pass.
     static func settingsJSON(wiring: HookWiring?, token: String?,
                              userStatusLine: ClaudeStatusLine.UserCommand?,
-                             theme: String?) -> String? {
+                             theme: String?, tools: ToolOptions = ToolOptions()) -> String? {
         var settings: [String: Any] = [:]
         if let wiring, let token {
             settings = hookSettings(wiring: wiring, token: token, userStatusLine: userStatusLine)
+            // Loom's own tools, by name — never the whole server: a tool added
+            // later is not pre-approved unless its spec says so. The user's
+            // own deny rules still win (Claude Code: deny > ask > allow).
+            if tools.preapproved, wiring.cli != nil {
+                settings["permissions"] = ["allow": APIToolCatalog.preapprovedRules(browser: tools.browser)]
+            }
         }
         if let theme { settings["theme"] = theme }
         guard !settings.isEmpty,

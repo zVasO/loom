@@ -15,6 +15,13 @@ struct TerminalMetricsTests {
         CGPoint(x: inset + cell.width * col, y: inset + cell.height * row)
     }
 
+    @Test("width(forColumns:) holds exactly that many columns — one cell less holds one fewer")
+    func largeurPourColonnes() {
+        let width = TerminalMetrics.width(forColumns: 80)
+        #expect(TerminalMetrics.grid(fitting: CGSize(width: width, height: 400)).cols == 80)
+        #expect(TerminalMetrics.grid(fitting: CGSize(width: width - cell.width, height: 400)).cols == 79)
+    }
+
     @Test("the padding is deducted: the first cell starts at the inset, not at zero")
     func remplissageDeduit() {
         let boundary = TerminalMetrics.boundary(at: point(col: 0.1, row: 0.1), rows: 10, cols: 40)

@@ -2,6 +2,7 @@ import LoomAgents
 import LoomCore
 import LoomExtensions
 import LoomUI
+import LoomWeb
 import SwiftUI
 
 /// The in-app Settings page (gear icon): general, remappable shortcuts,
@@ -20,6 +21,16 @@ struct SettingsPage: View {
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
     @State private var importShown = false
+    @State private var clearingAgentData = false
+    /// The model reads the same keys (AgentBrowserAPI.swift); AppStorage keeps
+    /// the switches showing what was just set.
+    @AppStorage("loom.agents.browserTools") private var browserToolsOn = true
+    @AppStorage("loom.agents.preapproveLoomTools") private var preapproveOn = true
+    @AppStorage("loom.agents.localOnly") private var localOnlyOn = false
+    /// Edited here, applied on Return or when the field goes: never a
+    /// half-typed list in force.
+    @State private var hostsDraft = ""
+    @State private var agentDataCleared = false
     @State private var removalCandidate: InstalledExtension?
 
     var body: some View {
@@ -31,6 +42,7 @@ struct SettingsPage: View {
 
                 generalSection
                 sessionsSection
+                agentsSection
                 reviewSection
                 shortcutsSection
                 badgesSection
@@ -133,6 +145,88 @@ struct SettingsPage: View {
                 }
                 .toggleStyle(.switch)
                 Text("Sessions opened from the PRs tab, or wearing a PR badge, gather below the projects in their own foldable section, still grouped by project. Off, they stay with the rest of their project's sessions.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
+        }
+    }
+
+    // MARK: Agents (ADR-0014)
+
+    private func commitHosts() {
+        guard hostsDraft != model.agentBrowsersAllowedHosts else { return }
+        model.agentBrowsersAllowedHosts = hostsDraft
+    }
+
+    private var agentsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("Agents")
+            card {
+                Toggle(isOn: $browserToolsOn) {
+                    Text("Browser tools for agents")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                // Through the model: turning them off also cancels what is queued.
+                .onChange(of: browserToolsOn) { _, on in model.agentBrowserToolsEnabled = on }
+                Text("Each session's agent gets its own browser — shown beside its terminal, on a profile kept per project and never your own cookies (reviews get a private one) — and browser_* tools to open your dev server, click, type, read the console and take screenshots. Off: calls are refused at once; sessions started or resumed afterwards no longer list the tools.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                Divider().overlay(DefaultTheme.cardBorder)
+                Toggle(isOn: $preapproveOn) {
+                    Text("Run Loom's tools without asking")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                Text("Claude Code runs Loom's own tools (mcp__loom__…: your session's title, badges and browser) without a permission prompt, so a browser test does not stop at every click. Your own deny rules still apply. Off: Claude Code asks, as for any MCP tool. Applies to sessions started or resumed after the change.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                Divider().overlay(DefaultTheme.cardBorder)
+                Toggle(isOn: $localOnlyOn) {
+                    Text("Agent browser: local sites only")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                .onChange(of: localOnlyOn) { _, on in model.agentBrowsersLocalOnly = on }
+                Text("The agents' browsers load from your machine's own addresses (localhost, 127.0.0.1) and the hosts below, nothing else: pages, scripts, images, requests and web sockets, filtered by WebKit. WebRTC and DNS prefetching are turned off where WebKit allows it. Open pages start again under the mode when it is turned on. The agent's other tools stay under Claude Code's own permissions.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                if localOnlyOn {
+                    TextField("api.example.com, *.staging.example.com", text: $hostsDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12))
+                        .onAppear { hostsDraft = model.agentBrowsersAllowedHosts }
+                        .onSubmit { commitHosts() }
+                        .onDisappear { commitHosts() }
+                    let invalid = AgentNetworkRules.parse(hostsDraft).invalid
+                    Text(invalid.isEmpty
+                         ? "Hosts the app under test needs (its API, its login), comma-separated; Return applies them."
+                         : "Not a host name, ignored: " + invalid.joined(separator: ", "))
+                        .font(.system(size: 11))
+                        .foregroundStyle(invalid.isEmpty ? DefaultTheme.secondaryText : DefaultTheme.danger)
+                }
+                Divider().overlay(DefaultTheme.cardBorder)
+                HStack(spacing: 10) {
+                    GhostButton("Clear agent browser data", systemImage: "trash") {
+                        clearingAgentData = true
+                        Task {
+                            await model.clearAgentBrowserData()
+                            clearingAgentData = false
+                            agentDataCleared = true
+                        }
+                    }
+                    .disabled(clearingAgentData)
+                    if clearingAgentData { ProgressView().controlSize(.small) }
+                    if agentDataCleared {
+                        Text("Cleared ✓")
+                            .font(.system(size: 11))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                    }
+                }
+                Text("Signs the agents out of every site they or you logged in to in their browsers, and empties their storage. Your own browser is untouched.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }

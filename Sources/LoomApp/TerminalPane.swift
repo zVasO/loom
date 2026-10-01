@@ -1,3 +1,4 @@
+import AppKit
 import LoomCore
 import LoomTerminal
 import LoomUI
@@ -12,14 +13,25 @@ struct TerminalPane: View {
     let sessionID: SessionID
     /// Where this pane lives — the grid it measures is remembered per role.
     let role: TerminalPaneRole
+    /// A divider beside the pane is being dragged: the grid holds until the
+    /// drag ends, then the pane fits once — a drag with pauses used to apply
+    /// one resize, hence one repaint of the conversation, per pause.
+    let fitSuspended: Bool
+    /// The pane's other shape (with the side panel open: the full width; with
+    /// it closed: the split's), whose grid is remembered from the same fit —
+    /// the launch grid of either shape never goes stale while the other shows.
+    let otherShape: (role: TerminalPaneRole, width: CGFloat)?
     /// Seeded from the model's cache: a live session's pane paints its retained
     /// screen in its first commit, no spinner, no actor round trip first.
     @State private var surface: TerminalSurface?
 
-    init(model: AppModel, sessionID: SessionID, role: TerminalPaneRole = .session) {
+    init(model: AppModel, sessionID: SessionID, role: TerminalPaneRole = .session,
+         fitSuspended: Bool = false, otherShape: (role: TerminalPaneRole, width: CGFloat)? = nil) {
         self.model = model
         self.sessionID = sessionID
         self.role = role
+        self.fitSuspended = fitSuspended
+        self.otherShape = otherShape
         _surface = State(initialValue: model.cachedSurface(for: sessionID))
     }
     @State private var paneSize: CGSize = .zero
@@ -34,10 +46,6 @@ struct TerminalPane: View {
     /// Terminal.app's "Option as Meta": ⌥+letter sends ESC+letter. Off by
     /// default — it would take the AZERTY braces and the dead keys away.
     @AppStorage(KeyboardPreferences.userDefaultsKey) private var optionAsMeta = false
-
-    /// Below this the surface itself refuses the geometry (20 × 5 cells), so
-    /// there is nothing to apply — and the first layout pass measures zero.
-    private static let minimumPaneSize = CGSize(width: 160, height: 60)
 
     var body: some View {
         Group {
@@ -63,18 +71,29 @@ struct TerminalPane: View {
                     // Keyed on the SURFACE too: a new session in the same pane
                     // (another PR tab) is fitted at once, not left at its
                     // launch grid until the pane happens to move.
-                    .task(id: FitKey(size: paneSize, surface: ObjectIdentifier(surface))) {
-                        guard paneSize.width >= Self.minimumPaneSize.width,
-                              paneSize.height >= Self.minimumPaneSize.height else { return }
-                        if fittedSurface != ObjectIdentifier(surface) {
+                    // Keyed on the suspension as well: the end of a divider
+                    // drag is itself the change that fits the final size.
+                    .task(id: FitKey(size: paneSize, surface: ObjectIdentifier(surface),
+                                     suspended: fitSuspended)) {
+                        let first = fittedSurface != ObjectIdentifier(surface)
+                        switch TerminalFitPolicy.decide(size: paneSize, suspended: fitSuspended,
+                                                        isFirstFitForSurface: first) {
+                        case .skip:
+                            return
+                        case .immediate:
                             fittedSurface = ObjectIdentifier(surface)
-                        } else {
-                            try? await Task.sleep(for: .milliseconds(220))
+                        case .debounced:
+                            try? await Task.sleep(for: TerminalFitPolicy.debounce)
                             guard !Task.isCancelled else { return }
                         }
                         let grid = TerminalMetrics.grid(fitting: paneSize)
                         surface.resize(cols: grid.cols, rows: grid.rows)
                         model.noteTerminalGrid(cols: grid.cols, rows: grid.rows, role: role)
+                        if let otherShape {
+                            let other = TerminalMetrics.grid(fitting: CGSize(width: otherShape.width,
+                                                                             height: paneSize.height))
+                            model.noteTerminalGrid(cols: other.cols, rows: other.rows, role: otherShape.role)
+                        }
                         badge = "\(grid.cols)×\(grid.rows)"
                     }
                     // Keystrokes go to the agent's field (first responder).
@@ -106,6 +125,10 @@ struct TerminalPane: View {
                         selection = .all(history: surface.history,
                                          historyBase: surface.historyBase,
                                          screen: surface.screen)
+                        // The keyboard follows the selection: ⌘C copies from
+                        // whoever has it, and a page or an address bar beside
+                        // the terminal may. Freed, the terminal reclaims it.
+                        NSApp.keyWindow?.makeFirstResponder(nil)
                     }
                     // claude's boot takes seconds — never a silent black screen.
                     // Gated on real output: the pane's own first fit bumps the
@@ -170,10 +193,12 @@ private func copiedBadge(_ characters: Int) -> String {
     characters == 1 ? "1 character copied" : "\(characters.formatted()) characters copied"
 }
 
-/// What a fit depends on: the pane's size and the surface it goes to.
+/// What a fit depends on: the pane's size, the surface it goes to, and
+/// whether fitting is on hold.
 private struct FitKey: Equatable {
     let size: CGSize
     let surface: ObjectIdentifier
+    let suspended: Bool
 }
 
 private struct PaneSizeKey: PreferenceKey {
