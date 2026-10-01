@@ -180,6 +180,17 @@ public enum CLI {
             }
             return .object(params)
         }
+        if name == "browser_file_upload" {
+            // `file_upload a.png b.png`: absolute paths, one per word.
+            let paths = text.split(separator: " ").map { (String($0) as NSString).expandingTildeInPath }
+            return .object(["paths": .array(paths.map(JSONValue.string))])
+        }
+        if name == "browser_resize" {
+            // `resize 375`, `resize 1280x800`: the width decides.
+            let width = text.lowercased().split(separator: "x").first.flatMap { Int($0) }
+            guard let width else { throw ParseError.invalidArgument("resize takes a width in CSS pixels, or JSON") }
+            return .object(["width": .number(Double(width))])
+        }
         if name == "browser_wait_for", let seconds = Double(text) {
             return .object(["time": .number(seconds)])   // `wait_for 2`: seconds, not the text "2"
         }

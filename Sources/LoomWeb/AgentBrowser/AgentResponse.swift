@@ -24,18 +24,24 @@ public struct AgentPageSummary: Equatable, Sendable {
     public var httpStatus: Int?
     public var consoleErrors: Int
     public var consoleWarnings: Int
+    /// In CSS pixels — what the page's media queries see.
     public var viewport: CGSize?
+    /// The width was set (browser_resize, the panel's menu): the page is
+    /// scaled into the panel.
+    public var viewportScaled: Bool
     /// Not on screen: rendering and observers are paused by WebKit.
     public var hidden: Bool
 
     public init(url: String, title: String, httpStatus: Int? = nil, consoleErrors: Int = 0,
-                consoleWarnings: Int = 0, viewport: CGSize? = nil, hidden: Bool = false) {
+                consoleWarnings: Int = 0, viewport: CGSize? = nil, viewportScaled: Bool = false,
+                hidden: Bool = false) {
         self.url = url
         self.title = title
         self.httpStatus = httpStatus
         self.consoleErrors = consoleErrors
         self.consoleWarnings = consoleWarnings
         self.viewport = viewport
+        self.viewportScaled = viewportScaled
         self.hidden = hidden
     }
 }
@@ -89,7 +95,7 @@ public struct AgentModalState: Equatable, Sendable {
             }
             return "- [\"\(name)\" dialog with message \(Self.quoted(message))]: can be handled by browser_handle_dialog"
         case .fileChooser(let multiple):
-            return "- [File chooser\(multiple ? " (multiple files)" : "")]: file uploads are not supported yet; cancel it with browser_handle_dialog"
+            return "- [File chooser\(multiple ? " (multiple files)" : "")]: can be handled by browser_file_upload"
         }
     }
 
@@ -140,7 +146,8 @@ public enum AgentResponseBuilder {
         if let page {
             var lines = ["- Page URL: \(page.url)", "- Page Title: \(page.title)"]
             if let viewport = page.viewport {
-                lines.append("- Viewport: \(Int(viewport.width))×\(Int(viewport.height))")
+                lines.append("- Viewport: \(Int(viewport.width.rounded()))×\(Int(viewport.height.rounded()))"
+                             + (page.viewportScaled ? " (width set, scaled into the panel; browser_resize 0 to fit)" : ""))
             }
             if let status = page.httpStatus, !(200..<300).contains(status) {
                 lines.append("- HTTP status: \(status)")

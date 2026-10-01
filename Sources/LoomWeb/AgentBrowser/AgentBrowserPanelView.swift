@@ -28,6 +28,7 @@ public struct AgentBrowserPanelView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
+                widthMenu
             }
             .padding(.horizontal, 10)
             .frame(height: 22)
@@ -37,6 +38,35 @@ public struct AgentBrowserPanelView: View {
                              newTabAddress: "about:blank")
                 .overlay(alignment: .top) { overlays }
         }
+    }
+
+    /// The page's width: the panel's, or a laptop's scaled into it — a
+    /// layout the terminal's 80 columns would otherwise squeeze to mobile.
+    private var widthMenu: some View {
+        Menu {
+            ForEach(ViewportWidth.presets, id: \.label) { width in
+                Button {
+                    browser.setViewportWidth(width)
+                } label: {
+                    if width == browser.viewportWidth {
+                        Label(width.label, systemImage: "checkmark")
+                    } else {
+                        Text(width.label)
+                    }
+                }
+            }
+            if !ViewportWidth.presets.contains(browser.viewportWidth) {
+                Divider()
+                Label(browser.viewportWidth.label + " (set by claude)", systemImage: "checkmark")
+            }
+        } label: {
+            Text(browser.viewportWidth == .fit ? "Fit" : browser.viewportWidth.label)
+                .font(.system(size: 10))
+                .foregroundStyle(DefaultTheme.secondaryText)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("The page's width: the panel's, or a wider one scaled to fit")
     }
 
     @ViewBuilder

@@ -71,6 +71,9 @@ public enum APIMethod: String, CaseIterable, Sendable {
     case browserHandleDialog = "browser.handleDialog"
     case browserTabs = "browser.tabs"
     case browserClose = "browser.close"
+    case browserFillForm = "browser.fillForm"
+    case browserFileUpload = "browser.fileUpload"
+    case browserResize = "browser.resize"
 
     /// Drives the session's own browser.
     public var isBrowser: Bool { rawValue.hasPrefix("browser.") }
@@ -99,12 +102,12 @@ public enum APIMethod: String, CaseIterable, Sendable {
     /// snapshot that follows.
     public var appDeadline: Duration? {
         switch self {
+        case .browserFillForm: return .seconds(40)
         case .browserNavigate, .browserWaitFor, .browserTabs: return .seconds(35)
         case .browserType, .browserEvaluate: return .seconds(30)
         case .browserNavigateBack, .browserClick, .browserSelectOption, .browserHover,
-             .browserPressKey, .browserHandleDialog: return .seconds(25)
-        case .browserScreenshot: return .seconds(20)
-        case .browserSnapshot: return .seconds(15)
+             .browserPressKey, .browserHandleDialog, .browserFileUpload, .browserScreenshot: return .seconds(25)
+        case .browserSnapshot, .browserResize: return .seconds(15)
         case .browserConsole, .browserNetwork, .browserClose: return .seconds(10)
         default: return nil
         }

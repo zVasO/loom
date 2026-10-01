@@ -24,7 +24,7 @@ public enum AgentScreenshot {
 
     /// The highest sequence already in `directory` — a previous run's files —
     /// or 0: the numbering goes on after it.
-    static func lastSequence(in directory: URL) -> Int {
+    public static func lastSequence(in directory: URL) -> Int {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         return names.compactMap { Int($0.prefix { $0.isNumber }) }.max() ?? 0
     }
@@ -48,6 +48,44 @@ public enum AgentScreenshot {
     /// Drawn again at exactly `pixels`, then encoded.
     @MainActor
     static func encode(_ image: NSImage, pixels: CGSize, format: ImageFormat) -> Data? {
+        render(pixels: pixels, format: format) {
+            image.draw(in: CGRect(origin: .zero, size: pixels), from: .zero, operation: .copy, fraction: 1)
+        }
+    }
+
+    /// One viewport's capture, and the band of it a full-page image takes.
+    struct Slice {
+        var image: NSImageBox
+        /// The band, from the capture's top, in its points.
+        var sourceTop: CGFloat
+        var sourceHeight: CGFloat
+        /// Where the band sits on the page, in CSS pixels.
+        var pageTop: CGFloat
+        var pageHeight: CGFloat
+    }
+
+    /// The bands, one under the other, at exactly `pixels` for a page of
+    /// `pageSize` CSS pixels.
+    @MainActor
+    static func encode(slices: [Slice], pageSize: CGSize, pixels: CGSize, format: ImageFormat) -> Data? {
+        guard pageSize.width > 0, pageSize.height > 0 else { return nil }
+        let scaleX = pixels.width / pageSize.width
+        let scaleY = pixels.height / pageSize.height
+        return render(pixels: pixels, format: format) {
+            for slice in slices {
+                let image = slice.image.image
+                // Both rectangles are bottom-up, as AppKit draws.
+                let source = CGRect(x: 0, y: image.size.height - slice.sourceTop - slice.sourceHeight,
+                                    width: image.size.width, height: slice.sourceHeight)
+                let destination = CGRect(x: 0, y: (pageSize.height - slice.pageTop - slice.pageHeight) * scaleY,
+                                         width: pageSize.width * scaleX, height: slice.pageHeight * scaleY)
+                image.draw(in: destination, from: source, operation: .copy, fraction: 1)
+            }
+        }
+    }
+
+    @MainActor
+    private static func render(pixels: CGSize, format: ImageFormat, draw: () -> Void) -> Data? {
         let width = Int(pixels.width)
         let height = Int(pixels.height)
         guard width > 0, height > 0,
@@ -61,7 +99,7 @@ public enum AgentScreenshot {
         guard let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
         NSGraphicsContext.current = context
         context.imageInterpolation = .high
-        image.draw(in: CGRect(origin: .zero, size: pixels), from: .zero, operation: .copy, fraction: 1)
+        draw()
         context.flushGraphics()
         switch format {
         case .png: return rep.representation(using: .png, properties: [:])

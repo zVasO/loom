@@ -28,12 +28,19 @@ public final class AgentBrowser: NSObject {
         /// The size a web view gets before the panel ever shows it: never
         /// zero, so layout, hit tests and screenshots work off screen too.
         public var initialViewport: CGSize
+        /// Where browser_file_upload may take files from: the session's
+        /// working tree, and a folder of Loom's (AgentUploadPolicy).
+        public var uploadRoots: [URL]
+        /// The page's width the project last chose.
+        public var viewportWidth: ViewportWidth
         public var limits: AgentBrowserLimits
 
-        public init(screenshotsDirectory: URL, initialViewport: CGSize,
-                    limits: AgentBrowserLimits = AgentBrowserLimits()) {
+        public init(screenshotsDirectory: URL, initialViewport: CGSize, uploadRoots: [URL] = [],
+                    viewportWidth: ViewportWidth = .fit, limits: AgentBrowserLimits = AgentBrowserLimits()) {
             self.screenshotsDirectory = screenshotsDirectory
             self.initialViewport = initialViewport
+            self.uploadRoots = uploadRoots
+            self.viewportWidth = viewportWidth
             self.limits = limits
         }
     }
@@ -47,6 +54,10 @@ public final class AgentBrowser: NSObject {
     public private(set) var activity: AgentActivity?
     /// The dialogs pages are blocked on, per tab — the panel's banner.
     public private(set) var dialogs: [BrowserTabsModel.TabID: AgentModalState] = [:]
+    /// The page's width: the panel's, or a CSS width it is scaled to.
+    public private(set) var viewportWidth: ViewportWidth = .fit
+    /// The width changed (the agent, the panel's menu): the app keeps it per project.
+    @ObservationIgnored public var onViewportChange: ((ViewportWidth) -> Void)?
 
     @ObservationIgnored private var answers: [BrowserTabsModel.TabID: DialogAnswer] = [:]
     @ObservationIgnored private var runtimes: [BrowserTabsModel.TabID: TabRuntime] = [:]
@@ -72,6 +83,7 @@ public final class AgentBrowser: NSObject {
         self.profile = profile
         self.dataStore = AgentBrowserProfile.dataStore(for: profile)
         self.environment = environment
+        self.viewportWidth = environment.viewportWidth
         self.controller = BrowserController(agentTabs: 3)
         super.init()
         controller.attach(engine: self)
@@ -208,7 +220,8 @@ public final class AgentBrowser: NSObject {
                                  args: ["target": target.target, "doubleClick": doubleClick,
                                         "button": button.rawValue, "modifiers": modifiers],
                                  verb: doubleClick ? "Double-clicked" : "Clicked", deadline: deadline)
-        case .type(let target, let text, let submit):
+        case .type(let target, let text, let submit, let slowly):
+            if slowly { return try await typeSlowly(into: target, text: text, submit: submit, deadline: deadline) }
             return try await act(on: target, readiness: "type", op: "type",
                                  args: ["target": target.target, "text": text, "submit": submit],
                                  verb: "Typed into", deadline: deadline)
@@ -223,8 +236,8 @@ public final class AgentBrowser: NSObject {
             return try await pressKey(key, deadline: deadline)
         case .waitFor(let time, let text, let textGone, let timeout):
             return try await waitFor(time: time, text: text, textGone: textGone, timeout: timeout, deadline: deadline)
-        case .screenshot(let target, let format):
-            return try await screenshot(target: target, format: format, deadline: deadline)
+        case .screenshot(let target, let format, let fullPage):
+            return try await screenshot(target: target, format: format, fullPage: fullPage, deadline: deadline)
         case .console(let level, let all):
             let (tab, webView) = try await currentPage(deadline: deadline)
             let text = runtimes[tab]?.console.render(level: level, all: all, limit: environment.limits.consoleChars)
@@ -244,6 +257,12 @@ public final class AgentBrowser: NSObject {
         case .close:
             controller.closeAll()
             return AgentResult(text: "### Result\nClosed every tab of the agent's browser. Its profile (cookies, storage) is kept.")
+        case .fillForm(let fields):
+            return try await fillForm(fields, deadline: deadline)
+        case .fileUpload(let paths):
+            return try await fileUpload(paths, deadline: deadline)
+        case .resize(let width):
+            return try await resize(to: width, deadline: deadline)
         }
     }
 
@@ -347,7 +366,7 @@ public final class AgentBrowser: NSObject {
         return await respondWithSnapshot(result, tab: tab, webView: webView, deadline: deadline)
     }
 
-    private func screenshot(target: AgentTarget?, format: ImageFormat,
+    private func screenshot(target: AgentTarget?, format: ImageFormat, fullPage: Bool,
                             deadline: ContinuousClock.Instant) async throws -> AgentResult {
         let (tab, webView) = try await currentPage(deadline: deadline)
         // A JS dialog blocks the page's process, and its drawing with it; a
@@ -356,25 +375,42 @@ public final class AgentBrowser: NSObject {
             if case .fileChooser = kind {} else { try refuseWhileDialog(tab) }
         }
         ensureFrame(webView)
-        var rect: CGRect?
+        // The page's CSS pixels are the view's points times its zoom (a set width).
+        let zoom = max(webView.pageZoom, 0.1)
+        let data: Data
+        let pixels: CGSize
         var what = "the visible page"
-        if let target {
-            let answer = try await helper("rect", ["target": target.target], tab: tab, webView: webView,
-                                          deadline: deadline)
-            guard let box = answer["rect"] as? [String: Any],
-                  let x = box["x"] as? Double, let y = box["y"] as? Double,
-                  let width = box["width"] as? Double, let height = box["height"] as? Double,
-                  width > 0, height > 0 else {
-                throw AgentError.invalid("\(target.target) has no visible box to capture")
+        if fullPage {
+            let page = try await fullPageImage(format: format, tab: tab, webView: webView, deadline: deadline)
+            data = page.data
+            pixels = page.pixels
+            what = page.what
+        } else {
+            var rect: CGRect?
+            if let target {
+                let answer = try await helper("rect", ["target": target.target], tab: tab, webView: webView,
+                                              deadline: deadline)
+                guard let box = answer["rect"] as? [String: Any],
+                      let x = box["x"] as? Double, let y = box["y"] as? Double,
+                      let width = box["width"] as? Double, let height = box["height"] as? Double,
+                      width > 0, height > 0 else {
+                    throw AgentError.invalid("\(target.target) has no visible box to capture")
+                }
+                rect = CGRect(x: x * zoom, y: y * zoom, width: width * zoom, height: height * zoom)
+                    .intersection(webView.bounds)
+                guard let visible = rect, !visible.isEmpty else {
+                    throw AgentError.invalid("\(target.target) is outside the visible page")
+                }
+                what = answer["description"] as? String ?? target.target
             }
-            rect = CGRect(x: x, y: y, width: width, height: height).intersection(webView.bounds)
-            what = answer["description"] as? String ?? target.target
-        }
-        let image = try await AgentScreenshot.capture(webView, rect: rect)
-        let cssSize = rect?.size ?? webView.bounds.size
-        let pixels = AgentScreenshot.targetSize(for: cssSize, maxEdge: environment.limits.imageMaxEdge)
-        guard let data = AgentScreenshot.encode(image, pixels: pixels, format: format) else {
-            throw AgentError.failed("the screenshot could not be encoded")
+            let image = try await AgentScreenshot.capture(webView, rect: rect)
+            let viewSize = rect?.size ?? webView.bounds.size
+            let cssSize = CGSize(width: viewSize.width / zoom, height: viewSize.height / zoom)
+            pixels = AgentScreenshot.targetSize(for: cssSize, maxEdge: environment.limits.imageMaxEdge)
+            guard let encoded = AgentScreenshot.encode(image, pixels: pixels, format: format) else {
+                throw AgentError.failed("the screenshot could not be encoded")
+            }
+            data = encoded
         }
         if screenshotSequence == 0 {
             // A resumed session's folder holds a previous run's files: the
@@ -545,6 +581,226 @@ public final class AgentBrowser: NSObject {
                                + (lines.isEmpty ? "No tab is open." : lines.joined(separator: "\n")))
         }
     }
+
+    /// `browser_type slowly`: the field focused and emptied, then each
+    /// character a key press — for handlers that watch keys (autocomplete).
+    /// Sent in small batches from here: a hidden page's timers are throttled.
+    private func typeSlowly(into target: AgentTarget, text: String, submit: Bool,
+                            deadline: ContinuousClock.Instant) async throws -> AgentResult {
+        let (tab, webView) = try await currentPage(deadline: deadline)
+        try refuseWhileDialog(tab)
+        let ready = try await waitUntilActionable(target, action: "type", tab: tab, webView: webView,
+                                                  deadline: deadline)
+        let described = Self.described(target, ready["description"] as? String)
+        let mark = navigationMark(tab)
+        _ = try await helper("focusField", ["target": target.target, "clear": true], tab: tab, webView: webView,
+                             deadline: deadline)
+        var keys = text.map(KeySpec.typing)
+        if submit { keys.append(KeySpec(key: "Enter", code: "Enter", keyCode: 13)) }
+        let batches = stride(from: 0, to: keys.count, by: 8).map { Array(keys[$0..<min($0 + 8, keys.count)]) }
+        var interrupted = false
+        for batch in batches {
+            let json = (try? JSONEncoder().encode(["keys": batch])).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+            do {
+                _ = try await helper("typeKeys", json: json, tab: tab, webView: webView, deadline: deadline)
+            } catch AgentInterruption.dialogOpened {
+                interrupted = true
+            } catch AgentInterruption.navigated {
+                interrupted = true
+            }
+            if interrupted { break }
+            try await pause(.milliseconds(40))
+        }
+        try await settle(after: mark, tab: tab, deadline: deadline)
+        noteFailedLoad(since: mark, tab: tab)
+        let how = interrupted ? " (stopped: the page opened a dialog or navigated)" : " one key at a time"
+        return await respondWithSnapshot("Typed into \(described)\(how)", tab: tab, webView: webView, deadline: deadline)
+    }
+
+    /// Several fields in order, each when it is ready; the first failure
+    /// stops the form and says which fields were filled.
+    private func fillForm(_ fields: [FormField], deadline: ContinuousClock.Instant) async throws -> AgentResult {
+        let (tab, webView) = try await currentPage(deadline: deadline)
+        try refuseWhileDialog(tab)
+        let mark = navigationMark(tab)
+        var filled: [String] = []
+        for field in fields {
+            do {
+                try await fill(field, tab: tab, webView: webView, deadline: deadline)
+                filled.append(field.name)
+            } catch AgentInterruption.dialogOpened {
+                filled.append(field.name)
+                if filled.count < fields.count { note(tab, "\(field.name) opened a dialog: the fields after it were left.") }
+                break
+            } catch AgentInterruption.navigated {
+                filled.append(field.name)
+                if filled.count < fields.count { note(tab, "\(field.name) left the page: the fields after it were left.") }
+                break
+            } catch let error as AgentError {
+                let done = filled.isEmpty ? "no field was filled" : "filled before it: " + filled.joined(separator: ", ")
+                throw error.prefixed("\(field.name): ", suffix: " (\(done))")
+            }
+        }
+        try await settle(after: mark, tab: tab, deadline: deadline)
+        noteFailedLoad(since: mark, tab: tab)
+        return await respondWithSnapshot("Filled \(filled.joined(separator: ", "))", tab: tab, webView: webView,
+                                         deadline: deadline)
+    }
+
+    private func fill(_ field: FormField, tab: BrowserTabsModel.TabID, webView: WKWebView,
+                      deadline: ContinuousClock.Instant) async throws {
+        let readiness: String
+        let op: String
+        var args: [String: Any] = ["target": field.target.target]
+        switch field.kind {
+        case .textbox:
+            readiness = "type"
+            op = "type"
+            args["text"] = field.value
+            args["submit"] = false
+        case .combobox:
+            readiness = "select"
+            op = "selectOption"
+            args["values"] = [field.value]
+        case .checkbox, .radio:
+            readiness = "click"
+            op = "setChecked"
+            args["checked"] = field.value == "true"
+        case .slider:
+            readiness = "click"
+            op = "setValue"
+            args["value"] = field.value
+        }
+        _ = try await waitUntilActionable(field.target, action: readiness, tab: tab, webView: webView, deadline: deadline)
+        let answer = try await helper(op, args, tab: tab, webView: webView, deadline: deadline)
+        if field.kind == .checkbox || field.kind == .radio, let checked = answer["checked"] as? Bool,
+           checked != (field.value == "true") {
+            throw AgentError.failed(field.kind == .radio && field.value == "false"
+                ? "a radio is unchecked by choosing another of its group"
+                : "it stayed \(checked ? "checked" : "unchecked") — the page undid the click")
+        }
+    }
+
+    /// Answers the file chooser the page opened, with files the policy
+    /// allows — or none, which cancels it.
+    private func fileUpload(_ paths: [String]?, deadline: ContinuousClock.Instant) async throws -> AgentResult {
+        let (tab, webView) = try await currentPage(deadline: deadline)
+        guard let dialog = dialogs[tab], answers[tab] != nil else {
+            throw AgentError.invalid("no file chooser is open: click the file input first, then call browser_file_upload")
+        }
+        guard case .fileChooser(let multiple) = dialog.kind else {
+            throw AgentError.conflict("the page waits on a dialog, not a file chooser: answer it with browser_handle_dialog")
+        }
+        var files: [URL] = []
+        if let paths, !paths.isEmpty {
+            let policy = AgentUploadPolicy(roots: environment.uploadRoots)
+            switch policy.validate(paths, allowsMultiple: multiple) {
+            case .success(let accepted): files = accepted
+            case .failure(let refusal):
+                throw AgentError.invalid(AgentUploadPolicy.message(for: refusal, roots: policy.roots))
+            }
+        }
+        guard let answer = answers.removeValue(forKey: tab) else { throw AgentError.invalid("no file chooser is open") }
+        dialogs[tab] = nil
+        let mark = navigationMark(tab)
+        answer.provide(files.isEmpty ? nil : files)
+        try await settle(after: mark, tab: tab, deadline: deadline)
+        noteFailedLoad(since: mark, tab: tab)
+        let what = files.isEmpty ? "Cancelled the file chooser"
+            : "Chose " + files.map(\.lastPathComponent).joined(separator: ", ")
+        return await respondWithSnapshot(what, tab: tab, webView: webView, deadline: deadline)
+    }
+
+    private func resize(to width: ViewportWidth, deadline: ContinuousClock.Instant) async throws -> AgentResult {
+        setViewportWidth(width)
+        let what: String
+        switch width {
+        case .fit: what = "The page fits the panel again"
+        case .css(let pixels): what = "The page is \(pixels) CSS pixels wide, scaled into the panel"
+        }
+        guard controller.activeTab != nil else {
+            return AgentResult(text: "### Result\n\(what); it applies to the next page.")
+        }
+        let (tab, webView) = try await currentPage(deadline: deadline)
+        // A width change is a relayout, and maybe a media query's new layout.
+        try await pause(.milliseconds(250))
+        return await respondWithSnapshot(what, tab: tab, webView: webView, deadline: deadline)
+    }
+
+    /// Every live page at the width; the app remembers it for the project.
+    public func setViewportWidth(_ width: ViewportWidth) {
+        viewportWidth = width
+        for tab in controller.tabs {
+            if let webView = controller.webView(for: tab.id) { applyZoom(webView) }
+        }
+        onViewportChange?(width)
+    }
+
+    private func applyZoom(_ webView: WKWebView) {
+        let zoom = viewportWidth.zoom(forViewWidth: webView.bounds.width)
+        if abs(webView.pageZoom - zoom) > 0.001 { webView.pageZoom = zoom }
+    }
+
+    /// The panel resized a page: a set width stays the same CSS width.
+    @objc private func webViewFrameDidChange(_ notification: Notification) {
+        guard let webView = notification.object as? WKWebView else { return }
+        applyZoom(webView)
+    }
+
+    /// The whole page, a viewport at a time — scrolled through, then put back
+    /// where it was. Fixed and sticky elements show in every slice.
+    private func fullPageImage(format: ImageFormat, tab: BrowserTabsModel.TabID, webView: WKWebView,
+                               deadline: ContinuousClock.Instant) async throws -> (data: Data, pixels: CGSize, what: String) {
+        let info = try await helper("pageInfo", [:], tab: tab, webView: webView, deadline: deadline)
+        let width = CGFloat(info["width"] as? Double ?? 0)
+        let viewportHeight = CGFloat(info["height"] as? Double ?? 0)
+        let scrollHeight = CGFloat(info["scrollHeight"] as? Double ?? 0)
+        let startX = info["scrollX"] as? Double ?? 0
+        let startY = info["scrollY"] as? Double ?? 0
+        guard width > 0, viewportHeight > 0 else { throw AgentError.failed("the page has no size to capture") }
+        let total = min(max(scrollHeight, viewportHeight), Self.fullPageMaxHeight)
+        let zoom = max(webView.pageZoom, 0.1)
+        var slices: [AgentScreenshot.Slice] = []
+        do {
+            var top: CGFloat = 0
+            while top < total {
+                let scrolled = try await helper("scrollTo", ["x": startX, "y": Double(top)], tab: tab,
+                                                webView: webView, deadline: deadline)
+                let actual = CGFloat(scrolled["y"] as? Double ?? Double(top))
+                try await pause(.milliseconds(120))   // a frame to paint the new position
+                let image = try await AgentScreenshot.capture(webView, rect: nil)
+                let bottom = min(top + viewportHeight, total)
+                // The slice [top, bottom) of the page, in a view that shows [actual, actual + viewport).
+                slices.append(AgentScreenshot.Slice(image: NSImageBox(image: image),
+                                                    sourceTop: (top - actual) * zoom,
+                                                    sourceHeight: (bottom - top) * zoom,
+                                                    pageTop: top, pageHeight: bottom - top))
+                top = bottom
+            }
+        } catch {
+            await scrollBack(x: startX, y: startY, tab: tab, webView: webView)
+            throw error
+        }
+        // Put back: the agent's next action expects the page where it was.
+        await scrollBack(x: startX, y: startY, tab: tab, webView: webView)
+        let size = CGSize(width: width, height: total)
+        let pixels = AgentScreenshot.targetSize(for: size, maxEdge: environment.limits.imageMaxEdge)
+        guard let data = AgentScreenshot.encode(slices: slices, pageSize: size, pixels: pixels, format: format) else {
+            throw AgentError.failed("the screenshot could not be encoded")
+        }
+        let cut = scrollHeight > Self.fullPageMaxHeight
+            ? " (cut at \(Int(Self.fullPageMaxHeight)) of \(Int(scrollHeight)) CSS pixels)" : ""
+        return (data, pixels, "the whole page, \(Int(width))×\(Int(total)) CSS pixels\(cut)")
+    }
+
+    private func scrollBack(x: Double, y: Double, tab: BrowserTabsModel.TabID, webView: WKWebView) async {
+        _ = try? await helper("scrollTo", ["x": x, "y": y], tab: tab, webView: webView,
+                              deadline: ContinuousClock.now + .seconds(2))
+    }
+
+    /// A full-page capture stops there: past it, the image would be scaled
+    /// to illegible anyway.
+    static let fullPageMaxHeight: CGFloat = 8_000
 
     // MARK: - Waiting
 
@@ -767,7 +1023,9 @@ public final class AgentBrowser: NSObject {
         let page = AgentPageSummary(url: webView.url?.absoluteString ?? controller.model.tab(tab)?.url.absoluteString ?? "",
                                     title: webView.title ?? "", httpStatus: runtime?.httpStatus,
                                     consoleErrors: counts.errors, consoleWarnings: counts.warnings,
-                                    viewport: webView.bounds.size, hidden: hidden)
+                                    viewport: CGSize(width: webView.bounds.width / max(webView.pageZoom, 0.1),
+                                                     height: webView.bounds.height / max(webView.pageZoom, 0.1)),
+                                    viewportScaled: viewportWidth != .fit, hidden: hidden)
         let events = runtimes[tab]?.events ?? []
         runtimes[tab]?.events.removeAll()
         let text = AgentResponseBuilder.render(result: result, page: page, tabs: tabSummaries(),
@@ -810,7 +1068,7 @@ public final class AgentBrowser: NSObject {
         case .navigateBack: return "Going back"
         case .snapshot: return "Reading the page"
         case .click(let target, _, _, _): return "Clicking \(described(target, nil))"
-        case .type(let target, _, _): return "Typing into \(described(target, nil))"
+        case .type(let target, _, _, _): return "Typing into \(described(target, nil))"
         case .selectOption(let target, _): return "Choosing in \(described(target, nil))"
         case .hover(let target): return "Hovering \(described(target, nil))"
         case .pressKey(let key): return "Pressing \(keyName(key))"
@@ -822,6 +1080,9 @@ public final class AgentBrowser: NSObject {
         case .handleDialog: return "Answering a dialog"
         case .tabs: return "Managing tabs"
         case .close: return "Closing its tabs"
+        case .fillForm(let fields): return "Filling \(fields.count == 1 ? "a field" : "\(fields.count) fields")"
+        case .fileUpload: return "Choosing files"
+        case .resize(let width): return "Setting the page width: \(width.label)"
         }
     }
 
@@ -977,6 +1238,11 @@ extension AgentBrowser: BrowserTabEngine {
         webView.isInspectable = true
         webView.navigationDelegate = self
         webView.uiDelegate = self
+        // A set width follows the panel's: the zoom is redone on each resize.
+        webView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(webViewFrameDidChange(_:)),
+                                               name: NSView.frameDidChangeNotification, object: webView)
+        applyZoom(webView)
         runtimes[tab] = TabRuntime()
         return webView
     }
@@ -985,6 +1251,7 @@ extension AgentBrowser: BrowserTabEngine {
         // Released while its tab stays in the model: unloaded, not closed.
         interruptCalls(tab, .closed(unloaded: controller.model.tab(tab) != nil))
         dismissDialog(tab)
+        NotificationCenter.default.removeObserver(self, name: NSView.frameDidChangeNotification, object: webView)
         webView.uiDelegate = nil
         webView.navigationDelegate = nil
         webView.configuration.userContentController.removeAllScriptMessageHandlers()
@@ -1222,6 +1489,14 @@ private enum DialogAnswer {
 
     func dismiss() {
         respond(accept: false, text: nil)
+    }
+
+    /// A file chooser's answer: these files, or nil to cancel.
+    func provide(_ files: [URL]?) {
+        switch self {
+        case .files(let done): done(files)
+        default: dismiss()
+        }
     }
 }
 

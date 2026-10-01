@@ -265,6 +265,24 @@ test("an element's box inside a same-origin frame is in the top viewport's coord
   await page.close();
 });
 
+test("a full-page capture scrolls the top document at once, and reads where it was", { skip }, async () => {
+  const page = await openTodo();
+  await page.evaluate(() => {
+    document.documentElement.style.scrollBehavior = "smooth";   // a page's own: not ours
+    const tall = document.createElement("div");
+    tall.style.height = "3000px";
+    document.body.append(tall);
+  });
+  const before = await run(page, "pageInfo");
+  assert.equal(before.scrollY, 0);
+  assert.ok(before.scrollHeight >= 3000, "the page's whole height: " + before.scrollHeight);
+  const moved = await run(page, "scrollTo", { x: 0, y: 1200 });
+  assert.equal(moved.y, 1200, "instant, despite smooth scrolling");
+  const clamped = await run(page, "scrollTo", { x: 0, y: 99999 });
+  assert.equal(clamped.y, before.scrollHeight - before.height, "the last slice starts where the page lets it");
+  await page.close();
+});
+
 test("a stamped element is found by the page-world function, then unmarked", { skip }, async () => {
   const page = await openTodo();
   const { yaml } = await run(page, "snapshot", {});

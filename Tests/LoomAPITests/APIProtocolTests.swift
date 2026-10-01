@@ -107,7 +107,7 @@ struct APIProtocolTests {
     @Test("the browser answers its session's own token only, and answers Markdown")
     func outilsNavigateurPortesParLaSession() {
         let browser = APIMethod.allCases.filter(\.isBrowser)
-        #expect(browser.count == 16)
+        #expect(browser.count == 19)
         for method in browser {
             #expect(!method.allowsGlobalScope, "\(method.rawValue) refuses the global token")
             #expect(!method.requiresGlobalScope)

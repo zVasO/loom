@@ -82,6 +82,22 @@ public struct KeySpec: Codable, Equatable, Sendable {
         return spec
     }
 
+    /// The key that types `character` — `browser_type slowly`, as Playwright's
+    /// pressSequentially: a newline is Enter, a capital is Shift and the letter.
+    public static func typing(_ character: Character) -> KeySpec {
+        switch character {
+        case " ": return KeySpec(key: " ", code: "Space", keyCode: 32, text: " ")
+        case "\n", "\r\n", "\r": return KeySpec(key: "Enter", code: "Enter", keyCode: 13)
+        case "\t": return KeySpec(key: "Tab", code: "Tab", keyCode: 9)
+        default: break
+        }
+        guard var spec = try? base(for: String(character)) else {
+            return KeySpec(key: String(character), code: "", keyCode: 0, text: String(character))
+        }
+        if character.isASCII, character.isLetter, character.isUppercase { spec.shiftKey = true }
+        return spec
+    }
+
     private static func base(for name: String) throws -> KeySpec {
         if let known = named[name] {
             return KeySpec(key: name == "Space" ? " " : name, code: known.code, keyCode: known.keyCode, text: known.text)

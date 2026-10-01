@@ -45,6 +45,8 @@ public struct APIBrowserTypeParams: Codable, Equatable, Sendable {
     public var ref: String?
     public var text: String
     public var submit: Bool?
+    /// One key at a time, for handlers that watch keys (200 characters at most).
+    public var slowly: Bool?
 }
 
 public struct APIBrowserSelectOptionParams: Codable, Equatable, Sendable {
@@ -82,6 +84,8 @@ public struct APIBrowserScreenshotParams: Codable, Equatable, Sendable {
     public var ref: String?
     /// png (default) or jpeg.
     public var type: String?
+    /// The whole scrollable page rather than what is visible.
+    public var fullPage: Bool?
 }
 
 public struct APIBrowserConsoleParams: Codable, Equatable, Sendable {
@@ -119,6 +123,64 @@ public struct APIBrowserTabsParams: Codable, Equatable, Sendable {
     public var action: String
     public var index: Double?
     public var url: String?
+}
+
+/// One field of `browser.fillForm`, as Playwright MCP names it.
+public struct APIBrowserFormField: Codable, Equatable, Sendable {
+    /// The field's human-readable name, echoed back.
+    public var name: String
+    /// textbox, checkbox, radio, combobox or slider.
+    public var type: String
+    public var target: String?
+    public var ref: String?
+    /// The text, the option, "true"/"false" for a checkbox or radio, a number for a slider.
+    public var value: String
+
+    public init(name: String, type: String, target: String? = nil, ref: String? = nil, value: String) {
+        self.name = name
+        self.type = type
+        self.target = target
+        self.ref = ref
+        self.value = value
+    }
+
+    enum CodingKeys: String, CodingKey { case name, type, target, ref, value }
+
+    /// `value` may come as a JSON boolean or number: agents send `true` for a checkbox.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        type = try container.decode(String.self, forKey: .type)
+        target = try container.decodeIfPresent(String.self, forKey: .target)
+        ref = try container.decodeIfPresent(String.self, forKey: .ref)
+        if let text = try? container.decode(String.self, forKey: .value) {
+            value = text
+        } else if let flag = try? container.decode(Bool.self, forKey: .value) {
+            value = flag ? "true" : "false"
+        } else {
+            let number = try container.decode(Double.self, forKey: .value)
+            value = number.rounded() == number && abs(number) < 1e15 ? String(Int(number)) : String(number)
+        }
+    }
+}
+
+public struct APIBrowserFillFormParams: Codable, Equatable, Sendable {
+    public var sessionId: String?
+    public var fields: [APIBrowserFormField]
+}
+
+public struct APIBrowserFileUploadParams: Codable, Equatable, Sendable {
+    public var sessionId: String?
+    /// Absolute paths; none (or omitted) cancels the file chooser.
+    public var paths: [String]?
+}
+
+public struct APIBrowserResizeParams: Codable, Equatable, Sendable {
+    public var sessionId: String?
+    /// The page's width in CSS pixels.
+    public var width: Double
+    /// Accepted for Playwright's shape; the height follows the panel.
+    public var height: Double?
 }
 
 /// A tool's answer meant to be read: Markdown, and maybe an image beside it.

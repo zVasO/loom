@@ -116,7 +116,9 @@ public enum APIToolCatalog {
                 + "then optionally press Enter.",
                 ["element": elementProperty, "target": targetProperty(optional: false), "ref": refAlias,
                  "text": string("The text the field ends up with."),
-                 "submit": boolean("Press Enter afterwards (submits a form).")],
+                 "submit": boolean("Press Enter afterwards (submits a form)."),
+                 "slowly": boolean("Type one key at a time, for handlers that watch keys "
+                                   + "(autocomplete); 200 characters at most. Off by default.")],
                 required: ["text"], cli: #"loom browser type '{"target":"e5","text":"milk","submit":true}'"#),
         browser(.browserSelectOption, "browser_select_option",
                 "Choose options of a <select>, by value or by visible label. For a custom dropdown, "
@@ -140,10 +142,12 @@ public enum APIToolCatalog {
                  "timeout": number("Seconds to wait for the text, 10 by default.")],
                 cli: #"loom browser wait_for '{"text":"Saved"}'"#),
         browser(.browserScreenshot, "browser_take_screenshot",
-                "Take a screenshot of the visible page, or of one element. For looking, not for "
-                + "acting: use browser_snapshot to act.",
+                "Take a screenshot of the visible page, of one element, or of the whole page. For "
+                + "looking, not for acting: use browser_snapshot to act.",
                 ["element": elementProperty, "target": targetProperty(optional: true), "ref": refAlias,
-                 "type": enumeration(["png", "jpeg"], "The format, png by default.")],
+                 "type": enumeration(["png", "jpeg"], "The format, png by default."),
+                 "fullPage": boolean("The whole scrollable page (scrolled through, then put back), "
+                                     + "not just what is visible. Not with a target.")],
                 cli: "loom browser take_screenshot --out shot.png"),
         browser(.browserConsole, "browser_console_messages",
                 "The console messages, uncaught errors and failed loads of the current page.",
@@ -162,7 +166,8 @@ public enum APIToolCatalog {
                  "element": elementProperty, "target": targetProperty(optional: true), "ref": refAlias],
                 required: ["function"], cli: #"loom browser evaluate '() => document.title'"#),
         browser(.browserHandleDialog, "browser_handle_dialog",
-                "Answer the alert, confirm or prompt the page is waiting on (see ### Modal state).",
+                "Answer the alert, confirm or prompt the page is waiting on (see ### Modal state); "
+                + "on a file chooser, cancel it.",
                 ["accept": boolean("OK (true) or Cancel (false)."),
                  "promptText": string("The text to answer a prompt with.")],
                 required: ["accept"], cli: #"loom browser handle_dialog '{"accept":true}'"#),
@@ -175,6 +180,37 @@ public enum APIToolCatalog {
         browser(.browserClose, "browser_close",
                 "Close every tab of your browser. Its profile (cookies, storage) is kept.",
                 [:], cli: "loom browser close"),
+        browser(.browserFillForm, "browser_fill_form",
+                "Fill several fields of a form in one call, in order: text into textboxes, a state "
+                + "for checkboxes and radios, an option for comboboxes, a number for sliders. Answers "
+                + "the new snapshot; stops at the first field that fails, saying which.",
+                ["fields": array(.object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "name": string("The field's name, as you would say it."),
+                        "type": enumeration(["textbox", "checkbox", "radio", "combobox", "slider"], "The kind of field."),
+                        "target": targetProperty(optional: false),
+                        "ref": refAlias,
+                        "value": string("The text; true or false for a checkbox or radio; the option's "
+                                        + "value or label for a combobox; a number for a slider."),
+                    ]),
+                    "required": .array([.string("name"), .string("type"), .string("value")]),
+                ]), "The fields to fill, 30 at most.")],
+                required: ["fields"],
+                cli: #"loom browser fill_form '{"fields":[{"name":"Email","type":"textbox","target":"e4","value":"a@b.c"}]}'"#),
+        browser(.browserFileUpload, "browser_file_upload",
+                "Answer the file chooser the page opened (### Modal state) with files — click the "
+                + "file input first. Files from your working tree, or ones you copied into the folder "
+                + "a refusal names. No paths cancels the chooser.",
+                ["paths": array(.object(["type": .string("string")]), "Absolute paths of the files.")],
+                cli: "loom browser file_upload /path/to/photo.png"),
+        browser(.browserResize, "browser_resize",
+                "Set the page's width in CSS pixels — 375 for a phone, 768 a tablet, 1280 a laptop — "
+                + "to test a responsive layout. The page is scaled into the panel; its height "
+                + "follows. 0 goes back to the panel's own width.",
+                ["width": number("The width in CSS pixels, 320 to 3840; 0 for the panel's."),
+                 "height": number("Accepted for compatibility; the height follows the panel.")],
+                required: ["width"], cli: "loom browser resize 375"),
     ]
 
     private static func browser(_ method: APIMethod, _ name: String, _ description: String,

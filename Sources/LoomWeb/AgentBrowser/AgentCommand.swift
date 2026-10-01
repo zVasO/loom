@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// What went wrong with a command, in words the agent can act on. Mapped to
@@ -16,6 +17,19 @@ public enum AgentError: Error, Equatable, Sendable {
         case .notFound(let m), .invalid(let m), .timeout(let m), .unavailable(let m), .conflict(let m),
              .failed(let m):
             return m
+        }
+    }
+
+    /// The same failure, its message framed — "Email: … (filled before it: Name)".
+    public func prefixed(_ prefix: String, suffix: String = "") -> AgentError {
+        let framed = prefix + message + suffix
+        switch self {
+        case .notFound: return .notFound(framed)
+        case .invalid: return .invalid(framed)
+        case .timeout: return .timeout(framed)
+        case .unavailable: return .unavailable(framed)
+        case .conflict: return .conflict(framed)
+        case .failed: return .failed(framed)
         }
     }
 }
@@ -55,24 +69,74 @@ public enum TabsAction: Equatable, Sendable {
     case close(Int?)
 }
 
+/// One field of a form the agent fills in one call.
+public struct FormField: Equatable, Sendable {
+    public enum Kind: String, Equatable, Sendable, CaseIterable {
+        case textbox, checkbox, radio, combobox, slider
+    }
+
+    public var name: String
+    public var kind: Kind
+    public var target: AgentTarget
+    public var value: String
+
+    public init(name: String, kind: Kind, target: AgentTarget, value: String) {
+        self.name = name
+        self.kind = kind
+        self.target = target
+        self.value = value
+    }
+}
+
+/// The page's width: the panel's own, or a CSS width the page is scaled to.
+public enum ViewportWidth: Equatable, Sendable, Codable {
+    case fit
+    case css(Int)
+
+    public static let range = 320...3_840
+    /// The menu's presets: the panel, a small laptop, a laptop.
+    public static let presets: [ViewportWidth] = [.fit, .css(1_024), .css(1_280)]
+
+    /// The page zoom that shows `self` in a view `viewWidth` points wide.
+    public func zoom(forViewWidth viewWidth: CGFloat) -> CGFloat {
+        guard case .css(let width) = self, viewWidth > 0 else { return 1 }
+        return min(4, max(0.1, viewWidth / CGFloat(width)))
+    }
+
+    public var label: String {
+        switch self {
+        case .fit: return "Fit panel"
+        case .css(let width): return "\(width) px"
+        }
+    }
+}
+
 /// One command of the agent's browser, validated — the engine runs it as is.
 public enum AgentCommand: Equatable, Sendable {
     case navigate(URL)
     case navigateBack
     case snapshot(target: String?, depth: Int?)
     case click(AgentTarget, doubleClick: Bool, button: MouseButton, modifiers: [String])
-    case type(AgentTarget, text: String, submit: Bool)
+    case type(AgentTarget, text: String, submit: Bool, slowly: Bool)
     case selectOption(AgentTarget, values: [String])
     case hover(AgentTarget)
     case pressKey(KeySpec)
     case waitFor(time: Double?, text: String?, textGone: String?, timeout: Double)
-    case screenshot(target: AgentTarget?, format: ImageFormat)
+    case screenshot(target: AgentTarget?, format: ImageFormat, fullPage: Bool)
     case console(level: ConsoleLevel, all: Bool)
     case network(filter: String?)
     case evaluate(function: String, target: AgentTarget?)
     case handleDialog(accept: Bool, promptText: String?)
     case tabs(TabsAction)
     case close
+    case fillForm([FormField])
+    /// nil or empty: the chooser is cancelled.
+    case fileUpload(paths: [String]?)
+    case resize(ViewportWidth)
+
+    /// `browser_type slowly`: one key press each, sent from Swift.
+    public static let maxSlowText = 200
+    public static let maxFormFields = 30
 
     /// The longest a wait may last, `time` and `timeout` together: the
     /// method's deadline must hold the worst case.

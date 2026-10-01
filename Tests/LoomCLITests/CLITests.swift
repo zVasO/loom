@@ -62,6 +62,11 @@ struct CLIParseTests {
                 == .browser(.browserWaitFor, .object(["time": .number(3)])), "a number is seconds")
         #expect(try CLI.parse(["browser", "wait_for", "Saved"]).0
                 == .browser(.browserWaitFor, .object(["text": .string("Saved")])))
+        #expect(try CLI.parse(["browser", "file_upload", "/tmp/a.png", "/tmp/b.png"]).0
+                == .browser(.browserFileUpload, .object(["paths": .array([.string("/tmp/a.png"), .string("/tmp/b.png")])])))
+        #expect(try CLI.parse(["browser", "resize", "1280x800"]).0
+                == .browser(.browserResize, .object(["width": .number(1280)])))
+        #expect(throws: CLI.ParseError.self) { try CLI.parse(["browser", "resize", "wide"]) }
     }
 
     @Test("browser usage errors are said plainly")

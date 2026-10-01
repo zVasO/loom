@@ -18,6 +18,11 @@ requêtes, prendre une capture. La décision et ses garde-fous : [ADR-0014](adr/
   « <hôte> says: » : l'agent ou vous pouvez y répondre.
 - La carte de la session dans la barre latérale montre un globe quand son agent
   navigue ; dans l'onglet PR, l'en-tête du tiroir aussi.
+- **La largeur de la page** : le menu à droite de la légende (« Fit », 1024 px,
+  1280 px). Le terminal garde ses 80 colonnes, le panneau est souvent étroit :
+  sans cela, l'agent testerait la mise en page mobile. Une largeur choisie est
+  mise à l'échelle dans le panneau et retenue pour le projet ; l'agent la règle
+  lui-même avec `browser_resize`.
 
 ## Le profil
 
@@ -41,10 +46,13 @@ Les outils MCP `browser_*` suivent Playwright MCP, que les agents connaissent :
 | `browser_navigate` | Ouvre une adresse (`localhost:5173` en http) et répond l'instantané |
 | `browser_snapshot` | L'instantané de la page : l'arbre d'accessibilité, références `e12` comprises |
 | `browser_click`, `browser_hover` | Clique, survole un élément (référence ou sélecteur CSS) |
-| `browser_type`, `browser_select_option`, `browser_press_key` | Saisie, listes, touches |
+| `browser_type`, `browser_select_option`, `browser_press_key` | Saisie (`slowly` : touche par touche, pour une autocomplétion), listes, touches |
+| `browser_fill_form` | Plusieurs champs d'un coup : textes, cases, listes, curseurs |
+| `browser_file_upload` | Répond au sélecteur de fichier que la page a ouvert |
+| `browser_resize` | La largeur de la page en pixels CSS (375, 768, 1280…), mise à l'échelle dans le panneau |
 | `browser_wait_for` | Attend un temps, ou qu'un texte apparaisse ou disparaisse |
 | `browser_console_messages`, `browser_network_requests` | Console, erreurs, fetch/XHR |
-| `browser_take_screenshot` | Capture de la page ou d'un élément, rendue en image |
+| `browser_take_screenshot` | Capture de la page visible, d'un élément ou de toute la page (`fullPage`), rendue en image |
 | `browser_evaluate` | Une fonction JavaScript dans la page, son résultat en JSON |
 | `browser_handle_dialog`, `browser_tabs`, `browser_navigate_back`, `browser_close` | Le reste |
 
@@ -61,8 +69,13 @@ Chaque action répond l'instantané de la page qui en résulte. Depuis un shell 
 - Panneau masqué, la page tourne mais WebKit suspend son rendu (animations,
   `requestAnimationFrame`) : `### Page` l'indique.
 - Les captures ne voient pas WebGL ni la vidéo.
-- L'envoi de fichiers n'est pas encore là : un sélecteur de fichier attend
-  `browser_handle_dialog`, qui l'annule.
+- Une capture pleine page fait défiler la page tranche par tranche, puis la
+  remet où elle était : un en-tête fixe apparaît dans chaque tranche, et au-delà
+  de 8 000 pixels CSS la capture s'arrête.
+- `browser_file_upload` ne prend que des fichiers du dossier de travail de la
+  session, ou du dossier que son refus indique (Loom y range ce que l'agent veut
+  envoyer d'ailleurs) : envoyer un fichier à une page, c'est le faire sortir de
+  la machine.
 
 ## Dépannage
 

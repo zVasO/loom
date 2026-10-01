@@ -33,8 +33,12 @@ public enum AgentBrowserSelfTest {
         }
         defer { server.stop() }
         let shots = FileManager.default.temporaryDirectory.appendingPathComponent("loom-agent-selftest-shots")
+        let uploads = FileManager.default.temporaryDirectory.appendingPathComponent("loom-agent-selftest-uploads")
+        try? FileManager.default.createDirectory(at: uploads, withIntermediateDirectories: true)
+        let photo = uploads.appendingPathComponent("photo.png")
+        FileManager.default.createFile(atPath: photo.path, contents: Data([0x89, 0x50, 0x4E, 0x47]))
         let browser = AgentBrowser(profile: .private, environment: .init(
-            screenshotsDirectory: shots, initialViewport: CGSize(width: 900, height: 900)))
+            screenshotsDirectory: shots, initialViewport: CGSize(width: 900, height: 900), uploadRoots: [uploads]))
         let base = "http://127.0.0.1:\(port)"
 
         func send(_ command: AgentCommand, seconds: Int = 30) async -> Result<AgentResult, Error> {
@@ -66,7 +70,7 @@ public enum AgentBrowserSelfTest {
         // 2. Type into the framework-style input and submit through the form.
         let snapshot = text(await send(.snapshot(target: nil, depth: nil)))
         if let field = ref(snapshot, #"textbox "New todo""#) {
-            let typed = text(await send(.type(AgentTarget(target: field), text: "milk", submit: true)))
+            let typed = text(await send(.type(AgentTarget(target: field), text: "milk", submit: true, slowly: false)))
             let todos = await evaluate("() => window.state.todos.map(t => t.text)")
             record("type + submit", todos.contains("\"milk\""), typed + "\n" + todos)
             let keys = await evaluate("() => window.events")
@@ -102,7 +106,7 @@ public enum AgentBrowserSelfTest {
         }
 
         // 5. Screenshot: a real PNG at the CSS size.
-        switch await send(.screenshot(target: nil, format: .png)) {
+        switch await send(.screenshot(target: nil, format: .png, fullPage: false)) {
         case .success(let answer):
             let data = answer.image.flatMap { try? Data(contentsOf: $0.url) } ?? Data()
             let png = data.starts(with: [0x89, 0x50, 0x4E, 0x47])
@@ -135,7 +139,64 @@ public enum AgentBrowserSelfTest {
         let pressed = text(await send(.pressKey(try! KeySpec.parse("Tab"))))
         record("Tab moves focus", pressed.contains("focus: button \"Add\""), pressed)
 
+        // 10. A form in one call: text, a checkbox, an option, a slider.
+        let form = text(await send(.snapshot(target: nil, depth: nil)))
+        if let field = ref(form, #"textbox "New todo""#), let terms = ref(form, #"checkbox "I agree""#),
+           let color = ref(form, #"combobox "Color""#), let volume = ref(form, #"slider "Volume""#) {
+            let filled = text(await send(.fillForm([
+                FormField(name: "New todo", kind: .textbox, target: AgentTarget(target: field), value: "eggs"),
+                FormField(name: "Terms", kind: .checkbox, target: AgentTarget(target: terms), value: "true"),
+                FormField(name: "Color", kind: .combobox, target: AgentTarget(target: color), value: "Blue"),
+                FormField(name: "Volume", kind: .slider, target: AgentTarget(target: volume), value: "7"),
+            ])))
+            let values = await evaluate("""
+                () => [document.getElementById('new').value, document.getElementById('terms').checked,
+                       document.getElementById('color').value, document.getElementById('volume').value].join('|')
+                """)
+            record("fill form", values.contains("eggs|true|b|7"), filled + "\n" + values)
+            // 11. One key at a time: the page's key handlers see each.
+            _ = await evaluate("() => { window.events = []; return true }")
+            _ = await send(.type(AgentTarget(target: field), text: "Hi", submit: false, slowly: true))
+            let keys = await evaluate("() => window.events")
+            record("type slowly", keys.contains("keydown:H:72") && keys.contains("keydown:i:73"), keys)
+        } else {
+            record("fill form", false, "missing fields in:\n" + form)
+        }
+
+        // 12. A laptop's width in a narrower view: the page sees 1280 CSS pixels.
+        let wide = text(await send(.resize(.css(1_280))))
+        let innerWidth = await evaluate("() => window.innerWidth")
+        record("resize", innerWidth.contains("1280") && wide.contains("Viewport: 1280×"), wide + "\n" + innerWidth)
+        _ = await send(.resize(.fit))
+
+        // 13. The whole page: taller than the view, put back where it was.
+        _ = await evaluate("() => { document.body.style.minHeight = '2400px'; window.scrollTo(0, 100); return true }")
+        switch await send(.screenshot(target: nil, format: .png, fullPage: true)) {
+        case .success(let answer):
+            let tall = (answer.image?.height ?? 0) > (answer.image?.width ?? 0)
+            let scrolled = await evaluate("() => window.scrollY")
+            record("full-page screenshot", tall && scrolled.contains("100"),
+                   "\(answer.image.map { "\($0.width)×\($0.height)" } ?? "no image"), scrollY \(scrolled)")
+        case .failure(let error):
+            record("full-page screenshot", false, "\(error)")
+        }
+
+        // 14. A file chooser answered with a file the policy allows.
+        let withPhoto = text(await send(.snapshot(target: nil, depth: nil)))
+        if let input = ref(withPhoto, #"Photo"#) {
+            let opened = text(await send(.click(AgentTarget(target: input), doubleClick: false, button: .left,
+                                                modifiers: [])))
+            let outside = text(await send(.fileUpload(paths: ["/etc/hosts"])))
+            let chosen = text(await send(.fileUpload(paths: [photo.path])))
+            let events = await evaluate("() => window.events")
+            record("file upload", opened.contains("File chooser") && outside.contains("outside")
+                   && events.contains("file:photo.png"), opened + "\n" + outside + "\n" + chosen + "\n" + events)
+        } else {
+            record("file upload", false, "no file input in:\n" + withPhoto)
+        }
+
         browser.tearDown()
+        try? FileManager.default.removeItem(at: uploads)
         return write(steps, to: reportPath)
     }
 

@@ -37,6 +37,7 @@
 <label><input id="terms" type="checkbox"> I agree</label>
 <label for="volume">Volume</label>
 <input id="volume" type="range" min="0" max="10" value="2">
+<label>Photo <input id="photo" type="file"></label>
 <p id="status" role="status"></p>
 <div id="overlay"></div>
 <script>
@@ -59,6 +60,9 @@
     if (now !== tracked) { tracked = now; window.state.draft = now; window.events.push("change:" + now); }
   });
   input.addEventListener("keydown", (e) => window.events.push("keydown:" + e.key + ":" + e.keyCode));
+  document.getElementById("photo").addEventListener("change", (e) => {
+    window.events.push("file:" + Array.from(e.target.files).map((f) => f.name).join(","));
+  });
 
   function render() {
     const list = document.getElementById("list");

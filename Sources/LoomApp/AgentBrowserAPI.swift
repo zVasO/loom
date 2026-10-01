@@ -68,9 +68,52 @@ extension AppModel {
         let viewport = CGSize(width: storedSidePanelWidth ?? 640, height: 900)
         let browser = AgentBrowser(profile: profile, environment: .init(
             screenshotsDirectory: agentScreenshotsDirectory(for: parent),
-            initialViewport: viewport))
+            initialViewport: viewport,
+            uploadRoots: agentUploadRoots(for: item),
+            viewportWidth: agentViewportWidth(for: item.projectID)))
+        let projectID = item.projectID
+        browser.onViewportChange = { [weak self] width in self?.rememberAgentViewportWidth(width, for: projectID) }
         agentBrowsers[parent] = browser
         return browser
+    }
+
+    /// Where browser_file_upload may take files: the session's working tree,
+    /// and a folder of Loom's the agent copies other files into on purpose.
+    private func agentUploadRoots(for item: SessionItem) -> [URL] {
+        var roots: [URL] = []
+        let record = allRecords.first { $0.id == item.id }
+        if let tree = record?.worktreePath.map({ URL(fileURLWithPath: $0) }) ?? projectRepo(item.projectID) {
+            roots.append(tree)
+        }
+        let uploads = agentUploadsDirectory(for: item.id)
+        try? FileManager.default.createDirectory(at: uploads, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        roots.append(uploads)
+        return roots
+    }
+
+    func agentUploadsDirectory(for session: SessionID) -> URL {
+        supportDirectory.appendingPathComponent("agent-browser/uploads", isDirectory: true)
+            .appendingPathComponent(session.rawValue.uuidString, isDirectory: true)
+    }
+
+    /// The page width a project's agent browser last had (the agent's
+    /// browser_resize, the panel's menu) — a layout under test stays put.
+    private func agentViewportWidth(for project: ProjectID?) -> ViewportWidth {
+        guard let project,
+              let data = UserDefaults.standard.data(forKey: "loom.agentBrowser.viewport." + project.rawValue.uuidString),
+              let width = try? JSONDecoder().decode(ViewportWidth.self, from: data) else { return .fit }
+        return width
+    }
+
+    private func rememberAgentViewportWidth(_ width: ViewportWidth, for project: ProjectID?) {
+        guard let project else { return }
+        let key = "loom.agentBrowser.viewport." + project.rawValue.uuidString
+        if width == .fit {
+            UserDefaults.standard.removeObject(forKey: key)
+        } else if let data = try? JSONEncoder().encode(width) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
     }
 
     /// What the panel says about where the agent's cookies live.
@@ -108,6 +151,7 @@ extension AppModel {
     func forgetAgentBrowser(_ session: SessionID) {
         agentBrowsers.removeValue(forKey: session)?.tearDown()
         try? FileManager.default.removeItem(at: agentScreenshotsDirectory(for: session))
+        try? FileManager.default.removeItem(at: agentUploadsDirectory(for: session))
     }
 
     /// Screenshots older than a week: the agent has read them long ago.

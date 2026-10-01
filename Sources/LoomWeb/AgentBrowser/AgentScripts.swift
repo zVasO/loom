@@ -1376,12 +1376,22 @@ function rect(args) {
 
 function pageInfo() {
   const doc = document.documentElement;
+  const body = document.body;
   return {
     ok: true, url: location.href, title: document.title,
     width: window.innerWidth, height: window.innerHeight,
-    scrollWidth: doc ? doc.scrollWidth : 0, scrollHeight: doc ? doc.scrollHeight : 0,
+    scrollWidth: Math.max(doc ? doc.scrollWidth : 0, body ? body.scrollWidth : 0),
+    scrollHeight: Math.max(doc ? doc.scrollHeight : 0, body ? body.scrollHeight : 0),
+    scrollX: window.scrollX, scrollY: window.scrollY,
     visibility: document.visibilityState,
   };
+}
+
+/** Scrolls the top document at once (a page's smooth scrolling aside) — for
+ * full-page screenshots, which put it back after. */
+function scrollTo(args) {
+  window.scrollTo({ left: Number(args.x) || 0, top: Number(args.y) || 0, behavior: "instant" });
+  return { ok: true, x: window.scrollX, y: window.scrollY };
 }
 
 /** Marks the target for a page-world function: only DOM state crosses worlds. */
@@ -1394,7 +1404,7 @@ function stamp(args) {
 }
 
 const OPS = { snapshot, prepare, click, hover, type, selectOption, pressKey, waitText, rect, pageInfo, stamp,
-  setChecked, setValue, focusField, typeKeys };
+  setChecked, setValue, focusField, typeKeys, scrollTo };
 
 async function run(op, argsJSON) {
   try {

@@ -57,7 +57,8 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   navigateur, à côté de son terminal, sur un profil isolé par projet (jamais les
   cookies de l'utilisateur ; privé pour les revues), piloté par les outils MCP
   `browser_*` au format de Playwright MCP — naviguer, instantané d'accessibilité à
-  références, cliquer, taper, touches, attendre, console, requêtes, capture,
+  références, cliquer, taper, remplir un formulaire, envoyer un fichier, touches,
+  attendre, console, requêtes, capture (pleine page comprise), largeur de page,
   JavaScript, dialogues, onglets — et par `loom browser <outil>`. L'agent ouvre le
   panneau sur son navigateur la première fois qu'il s'en sert. Outils
   pré-autorisés par défaut, coupables dans les Réglages. Guide :

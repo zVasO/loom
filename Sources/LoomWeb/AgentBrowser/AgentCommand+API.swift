@@ -61,7 +61,12 @@ extension AgentCommand {
                           button: button, modifiers: modifiers)
         case .browserType:
             let p = try decode(APIBrowserTypeParams.self, params)
-            return .type(try target(p.target ?? p.ref, element: p.element), text: p.text, submit: p.submit ?? false)
+            let slowly = p.slowly ?? false
+            if slowly, p.text.count > maxSlowText {
+                throw AgentError.invalid("slowly types \(maxSlowText) characters at most: type the rest at once")
+            }
+            return .type(try target(p.target ?? p.ref, element: p.element), text: p.text, submit: p.submit ?? false,
+                         slowly: slowly)
         case .browserSelectOption:
             let p = try decode(APIBrowserSelectOptionParams.self, params)
             guard !p.values.isEmpty else { throw AgentError.invalid("values must name at least one option") }
@@ -83,7 +88,9 @@ extension AgentCommand {
             } ?? .png
             let raw = p.target ?? p.ref
             let target = try raw.map { try Self.target($0, element: p.element) }
-            return .screenshot(target: target, format: format)
+            let fullPage = p.fullPage ?? false
+            if fullPage, target != nil { throw AgentError.invalid("fullPage or a target, not both") }
+            return .screenshot(target: target, format: format, fullPage: fullPage)
         case .browserConsole:
             let p = try decode(APIBrowserConsoleParams.self, params)
             let level = try p.level.map { raw -> ConsoleLevel in
@@ -124,6 +131,39 @@ extension AgentCommand {
             }
         case .browserClose:
             return .close
+        case .browserFillForm:
+            let p = try decode(APIBrowserFillFormParams.self, params)
+            guard !p.fields.isEmpty else { throw AgentError.invalid("fields must name at least one field") }
+            guard p.fields.count <= maxFormFields else {
+                throw AgentError.invalid("\(maxFormFields) fields at most: fill the rest in a second call")
+            }
+            return .fillForm(try p.fields.map { field in
+                guard let kind = FormField.Kind(rawValue: field.type) else {
+                    throw AgentError.invalid("\(field.name): type is textbox, checkbox, radio, combobox or slider")
+                }
+                if kind == .checkbox || kind == .radio, !["true", "false"].contains(field.value) {
+                    throw AgentError.invalid("\(field.name): a \(kind.rawValue) takes true or false")
+                }
+                if kind == .slider, Double(field.value) == nil {
+                    throw AgentError.invalid("\(field.name): a slider takes a number")
+                }
+                return FormField(name: field.name, kind: kind,
+                                 target: try target(field.target ?? field.ref, element: field.name), value: field.value)
+            })
+        case .browserFileUpload:
+            let p = try decode(APIBrowserFileUploadParams.self, params)
+            for path in p.paths ?? [] where !path.hasPrefix("/") {
+                throw AgentError.invalid("\(path) is not an absolute path")
+            }
+            return .fileUpload(paths: p.paths)
+        case .browserResize:
+            let p = try decode(APIBrowserResizeParams.self, params)
+            let width = try whole(p.width, "width", minimum: 0)
+            if width == 0 { return .resize(.fit) }
+            guard ViewportWidth.range.contains(width) else {
+                throw AgentError.invalid("width is \(ViewportWidth.range.lowerBound) to \(ViewportWidth.range.upperBound) CSS pixels, or 0 for the panel's")
+            }
+            return .resize(.css(width))
         default:
             throw APIError(code: .unknownMethod, message: "\(method.rawValue) is not a browser method")
         }

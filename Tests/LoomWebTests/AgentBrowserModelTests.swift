@@ -99,6 +99,17 @@ struct AgentKeysTests {
         #expect(throws: AgentError.self) { try KeySpec.parse("NotAKey") }
         #expect(throws: AgentError.self) { try KeySpec.parse("") }
     }
+
+    @Test("typing a text key by key: capitals shifted, a newline is Enter, anything else types itself")
+    func toucheParCaractere() {
+        let capital = KeySpec.typing("M")
+        #expect(capital.key == "M" && capital.text == "M" && capital.shiftKey && capital.code == "KeyM")
+        #expect(KeySpec.typing("m").shiftKey == false)
+        #expect(KeySpec.typing(" ").code == "Space" && KeySpec.typing(" ").text == " ")
+        #expect(KeySpec.typing("\n").key == "Enter")
+        #expect(KeySpec.typing("é").text == "é" && KeySpec.typing("é").keyCode == 0)
+        #expect(KeySpec.typing("4").code == "Digit4")
+    }
 }
 
 @Suite("Agent browser — what pages log")
@@ -289,6 +300,30 @@ struct AgentResponseTests {
         #expect(!text.contains("### Snapshot"))
         #expect(text.contains("- HTTP status: 500"))
         #expect(text.contains("- Visibility: hidden"))
+        let chooser = AgentModalState(kind: .fileChooser(multiple: true), message: "", host: "localhost")
+        #expect(chooser.line == "- [File chooser (multiple files)]: can be handled by browser_file_upload")
+    }
+
+    @Test("a set width shows in CSS pixels, and says the page is scaled")
+    func largeurAffichee() {
+        let text = AgentResponseBuilder.render(
+            result: nil, page: AgentPageSummary(url: "u", title: "t", viewport: CGSize(width: 1280, height: 1800),
+                                                viewportScaled: true),
+            tabs: [], modal: nil, snapshot: nil, events: [])
+        #expect(text.contains("- Viewport: 1280×1800 (width set, scaled into the panel; browser_resize 0 to fit)"))
+    }
+
+    @Test("a previous run's screenshots: the numbering goes on after them")
+    func numerotationContinue() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loom-shots-\(UUID().uuidString.prefix(6))", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        #expect(AgentScreenshot.lastSequence(in: directory) == 0)
+        for name in ["000007.png", "000012.jpg", "notes.txt"] {
+            FileManager.default.createFile(atPath: directory.appendingPathComponent(name).path, contents: Data())
+        }
+        #expect(AgentScreenshot.lastSequence(in: directory) == 12)
     }
 
     @Test("the answer never outgrows its limit: the snapshot is cut first")
@@ -330,11 +365,33 @@ struct AgentCommandAPITests {
         #expect(try command(.browserClick, ["ref": .string("e12"), "element": .string("Save")])
                 == .click(AgentTarget(target: "e12", element: "Save"), doubleClick: false, button: .left, modifiers: []))
         #expect(try command(.browserType, ["target": .string("#name"), "text": .string("Ada"), "submit": .bool(true)])
-                == .type(AgentTarget(target: "#name"), text: "Ada", submit: true))
+                == .type(AgentTarget(target: "#name"), text: "Ada", submit: true, slowly: false))
         #expect(try command(.browserPressKey, ["key": .string("Enter")]) == .pressKey(try KeySpec.parse("Enter")))
         #expect(try command(.browserTabs, ["action": .string("select"), "index": .number(1)]) == .tabs(.select(1)))
         #expect(try command(.browserConsole, [:]) == .console(level: .info, all: false))
         #expect(try command(.browserSnapshot, ["depth": .number(2)]) == .snapshot(target: nil, depth: 2))
+        #expect(try command(.browserScreenshot, ["fullPage": .bool(true)])
+                == .screenshot(target: nil, format: .png, fullPage: true))
+        #expect(try command(.browserType, ["target": .string("e3"), "text": .string("Par"), "slowly": .bool(true)])
+                == .type(AgentTarget(target: "e3"), text: "Par", submit: false, slowly: true))
+        #expect(try command(.browserResize, ["width": .number(375), "height": .number(812)]) == .resize(.css(375)))
+        #expect(try command(.browserResize, ["width": .number(0)]) == .resize(.fit))
+        #expect(try command(.browserFileUpload, [:]) == .fileUpload(paths: nil), "no paths: cancel")
+        #expect(try command(.browserFileUpload, ["paths": .array([.string("/w/a.png")])]) == .fileUpload(paths: ["/w/a.png"]))
+    }
+
+    @Test("a form: each field its kind, target and value; a boolean for a checkbox is accepted")
+    func formulaire() throws {
+        let fields: JSONValue = .array([
+            .object(["name": .string("Email"), "type": .string("textbox"), "ref": .string("e4"), "value": .string("a@b.c")]),
+            .object(["name": .string("Terms"), "type": .string("checkbox"), "target": .string("e7"), "value": .bool(true)]),
+            .object(["name": .string("Volume"), "type": .string("slider"), "target": .string("#vol"), "value": .number(7)]),
+        ])
+        #expect(try command(.browserFillForm, ["fields": fields]) == .fillForm([
+            FormField(name: "Email", kind: .textbox, target: AgentTarget(target: "e4", element: "Email"), value: "a@b.c"),
+            FormField(name: "Terms", kind: .checkbox, target: AgentTarget(target: "e7", element: "Terms"), value: "true"),
+            FormField(name: "Volume", kind: .slider, target: AgentTarget(target: "#vol", element: "Volume"), value: "7"),
+        ]))
     }
 
     @Test("invalid parameters are the API's invalidParams, in words the agent can fix")
@@ -358,6 +415,27 @@ struct AgentCommandAPITests {
         #expect(code(.browserTabs, ["action": .string("select"), "index": .number(1.5)]) == .invalidParams)
         #expect(code(.browserClick, ["target": .string("e1"), "button": .string("thumb")]) == .invalidParams)
         #expect(code(.sessionGet, [:]) == .unknownMethod)
+        #expect(code(.browserScreenshot, ["target": .string("e1"), "fullPage": .bool(true)]) == .invalidParams)
+        #expect(code(.browserType, ["target": .string("e1"), "text": .string(String(repeating: "x", count: 201)),
+                                    "slowly": .bool(true)]) == .invalidParams, "slowly is for short texts")
+        #expect(code(.browserResize, ["width": .number(100)]) == .invalidParams)
+        #expect(code(.browserFileUpload, ["paths": .array([.string("relative.png")])]) == .invalidParams)
+        #expect(code(.browserFillForm, ["fields": .array([])]) == .invalidParams)
+        #expect(code(.browserFillForm, ["fields": .array([.object(["name": .string("X"), "type": .string("checkbox"),
+                                                                   "target": .string("e1"), "value": .string("yes")])])])
+                == .invalidParams, "a checkbox takes true or false")
+        #expect(code(.browserFillForm, ["fields": .array([.object(["name": .string("X"), "type": .string("date"),
+                                                                   "target": .string("e1"), "value": .string("x")])])])
+                == .invalidParams)
+    }
+
+    @Test("a set width is a page zoom: the CSS width shown in the view's points")
+    func largeurDePage() {
+        #expect(ViewportWidth.fit.zoom(forViewWidth: 640) == 1)
+        #expect(ViewportWidth.css(1_280).zoom(forViewWidth: 640) == 0.5)
+        #expect(ViewportWidth.css(375).zoom(forViewWidth: 750) == 2)
+        #expect(ViewportWidth.css(1_280).zoom(forViewWidth: 0) == 1, "no view yet: no zoom")
+        #expect(ViewportWidth.presets.first == .fit)
     }
 
     @Test("every command fits its method's deadline at its validation maximum")
