@@ -1842,6 +1842,12 @@ struct SessionsView: View {
                 renameTarget = id
             }
         }
+        // ⌘⇧B: the stack's side panel — on the session or one of its shells.
+        .onReceive(NotificationCenter.default.publisher(for: .loomToggleSidePanel)) { _ in
+            if case .session(let id) = selected {
+                model.toggleSidePanel(for: model.stackParentID(of: id))
+            }
+        }
         // ⌘T only exists in a terminal or browser context, and NECESSARILY
         // creates a tab of the same type, in the horizontal bar.
         .onReceive(NotificationCenter.default.publisher(for: .loomNewTab)) { _ in
@@ -2482,9 +2488,48 @@ struct SessionDetailView: View {
         loadedUsage?.reportingWindow(model.reportedWindows[sessionID])
     }
     @State private var contextShown = false
+    /// The panel's width as the user last dragged it — 0 = never.
+    @AppStorage(AppModel.sidePanelWidthKey) private var storedPanelWidth: Double = 0
+    /// The divider drag in progress — reset by SwiftUI on cancel as on end,
+    /// so the terminal's fitting can never stay suspended.
+    @GestureState private var panelDrag: PanelDrag?
+    /// The width the drag last asked for, persisted once it is over.
+    @State private var lastDraggedWidth: CGFloat?
+    /// The detail's width, for settling a reveal the agent asked for.
+    @State private var detailWidth: CGFloat = 0
+
+    private struct PanelDrag: Equatable {
+        var startWidth: CGFloat
+        var translation: CGFloat
+        var width: CGFloat { startWidth - translation }
+    }
+
+    /// The terminal never shrinks under 80 columns on the panel's account.
+    private static let terminalMinimum = TerminalMetrics.width(forColumns: 80)
 
     private var item: AppModel.SessionItem? {
         model.sessions.first { $0.id == sessionID }
+    }
+
+    /// The stack this tab belongs to — a shell shows its parent's panel.
+    private var parentID: SessionID { model.stackParentID(of: sessionID) }
+
+    private var panel: SidePanelState { model.sidePanel(for: parentID) }
+
+    private func sideLayout(width: CGFloat) -> SidePanelLayout {
+        // The drag's last width bridges the frame between the gesture's reset
+        // and its persistence: the panel never flicks back to the old width.
+        let preferred = panelDrag?.width ?? lastDraggedWidth
+            ?? (storedPanelWidth > 0 ? CGFloat(storedPanelWidth) : nil)
+        return SidePanelLayout.resolve(available: width, preferredPanelWidth: preferred,
+                                       terminalMinimum: Self.terminalMinimum)
+    }
+
+    /// The agent asked for its browser while this stack was not split: the
+    /// panel opens only if the terminal keeps its 80 columns.
+    private func settlePendingReveal() {
+        guard panel.pendingReveal, detailWidth > 0 else { return }
+        model.resolvePendingReveal(for: parentID, terminalFits: sideLayout(width: detailWidth).fits)
     }
 
     /// The conversation the process serves: the Loom id, unless a `/resume
@@ -2510,20 +2555,67 @@ struct SessionDetailView: View {
         VStack(spacing: 0) {
             breadcrumb
             Divider().overlay(DefaultTheme.cardBorder)
-            // The git panel slides OVER the terminal instead of splitting it:
-            // shrinking the pane resized the PTY, and the agent answers a
-            // resize by repainting its whole conversation — everything moved,
-            // and the scrollback kept a duplicate of every block.
-            ZStack(alignment: .trailing) {
-                TerminalPane(model: model, sessionID: sessionID)
-                if gitShown {
-                    gitPanel
-                        .shadow(color: .black.opacity(0.45), radius: 20, x: -8)
-                        .transition(.move(edge: .trailing))
+            GeometryReader { geo in
+                let layout = sideLayout(width: geo.size.width)
+                let split = panel.isOpen && layout.showsPanel
+                let columnWidth = split ? layout.terminalWidth : geo.size.width
+                // The side panel SPLITS: an overlay would hide claude's input
+                // box, and the terminal's window-wide mouse monitors would take
+                // the page's clicks and wheel. Each open, close or drag end is
+                // one resize — one repaint of the conversation — never more:
+                // no animated width, no fit while dragging.
+                HStack(spacing: 0) {
+                    // The git panel slides OVER the terminal instead of splitting
+                    // it: shrinking the pane resized the PTY, and the agent
+                    // answers a resize by repainting its whole conversation —
+                    // everything moved, and the scrollback kept a duplicate of
+                    // every block.
+                    ZStack(alignment: .trailing) {
+                        // Always the first child: toggling the panel never
+                        // recreates the terminal (no focus grab, no first-fit race).
+                        TerminalPane(model: model, sessionID: sessionID,
+                                     role: split ? .sessionSplit : .session,
+                                     fitSuspended: panelDrag != nil)
+                        if gitShown {
+                            gitPanel
+                                .frame(width: min(380, columnWidth))
+                                .shadow(color: .black.opacity(0.45), radius: 20, x: -8)
+                                .transition(.move(edge: .trailing))
+                        }
+                    }
+                    .frame(width: columnWidth)
+                    .clipped()
+                    if split {
+                        SidePanelResizeHandle()
+                            .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                                .updating($panelDrag) { value, drag, _ in
+                                    drag = PanelDrag(startWidth: drag?.startWidth ?? layout.panelWidth,
+                                                     translation: value.translation.width)
+                                })
+                        SessionSidePanelView(model: model, parentID: parentID)
+                            .frame(width: layout.panelWidth)
+                    }
                 }
+                .animation(nil, value: split)
+                .animation(nil, value: layout.panelWidth)
+                .onAppear { detailWidth = geo.size.width }
+                .onChange(of: geo.size.width) { _, width in detailWidth = width }
             }
         }
         .background(DefaultTheme.contentBackground)
+        .onChange(of: panelDrag) { _, drag in
+            if let drag {
+                lastDraggedWidth = drag.width
+            } else if let width = lastDraggedWidth {
+                // Ended or cancelled alike: the panel stays where it was left.
+                let settled = SidePanelLayout.resolve(available: detailWidth, preferredPanelWidth: width,
+                                                      terminalMinimum: Self.terminalMinimum)
+                storedPanelWidth = Double(settled.showsPanel ? settled.panelWidth : width)
+                lastDraggedWidth = nil
+            }
+        }
+        .onChange(of: panel.pendingReveal, initial: true) { settlePendingReveal() }
+        .onChange(of: detailWidth) { settlePendingReveal() }
         .task(id: InfoKey(shown: infoShown, state: item?.state)) {
             guard infoShown else { return }
             let snapshot = await model.sessionInfoSnapshot(sessionID)
@@ -2603,6 +2695,17 @@ struct SessionDetailView: View {
                 .background(DefaultTheme.surface)
                 .preferredColorScheme(DefaultTheme.colorScheme)
             }
+            // The browser beside the terminal (the stack's side panel).
+            GhostButton(systemImage: "sidebar.right") {
+                model.toggleSidePanel(for: parentID)
+            }
+            .overlay(alignment: .topTrailing) {
+                if panel.isOpen {
+                    Circle().fill(DefaultTheme.accent).frame(width: 5, height: 5)
+                        .offset(x: -3, y: 5)
+                }
+            }
+            .help(panel.isOpen ? "Hide the browser (⌘⇧B)" : "Show a browser beside the terminal (⌘⇧B)")
             GhostButton("Git", systemImage: "arrow.triangle.branch") {
                 withAnimation(.hover) { gitShown.toggle() }
                 if gitShown { Task { gitData = await model.gitPanel(for: sessionID) } }
@@ -2794,7 +2897,7 @@ struct SessionDetailView: View {
             Spacer()
         }
         .padding(12)
-        .frame(width: 380)
+        .frame(maxWidth: 380)
         .frame(maxHeight: .infinity)
         .background(DefaultTheme.background)
     }

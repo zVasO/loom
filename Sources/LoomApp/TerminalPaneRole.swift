@@ -6,6 +6,10 @@ import Foundation
 public enum TerminalPaneRole: Sendable {
     case session
     case review
+    /// The Sessions tab with the side panel open: a narrower shape of its own,
+    /// so a split never becomes the launch grid of every new session — and a
+    /// stack resumed with its panel open is born at the split's grid.
+    case sessionSplit
 
     /// The drawer's width before the user ever dragged it (GlobalPRsView).
     public static let defaultReviewDrawerWidth: CGFloat = 420
@@ -14,6 +18,7 @@ public enum TerminalPaneRole: Sendable {
         switch self {
         case .session: "loom.terminal.cols"
         case .review: "loom.review.cols"
+        case .sessionSplit: "loom.terminal.split.cols"
         }
     }
 
@@ -21,6 +26,7 @@ public enum TerminalPaneRole: Sendable {
         switch self {
         case .session: "loom.terminal.rows"
         case .review: "loom.review.rows"
+        case .sessionSplit: "loom.terminal.split.rows"
         }
     }
 }

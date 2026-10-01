@@ -60,6 +60,14 @@ struct LoomApp: App {
                 }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
             }
+            // A menu item, like ⌘⇧A: the breadcrumb's button is an icon, and
+            // the menu is where a shortcut gets discovered.
+            CommandGroup(after: .sidebar) {
+                Button("Show Browser Beside Session") {
+                    NotificationCenter.default.post(name: .loomToggleSidePanel, object: nil)
+                }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+            }
         }
     }
 }
@@ -78,4 +86,6 @@ extension Notification.Name {
     static let loomNewTab = Notification.Name("loom.newTab")
     /// ⌘⇧A — select everything the terminal pane holds.
     static let loomSelectAllTerminal = Notification.Name("loom.selectAllTerminal")
+    /// ⌘⇧B — the browser beside the selected session's terminal.
+    static let loomToggleSidePanel = Notification.Name("loom.toggleSidePanel")
 }

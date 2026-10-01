@@ -855,6 +855,14 @@ public struct KeyCaptureView: NSViewRepresentable {
         }
 
         public override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            // AppKit offers key equivalents to EVERY view of the key window,
+            // focused or not: with a browser beside the terminal, ⌘V in its
+            // address bar or in a page's field would otherwise paste into
+            // claude. Only the terminal's own keyboard (or nobody's, a
+            // transient state the focus watcher reclaims) takes them.
+            guard window?.firstResponder === self || focusIsIdle(acceptingUnset: true) else {
+                return super.performKeyEquivalent(with: event)
+            }
             guard event.modifierFlags.contains(.command),
                   !event.modifierFlags.contains(.control) else {
                 return super.performKeyEquivalent(with: event)

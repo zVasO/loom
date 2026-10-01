@@ -32,6 +32,10 @@ _Avoid_ : onglet (terme UI, pas domaine)
 **Worktree** :
 Checkout Git isolé créé pour une session, sur sa propre branche. Détruit ou conservé indépendamment de la session.
 
+**Panneau latéral** :
+Le navigateur affiché à droite du terminal d'une pile, dans l'onglet Sessions : un des navigateurs de la pile, choisi dans son en-tête. Il appartient à la pile, pas à l'onglet — un terminal secondaire montre le même. L'ouvrir, le fermer ou finir de le redimensionner coûte un redimensionnement du terminal, jamais plus.
+_Avoid_ : split view, tiroir (le tiroir est celui de l'onglet PR)
+
 **Transcript** :
 L'enregistrement intégral et continu de la sortie d'un terminal, conservé après la fin de la session.
 _Avoid_ : log, historique (« historique » = la liste des sessions passées)

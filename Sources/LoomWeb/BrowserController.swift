@@ -88,6 +88,12 @@ public final class BrowserController: NSObject {
         return search.url
     }
 
+    /// An http(s) address — the only kind handed to the system browser.
+    nonisolated public static func isWebAddress(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
+    }
+
     /// Reconciles the live webviews with the model's LRU decision:
     /// suspended = the webview is destroyed, the URL stays in the model (WEB-05).
     private func reconcileWebViews() {

@@ -25,6 +25,14 @@ public enum TerminalMetrics {
     /// the cell count are both measured from it — they must not drift apart.
     public static let gridInset: CGFloat = 8
 
+    /// The narrowest pane that still holds `columns` cells: the floor the side
+    /// panel leaves the terminal, so claude keeps the 80-column layout it draws
+    /// for. Half a point of slack absorbs the fractional cell width — `grid`
+    /// of this width yields exactly `columns`, one cell less yields one fewer.
+    public static func width(forColumns columns: Int, insets: CGFloat = gridInset * 2) -> CGFloat {
+        ceil(insets + CGFloat(columns) * cellSize.width + 0.5)
+    }
+
     /// How many cells fit in `size` (view padding deducted).
     public static func grid(fitting size: CGSize,
                             insets: CGFloat = gridInset * 2) -> (cols: Int, rows: Int) {

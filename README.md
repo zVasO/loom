@@ -46,7 +46,10 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   un onglet par PR ouverte (aperçu réutilisé au clic, épinglé par la review),
   conservés d'un onglet de l'app à l'autre et d'un lancement à l'autre.
 - **Navigateur** : WKWebView à data store persistant (cookies GitHub conservés),
-  UA Safari, LRU d'onglets, historique avec suggestions.
+  UA Safari, LRU d'onglets, historique avec suggestions. Panneau latéral (⌘⇧B) :
+  un navigateur de la pile à côté du terminal de la session, sans jamais
+  réduire le terminal sous 80 colonnes de lui-même ni le redimensionner pendant
+  un glisser.
 - **Persistance** : GRDB, migrations versionnées (v1→v4), journal des transitions
   avec source, marquage `interrupted` au relancement.
 - **Extensions** (ADR-0011) : pages web tierces dans un onglet « Extensions »,

@@ -229,6 +229,7 @@ public final class AppModel {
     public private(set) var preferredGrid: TerminalGeometry =
         AppModel.storedGrid(role: .session) ?? .default
     private var preferredReviewGrid: TerminalGeometry? = AppModel.storedGrid(role: .review)
+    private var preferredSplitGrid: TerminalGeometry? = AppModel.storedGrid(role: .sessionSplit)
 
     private static func storedGrid(role: TerminalPaneRole) -> TerminalGeometry? {
         let cols = UserDefaults.standard.integer(forKey: role.colsKey)
@@ -247,7 +248,24 @@ public final class AppModel {
             let cols = TerminalMetrics.grid(fitting: CGSize(width: TerminalPaneRole.defaultReviewDrawerWidth,
                                                             height: 0)).cols
             return TerminalGeometry(cols: cols, rows: max(10, preferredGrid.rows - 2))
+        case .sessionSplit:
+            if let preferredSplitGrid { return preferredSplitGrid }
+            // Never measured: the Sessions grid minus the panel's default
+            // share — the same rows, the split only takes columns.
+            let full = TerminalMetrics.width(forColumns: preferredGrid.cols)
+            let layout = SidePanelLayout.resolve(available: full, preferredPanelWidth: storedSidePanelWidth,
+                                                 terminalMinimum: TerminalMetrics.width(forColumns: 80))
+            guard layout.showsPanel else { return preferredGrid }
+            let cols = TerminalMetrics.grid(fitting: CGSize(width: layout.terminalWidth, height: 0)).cols
+            return TerminalGeometry(cols: cols, rows: preferredGrid.rows)
         }
+    }
+
+    /// The grid a session of this stack is born at: the split's when its side
+    /// panel is open, so a resumed session or a new shell is not resized while
+    /// it boots — the one moment a resize can be missed.
+    func launchGrid(forStack parent: SessionID) -> TerminalGeometry {
+        sidePanels[parent]?.isOpen == true ? preferredGrid(for: .sessionSplit) : preferredGrid
     }
 
     /// Review worktrees are read-only (guard hooks) unless the user opts out —
@@ -320,6 +338,7 @@ public final class AppModel {
         switch role {
         case .session: preferredGrid = grid
         case .review: preferredReviewGrid = grid
+        case .sessionSplit: preferredSplitGrid = grid
         }
         UserDefaults.standard.set(cols, forKey: role.colsKey)
         UserDefaults.standard.set(rows, forKey: role.rowsKey)
@@ -466,6 +485,7 @@ public final class AppModel {
             Task { await self.observeWindows(of: manager) }
             reloadPersistedSessions()
             restoreStackChildren()
+            restoreSidePanels()
             reindexAllSessions()
         } catch {
             if case IPCError.anotherInstanceRunning = error {
@@ -1843,7 +1863,7 @@ public final class AppModel {
         var spec = SessionManager.SessionSpec(
             command: Command(executable: shell, arguments: ["-l"]),
             workingDirectory: directory,
-            geometry: preferredGrid,
+            geometry: launchGrid(forStack: parent.id),
             samplingInterval: .seconds(1))
         spec.title = name
         spec.projectID = parent.projectID
@@ -1971,6 +1991,10 @@ public final class AppModel {
 
     public private(set) var browserPanes: [BrowserPane] = []
 
+    /// The side panel of each stack, keyed by its parent session
+    /// (SidePanelModel.swift).
+    var sidePanels: [SessionID: SidePanelState] = [:]
+
     /// Each open creates a dedicated pane, child of the session (or global if nil).
     @discardableResult
     public func openBrowserPane(for parent: SessionID?) -> UUID {
@@ -1983,6 +2007,7 @@ public final class AppModel {
 
     public func closeBrowserPane(_ id: UUID) {
         browserPanes.removeAll { $0.id == id }
+        sidePanelPaneRemoved(id)
         saveStackChildren()
     }
 
@@ -2216,7 +2241,7 @@ public final class AppModel {
                                     userStatusLine: statusLine, theme: theme)
         do {
             try await manager.resume(record, command: command, workingDirectory: directory,
-                                     geometry: preferredGrid,
+                                     geometry: launchGrid(forStack: record.id),
                                      samplingInterval: .milliseconds(500), hookToken: token)
             await cacheSurface(for: record.id)
             tokenRegistry.register(token: token, session: record.id)
@@ -2234,6 +2259,7 @@ public final class AppModel {
     public func archiveSession(_ id: SessionID) async {
         await manager?.archive(id)
         sessions.removeAll { $0.id == id }
+        forgetSidePanel(id)
         // A live session archived from its card exits through `.archived`, a
         // terminal state the reducer never leaves: no `.completed` follows,
         // so the close path in observeStates never drops its surface.
