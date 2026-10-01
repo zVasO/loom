@@ -87,9 +87,13 @@ Chaque action répond l'instantané de la page qui en résulte. Depuis un shell 
 - Panneau masqué, la page tourne mais WebKit suspend son rendu (animations,
   `requestAnimationFrame`) : `### Page` l'indique.
 - Les captures ne voient pas WebGL ni la vidéo.
-- Une page qui envoie des messages de console par rafales (des centaines de
-  cadres, chacun au plafond) voit leur enregistrement coupé jusqu'à sa navigation
-  suivante : `### Events` le dit.
+- Les messages de console et les requêtes d'un cadre d'une autre origine (une
+  publicité, un widget) sont plafonnés à 20 par seconde ; ceux de la page et de
+  ses propres cadres à 200. Une page qui envoie des messages par rafales (des
+  centaines de cadres, chacun au plafond) voit leur enregistrement coupé jusqu'à
+  sa navigation suivante : `### Events` le dit.
+- Un sélecteur de fichier ouvert n'empêche ni l'instantané ni la capture ; les
+  actions attendent `browser_file_upload` (sans chemin, il l'annule).
 - Un bouton « Copier » que l'agent clique écrit dans votre presse-papiers, comme
   si vous l'aviez cliqué : Loom ne le restaure pas, faute de distinguer cette
   copie d'une des vôtres faite au même moment.

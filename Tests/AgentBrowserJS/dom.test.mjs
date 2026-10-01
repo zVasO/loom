@@ -317,22 +317,36 @@ test("a page whose body scrolls itself is as tall as its window, for a full-page
   await page.close();
 });
 
-test("an embedded frame's relay admits far less than the page's", { skip }, async () => {
+test("a frame of another origin gets a tenth of the page's relay budget; the page's own frames, all of it", { skip }, async () => {
   const page = await openTodo();
-  const posted = await page.evaluate(() => new Promise((done) => {
-    const frame = document.createElement("iframe");
-    frame.srcdoc = "<p>inner</p>";
-    frame.onload = () => {
-      const inner = frame.contentWindow;
-      for (let i = 0; i < 300; i++) {
-        inner.document.dispatchEvent(new inner.CustomEvent("loom-agent-hook",
-          { detail: JSON.stringify({ t: "console", level: "info", text: "f" + i }) }));
-      }
-      done(inner.__posted.filter((m) => m.t === "console").length);
-    };
-    document.body.append(frame);
+  const flood = (count) => {
+    for (let i = 0; i < count; i++) {
+      document.dispatchEvent(new CustomEvent("loom-agent-hook",
+        { detail: JSON.stringify({ t: "console", level: "info", text: "f" + i }) }));
+    }
+    return window.__posted.filter((m) => m.t === "console").length;
+  };
+  await page.evaluate(() => new Promise((done) => {
+    const own = document.createElement("iframe");
+    own.srcdoc = "<p>own</p>";
+    own.onload = done;
+    document.body.append(own);
   }));
-  assert.ok(posted > 0 && posted <= 25, "about 20 from a frame: " + posted);
+  const ownFrame = page.frames().find((f) => f !== page.mainFrame() && f.url() === "about:srcdoc");
+  assert.ok(ownFrame, "the page's own frame");
+  const own = await ownFrame.evaluate(flood, 300);
+  assert.ok(own >= 150, "a same-origin frame is the page's: " + own);
+  const other = base.replace("127.0.0.1", "localhost") + "/todo";
+  await page.evaluate((src) => new Promise((done) => {
+    const frame = document.createElement("iframe");
+    frame.src = src;
+    frame.onload = done;
+    document.body.append(frame);
+  }), other);
+  const otherFrame = page.frames().find((f) => f.url().startsWith(base.replace("127.0.0.1", "localhost")));
+  assert.ok(otherFrame, "the other origin's frame");
+  const foreign = await otherFrame.evaluate(flood, 300);
+  assert.ok(foreign > 0 && foreign <= 25, "about 20 from another origin: " + foreign);
   await page.close();
 });
 

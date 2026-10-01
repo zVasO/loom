@@ -187,6 +187,18 @@ public enum AgentBrowserSelfTest {
         case .failure(let error):
             record("full-page screenshot", false, "\(error)")
         }
+        // 13b. The same at a phone's width: a zoom of 2.4, whose scroll lands
+        // between device pixels — the capture still goes to the end.
+        _ = await send(.resize(.css(375)))
+        switch await send(.screenshot(target: nil, format: .png, fullPage: true)) {
+        case .success(let answer):
+            let whole = !answer.text.contains("would not scroll further")
+            record("full-page screenshot at a set width", whole && (answer.image?.height ?? 0) > (answer.image?.width ?? 0),
+                   answer.text)
+        case .failure(let error):
+            record("full-page screenshot at a set width", false, "\(error)")
+        }
+        _ = await send(.resize(.fit))
 
         // 14. A file chooser answered with a file the policy allows.
         let withPhoto = text(await send(.snapshot(target: nil, depth: nil)))

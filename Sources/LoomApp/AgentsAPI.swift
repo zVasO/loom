@@ -78,7 +78,8 @@ extension AppModel {
                 // code review): the agent may set badges around it, never take
                 // it off — nor give itself one, which would then stick.
                 let kept = badges(of: id).filter { Self.wearsPRBadge([$0]) }
-                let added = params.badges.filter { !kept.contains($0) }
+                // As they will be stored: " PR #3 " is a PR badge too.
+                let added = SessionRecord.normalizedBadges(params.badges).filter { !kept.contains($0) }
                 if added.contains(where: { Self.wearsPRBadge([$0]) }) {
                     throw APIError(code: .invalidParams,
                                    message: "\"PR #n\" badges are Loom's: the PR tab gives them")

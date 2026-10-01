@@ -127,7 +127,10 @@ public final class AgentBrowser: NSObject {
         guard case .localOnly(let hosts) = access else {
             rulesPreparation = nil
             contentRules = nil
-            for webView in liveWebViews { webView.configuration.userContentController.removeAllContentRuleLists() }
+            for webView in liveWebViews {
+                webView.configuration.userContentController.removeAllContentRuleLists()
+                Self.setSideChannels(webView.configuration.preferences, enabled: true)
+            }
             return
         }
         let json = AgentNetworkRules.json(allowedHosts: hosts)
@@ -150,9 +153,15 @@ public final class AgentBrowser: NSObject {
         }
         if wasOpen, !liveWebViews.isEmpty {
             // Before this, the pages ran free: they start again under the
-            // mode, their loads held until the rules are on.
+            // mode, their loads held until the rules are on. A command on
+            // them ends first — it would hold a page outside the mode.
+            cancelAll("Local sites only was turned on: the pages were loaded again under it.")
             controller.releaseWebViews()
             controller.materialize()
+            for tab in controller.tabs where controller.webView(for: tab.id) != nil {
+                note(tab.id, "Local sites only was turned on: the page was loaded again under it "
+                     + "(a dialog it had was dismissed).")
+            }
         }
     }
 
@@ -160,11 +169,11 @@ public final class AgentBrowser: NSObject {
     /// turn off: peer connections (WebRTC's sockets are not loads) and DNS
     /// prefetching. WebKit's own preferences, through key-value coding — set
     /// only where the running WebKit has them.
-    private static func closeSideChannels(_ preferences: WKPreferences) {
+    private static func setSideChannels(_ preferences: WKPreferences, enabled: Bool) {
         for (key, setter) in [("peerConnectionEnabled", "_setPeerConnectionEnabled:"),
                               ("DNSPrefetchingEnabled", "_setDNSPrefetchingEnabled:")]
         where preferences.responds(to: NSSelectorFromString(setter)) {
-            preferences.setValue(false, forKey: key)
+            preferences.setValue(enabled, forKey: key)
         }
     }
 
@@ -199,6 +208,16 @@ public final class AgentBrowser: NSObject {
         return waits
     }
 
+    /// Until no preparation is pending — a setting changed while waiting
+    /// starts another.
+    private func preparationsSettled() async {
+        while true {
+            let waits = pendingPreparations
+            if waits.isEmpty { return }
+            for wait in waits { await wait.value }
+        }
+    }
+
     /// Outside what local-only mode allows: the navigation's URL, refused.
     private func refusedByNetworkAccess(_ url: URL?) -> Bool {
         AgentNetworkRules.refuses(url, under: networkAccess)
@@ -208,7 +227,7 @@ public final class AgentBrowser: NSObject {
     /// mode forbids it, rather than a load WebKit drops without a word.
     private func refuseOutsideNetworkAccess(_ url: URL) async throws {
         guard networkAccess != .open else { return }
-        for wait in pendingPreparations { await wait.value }
+        await preparationsSettled()
         try Task.checkCancellation()
         if refusedByNetworkAccess(url) {
             throw AgentError.invalid("\(url.host() ?? url.absoluteString) is outside local sites only "
@@ -450,7 +469,8 @@ public final class AgentBrowser: NSObject {
 
     private func snapshot(target: String?, depth: Int?, deadline: ContinuousClock.Instant) async throws -> AgentResult {
         let (tab, webView) = try await currentPage(deadline: deadline)
-        try refuseWhileDialog(tab)
+        // Reading is fine beside a file chooser; a JS dialog holds the page.
+        if blocksPage(tab) { try refuseWhileDialog(tab) }
         var args: [String: Any] = ["budget": environment.limits.snapshotChars]
         if let target { args["target"] = target }
         if let depth { args["depth"] = depth }
@@ -900,17 +920,21 @@ public final class AgentBrowser: NSObject {
                 // The slice [top, bottom) of the page, in a view that shows
                 // [actual, actual + viewport): never past what it shows — a
                 // page that shrank, or would not scroll, ends the capture.
+                // A set width scales the page: WebKit keeps the scroll in
+                // whole device pixels, a fraction of a CSS pixel off.
+                let slack = 1 / zoom + 0.5
+                let shown = actual + webView.bounds.height / zoom
                 var bottom = min(top + viewportHeight, total)
-                if actual + viewportHeight < bottom {
+                if actual + viewportHeight + slack < bottom {
                     bottom = actual + viewportHeight
                     stuck = true
                 }
-                // A scroll snapped past `top` (beyond a pixel's rounding) leaves
-                // a band unseen: the capture ends there rather than skip it.
-                guard bottom > top, actual <= top + 1 else { stuck = true; break }
+                // A scroll snapped past `top` leaves a band unseen: the
+                // capture ends there rather than skip it.
+                guard bottom > top, actual <= top + slack else { stuck = true; break }
                 slices.append(AgentScreenshot.Slice(image: NSImageBox(image: image),
                                                     sourceTop: max(0, top - actual) * zoom,
-                                                    sourceHeight: (bottom - top) * zoom,
+                                                    sourceHeight: (min(bottom, shown) - top) * zoom,
                                                     pageTop: top, pageHeight: bottom - top))
                 covered = bottom
                 if stuck { break }
@@ -1150,6 +1174,9 @@ public final class AgentBrowser: NSObject {
     }
 
     private func refuseWhileDialog(_ tab: BrowserTabsModel.TabID) throws {
+        if case .fileChooser? = dialogs[tab]?.kind {
+            throw AgentError.conflict("a file chooser is open: answer it with browser_file_upload (no paths cancels it)")
+        }
         if dialogs[tab] != nil {
             throw AgentError.conflict("a dialog is open: answer it with browser_handle_dialog first")
         }
@@ -1381,7 +1408,7 @@ extension AgentBrowser: BrowserTabEngine {
     func makeWebView(for tab: BrowserTabsModel.TabID) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = dataStore
-        if networkAccess != .open { Self.closeSideChannels(configuration.preferences) }
+        if networkAccess != .open { Self.setSideChannels(configuration.preferences, enabled: false) }
         // Popups only from what the agent clicks — its clicks carry the gesture.
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         // Off screen, the page keeps running: the agent drives it whether the
@@ -1421,6 +1448,10 @@ extension AgentBrowser: BrowserTabEngine {
         // Released while its tab stays in the model: unloaded, not closed.
         interruptCalls(tab, .closed(unloaded: controller.model.tab(tab) != nil))
         dismissDialog(tab)
+        // A reference left somewhere (a view not yet swapped) never keeps the
+        // page running: it is emptied as it goes.
+        webView.stopLoading()
+        webView.loadHTMLString("", baseURL: nil)
         NotificationCenter.default.removeObserver(self, name: NSView.frameDidChangeNotification, object: webView)
         messageProxy?.forget(webView.configuration.userContentController)
         webView.uiDelegate = nil
@@ -1449,24 +1480,15 @@ extension AgentBrowser: WKNavigationDelegate {
         switch AgentNavigationPolicy.decide(url: navigationAction.request.url, isMainFrame: isMainFrame) {
         case .allow:
             let url = navigationAction.request.url
-            if refusedByNetworkAccess(url) {
-                decisionHandler(.cancel)
-                if isMainFrame, let tab {
-                    note(tab, "Blocked \(url?.absoluteString ?? "a page"): the agent's browser opens local sites only "
-                         + "(Loom's Settings ▸ Agents).")
-                }
-                return
-            }
             // No request before the store's leftovers are gone and the
             // local-only rules are on the view: WebKit sends nothing until
-            // the policy is decided.
-            let waits = pendingPreparations
-            if waits.isEmpty {
-                finishAllowing(decisionHandler, tab: tab, isMainFrame: isMainFrame)
+            // the policy is decided — then decided against the mode in force.
+            if pendingPreparations.isEmpty {
+                finishAllowing(decisionHandler, url: url, webView: webView, tab: tab, isMainFrame: isMainFrame)
             } else {
                 Task { @MainActor in
-                    for wait in waits { await wait.value }
-                    self.finishAllowing(decisionHandler, tab: tab, isMainFrame: isMainFrame)
+                    await self.preparationsSettled()
+                    self.finishAllowing(decisionHandler, url: url, webView: webView, tab: tab, isMainFrame: isMainFrame)
                 }
             }
         case .cancel:
@@ -1477,17 +1499,38 @@ extension AgentBrowser: WKNavigationDelegate {
         }
     }
 
-    /// Local-only mode whose rules could not be compiled: nothing loads.
-    private func finishAllowing(_ decisionHandler: @escaping (WKNavigationActionPolicy) -> Void,
-                                tab: BrowserTabsModel.TabID?, isMainFrame: Bool) {
-        if networkAccess != .open, let rulesFailure {
+    /// The decision, against the mode in force now: outside it, refused; in
+    /// local-only mode without its rules on the views (they failed), nothing
+    /// loads.
+    private func finishAllowing(_ decisionHandler: @escaping (WKNavigationActionPolicy) -> Void, url: URL?,
+                                webView: WKWebView, tab: BrowserTabsModel.TabID?, isMainFrame: Bool) {
+        if refusedByNetworkAccess(url) {
             decisionHandler(.cancel)
             if isMainFrame, let tab {
-                note(tab, "Blocked: the local-only rules could not be set up (\(rulesFailure)), so nothing loads.")
+                note(tab, "Blocked \(url?.absoluteString ?? "a page"): the agent's browser opens local sites only "
+                     + "(Loom's Settings ▸ Agents).")
             }
             return
         }
+        if networkAccess != .open, rulesFailure != nil || contentRules == nil {
+            decisionHandler(.cancel)
+            if isMainFrame, let tab {
+                note(tab, "Blocked: the local-only rules could not be set up (\(rulesFailure ?? "not ready")), "
+                     + "so nothing loads.")
+            }
+            return
+        }
+        // A new document of a page whose channel a flood cut: open again
+        // before it starts — its relay looks for the channel at document start.
+        if isMainFrame, let tab { reopenChannelIfCut(webView, tab: tab) }
         decisionHandler(.allow)
+    }
+
+    private func reopenChannelIfCut(_ webView: WKWebView, tab: BrowserTabsModel.TabID) {
+        guard runtimes[tab]?.channelCut == true, let messageProxy else { return }
+        webView.configuration.userContentController.add(messageProxy, contentWorld: AgentScripts.world,
+                                                        name: AgentScripts.messageHandlerName)
+        runtimes[tab]?.channelCut = false
     }
 
     public func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
@@ -1523,12 +1566,9 @@ extension AgentBrowser: WKNavigationDelegate {
             runtimes[tab]?.network.document(url: document.url, status: document.status)
             runtimes[tab]?.pendingDocument = nil
         }
-        if runtimes[tab]?.channelCut == true, let messageProxy {
-            // A new document: the channel a flood cut is open again.
-            webView.configuration.userContentController.add(messageProxy, contentWorld: AgentScripts.world,
-                                                            name: AgentScripts.messageHandlerName)
-            runtimes[tab]?.channelCut = false
-        }
+        // A navigation that skipped the policy (a reload, history): the
+        // channel a flood cut is open again for the documents after this one.
+        reopenChannelIfCut(webView, tab: tab)
         // A new document: a dialog or chooser of the old one can no longer
         // be answered, and scripts running in it will never answer.
         if dialogs[tab] != nil {

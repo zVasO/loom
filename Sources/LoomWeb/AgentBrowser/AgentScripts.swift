@@ -231,9 +231,10 @@ if (XHR) {
 // Loom's own world, document start, every frame: the only path from the page
 // hook to Loom. The message handler exists in this world alone — a page
 // cannot post to it, only dispatch events this relay reads: strings of at
-// most 4 KB, JSON objects only, 200 a second from the page itself and 20
-// from each frame it embeds (the rest counted) — a page cannot multiply its
-// budget by its frames much; Loom cuts the channel of one that still floods.
+// most 4 KB, JSON objects only, 200 a second from the page and its own
+// frames, 20 from each frame of another origin (an ad, a widget) — the rest
+// counted. Loom cuts the channel of a page that multiplies its frames to
+// flood anyway.
 // A response passes when its request did, so a chatty page never leaves one
 // pending.
 if (globalThis.__loomAgentRelay) return;
@@ -245,9 +246,9 @@ if (!channel) return;
 const EVENT = "loom-agent-hook";
 const MAX_DETAIL = 4096;
 const MAX_ADMITTED = 2000;
-let isTop = true;
-try { isTop = window === window.top; } catch (_) { isTop = false; }
-const RATE = isTop ? 200 : 20;
+let sameOrigin = true;
+try { void window.top.location.href; } catch (_) { sameOrigin = false; }
+const RATE = sameOrigin ? 200 : 20;
 let tokens = RATE;
 let refilled = Date.now();
 let dropped = 0;
