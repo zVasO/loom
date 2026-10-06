@@ -195,10 +195,10 @@ struct ForkPTYHostSignalTests {
         defer { withExtendedLifetime(runtime) {} }
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else { Issue.record("no .started"); return }
-        guard case .terminated = await iterator.next() else { Issue.record("no .terminated"); return }
+        guard case .terminated(let report) = await iterator.next() else { Issue.record("no .terminated"); return }
         _ = await waitFor("mask-", in: transcript)
         #expect(transcript.text.contains("mask-clear") && !transcript.text.contains("mask-blocked"),
-                "the child must not inherit the forking thread's mask — saw: \(transcript.text)")
+                "the child must not inherit the forking thread's mask — saw: \(transcript.text) (exit \(report.exitStatus))")
     }
 
     @Test("SIGWINCH reaches a handler in a child born from a thread that blocked it",
