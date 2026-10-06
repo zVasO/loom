@@ -204,7 +204,8 @@ struct AgentLogsTests {
         var limiter = AgentRateLimiter(perSecond: 10, burst: 10)
         let admitted = (0..<50).filter { _ in limiter.admit(at: 100) }.count
         #expect(admitted == 10)
-        #expect(limiter.admit(at: 100.5), "half a second later, five more")
+        let later = limiter.admit(at: 100.5)
+        #expect(later, "half a second later, five more")
     }
 }
 

@@ -27,13 +27,16 @@ struct SidePanelStateTests {
     @Test("panel closed: the agent's first use asks for a reveal, the view settles it once")
     func revelationParLAgentUneSeuleFois() {
         var state = SidePanelState()
-        #expect(state.agentDidUseBrowser())
+        let first = state.agentDidUseBrowser()
+        #expect(first)
         #expect(state.pendingReveal && !state.isOpen)
-        #expect(!state.agentDidUseBrowser(), "already pending: nothing more")
+        let second = state.agentDidUseBrowser()
+        #expect(!second, "already pending: nothing more")
         state.resolvePendingReveal(terminalFits: true)
         #expect(state.isOpen && state.source == .agent && state.agentRevealed)
         #expect(!state.pendingReveal)
-        #expect(!state.agentDidUseBrowser(), "revealed once: never again")
+        let third = state.agentDidUseBrowser()
+        #expect(!third, "revealed once: never again")
     }
 
     @Test("closed by the user after the reveal: the agent never reopens it")
@@ -42,7 +45,8 @@ struct SidePanelStateTests {
         state.agentDidUseBrowser()
         state.resolvePendingReveal(terminalFits: true)
         state.close()
-        #expect(!state.agentDidUseBrowser())
+        let first = state.agentDidUseBrowser()
+        #expect(!first)
         #expect(!state.isOpen && !state.pendingReveal)
     }
 
@@ -50,10 +54,12 @@ struct SidePanelStateTests {
     func basculeVersLAgentUneFois() {
         var state = SidePanelState()
         state.open(.pane(pane))
-        #expect(state.agentDidUseBrowser())
+        let first = state.agentDidUseBrowser()
+        #expect(first)
         #expect(state.isOpen && state.source == .agent)
         state.open(.pane(pane))
-        #expect(!state.agentDidUseBrowser(), "the user went back to their pane: it stays")
+        let second = state.agentDidUseBrowser()
+        #expect(!second, "the user went back to their pane: it stays")
         #expect(state.source == .pane(pane))
     }
 
@@ -63,7 +69,8 @@ struct SidePanelStateTests {
         state.agentDidUseBrowser()
         state.resolvePendingReveal(terminalFits: false)
         #expect(!state.isOpen && !state.agentRevealed && !state.pendingReveal)
-        #expect(state.agentDidUseBrowser())
+        let first = state.agentDidUseBrowser()
+        #expect(first)
     }
 
     @Test("the user picking the agent's browser counts as its reveal")
@@ -71,7 +78,8 @@ struct SidePanelStateTests {
         var state = SidePanelState()
         state.open(.agent)
         state.close()
-        #expect(!state.agentDidUseBrowser())
+        let first = state.agentDidUseBrowser()
+        #expect(!first)
     }
 
     @Test("a closed pane leaves no panel pointing at it")
@@ -88,6 +96,7 @@ struct SidePanelStateTests {
     func memoireDeRevelation() {
         var state = SidePanelState(agentRevealed: true)
         #expect(!state.isOpen)
-        #expect(!state.agentDidUseBrowser())
+        let first = state.agentDidUseBrowser()
+        #expect(!first)
     }
 }
