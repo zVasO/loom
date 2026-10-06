@@ -52,13 +52,13 @@ jobs:
         run: |
           set -o pipefail
           swift test --skip-build --skip PerfProbes 2>&1 | tee test.log
-      # Timing probes alone: their bounds are for a quiet machine, not for a
-      # runner busy with every other suite at once.
+      # Timing probes alone, and optimised: their bounds are for a quiet
+      # machine, and a debug build on a virtual runner measures neither.
       - name: Performance probes
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           set -o pipefail
-          swift test --skip-build --no-parallel --filter PerfProbes 2>&1 | tee perf.log
+          swift test -c release -Xswiftc -enable-testing --no-parallel --filter PerfProbes 2>&1 | tee perf.log
       # The last lines of a failed job: every distinct error, nothing else —
       # what a cloud session reads back to fix the push.
       - name: Errors

@@ -167,8 +167,14 @@ struct ForkPTYHostSignalTests {
     /// The probe prints `ready` once its handler is installed: the signal
     /// goes out after that, never on a timer's guess.
     private func waitForReady(_ transcript: MemoryTranscriptSink) async -> Bool {
+        await waitFor("ready", in: transcript)
+    }
+
+    /// The child's last bytes and its exit reach Loom on two sources: the
+    /// exit may come first, its output a moment later.
+    private func waitFor(_ text: String, in transcript: MemoryTranscriptSink) async -> Bool {
         for _ in 0..<200 {   // 5 s
-            if transcript.text.contains("ready") { return true }
+            if transcript.text.contains(text) { return true }
             try? await Task.sleep(for: .milliseconds(25))
         }
         return false
@@ -187,6 +193,7 @@ struct ForkPTYHostSignalTests {
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else { Issue.record("no .started"); return }
         guard case .terminated = await iterator.next() else { Issue.record("no .terminated"); return }
+        _ = await waitFor("mask-", in: transcript)
         #expect(transcript.text.contains("mask-clear") && !transcript.text.contains("mask-blocked"),
                 "the child must not inherit the forking thread's mask — saw: \(transcript.text)")
     }
