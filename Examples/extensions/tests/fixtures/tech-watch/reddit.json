@@ -1,0 +1,7 @@
+{ "data": { "children": [
+  { "data": { "id": "abc1", "title": "Swift 7 is out", "url_overridden_by_dest": "https://swift.org/blog/swift-7",
+              "permalink": "/r/swift/comments/abc1/swift_7_is_out/", "author": "dev", "score": 1500, "created_utc": 1790001000 } },
+  { "data": { "id": "abc2", "title": "Weekly thread", "stickied": true, "permalink": "/r/swift/comments/abc2/", "score": 3, "created_utc": 1790001000 } },
+  { "data": { "id": "abc3", "title": "Self post about actors", "permalink": "/r/swift/comments/abc3/actors/", "selftext": "Actors **everywhere**",
+              "author": "x", "score": 40, "created_utc": 1790002000 } }
+] } }

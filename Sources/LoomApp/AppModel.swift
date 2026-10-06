@@ -1570,26 +1570,12 @@ public final class AppModel {
         DIFF:
         \(diff)
         """
-        let process = Process()
-        process.executableURL = claude
-        process.arguments = ["-p", prompt, "--output-format", "json"]
-        process.currentDirectoryURL = repo
-        let stdout = Pipe(), stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        let output: String? = await withCheckedContinuation { continuation in
-            // ProcessDrain: drains pipes before exit and never touches
-            // waitUntilExit (both deadlock in their own way).
-            do {
-                try ProcessDrain.launch(process, stdout: stdout, stderr: stderr) { _, out, _ in
-                    continuation.resume(returning: String(decoding: out, as: UTF8.self))
-                }
-            } catch {
-                continuation.resume(returning: nil)
-            }
-        }
-        guard let output else { return nil }
-        return PRTourParser.parse(claudeOutput: output)
+        // ClaudeOneShot: the prompt on stdin (a 40 KB diff has no place in
+        // argv), pipes drained before exit, a deadline.
+        let request = ClaudeOneShot.Request(prompt: prompt, tools: .inherited,
+                                            timeout: 600, workingDirectory: repo)
+        guard let result = try? await ClaudeOneShot.run(request, executable: claude) else { return nil }
+        return PRTourParser.parse(tourJSON: result.text)
     }
 
     /// "Ask the guide": the PR checked out into a dedicated worktree, and an

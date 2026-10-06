@@ -13,7 +13,9 @@ declare namespace Loom {
     | "conflict"
     | "network"
     | "tooLarge"
-    | "internalError";
+    | "internalError"
+    | "unavailable"
+    | "timeout";
 
   interface LoomError extends Error {
     readonly name: "LoomError";
@@ -119,6 +121,38 @@ declare namespace Loom {
     scheduledTime: number;
   }
 
+  interface ClaudeCompleteOptions {
+    prompt: string;
+    /** Replaces Claude Code's system prompt for this run. */
+    system?: string;
+    /** Absent: the user's default model. */
+    model?: "haiku" | "sonnet" | "opus";
+    /** Clamped to 10 s … 5 min; default 2 min. */
+    timeoutMs?: number;
+  }
+
+  interface ClaudeCompletion {
+    text: string;
+    model?: string;
+    /** As claude counts it — on the user's plan. */
+    costUsd?: number;
+    durationMs: number;
+    /** Cut to 100 000 characters. */
+    truncated: boolean;
+  }
+
+  interface HostsGrant {
+    granted: string[];
+    denied: string[];
+  }
+
+  interface HostsList {
+    /** The manifest's `network`. */
+    declared: string[];
+    /** What the user granted at use. */
+    granted: string[];
+  }
+
   interface EventPayloads {
     "theme.changed": Theme;
     "sessions.changed": { sessions: Session[] };
@@ -126,6 +160,8 @@ declare namespace Loom {
     command: { id: string };
     alarm: Alarm;
     "overlay.dismissed": { reason: "user" | "timeout" | "extension" | "replaced"; page: string };
+    /** The user revoked hosts in Settings; `granted` is what is left. */
+    "network.changed": { granted: string[] };
   }
 
   interface SDK {
@@ -180,6 +216,23 @@ declare namespace Loom {
       create(name: string, options: { when?: number | Date; delayMs?: number }): Promise<Alarm>;
       clear(name: string): Promise<void>;
       list(): Promise<Alarm[]>;
+    };
+    claude: {
+      /**
+       * Needs `"claude": ["complete"]`. Text only, with the user's Claude Code
+       * account — no tools, no files. One run at a time per extension, 30 an
+       * hour. Fails with `unavailable` (no claude, logged out) or `timeout`.
+       */
+      complete(options: ClaudeCompleteOptions | string): Promise<ClaudeCompletion>;
+    };
+    network: {
+      /**
+       * Needs `"optionalNetwork": true`, and the extension on screen. Hosts or
+       * https URLs; the user approves each in Loom's sheet.
+       */
+      request(hosts: string | string[]): Promise<HostsGrant>;
+      granted(): Promise<HostsList>;
+      revoke(hosts: string | string[]): Promise<void>;
     };
   }
 }

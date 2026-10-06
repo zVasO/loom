@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Veille techno</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="text.js" defer></script>
+  <script src="sources.js" defer></script>
+  <script src="settings.js" defer></script>
+  <script src="schedule.js" defer></script>
+  <script src="feeds.js" defer></script>
+  <script src="curate.js" defer></script>
+  <script src="digest.js" defer></script>
+  <script src="view.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="bar">
+    <h1>Veille techno</h1>
+    <nav class="tabs" aria-label="Vues">
+      <button type="button" class="tab" data-tab="digest" aria-pressed="true">Digest</button>
+      <button type="button" class="tab" data-tab="items" aria-pressed="false">Flux</button>
+      <button type="button" class="tab" data-tab="settings" aria-pressed="false">Réglages</button>
+    </nav>
+    <div class="actions">
+      <button id="refresh" type="button" class="ghost">Rafraîchir</button>
+      <button id="summarize" type="button" class="accent">Résumer maintenant</button>
+    </div>
+  </header>
+  <p id="meta" class="meta muted" aria-live="polite"></p>
+  <p id="banner" class="banner" role="alert" hidden></p>
+  <main>
+    <section id="view-digest" class="view"></section>
+    <section id="view-items" class="view" hidden></section>
+    <section id="view-settings" class="view" hidden></section>
+  </main>
+</body>
+</html>

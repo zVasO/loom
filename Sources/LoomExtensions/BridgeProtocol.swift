@@ -84,6 +84,11 @@ public struct BridgeError: Error, Codable, Equatable, Sendable, CustomStringConv
         /// A body, a stored value or a secret over its cap.
         case tooLarge
         case internalError
+        /// What Loom would reach for is not there: claude missing, logged
+        /// out, or answering with an error (ADR-0015).
+        case unavailable
+        /// No answer in the time given.
+        case timeout
     }
 
     public var code: Code
@@ -120,12 +125,19 @@ public enum BridgeMethod: String, CaseIterable, Sendable {
     case alarmsCreate = "alarms.create"
     case alarmsClear = "alarms.clear"
     case alarmsList = "alarms.list"
+    // ADR-0015.
+    case claudeComplete = "claude.complete"
+    case networkRequest = "network.request"
+    case networkGranted = "network.granted"
+    case networkRevoke = "network.revoke"
 
     public enum Requirement: Equatable, Sendable, CustomStringConvertible {
         case sessions(ExtensionPermissions.SessionAccess)
         case projects(ExtensionPermissions.ProjectAccess)
         case network
         case ui(ExtensionPermissions.UIAccess)
+        case optionalNetwork
+        case claude(ExtensionPermissions.ClaudeAccess)
 
         public var description: String {
             switch self {
@@ -133,6 +145,8 @@ public enum BridgeMethod: String, CaseIterable, Sendable {
             case .projects(let access): return "projects: \(access.rawValue)"
             case .network: return "network"
             case .ui(let access): return "ui: \(access.rawValue)"
+            case .optionalNetwork: return "optionalNetwork"
+            case .claude(let access): return "claude: \(access.rawValue)"
             }
         }
     }
@@ -141,7 +155,7 @@ public enum BridgeMethod: String, CaseIterable, Sendable {
         switch self {
         case .info, .secretsGet, .secretsSet, .secretsDelete,
              .storageGet, .storageSet, .storageDelete, .openExternal,
-             .alarmsCreate, .alarmsClear, .alarmsList:
+             .alarmsCreate, .alarmsClear, .alarmsList, .networkGranted:
             return nil
         case .uiSetStatus: return .ui(.status)
         case .uiPresentOverlay, .uiDismissOverlay: return .ui(.overlay)
@@ -149,6 +163,8 @@ public enum BridgeMethod: String, CaseIterable, Sendable {
         case .sessionsList, .sessionsGet, .sessionsOpen: return .sessions(.read)
         case .sessionsLaunch: return .sessions(.launch)
         case .httpFetch: return .network
+        case .claudeComplete: return .claude(.complete)
+        case .networkRequest, .networkRevoke: return .optionalNetwork
         }
     }
 }
@@ -467,6 +483,7 @@ public struct BridgeEvent: Codable, Equatable, Sendable {
     public static let commandName = "command"
     public static let alarmName = "alarm"
     public static let overlayDismissedName = "overlay.dismissed"
+    public static let networkChangedName = "network.changed"
 
     public static func themeChanged(_ theme: BridgeTheme) -> BridgeEvent {
         BridgeEvent(name: themeChangedName, payload: (try? JSONValue.from(theme)) ?? .null)
@@ -507,11 +524,20 @@ public struct BridgeEvent: Codable, Equatable, Sendable {
         ]))
     }
 
+    /// The hosts the user granted changed from Settings — a revoke the page
+    /// did not ask for (ADR-0015).
+    public static func networkChanged(granted: [String]) -> BridgeEvent {
+        BridgeEvent(name: networkChangedName, payload: .object([
+            "granted": .array(granted.map(JSONValue.string)),
+        ]))
+    }
+
     /// The permission a page needs to hear this event: session events carry
     /// what `sessions.list` would, and are held to the same grant.
     public var requirement: BridgeMethod.Requirement? {
         switch name {
         case Self.sessionsChangedName, Self.sessionStateChangedName: return .sessions(.read)
+        case Self.networkChangedName: return .optionalNetwork
         default: return nil
         }
     }
