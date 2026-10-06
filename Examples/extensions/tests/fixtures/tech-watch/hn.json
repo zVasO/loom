@@ -1,0 +1,10 @@
+{
+  "hits": [
+    { "objectID": "41000001", "title": "Swift 7 released", "url": "https://www.swift.org/blog/swift-7/?utm_source=hn",
+      "author": "tim", "points": 812, "num_comments": 301, "created_at_i": 1790000000 },
+    { "objectID": "41000002", "title": "Ask HN: How do you run coding agents?", "url": null,
+      "author": "ada", "points": 240, "story_text": "<p>We use <b>worktrees</b> per agent.</p>", "created_at_i": 1790003600 },
+    { "objectID": "41000003", "title": "", "url": "https://example.com/untitled", "points": 5, "created_at_i": 1790000000 },
+    { "objectID": "41000004", "title": "Bad link", "url": "javascript:alert(1)", "points": 500, "created_at_i": 1790000000 }
+  ]
+}

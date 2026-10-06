@@ -1,0 +1,24 @@
+{
+  "id": "dev.loom.tech-watch",
+  "name": "Veille techno",
+  "version": "1.0.0",
+  "description": "Hacker News, releases GitHub, flux RSS/Atom, Reddit et Lobsters — et chaque matin, un résumé écrit par Claude.",
+  "author": "Loom",
+  "icon": "newspaper",
+  "entry": "index.html",
+  "loomApi": 1,
+  "permissions": {
+    "network": ["hn.algolia.com", "api.github.com", "www.reddit.com", "lobste.rs"],
+    "optionalNetwork": true,
+    "claude": ["complete"],
+    "sessions": ["launch"],
+    "background": true,
+    "ui": ["status"]
+  },
+  "contributes": {
+    "commands": [
+      { "id": "refresh", "title": "Veille techno : relire les sources" },
+      { "id": "digest", "title": "Veille techno : résumer maintenant" }
+    ]
+  }
+}
