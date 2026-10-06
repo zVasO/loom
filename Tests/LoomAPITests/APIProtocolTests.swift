@@ -134,6 +134,25 @@ struct APIProtocolTests {
                 "never the whole server: a tool added later is not pre-approved by default")
     }
 
+    @Test("the actions that answer a snapshot, and only they, may leave it out")
+    func optionInstantane() {
+        let answering = APIMethod.allCases.filter(\.answersSnapshot)
+        #expect(answering.count == 13)
+        #expect(!APIMethod.browserSnapshot.answersSnapshot, "it is the snapshot")
+        #expect(!APIMethod.browserScreenshot.answersSnapshot && !APIMethod.browserEvaluate.answersSnapshot)
+        for method in APIMethod.allCases where method.isBrowser {
+            let property = APIToolCatalog.spec(for: method).inputSchema["properties"]?["snapshot"]
+            if method.answersSnapshot {
+                #expect(property?["enum"] == .array([.string("full"), .string("none")]), "\(method.rawValue)")
+                guard case .array(let required)? = APIToolCatalog.spec(for: method).inputSchema["required"] else { continue }
+                #expect(!required.contains(.string("snapshot")), "opt-in: never required")
+            } else {
+                #expect(property == nil, "\(method.rawValue) takes no snapshot option")
+            }
+        }
+        #expect(APIToolCatalog.agentInstructions(browser: true).contains("snapshot \"none\""))
+    }
+
     @Test("the browser tools' schemas require what the method cannot do without")
     func schemasNavigateurRequis() {
         func required(_ method: APIMethod) -> Set<String> {

@@ -74,6 +74,7 @@ extension AppModel {
             throw APIError(code: .unavailable, message: "this session is not running")
         }
         let command = try AgentCommand(method: method, params: request.params)
+        let options = try AgentCommandOptions(method: method, params: request.params)
         guard let browser = agentBrowser(for: id, create: command.createsBrowser) else {
             throw APIError(code: .unavailable, message: "No page is open yet — start with browser_navigate.")
         }
@@ -83,7 +84,7 @@ extension AppModel {
             throw APIError(code: .internalError, message: "\(method.rawValue) has no deadline")
         }
         do {
-            let result = try await browser.run(command, deadline: ContinuousClock.now + budget)
+            let result = try await browser.run(command, options: options, deadline: ContinuousClock.now + budget)
             return .ok(request.id, result.apiContent)
         } catch let error as AgentError {
             throw error.apiError

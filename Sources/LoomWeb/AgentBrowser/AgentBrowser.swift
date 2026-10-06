@@ -67,6 +67,8 @@ public final class AgentBrowser: NSObject {
     @ObservationIgnored private var runtimes: [BrowserTabsModel.TabID: TabRuntime] = [:]
     @ObservationIgnored private var queueTail: Task<Void, Never>?
     @ObservationIgnored private var running: Task<AgentResult, Error>?
+    /// The running command's options: commands run one at a time.
+    @ObservationIgnored private var currentOptions = AgentCommandOptions()
     @ObservationIgnored private var queueGeneration = 0
     @ObservationIgnored private var cancelledReason = "the browser's commands were cancelled"
     @ObservationIgnored private var screenshotSequence = 0
@@ -243,6 +245,13 @@ public final class AgentBrowser: NSObject {
 
     /// Runs `command` after the ones before it, within `deadline`.
     public func run(_ command: AgentCommand, deadline: ContinuousClock.Instant) async throws -> AgentResult {
+        try await run(command, options: AgentCommandOptions(), deadline: deadline)
+    }
+
+    /// Runs `command` after the ones before it, within `deadline`, answering
+    /// as `options` ask.
+    public func run(_ command: AgentCommand, options: AgentCommandOptions,
+                    deadline: ContinuousClock.Instant) async throws -> AgentResult {
         let previous = queueTail
         let generation = queueGeneration
         let job = Task<AgentResult, Error> { @MainActor [weak self] in
@@ -256,7 +265,7 @@ public final class AgentBrowser: NSObject {
             guard ContinuousClock.now < deadline - .seconds(1) else {
                 throw AgentError.timeout("another browser command was still running when this one's time ran out; it did not run")
             }
-            return try await self.runNow(command, deadline: deadline)
+            return try await self.runNow(command, options: options, deadline: deadline)
         }
         queueTail = Task { _ = try? await job.value }
         // The caller's wait is bounded even while the job queues or overruns:
@@ -294,8 +303,10 @@ public final class AgentBrowser: NSObject {
         activity = activity.map { AgentActivity(summary: reason, isRunning: false, at: $0.at) }
     }
 
-    private func runNow(_ command: AgentCommand, deadline: ContinuousClock.Instant) async throws -> AgentResult {
+    private func runNow(_ command: AgentCommand, options: AgentCommandOptions,
+                        deadline: ContinuousClock.Instant) async throws -> AgentResult {
         let generation = queueGeneration
+        currentOptions = options
         activity = AgentActivity(summary: Self.summary(of: command), isRunning: true, at: Date())
         let window = controller.activeTab.flatMap { controller.webView(for: $0) }?.window
         let responder = window?.firstResponder
@@ -310,6 +321,7 @@ public final class AgentBrowser: NSObject {
         defer {
             timer.cancel()
             running = nil
+            currentOptions = AgentCommandOptions()
             activity = activity.map { AgentActivity(summary: $0.summary, isRunning: false, at: Date()) }
             restoreFocus(responder, in: window)
         }
@@ -504,7 +516,7 @@ public final class AgentBrowser: NSObject {
                     throw AgentError.timeout(text.map { "\"\($0)\" did not appear" }
                                              ?? "\"\(textGone ?? "")\" did not go away")
                 }
-                try await pause(.milliseconds(250))
+                try await pause(.milliseconds(100))
             }
             result = text.map { "\"\($0)\" appeared" } ?? "\"\(textGone ?? "")\" went away"
         }
@@ -1001,7 +1013,8 @@ public final class AgentBrowser: NSObject {
             || controller.webView(for: tab)?.isLoading == true {
             try await waitForLoad(tab: tab, limit: .seconds(10), deadline: deadline)
         } else {
-            try await waitForNetworkIdle(tab: tab, after: mark.network, limit: .seconds(5), deadline: deadline)
+            // 2 s at most: a long-poll request would otherwise cost every action its whole limit.
+            try await waitForNetworkIdle(tab: tab, after: mark.network, limit: .seconds(2), deadline: deadline)
         }
         try await pause(.milliseconds(150))
     }
@@ -1194,7 +1207,7 @@ public final class AgentBrowser: NSObject {
     private func respondWithSnapshot(_ result: String, tab: BrowserTabsModel.TabID, webView: WKWebView,
                                      deadline: ContinuousClock.Instant) async -> AgentResult {
         var yaml: String?
-        if !blocksPage(tab), ContinuousClock.now < deadline - .milliseconds(500) {
+        if currentOptions.snapshot == .full, !blocksPage(tab), ContinuousClock.now < deadline - .milliseconds(500) {
             let answer = try? await helper("snapshot", ["budget": environment.limits.actionSnapshotChars],
                                            tab: tab, webView: webView, deadline: deadline - .milliseconds(300))
             yaml = answer?["yaml"] as? String

@@ -74,7 +74,9 @@ Les outils MCP `browser_*` suivent Playwright MCP, que les agents connaissent :
 | `browser_evaluate` | Une fonction JavaScript dans la page, son résultat en JSON |
 | `browser_handle_dialog`, `browser_tabs`, `browser_navigate_back`, `browser_close` | Le reste |
 
-Chaque action répond l'instantané de la page qui en résulte. Depuis un shell :
+Chaque action répond l'instantané de la page qui en résulte ; avec `snapshot: "none"`,
+elle ne répond que `### Page`, un dialogue et les événements — bien plus court,
+pour enchaîner des actions sur les références du dernier instantané. Depuis un shell :
 `loom browser navigate localhost:5173`, `loom browser click e12`,
 `loom browser take_screenshot --out shot.png` — `loom docs` donne tout.
 

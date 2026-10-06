@@ -96,6 +96,19 @@ public enum APIMethod: String, CaseIterable, Sendable {
         !isBrowser
     }
 
+    /// A browser action whose answer ends with the page's new snapshot —
+    /// the methods that take the `snapshot` option ("none" leaves it out).
+    public var answersSnapshot: Bool {
+        switch self {
+        case .browserNavigate, .browserNavigateBack, .browserClick, .browserType, .browserSelectOption,
+             .browserHover, .browserPressKey, .browserWaitFor, .browserHandleDialog, .browserTabs,
+             .browserFillForm, .browserFileUpload, .browserResize:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// The app's own deadline for answering, when the method may wait on
     /// something slow (a page loading); nil = it answers at once. Each holds
     /// its command's worst case: a load (30 s), a wait (30 s), plus the

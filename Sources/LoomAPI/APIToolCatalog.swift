@@ -218,6 +218,7 @@ public enum APIToolCatalog {
                                 cli: String) -> APIToolSpec {
         var fields = properties
         fields["sessionId"] = string("Omit it: your own session. The browser answers its session's token only.")
+        if method.answersSnapshot { fields["snapshot"] = snapshotProperty }
         return APIToolSpec(method: method, name: name, description: description,
                            inputSchema: object(fields, required: required), cliUsage: cli,
                            resultFormat: .content, preapprovable: true)
@@ -262,7 +263,9 @@ public enum APIToolCatalog {
     (`localhost:5173` is opened in http), act on the page, read its console and \
     requests. Work from browser_snapshot: it lists the page's elements with refs \
     (e12) that browser_click, browser_type and the others take; a ref is valid \
-    only until the next snapshot. Screenshots are for looking, not for acting. \
+    only until the next snapshot. Each action answers the page's new snapshot; \
+    when you chain actions on refs you already have, pass snapshot "none" for a \
+    much shorter, faster answer. Screenshots are for looking, not for acting. \
     Its cookies and storage belong to this project's agent profile, never the \
     person's own browser. Events are synthetic: no CSS :hover, no native drag.
     """
@@ -341,6 +344,13 @@ public enum APIToolCatalog {
     }
 
     private static let refAlias = string("Same as target (Playwright's older name).")
+
+    /// The opt-in that leaves the snapshot out of an action's answer.
+    private static let snapshotProperty = enumeration(
+        ["full", "none"],
+        "What the answer shows of the page afterwards: full (default), its new snapshot; none, no snapshot — "
+            + "a much shorter, faster answer (### Page, a dialog and events still show). The refs of your last "
+            + "snapshot keep working while the page stays the same document.")
 
     private static let elementProperty = string(
         "A human-readable description of the element, echoed back (\"Submit button\").")

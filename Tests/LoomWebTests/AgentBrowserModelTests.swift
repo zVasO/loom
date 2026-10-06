@@ -448,6 +448,32 @@ struct AgentCommandAPITests {
                 == .invalidParams)
     }
 
+    @Test("snapshot: full unless the agent says none; anywhere else, an error it can fix")
+    func optionInstantane() throws {
+        func options(_ method: APIMethod, _ params: [String: JSONValue]) throws -> AgentCommandOptions {
+            try AgentCommandOptions(method: method, params: .object(params))
+        }
+        func code(_ method: APIMethod, _ params: [String: JSONValue]) -> APIError.Code? {
+            do {
+                _ = try options(method, params)
+                return nil
+            } catch let error as APIError {
+                return error.code
+            } catch {
+                return .internalError
+            }
+        }
+        #expect(try options(.browserClick, ["target": .string("e1")]).snapshot == .full, "Playwright's answer by default")
+        #expect(try options(.browserClick, ["target": .string("e1"), "snapshot": .string("none")]).snapshot == .none)
+        #expect(try options(.browserNavigate, ["url": .string("localhost:3000"), "snapshot": .string("full")]).snapshot == .full)
+        #expect(try options(.browserType, ["snapshot": .null]).snapshot == .full)
+        #expect(try options(.browserSnapshot, [:]) == AgentCommandOptions())
+        #expect(code(.browserClick, ["snapshot": .string("diff")]) == .invalidParams)
+        #expect(code(.browserClick, ["snapshot": .bool(false)]) == .invalidParams)
+        #expect(code(.browserSnapshot, ["snapshot": .string("none")]) == .invalidParams, "the snapshot itself")
+        #expect(code(.browserEvaluate, ["snapshot": .string("none")]) == .invalidParams)
+    }
+
     @Test("a set width is a page zoom: the CSS width shown in the view's points")
     func largeurDePage() {
         #expect(ViewportWidth.fit.zoom(forViewWidth: 640) == 1)
