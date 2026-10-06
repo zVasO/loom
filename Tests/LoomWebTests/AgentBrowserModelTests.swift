@@ -690,3 +690,24 @@ struct AgentViewportDefaultsTests {
         #expect(AgentViewportDefaults.load(from: defaults).width(for: project) == .css(375), "and the default stays")
     }
 }
+
+@Suite("Agent browser — engine")
+struct AgentBrowserEngineTests {
+
+    @Test("WebKit until chosen otherwise; Chromium only when one can run; the environment wins")
+    func choixDuMoteur() {
+        func resolve(_ preference: AgentBrowserEnginePreference?, _ environment: [String: String] = [:],
+                     chromium: Bool) -> APIBrowserEngine {
+            AgentBrowserEnginePreference.resolve(preference: preference, environment: environment,
+                                                 chromiumAvailable: chromium)
+        }
+        #expect(resolve(nil, chromium: true) == .webkit, "nothing chosen yet")
+        #expect(resolve(.automatic, chromium: true) == .chromium)
+        #expect(resolve(.automatic, chromium: false) == .webkit)
+        #expect(resolve(.chromium, chromium: false) == .webkit, "never without a browser")
+        #expect(resolve(.webkit, chromium: true) == .webkit)
+        #expect(resolve(.webkit, ["LOOM_AGENT_ENGINE": "chromium"], chromium: true) == .chromium)
+        #expect(resolve(.chromium, ["LOOM_AGENT_ENGINE": "webkit"], chromium: true) == .webkit)
+        #expect(resolve(.chromium, ["LOOM_AGENT_ENGINE": "nonsense"], chromium: true) == .chromium)
+    }
+}

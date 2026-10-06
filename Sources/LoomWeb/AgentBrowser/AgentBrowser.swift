@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import LoomAPI
 import Observation
 import WebKit
 
@@ -242,11 +243,6 @@ public final class AgentBrowser: NSObject {
     }
 
     // MARK: - Commands
-
-    /// Runs `command` after the ones before it, within `deadline`.
-    public func run(_ command: AgentCommand, deadline: ContinuousClock.Instant) async throws -> AgentResult {
-        try await run(command, options: AgentCommandOptions(), deadline: deadline)
-    }
 
     /// Runs `command` after the ones before it, within `deadline`, answering
     /// as `options` ask.
@@ -1809,4 +1805,11 @@ final class AgentMessageProxy: NSObject, WKScriptMessageHandler {
             owner?.received(parsed, from: webView, frameKey: frameKey)
         }
     }
+}
+
+// MARK: - The engine the app sees
+
+extension AgentBrowser: AgentBrowserEngine {
+    public var engine: APIBrowserEngine { .webkit }
+    public var panelContent: AgentBrowserPanelContent { .webKit(controller) }
 }

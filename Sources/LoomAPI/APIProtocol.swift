@@ -25,6 +25,9 @@ public enum APIProtocol {
     /// "0" in the MCP server's environment: the browser tools are turned off
     /// in Loom's Settings, and `loom mcp` does not list them.
     public static let browserToolsEnvironmentKey = "LOOM_BROWSER_TOOLS"
+    /// The engine behind the session's browser (`webkit`, `chromium`), pinned
+    /// when the session launched: the tools and their wording follow it.
+    public static let browserEngineEnvironmentKey = "LOOM_BROWSER_ENGINE"
 
     /// Where the app writes the agent browser's screenshots (ADR-0014), beside
     /// its socket: the one place the app and `loom mcp` agree on. The MCP

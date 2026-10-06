@@ -441,7 +441,7 @@ public final class ThemeStore {
     public var isDark: Bool { Self.resolveIsDark(mode: appearanceMode, systemIsDark: systemIsDark) }
 
     /// Pure: the one rule the appearance follows.
-    public static func resolveIsDark(mode: AppearanceMode, systemIsDark: Bool) -> Bool {
+    nonisolated public static func resolveIsDark(mode: AppearanceMode, systemIsDark: Bool) -> Bool {
         switch mode {
         case .system: systemIsDark
         case .light: false

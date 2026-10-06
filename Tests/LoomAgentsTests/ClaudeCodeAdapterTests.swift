@@ -291,6 +291,22 @@ struct ClaudeCodeAdapterTests {
         let onIndex = try #require(on.arguments.firstIndex(of: "--mcp-config"))
         #expect(!on.arguments[onIndex + 1].contains("LOOM_BROWSER_TOOLS"))
     }
+
+    @Test("the session's engine reaches the MCP server; WebKit, the default, is not said")
+    func moteurDuNavigateur() throws {
+        func environment(_ tools: ClaudeCodeAdapter.ToolOptions) throws -> [String: String] {
+            let command = wired(tools).launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok")
+            let index = try #require(command.arguments.firstIndex(of: "--mcp-config"))
+            let config = try #require(try JSONSerialization.jsonObject(
+                with: Data(command.arguments[index + 1].utf8)) as? [String: Any])
+            let loom = try #require((config["mcpServers"] as? [String: Any])?["loom"] as? [String: Any])
+            return try #require(loom["env"] as? [String: String])
+        }
+        #expect(try environment(.init(engine: .chromium))["LOOM_BROWSER_ENGINE"] == "chromium")
+        #expect(try environment(.init(engine: .webkit))["LOOM_BROWSER_ENGINE"] == nil)
+        #expect(try environment(.init(browser: false, engine: .chromium))["LOOM_BROWSER_ENGINE"] == nil,
+                "no browser tools, no engine to word them for")
+    }
 }
 
 // v3 — real counters: token usage parsed from claude's native .jsonl.

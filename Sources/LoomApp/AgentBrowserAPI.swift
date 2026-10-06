@@ -93,8 +93,15 @@ extension AppModel {
 
     /// The stack's agent browser; `create` makes it for a running claude
     /// session that has none.
-    func agentBrowser(for parent: SessionID, create: Bool) -> AgentBrowser? {
-        if let existing = agentBrowsers[parent] { return existing }
+    func agentBrowser(for parent: SessionID, create: Bool) -> (any AgentBrowserEngine)? {
+        let engine = agentEngines[parent] ?? .webkit
+        if let existing = agentBrowsers[parent] {
+            if existing.engine == engine { return existing }
+            // Resumed on another engine (Settings changed meanwhile): the
+            // old browser goes, its tools are no longer listed.
+            agentBrowsers[parent] = nil
+            existing.tearDown()
+        }
         guard create, agentBrowserToolsEnabled,
               let item = sessions.first(where: { $0.id == parent }), !item.isShell else { return nil }
         let isReview = runsUntrustedCode(parent)
@@ -112,6 +119,30 @@ extension AppModel {
             networkAccess: agentNetworkAccess))
         agentBrowsers[parent] = browser
         return browser
+    }
+
+    // MARK: - Engine (ADR-0015)
+
+    /// Settings ▸ Agents: which engine new sessions' browsers use; nil until
+    /// the person chooses (WebKit).
+    var agentBrowserEnginePreference: AgentBrowserEnginePreference? {
+        get {
+            UserDefaults.standard.string(forKey: AgentBrowserEnginePreference.defaultsKey)
+                .flatMap(AgentBrowserEnginePreference.init(rawValue:))
+        }
+        set {
+            UserDefaults.standard.set(newValue?.rawValue, forKey: AgentBrowserEnginePreference.defaultsKey)
+        }
+    }
+
+    /// Whether a Chromium-family browser can drive agents' pages here.
+    var agentChromiumAvailable: Bool { false }
+
+    /// The engine a session launching or resuming now gets.
+    func resolveAgentBrowserEngine() -> APIBrowserEngine {
+        AgentBrowserEnginePreference.resolve(preference: agentBrowserEnginePreference,
+                                             environment: ProcessInfo.processInfo.environment,
+                                             chromiumAvailable: agentChromiumAvailable)
     }
 
     /// Where browser_file_upload may take files: the session's working tree,
@@ -261,6 +292,7 @@ extension AppModel {
     /// An archived session's browser and screenshots are gone for good.
     func forgetAgentBrowser(_ session: SessionID) {
         agentBrowsers.removeValue(forKey: session)?.tearDown()
+        agentEngines[session] = nil
         try? FileManager.default.removeItem(at: agentScreenshotsDirectory(for: session))
         try? FileManager.default.removeItem(at: agentUploadsDirectory(for: session))
     }

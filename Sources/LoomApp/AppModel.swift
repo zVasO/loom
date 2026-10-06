@@ -351,14 +351,18 @@ public final class AppModel {
 
     /// The adapter talks to the CLI with the full hooks wiring (ADR-0005) and,
     /// when the `loom` binary is around, the API as MCP tools (ADR-0010).
-    private var adapter: ClaudeCodeAdapter {
-        ClaudeCodeAdapter(executable: claudePath?.path ?? "claude",
-                          hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
-                                       socket: socketURL,
-                                       cli: Self.companionBinaryURL(named: "loom",
-                                                                    fallback: supportDirectory)),
-                          tools: .init(browser: agentBrowserToolsEnabled,
-                                       preapproved: preapprovesLoomTools))
+    /// The session's browser engine is chosen here, once per launch or resume.
+    private func adapter(for session: SessionID) -> ClaudeCodeAdapter {
+        let engine = resolveAgentBrowserEngine()
+        agentEngines[session] = engine
+        return ClaudeCodeAdapter(executable: claudePath?.path ?? "claude",
+                                 hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
+                                              socket: socketURL,
+                                              cli: Self.companionBinaryURL(named: "loom",
+                                                                           fallback: supportDirectory)),
+                                 tools: .init(browser: agentBrowserToolsEnabled,
+                                              preapproved: preapprovesLoomTools,
+                                              engine: engine))
     }
 
     /// In development, `loom-hook` is a sibling product of the app; packaged,
@@ -1255,7 +1259,7 @@ public final class AppModel {
             // review nobody asked for yet). The setup command is typed after
             // the boot, from the outside, and only when the setting says so.
             var spec = SessionManager.SessionSpec(
-                command: adapter.launchCommand(session: sessionID, initialPrompt: nil,
+                command: adapter(for: sessionID).launchCommand(session: sessionID, initialPrompt: nil,
                                                hookToken: token,
                                                userStatusLine: userStatusLine(in: worktree),
                                                theme: claudeTheme(for: projectID)),
@@ -1611,7 +1615,7 @@ public final class AppModel {
             let sessionID = SessionID()
             let token = UUID().uuidString
             var spec = SessionManager.SessionSpec(
-                command: adapter.launchCommand(session: sessionID, initialPrompt: prompt,
+                command: adapter(for: sessionID).launchCommand(session: sessionID, initialPrompt: prompt,
                                                hookToken: token,
                                                userStatusLine: userStatusLine(in: worktree),
                                                theme: claudeTheme(for: projectID)),
@@ -1654,7 +1658,7 @@ public final class AppModel {
             let sessionID = SessionID()
             let token = UUID().uuidString
             var spec = SessionManager.SessionSpec(
-                command: adapter.launchCommand(
+                command: adapter(for: sessionID).launchCommand(
                     session: sessionID, initialPrompt: prompt, hookToken: token,
                     userStatusLine: userStatusLine(in: URL(fileURLWithPath: worktreePath)),
                     theme: claudeTheme(for: record.projectID)),
@@ -2041,7 +2045,11 @@ public final class AppModel {
 
     /// Each session agent's own browser (ADR-0014), created on its first use
     /// (AgentBrowserAPI.swift).
-    var agentBrowsers: [SessionID: AgentBrowser] = [:]
+    var agentBrowsers: [SessionID: any AgentBrowserEngine] = [:]
+
+    /// The engine each session's browser uses, pinned when it launched or
+    /// resumed: the browser tools `loom mcp` listed, and their words, follow it.
+    var agentEngines: [SessionID: APIBrowserEngine] = [:]
 
     /// The page width each project's agent browsers open at (Settings, the
     /// panel's menu) — AgentBrowserAPI.swift reads and writes it.
@@ -2286,11 +2294,12 @@ public final class AppModel {
         }
         let statusLine = userStatusLine(in: directory)
         let theme = claudeTheme(for: record.projectID)
+        let launcher = adapter(for: record.id)
         let command = nativeSessionExists(record)
-            ? adapter.resumeCommand(session: native, hookToken: token, userStatusLine: statusLine,
-                                    theme: theme)
-            : adapter.launchCommand(session: record.id, initialPrompt: nil, hookToken: token,
-                                    userStatusLine: statusLine, theme: theme)
+            ? launcher.resumeCommand(session: native, hookToken: token, userStatusLine: statusLine,
+                                     theme: theme)
+            : launcher.launchCommand(session: record.id, initialPrompt: nil, hookToken: token,
+                                     userStatusLine: statusLine, theme: theme)
         do {
             try await manager.resume(record, command: command, workingDirectory: directory,
                                      geometry: launchGrid(forStack: record.id),
@@ -2478,7 +2487,7 @@ public final class AppModel {
             let sessionID = SessionID()
             let token = UUID().uuidString
             var spec = SessionManager.SessionSpec(
-                command: adapter.launchCommand(session: sessionID, initialPrompt: initialPrompt,
+                command: adapter(for: sessionID).launchCommand(session: sessionID, initialPrompt: initialPrompt,
                                                hookToken: token,
                                                userStatusLine: userStatusLine(in: directory),
                                                theme: claudeTheme(for: project?.id)),

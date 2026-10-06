@@ -241,11 +241,12 @@ public enum CLI {
         let screenshots = APIProtocol.screenshotsDirectory(socketPath: connection.socketPath)
         if case .mcp = command {
             let browser = environment[APIProtocol.browserToolsEnvironmentKey] != "0"
+            let engine = APIBrowserEngine(environment: environment)
             let server = MCPServer(call: { method, params in
                                        try connection.client.call(method, params: params, as: JSONValue.self)
                                    },
-                                   tools: APIToolCatalog.tools(browser: browser),
-                                   instructions: APIToolCatalog.agentInstructions(browser: browser),
+                                   tools: APIToolCatalog.tools(browser: browser, engine: engine),
+                                   instructions: APIToolCatalog.agentInstructions(browser: browser, engine: engine),
                                    imageRoot: screenshots)
             server.serve()
             return 0

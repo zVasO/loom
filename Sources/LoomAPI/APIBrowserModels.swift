@@ -6,6 +6,18 @@ import Foundation
 // `element` is the agent's own description of the element, echoed back.
 // Numbers are Doubles on the wire: JSON has no integers.
 
+/// The engine behind a session's browser (ADR-0014, ADR-0015): WebKit with
+/// synthetic events, or headless Chromium driven over the DevTools protocol
+/// with real ones. Chosen when the session launches, kept until it resumes.
+public enum APIBrowserEngine: String, Codable, Sendable, CaseIterable {
+    case webkit, chromium
+
+    /// The engine `loom mcp` was launched for; WebKit when unsaid.
+    public init(environment: [String: String]) {
+        self = environment[APIProtocol.browserEngineEnvironmentKey].flatMap(Self.init(rawValue:)) ?? .webkit
+    }
+}
+
 /// Any browser method's session: omitted under a session token (yours).
 public struct APIBrowserSessionParams: Codable, Equatable, Sendable {
     public var sessionId: String?

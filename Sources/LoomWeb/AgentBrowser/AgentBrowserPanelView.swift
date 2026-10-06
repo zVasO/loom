@@ -6,7 +6,7 @@ import SwiftUI
 /// the agent's actions), with the agent's activity and a page's dialog laid
 /// OVER the page rather than above it.
 public struct AgentBrowserPanelView: View {
-    private let browser: AgentBrowser
+    private let browser: any AgentBrowserEngine
     private let caption: String
     /// The project whose default width the menu can set, and how — nil for
     /// a session without one, or a review (it reads the default, never writes it).
@@ -27,7 +27,7 @@ public struct AgentBrowserPanelView: View {
         }
     }
 
-    public init(browser: AgentBrowser, caption: String, defaultWidth: DefaultWidth? = nil) {
+    public init(browser: any AgentBrowserEngine, caption: String, defaultWidth: DefaultWidth? = nil) {
         self.browser = browser
         self.caption = caption
         self.defaultWidth = defaultWidth
@@ -50,10 +50,18 @@ public struct AgentBrowserPanelView: View {
             .padding(.horizontal, 10)
             .frame(height: 22)
             .background(DefaultTheme.background)
-            BrowserPanelView(controller: browser.controller,
+            page
+                .overlay(alignment: .top) { overlays }
+        }
+    }
+
+    @ViewBuilder
+    private var page: some View {
+        switch browser.panelContent {
+        case .webKit(let controller):
+            BrowserPanelView(controller: controller,
                              emptyHint: "The agent hasn't opened a page yet — it will appear here.",
                              newTabAddress: "about:blank")
-                .overlay(alignment: .top) { overlays }
         }
     }
 

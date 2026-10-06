@@ -23,13 +23,13 @@ concurrency:
 jobs:
   swift:
     name: swift build + test (macOS)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Toolchain
+      - name: Toolchain (the newest Xcode on the runner)
         run: |
-          sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -v beta | sort -V | tail -1)"
           swift --version
       - name: Cache SwiftPM build
         uses: actions/cache@v4
@@ -57,7 +57,7 @@ jobs:
         if: failure()
         run: |
           echo "::group::distinct errors"
-          cat build.log test.log 2>/dev/null | grep -E "error:|✘|failed|Fatal error" | grep -v "^\s*|" | sed -E 's/^[0-9T:.Z-]+ //' | sort -u | head -80
+          cat build.log test.log 2>/dev/null | grep -E "error:|✘|failed|Fatal error|originates here" | grep -v "^\s*|" | sed -E 's/^[0-9T:.Z-]+ //' | sort -u | head -80
           echo "::endgroup::"
 
   node:
@@ -65,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15]
+        os: [ubuntu-latest, macos-26]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -94,13 +94,13 @@ jobs:
       fail-fast: false
       matrix:
         engine: [webkit, chromium]
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
-        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -v beta | sort -V | tail -1)"
       - uses: actions/cache@v4
         with:
           path: .build

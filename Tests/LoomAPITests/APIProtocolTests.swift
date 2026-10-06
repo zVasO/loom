@@ -153,6 +153,25 @@ struct APIProtocolTests {
         #expect(APIToolCatalog.agentInstructions(browser: true).contains("snapshot \"none\""))
     }
 
+    @Test("the engine words the tools: real events on Chromium, synthetic ones on WebKit")
+    func outilsSelonLeMoteur() {
+        func description(_ name: String, _ engine: APIBrowserEngine) -> String {
+            APIToolCatalog.tools(browser: true, engine: engine).first { $0.name == name }?.description ?? ""
+        }
+        #expect(description("browser_hover", .webkit).contains("CSS :hover does not"))
+        #expect(description("browser_hover", .chromium).contains("CSS :hover applies"))
+        #expect(APIToolCatalog.agentInstructions(browser: true, engine: .webkit).contains("Events are synthetic"))
+        let chromium = APIToolCatalog.agentInstructions(browser: true, engine: .chromium)
+        #expect(chromium.contains("real") && !chromium.contains("synthetic"))
+        #expect(APIToolCatalog.all == APIToolCatalog.all(engine: .webkit), "loom docs: the WebKit words")
+        #expect(Set(APIToolCatalog.tools(browser: true, engine: .webkit).map(\.name))
+                .isSubset(of: Set(APIToolCatalog.tools(browser: true, engine: .chromium).map(\.name))))
+        #expect(APIToolCatalog.preapprovedRules(browser: true, engine: .chromium).contains("mcp__loom__browser_hover"))
+        #expect(APIBrowserEngine(environment: ["LOOM_BROWSER_ENGINE": "chromium"]) == .chromium)
+        #expect(APIBrowserEngine(environment: [:]) == .webkit)
+        #expect(APIBrowserEngine(environment: ["LOOM_BROWSER_ENGINE": "gecko"]) == .webkit)
+    }
+
     @Test("the browser tools' schemas require what the method cannot do without")
     func schemasNavigateurRequis() {
         func required(_ method: APIMethod) -> Set<String> {
