@@ -186,15 +186,16 @@ struct ForkPTYHostSignalTests {
         let transcript = MemoryTranscriptSink()
         // SIGWINCH is not a POSIX signal: perl's POSIX module does not export
         // it, so the number comes from Config (28 on Darwin).
-        let (_, events) = try withSignalBlocked(SIGWINCH) {
-            try launch(perl(#"use strict; use warnings; use POSIX; use Config; $| = 1; my %sig; @sig{split " ", $Config{sig_name}} = split " ", $Config{sig_num}; my $old = POSIX::SigSet->new; POSIX::sigprocmask(SIG_BLOCK, POSIX::SigSet->new, $old); my $member = $old->ismember($sig{WINCH}); print $member == 1 ? "mask-blocked" : $member == 0 ? "mask-clear" : "mask-error"; sleep 1"#),
+        // The runtime is kept: released, it no longer feeds the transcript,
+        // and the probe's line would be lost while its exit still arrives.
+        let (runtime, events) = try withSignalBlocked(SIGWINCH) {
+            try launch(perl(#"use strict; use warnings; use POSIX; use Config; $| = 1; my %sig; @sig{split " ", $Config{sig_name}} = split " ", $Config{sig_num}; my $old = POSIX::SigSet->new; POSIX::sigprocmask(SIG_BLOCK, POSIX::SigSet->new, $old); my $member = $old->ismember($sig{WINCH}); print $member == 1 ? "mask-blocked" : $member == 0 ? "mask-clear" : "mask-error""#),
                        transcript: transcript)
         }
+        defer { withExtendedLifetime(runtime) {} }
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else { Issue.record("no .started"); return }
         guard case .terminated = await iterator.next() else { Issue.record("no .terminated"); return }
-        // The probe stays a second after its line: macOS may drop a PTY's
-        // unread output when the child's side closes at once.
         _ = await waitFor("mask-", in: transcript)
         #expect(transcript.text.contains("mask-clear") && !transcript.text.contains("mask-blocked"),
                 "the child must not inherit the forking thread's mask — saw: \(transcript.text)")
