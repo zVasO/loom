@@ -1,0 +1,112 @@
+# Compile and test on every push: the app is macOS-only, and the agent browser's
+# scripts and its Chromium protocol harness run on a real Chromium.
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      selftest:
+        description: "Also run the agent browser self-test (LOOM_AUTOTEST) on both engines"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swift:
+    name: swift build + test (macOS)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+          swift --version
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}-${{ github.sha }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}-
+            spm-${{ runner.os }}-
+      - name: Git identity (tests commit in throwaway repos)
+        run: |
+          git config --global user.name "Loom CI"
+          git config --global user.email "ci@loom.invalid"
+      - name: Build
+        run: swift build --build-tests
+      - name: Test
+        run: swift test --skip-build --parallel
+
+  node:
+    name: node tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Playwright and its Chromium builds
+        run: |
+          npm install -g playwright@1.56.1
+          npx --yes playwright@1.56.1 install --with-deps chromium chromium-headless-shell
+      - name: Agent browser scripts on a real DOM
+        run: node --test Tests/AgentBrowserJS/*.test.mjs
+      - name: Agent browser over the Chrome DevTools Protocol
+        if: hashFiles('Tests/AgentBrowserCDP/*.test.mjs') != ''
+        run: node --test --test-concurrency=1 Tests/AgentBrowserCDP/*.test.mjs
+      - name: Extension SDK and examples
+        working-directory: Examples/extensions
+        run: npm test
+
+  selftest:
+    name: agent browser self-test (${{ matrix.engine }})
+    if: github.event_name == 'workflow_dispatch' && inputs.selftest
+    needs: swift
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [webkit, chromium]
+    runs-on: macos-15
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)"
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-release-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}-${{ github.sha }}
+          restore-keys: spm-release-${{ runner.os }}-
+      - name: Build (release)
+        run: swift build -c release
+      - name: Self-test
+        timeout-minutes: 20
+        env:
+          LOOM_AUTOTEST: agent-browser
+          LOOM_AUTOTEST_ENGINE: ${{ matrix.engine }}
+          LOOM_AUTOTEST_FIXTURES: ${{ github.workspace }}/Tests/AgentBrowserJS/fixtures
+        run: swift run -c release LoomApp
+      - name: Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-browser-report-${{ matrix.engine }}
+          path: /tmp/loom-agent-browser-report.json
+          if-no-files-found: warn
