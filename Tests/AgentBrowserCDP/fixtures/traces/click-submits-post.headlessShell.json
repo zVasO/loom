@@ -1,0 +1,341 @@
+{
+ "$comment": "Recorded by Tests/AgentBrowserCDP/settle.test.mjs for SettleMachine replay. t: ms from the mark (just before the click's write). Ids are tokens (F frame, L loader — a navigation's Document request shares its loader's —, R request); {origin} is the fixture server.",
+ "scenario": "click-submits-post",
+ "description": "A click on a form's submit button: a POST navigation.",
+ "binary": "headlessShell",
+ "product": "HeadlessChrome/141.0.7390.37",
+ "mainFrame": "F1",
+ "loaderAtMark": "L1",
+ "barrier": "answered",
+ "entries": [
+  {
+   "t": -20.9,
+   "event": "Page.frameStartedNavigating",
+   "params": {
+    "frameId": "F1",
+    "url": "{origin}/settle.html",
+    "loaderId": "L1",
+    "navigationType": "differentDocument"
+   }
+  },
+  {
+   "t": -20.8,
+   "event": "Page.frameStartedLoading",
+   "params": {
+    "frameId": "F1"
+   }
+  },
+  {
+   "t": -20.7,
+   "event": "Network.requestWillBeSent",
+   "params": {
+    "requestId": "L1",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "Document",
+    "request": {
+     "method": "GET",
+     "url": "{origin}/settle.html"
+    }
+   }
+  },
+  {
+   "t": -17.3,
+   "event": "Network.responseReceived",
+   "params": {
+    "requestId": "L1",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "Document",
+    "response": {
+     "status": 200,
+     "url": "{origin}/settle.html"
+    }
+   }
+  },
+  {
+   "t": -14.7,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L1",
+    "name": "init"
+   }
+  },
+  {
+   "t": -14.3,
+   "event": "Page.frameNavigated",
+   "params": {
+    "frame": {
+     "id": "F1",
+     "loaderId": "L1",
+     "url": "{origin}/settle.html"
+    },
+    "type": "Navigation"
+   }
+  },
+  {
+   "t": -7.8,
+   "event": "Network.loadingFinished",
+   "params": {
+    "requestId": "L1"
+   }
+  },
+  {
+   "t": -2.5,
+   "event": "Page.domContentEventFired",
+   "params": {}
+  },
+  {
+   "t": -2.4,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L1",
+    "name": "DOMContentLoaded"
+   }
+  },
+  {
+   "t": -2.4,
+   "event": "Page.loadEventFired",
+   "params": {}
+  },
+  {
+   "t": -2.1,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L1",
+    "name": "load"
+   }
+  },
+  {
+   "t": -2.1,
+   "event": "Page.frameStoppedLoading",
+   "params": {
+    "frameId": "F1"
+   }
+  },
+  {
+   "t": 0,
+   "mark": true
+  },
+  {
+   "t": 0.1,
+   "send": "Input.dispatchMouseEvent",
+   "ref": "click.moved",
+   "params": {
+    "type": "mouseMoved",
+    "x": 132,
+    "y": 345,
+    "button": "none",
+    "buttons": 0,
+    "modifiers": 0,
+    "pointerType": "mouse"
+   }
+  },
+  {
+   "t": 0.1,
+   "send": "Input.dispatchMouseEvent",
+   "ref": "click.pressed",
+   "params": {
+    "type": "mousePressed",
+    "x": 132,
+    "y": 345,
+    "button": "left",
+    "clickCount": 1,
+    "modifiers": 0,
+    "pointerType": "mouse",
+    "buttons": 1
+   }
+  },
+  {
+   "t": 0.1,
+   "send": "Input.dispatchMouseEvent",
+   "ref": "click.released",
+   "params": {
+    "type": "mouseReleased",
+    "x": 132,
+    "y": 345,
+    "button": "left",
+    "clickCount": 1,
+    "modifiers": 0,
+    "pointerType": "mouse",
+    "buttons": 0
+   }
+  },
+  {
+   "t": 0.9,
+   "reply": "click.moved"
+  },
+  {
+   "t": 1.5,
+   "reply": "click.pressed"
+  },
+  {
+   "t": 1.7,
+   "event": "Page.frameRequestedNavigation",
+   "params": {
+    "frameId": "F1",
+    "reason": "formSubmissionPost",
+    "url": "{origin}/echo",
+    "disposition": "currentTab"
+   }
+  },
+  {
+   "t": 1.9,
+   "reply": "click.released"
+  },
+  {
+   "t": 1.9,
+   "send": "Runtime.callFunctionOn",
+   "ref": "barrier",
+   "params": {
+    "functionDeclaration": "async function() { await new Promise((resolve) => setTimeout(resolve, 0)); return JSON.stringify({ url: location.href, visibility: document.visibilityState }); }"
+   }
+  },
+  {
+   "t": 4.7,
+   "event": "Page.frameStartedNavigating",
+   "params": {
+    "frameId": "F1",
+    "url": "{origin}/echo",
+    "loaderId": "L2",
+    "navigationType": "differentDocument"
+   }
+  },
+  {
+   "t": 4.7,
+   "event": "Page.frameStartedLoading",
+   "params": {
+    "frameId": "F1"
+   }
+  },
+  {
+   "t": 4.9,
+   "event": "Network.requestWillBeSent",
+   "params": {
+    "requestId": "L2",
+    "loaderId": "L2",
+    "frameId": "F1",
+    "type": "Document",
+    "request": {
+     "method": "POST",
+     "url": "{origin}/echo"
+    }
+   }
+  },
+  {
+   "t": 5.9,
+   "reply": "barrier",
+   "value": {
+    "url": "{origin}/settle.html",
+    "visibility": "visible"
+   }
+  },
+  {
+   "t": 8.7,
+   "event": "Network.responseReceived",
+   "params": {
+    "requestId": "L2",
+    "loaderId": "L2",
+    "frameId": "F1",
+    "type": "Document",
+    "response": {
+     "status": 200,
+     "url": "{origin}/echo"
+    }
+   }
+  },
+  {
+   "t": 11.5,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L2",
+    "name": "init"
+   }
+  },
+  {
+   "t": 12.1,
+   "event": "Page.frameNavigated",
+   "params": {
+    "frame": {
+     "id": "F1",
+     "loaderId": "L2",
+     "url": "{origin}/echo"
+    },
+    "type": "Navigation"
+   }
+  },
+  {
+   "t": 17.5,
+   "event": "Network.loadingFinished",
+   "params": {
+    "requestId": "L2"
+   }
+  },
+  {
+   "t": 17.7,
+   "event": "Page.domContentEventFired",
+   "params": {}
+  },
+  {
+   "t": 18.2,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L2",
+    "name": "DOMContentLoaded"
+   }
+  },
+  {
+   "t": 18.6,
+   "event": "Page.loadEventFired",
+   "params": {}
+  },
+  {
+   "t": 18.6,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L2",
+    "name": "load"
+   }
+  },
+  {
+   "t": 20.6,
+   "event": "Page.frameStoppedLoading",
+   "params": {
+    "frameId": "F1"
+   }
+  },
+  {
+   "t": 37.2,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L2",
+    "name": "firstMeaningfulPaintCandidate"
+   }
+  },
+  {
+   "t": 37.2,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L2",
+    "name": "firstContentfulPaint"
+   }
+  },
+  {
+   "t": 37.2,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L2",
+    "name": "firstPaint"
+   }
+  }
+ ]
+}

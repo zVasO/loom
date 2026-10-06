@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Form</title>
+<style>
+  body { margin: 0; font-family: sans-serif; }
+  #target { position: absolute; left: 100px; top: 100px; width: 200px; height: 60px; background-color: rgb(250, 250, 250); }
+  #target:hover { background-color: rgb(1, 2, 3); }
+  #login { position: absolute; left: 100px; top: 220px; }
+  #area { position: absolute; left: 100px; top: 320px; width: 300px; height: 60px; }
+</style>
+</head>
+<body>
+<!-- Trusted input (input-click.test.mjs, keys.test.mjs): a target that logs
+     every pointer and mouse event with what the page can read of it, and a
+     plain form for Enter and Tab. -->
+<button id="target" type="button">Target</button>
+<form id="login" action="/echo" method="get">
+  <input id="user" name="user" aria-label="User">
+  <input id="password" name="password" type="password" aria-label="Password">
+  <button id="submit" type="submit">Sign in</button>
+</form>
+<textarea id="area" aria-label="Notes"></textarea>
+<script>
+  window.log = [];
+  window.submits = 0;
+  const target = document.getElementById("target");
+  const types = ["pointerover", "pointerenter", "mouseover", "mouseenter", "pointermove", "mousemove",
+    "pointerdown", "mousedown", "pointerup", "mouseup", "click", "dblclick", "auxclick", "contextmenu",
+    "pointerout", "pointerleave", "mouseout", "mouseleave"];
+  for (const type of types) {
+    target.addEventListener(type, (event) => {
+      window.log.push({
+        type, trusted: event.isTrusted, pointerType: event.pointerType ?? null, detail: event.detail,
+        button: event.button, buttons: event.buttons, shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey, meta: event.metaKey,
+      });
+    });
+  }
+  target.addEventListener("contextmenu", (event) => event.preventDefault());
+  document.getElementById("login").addEventListener("submit", (event) => {
+    event.preventDefault();
+    window.submits++;
+  });
+  window.keyLog = [];
+  for (const type of ["keydown", "keypress", "beforeinput", "input", "keyup"]) {
+    document.addEventListener(type, (event) => {
+      window.keyLog.push({ type, trusted: event.isTrusted, key: event.key ?? null, keyCode: event.keyCode ?? null,
+        inputType: event.inputType ?? null, data: event.data ?? null, target: event.target.id });
+    }, true);
+  }
+</script>
+</body>
+</html>

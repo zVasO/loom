@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dialogs</title>
+<style>
+  body { margin: 0; font-family: sans-serif; }
+  button { display: block; width: 200px; height: 40px; margin: 10px; }
+</style>
+</head>
+<body>
+<!-- JavaScript dialogs opened by trusted clicks (dialog-race.test.mjs). Each
+     answer lands in window.answers; #arm adds a beforeunload handler. -->
+<button id="alert" type="button">Alert</button>
+<button id="confirm" type="button">Confirm</button>
+<button id="prompt" type="button">Prompt</button>
+<button id="arm" type="button">Ask before leaving</button>
+<script>
+  window.answers = [];
+  document.getElementById("alert").addEventListener("click", () => { alert("Saved"); window.answers.push("alert closed"); });
+  document.getElementById("confirm").addEventListener("click", () => { window.answers.push("confirm:" + confirm("Delete it?")); });
+  document.getElementById("prompt").addEventListener("click", () => { window.answers.push("prompt:" + prompt("Your name?", "nobody")); });
+  document.getElementById("arm").addEventListener("click", () => {
+    addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; });
+    window.answers.push("armed");
+  });
+</script>
+</body>
+</html>
