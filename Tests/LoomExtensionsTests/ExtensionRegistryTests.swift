@@ -180,4 +180,60 @@ struct ExtensionRegistryTests {
             return
         }
     }
+
+    // ADR-0015: hosts granted at use, beside the grant.
+
+    @Test("granted hosts survive a rescan and a reinstall, leave the grant alone, and go with removal")
+    func hotesAccordes() throws {
+        let box = try Sandbox()
+        defer { box.cleanUp() }
+        let source = try box.source(id: "dev.example.watch")
+        let manifest = try box.registry.inspect(source)
+        let installed = try box.registry.install(from: source, granting: manifest.permissions)
+        try box.registry.grantHosts(["Blog.Example.com", "news.example.org"], to: installed.id)
+        try box.registry.grantHosts(["blog.example.com"], to: installed.id)
+        box.registry.scan()
+        #expect(box.registry.grantedHosts(for: installed.id) == ["blog.example.com", "news.example.org"])
+        #expect(box.registry.extensionNamed(installed.id) == installed, "the page needs no reload")
+        try box.registry.install(from: source, granting: manifest.permissions)
+        #expect(box.registry.grantedHosts(for: installed.id) == ["blog.example.com", "news.example.org"])
+        try box.registry.revokeHosts(["news.example.org"], from: installed.id)
+        #expect(box.registry.grantedHosts(for: installed.id) == ["blog.example.com"])
+        try box.registry.remove(installed.id)
+        #expect(box.registry.grantedHosts(for: installed.id).isEmpty)
+    }
+
+    @Test("a linked extension keeps its hosts across a re-link; revoking all clears them")
+    func hotesLies() throws {
+        let box = try Sandbox()
+        defer { box.cleanUp() }
+        let source = try box.source(id: "dev.example.linked")
+        try box.registry.link(source, granting: try box.registry.inspect(source).permissions)
+        try box.registry.grantHosts(["feeds.example.com"], to: "dev.example.linked")
+        try box.registry.link(source, granting: try box.registry.inspect(source).permissions)
+        #expect(box.registry.grantedHosts(for: "dev.example.linked") == ["feeds.example.com"])
+        try box.registry.revokeHosts(nil, from: "dev.example.linked")
+        #expect(box.registry.grantedHosts(for: "dev.example.linked").isEmpty)
+        #expect(box.registry.extensionNamed("dev.example.linked")?.isLinked == true)
+    }
+
+    @Test("a wildcard is refused, and an extension holds at most 64 sites")
+    func hotesBornes() throws {
+        let box = try Sandbox()
+        defer { box.cleanUp() }
+        let source = try box.source(id: "dev.example.many")
+        let installed = try box.registry.install(from: source, granting: try box.registry.inspect(source).permissions)
+        #expect(throws: ExtensionRegistry.RegistryError.self) {
+            try box.registry.grantHosts(["*.example.com"], to: installed.id)
+        }
+        let hosts = (0..<ExtensionRegistry.maxGrantedHosts).map { "h\($0).example.com" }
+        try box.registry.grantHosts(hosts, to: installed.id)
+        #expect(throws: ExtensionRegistry.RegistryError.self) {
+            try box.registry.grantHosts(["one-more.example.com"], to: installed.id)
+        }
+        #expect(box.registry.grantedHosts(for: installed.id).count == ExtensionRegistry.maxGrantedHosts)
+        #expect(throws: ExtensionRegistry.RegistryError.self) {
+            try box.registry.grantHosts(["x.example.com"], to: "dev.example.nobody")
+        }
+    }
 }

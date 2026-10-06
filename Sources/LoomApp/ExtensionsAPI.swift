@@ -101,6 +101,21 @@ extension AppModel: ExtensionAppServices {
         extensions.dismissOverlay(for: extensionID)
     }
 
+    // ADR-0015: Claude for text, and hosts granted at use.
+
+    public func completeWithClaude(_ request: ClaudeCompletionRequest,
+                                   for manifest: ExtensionManifest) async throws -> BridgeClaudeCompletion {
+        try await extensions.claudeRunner.run(request, for: manifest.id, executable: claudePath)
+    }
+
+    public func requestHosts(_ hosts: [String], from manifest: ExtensionManifest) async throws -> [String] {
+        try await extensions.beginHostRequest(hosts, from: manifest)
+    }
+
+    public func revokeHosts(_ hosts: [String], for extensionID: String) throws {
+        try extensions.revokeHostsAsked(hosts, for: extensionID)
+    }
+
     /// Hands the extensions the sessions as they now are — skipped when no
     /// open extension may read them.
     func publishSessionSnapshot() {

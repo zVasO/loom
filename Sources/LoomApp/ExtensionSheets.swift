@@ -241,3 +241,66 @@ struct ExtensionConsentSheet: View {
         }
     }
 }
+
+/// Sites an extension asks to reach at use (ADR-0015) — a feed the user just
+/// added. One switch per host, all on; nothing is granted until Allow, and
+/// Settings › Extensions takes any of them back.
+struct ExtensionHostsSheet: View {
+    let model: AppModel
+    let request: PendingHostRequest
+
+    @State private var chosen: Set<String> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "network")
+                    .foregroundStyle(DefaultTheme.accent)
+                Text(request.hosts.count == 1
+                     ? "\(request.extensionName) wants to connect to a new site"
+                     : "\(request.extensionName) wants to connect to new sites")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(request.hosts, id: \.self) { host in
+                    Toggle(isOn: Binding(get: { chosen.contains(host) },
+                                         set: { on in if on { chosen.insert(host) } else { chosen.remove(host) } })) {
+                        Text("https://\(host)")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(DefaultTheme.primaryText)
+                    }
+                    .toggleStyle(.checkbox)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+
+            Text("HTTPS only. The extension can send and receive anything with these sites. Revoke them any time in Settings › Extensions.")
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.secondaryText)
+
+            HStack {
+                GhostButton("Don't Allow") { finish([]) }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                AccentButton("Allow", systemImage: "checkmark") {
+                    finish(request.hosts.filter(chosen.contains))
+                }
+                .disabled(chosen.isEmpty)
+                .opacity(chosen.isEmpty ? 0.5 : 1)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+        .background(DefaultTheme.background)
+        .onAppear { chosen = Set(request.hosts) }
+    }
+
+    private func finish(_ approved: [String]) {
+        model.extensions.finishHostRequest(approved, for: request)
+    }
+}

@@ -62,19 +62,26 @@ public final class ExtensionRegistry {
             var granted: ExtensionPermissions?
             /// Set for a linked extension: its source folder.
             var linkedPath: String?
+            /// Hosts the user granted at use (ADR-0015) — beside `granted`,
+            /// which never holds more than the manifest asks.
+            var grantedHosts: [String]?
         }
     }
 
     public enum RegistryError: Error, Equatable, CustomStringConvertible {
         case conflict(String)
         case notFound(String)
+        case tooMany(String)
 
         public var description: String {
             switch self {
-            case .conflict(let message), .notFound(let message): return message
+            case .conflict(let message), .notFound(let message), .tooMany(let message): return message
             }
         }
     }
+
+    /// Hosts one extension may hold beyond its manifest's.
+    public static let maxGrantedHosts = 64
 
     public init(directory: URL, secrets: any SecretStore) {
         self.directory = directory
@@ -182,7 +189,8 @@ public final class ExtensionRegistry {
         }
         try fm.moveItem(at: staging, to: destination)
         state.extensions[manifest.id] = RegistryState.Entry(
-            enabled: true, granted: manifest.permissions.intersection(granted), linkedPath: nil)
+            enabled: true, granted: manifest.permissions.intersection(granted), linkedPath: nil,
+            grantedHosts: state.extensions[manifest.id]?.grantedHosts)
         try saveState()
         scan()
         guard let installed = extensionNamed(manifest.id) else {
@@ -201,7 +209,8 @@ public final class ExtensionRegistry {
         }
         state.extensions[manifest.id] = RegistryState.Entry(
             enabled: true, granted: manifest.permissions.intersection(granted),
-            linkedPath: folder.standardizedFileURL.path)
+            linkedPath: folder.standardizedFileURL.path,
+            grantedHosts: state.extensions[manifest.id]?.grantedHosts)
         try saveState()
         scan()
         guard let linked = extensionNamed(manifest.id) else {
@@ -251,6 +260,47 @@ public final class ExtensionRegistry {
         state.extensions[id] = entry
         try saveState()
         scan()
+    }
+
+    // MARK: - Hosts granted at use (ADR-0015)
+
+    /// The hosts the user granted `id` at use, in the order granted. Kept
+    /// across updates and links; gone with the extension.
+    public func grantedHosts(for id: String) -> [String] {
+        state.extensions[id]?.grantedHosts ?? []
+    }
+
+    /// Adds `hosts` — exact host names — to what `id` was granted. Neither
+    /// the extension's state nor its grant changes: its page keeps running.
+    public func grantHosts(_ hosts: [String], to id: String) throws {
+        guard let current = extensionNamed(id) else { throw RegistryError.notFound("no extension \(id)") }
+        var entry = state.extensions[id]
+            ?? RegistryState.Entry(enabled: true, granted: nil, linkedPath: nil)
+        var granted = entry.grantedHosts ?? []
+        for host in hosts.map({ $0.lowercased() }) where !granted.contains(host) {
+            guard (try? HostPattern(host))?.includesSubdomains == false else {
+                throw RegistryError.conflict("\(host) is not an exact host name")
+            }
+            granted.append(host)
+        }
+        guard granted.count <= Self.maxGrantedHosts else {
+            throw RegistryError.tooMany("\(current.manifest.name) already holds \(Self.maxGrantedHosts) sites — revoke some in Settings")
+        }
+        entry.grantedHosts = granted
+        if current.isLinked, entry.linkedPath == nil { entry.linkedPath = current.root.path }
+        state.extensions[id] = entry
+        try saveState()
+    }
+
+    /// Takes `hosts` back from `id`; nil takes them all.
+    public func revokeHosts(_ hosts: [String]?, from id: String) throws {
+        guard var entry = state.extensions[id], let granted = entry.grantedHosts else { return }
+        let revoked = Set((hosts ?? granted).map { $0.lowercased() })
+        let remaining = granted.filter { !revoked.contains($0) }
+        guard remaining != granted else { return }
+        entry.grantedHosts = remaining.isEmpty ? nil : remaining
+        state.extensions[id] = entry
+        try saveState()
     }
 
     public func storageFile(for id: String) -> URL {
