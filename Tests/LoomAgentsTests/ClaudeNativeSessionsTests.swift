@@ -7,7 +7,7 @@ import Foundation
 // consults once instead of walking every project slug per persisted session.
 
 @Suite("ClaudeNativeSessions — index")
-struct ClaudeNativeSessionsTests {
+struct ClaudeNativeSessionsIndexTests {
 
     private func makeTree() throws -> (root: URL, present: SessionID, absent: SessionID) {
         let root = FileManager.default.temporaryDirectory
