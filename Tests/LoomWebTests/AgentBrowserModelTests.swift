@@ -48,6 +48,10 @@ struct AgentBrowserPolicyTests {
         #expect(try AgentNavigationPolicy.navigationURL("example.com").absoluteString == "https://example.com")
         #expect(throws: AgentError.self) { try AgentNavigationPolicy.navigationURL("file:///etc/passwd") }
         #expect(throws: AgentError.self) { try AgentNavigationPolicy.navigationURL("javascript:alert(1)") }
+        #expect(throws: AgentError.self) { try AgentNavigationPolicy.navigationURL("data:text/html,hi") }
+        #expect(try AgentNavigationPolicy.navigationURL("example.com:8080/a").absoluteString == "https://example.com:8080/a",
+                "a port is not a scheme")
+        #expect(try AgentNavigationPolicy.navigationURL("about:blank").absoluteString == "about:blank")
     }
 }
 

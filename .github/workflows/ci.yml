@@ -44,20 +44,31 @@ jobs:
           git config --global user.name "Loom CI"
           git config --global user.email "ci@loom.invalid"
       - name: Build
+        id: build
         run: |
           set -o pipefail
           swift build --build-tests 2>&1 | tee build.log
       - name: Test
         run: |
           set -o pipefail
-          swift test --skip-build --parallel 2>&1 | tee test.log
+          swift test --skip-build --skip PerfProbes 2>&1 | tee test.log
+      # Timing probes alone: their bounds are for a quiet machine, not for a
+      # runner busy with every other suite at once.
+      - name: Performance probes
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          swift test --skip-build --no-parallel --filter PerfProbes 2>&1 | tee perf.log
       # The last lines of a failed job: every distinct error, nothing else —
       # what a cloud session reads back to fix the push.
       - name: Errors
         if: failure()
         run: |
           echo "::group::distinct errors"
-          cat build.log test.log 2>/dev/null | grep -E "error:|✘|failed|Fatal error|originates here" | grep -v "^\s*|" | sed -E 's/^[0-9T:.Z-]+ //' | sort -u | head -80
+          cat build.log test.log perf.log 2>/dev/null | grep -E "error:|✘|failed|Fatal error|originates here" | grep -v "^\s*|" | sed -E 's/^[0-9T:.Z-]+ //' | sort -u | head -80
+          echo "::endgroup::"
+          echo "::group::issues in full"
+          cat test.log perf.log 2>/dev/null | grep -A6 "recorded an issue" | head -150
           echo "::endgroup::"
 
   node:
