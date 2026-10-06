@@ -206,8 +206,9 @@ public enum APIToolCatalog {
                 cli: "loom browser file_upload /path/to/photo.png"),
         browser(.browserResize, "browser_resize",
                 "Set the page's width in CSS pixels — 375 for a phone, 768 a tablet, 1280 a laptop — "
-                + "to test a responsive layout. The page is scaled into the panel; its height "
-                + "follows. 0 goes back to the panel's own width.",
+                + "to test a responsive layout, for this session only (each project's default width is "
+                + "in Loom's Settings). The page is scaled into the panel; its height follows. 0 goes "
+                + "back to the panel's own width.",
                 ["width": number("The width in CSS pixels, 320 to 3840; 0 for the panel's."),
                  "height": number("Accepted for compatibility; the height follows the panel.")],
                 required: ["width"], cli: "loom browser resize 375"),

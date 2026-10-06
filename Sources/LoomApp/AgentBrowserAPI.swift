@@ -108,10 +108,8 @@ extension AppModel {
             screenshotsDirectory: agentScreenshotsDirectory(for: parent),
             initialViewport: viewport,
             uploadRoots: agentUploadRoots(for: item),
-            viewportWidth: agentViewportWidth(for: item.projectID),
+            viewportWidth: agentViewportDefaults.width(for: project?.rawValue),
             networkAccess: agentNetworkAccess))
-        let projectID = item.projectID
-        browser.onViewportChange = { [weak self] width in self?.rememberAgentViewportWidth(width, for: projectID) }
         agentBrowsers[parent] = browser
         return browser
     }
@@ -136,23 +134,29 @@ extension AppModel {
             .appendingPathComponent(session.rawValue.uuidString, isDirectory: true)
     }
 
-    /// The page width a project's agent browser last had (the agent's
-    /// browser_resize, the panel's menu) — a layout under test stays put.
-    private func agentViewportWidth(for project: ProjectID?) -> ViewportWidth {
-        guard let project,
-              let data = UserDefaults.standard.data(forKey: "loom.agentBrowser.viewport." + project.rawValue.uuidString),
-              let width = try? JSONDecoder().decode(ViewportWidth.self, from: data) else { return .fit }
-        return width
+    /// The width a project's agent browsers open at; nil follows the default.
+    func setAgentDefaultViewportWidth(_ width: ViewportWidth?, for project: ProjectID) {
+        agentViewportDefaults.set(width, for: project.rawValue)
+        agentViewportDefaults.save(to: .standard)
     }
 
-    private func rememberAgentViewportWidth(_ width: ViewportWidth, for project: ProjectID?) {
-        guard let project else { return }
-        let key = "loom.agentBrowser.viewport." + project.rawValue.uuidString
-        if width == .fit {
-            UserDefaults.standard.removeObject(forKey: key)
-        } else if let data = try? JSONEncoder().encode(width) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
+    /// The width every project without its own opens at.
+    func setAgentGlobalViewportWidth(_ width: ViewportWidth) {
+        agentViewportDefaults.global = width
+        agentViewportDefaults.save(to: .standard)
+    }
+
+    /// What the panel's menu offers about the project's default: nothing for
+    /// a session without a project, or a review — it reads the default and
+    /// never writes it.
+    func agentDefaultWidth(for parent: SessionID) -> AgentBrowserPanelView.DefaultWidth? {
+        guard !runsUntrustedCode(parent),
+              let projectID = sessions.first(where: { $0.id == parent })?.projectID,
+              let project = project(projectID) else { return nil }
+        return AgentBrowserPanelView.DefaultWidth(
+            projectName: project.name,
+            current: agentViewportDefaults.width(for: projectID.rawValue),
+            set: { [weak self] width in self?.setAgentDefaultViewportWidth(width, for: projectID) })
     }
 
     /// What the panel says about where the agent's cookies live.
@@ -233,7 +237,8 @@ extension AppModel {
     /// next launch while a running session still browses with it (emptied
     /// meanwhile).
     func forgetAgentProfile(of project: ProjectID) async {
-        UserDefaults.standard.removeObject(forKey: "loom.agentBrowser.viewport." + project.rawValue.uuidString)
+        agentViewportDefaults.forget(project.rawValue)
+        agentViewportDefaults.save(to: .standard)
         let identifier = AgentBrowserProfile.storeIdentifier(forProject: project.rawValue)
         if agentBrowsers.values.contains(where: { $0.profile == .project(identifier) }) {
             await AgentBrowserProfile.clearStore(identifier)

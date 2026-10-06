@@ -2043,6 +2043,10 @@ public final class AppModel {
     /// (AgentBrowserAPI.swift).
     var agentBrowsers: [SessionID: AgentBrowser] = [:]
 
+    /// The page width each project's agent browsers open at (Settings, the
+    /// panel's menu) — AgentBrowserAPI.swift reads and writes it.
+    var agentViewportDefaults = AgentViewportDefaults.load(from: .standard)
+
     /// Each open creates a dedicated pane, child of the session (or global if nil).
     @discardableResult
     public func openBrowserPane(for parent: SessionID?) -> UUID {

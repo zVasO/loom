@@ -18,11 +18,14 @@ requêtes, prendre une capture. La décision et ses garde-fous : [ADR-0014](adr/
   « <hôte> says: » : l'agent ou vous pouvez y répondre.
 - La carte de la session dans la barre latérale montre un globe quand son agent
   navigue ; dans l'onglet PR, l'en-tête du tiroir aussi.
-- **La largeur de la page** : le menu à droite de la légende (« Fit », 1024 px,
-  1280 px). Le terminal garde ses 80 colonnes, le panneau est souvent étroit :
-  sans cela, l'agent testerait la mise en page mobile. Une largeur choisie est
-  mise à l'échelle dans le panneau et retenue pour le projet ; l'agent la règle
-  lui-même avec `browser_resize`.
+- **La largeur de la page** : chaque projet a une largeur par défaut
+  (**Réglages ▸ Projects**, sinon celle de **Réglages ▸ Agents**, 1280 px au
+  départ) : le terminal garde ses 80 colonnes, le panneau est souvent étroit, et
+  « Fit » y testerait la mise en page mobile. Une largeur plus grande que le
+  panneau y est mise à l'échelle. Le menu à droite de la légende (« Fit », 375,
+  768, 1024, 1280 px) et `browser_resize` changent la largeur de la session
+  seulement ; le menu propose aussi d'en faire le défaut du projet (jamais dans
+  une revue).
 
 ## Le profil
 

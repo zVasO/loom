@@ -630,3 +630,63 @@ struct AgentNetworkRulesTests {
         #expect(!AgentNetworkRules.refuses(URL(string: "https://example.com/"), under: .open))
     }
 }
+
+@Suite("Agent browser — default page width per project")
+struct AgentViewportDefaultsTests {
+
+    private func scratchDefaults() -> UserDefaults {
+        let name = "loom.tests.viewport.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    @Test("a laptop's width unless the project says otherwise; nil follows the default again")
+    func parProjet() {
+        var widths = AgentViewportDefaults()
+        let project = UUID()
+        #expect(widths.width(for: project) == .css(1_280))
+        #expect(widths.width(for: nil) == .css(1_280), "no project: the default")
+        widths.set(.css(375), for: project)
+        #expect(widths.width(for: project) == .css(375))
+        #expect(widths.width(for: UUID()) == .css(1_280), "another project keeps the default")
+        widths.global = .fit
+        #expect(widths.width(for: project) == .css(375))
+        #expect(widths.width(for: UUID()) == .fit)
+        widths.set(nil, for: project)
+        #expect(widths.override(for: project) == nil)
+        #expect(widths.width(for: project) == .fit)
+        widths.set(.css(768), for: project)
+        widths.forget(project)
+        #expect(widths.width(for: project) == .fit, "a removed project leaves nothing behind")
+    }
+
+    @Test("saved and read back; Fit survives as 0; nothing written for the factory default")
+    func persistance() {
+        let defaults = scratchDefaults()
+        let a = UUID(), b = UUID()
+        var widths = AgentViewportDefaults()
+        widths.set(.fit, for: a)
+        widths.set(.css(1_024), for: b)
+        widths.save(to: defaults)
+        #expect(defaults.object(forKey: AgentViewportDefaults.globalKey) == nil)
+        #expect(AgentViewportDefaults.load(from: defaults) == widths)
+        widths.global = .css(375)
+        widths.save(to: defaults)
+        #expect(AgentViewportDefaults.load(from: defaults).global == .css(375))
+        defaults.set(["not-a-uuid": 800, b.uuidString: 99_999], forKey: AgentViewportDefaults.projectsKey)
+        #expect(AgentViewportDefaults.load(from: defaults).perProject.isEmpty, "unreadable entries are dropped")
+    }
+
+    @Test("a project's last width from before becomes its default, once")
+    func migration() throws {
+        let defaults = scratchDefaults()
+        let project = UUID()
+        let legacy = AgentViewportDefaults.legacyPrefix + project.uuidString
+        defaults.set(try JSONEncoder().encode(ViewportWidth.css(375)), forKey: legacy)
+        let widths = AgentViewportDefaults.load(from: defaults)
+        #expect(widths.width(for: project) == .css(375))
+        #expect(defaults.object(forKey: legacy) == nil, "the old key goes")
+        #expect(AgentViewportDefaults.load(from: defaults).width(for: project) == .css(375), "and the default stays")
+    }
+}

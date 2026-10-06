@@ -8,12 +8,29 @@ import SwiftUI
 public struct AgentBrowserPanelView: View {
     private let browser: AgentBrowser
     private let caption: String
+    /// The project whose default width the menu can set, and how — nil for
+    /// a session without one, or a review (it reads the default, never writes it).
+    private let defaultWidth: DefaultWidth?
 
     @State private var promptText = ""
 
-    public init(browser: AgentBrowser, caption: String) {
+    /// A project's default page width, as the panel's menu shows and sets it.
+    public struct DefaultWidth {
+        public var projectName: String
+        public var current: ViewportWidth
+        public var set: @MainActor (ViewportWidth) -> Void
+
+        public init(projectName: String, current: ViewportWidth, set: @escaping @MainActor (ViewportWidth) -> Void) {
+            self.projectName = projectName
+            self.current = current
+            self.set = set
+        }
+    }
+
+    public init(browser: AgentBrowser, caption: String, defaultWidth: DefaultWidth? = nil) {
         self.browser = browser
         self.caption = caption
+        self.defaultWidth = defaultWidth
     }
 
     public var body: some View {
@@ -59,6 +76,16 @@ public struct AgentBrowserPanelView: View {
                 Divider()
                 Label(browser.viewportWidth.label + " (set by claude)", systemImage: "checkmark")
             }
+            if let defaultWidth {
+                Divider()
+                if defaultWidth.current == browser.viewportWidth {
+                    Text("Default for \(defaultWidth.projectName): \(defaultWidth.current.label)")
+                } else {
+                    Button("Use \(browser.viewportWidth.label) as default for \(defaultWidth.projectName)") {
+                        defaultWidth.set(browser.viewportWidth)
+                    }
+                }
+            }
         } label: {
             Text(browser.viewportWidth == .fit ? "Fit" : browser.viewportWidth.label)
                 .font(.system(size: 10))
@@ -66,7 +93,7 @@ public struct AgentBrowserPanelView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .help("The page's width: the panel's, or a wider one scaled to fit")
+        .help("This session's page width: the panel's, or another scaled to fit. New sessions open at the project's default (Settings).")
     }
 
     @ViewBuilder

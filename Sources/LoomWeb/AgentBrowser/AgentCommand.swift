@@ -94,8 +94,8 @@ public enum ViewportWidth: Equatable, Sendable, Codable {
     case css(Int)
 
     public static let range = 320...3_840
-    /// The menu's presets: the panel, a small laptop, a laptop.
-    public static let presets: [ViewportWidth] = [.fit, .css(1_024), .css(1_280)]
+    /// The menus' presets: the panel, a phone, a tablet, a small laptop, a laptop.
+    public static let presets: [ViewportWidth] = [.fit, .css(375), .css(768), .css(1_024), .css(1_280)]
 
     /// The page zoom that shows `self` in a view `viewWidth` points wide.
     public func zoom(forViewWidth viewWidth: CGFloat) -> CGFloat {

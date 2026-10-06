@@ -1,6 +1,7 @@
 import LoomAgents
 import LoomCore
 import LoomExtensions
+import LoomPersistence
 import LoomUI
 import LoomWeb
 import SwiftUI
@@ -208,6 +209,25 @@ struct SettingsPage: View {
                         .font(.system(size: 11))
                         .foregroundStyle(invalid.isEmpty ? DefaultTheme.secondaryText : DefaultTheme.danger)
                 }
+                Divider().overlay(DefaultTheme.cardBorder)
+                HStack(spacing: 12) {
+                    Text("Agent browser page width")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                    Spacer()
+                    Picker("", selection: Binding<Int>(
+                        get: { Self.widthTag(model.agentViewportDefaults.global) },
+                        set: { model.setAgentGlobalViewportWidth(Self.width(tag: $0) ?? AgentViewportDefaults.factoryDefault) })) {
+                        ForEach(ViewportWidth.presets, id: \.label) { width in
+                            Text(width.label).tag(Self.widthTag(width))
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                Text("The width an agent's page opens at in new sessions, unless its project sets its own (Projects, below). A width wider than the panel is scaled into it. The agent's browser_resize and the panel's menu change one session only.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
                 Divider().overlay(DefaultTheme.cardBorder)
                 HStack(spacing: 10) {
                     GhostButton("Clear agent browser data", systemImage: "trash") {
@@ -498,9 +518,44 @@ struct SettingsPage: View {
 
     // MARK: Per-project themes
 
+    /// A width as a picker's tag: 0 is Fit, -1 the default.
+    private static func widthTag(_ width: ViewportWidth?) -> Int {
+        switch width {
+        case nil: return -1
+        case .fit?: return 0
+        case .css(let pixels)?: return pixels
+        }
+    }
+
+    private static func width(tag: Int) -> ViewportWidth? {
+        switch tag {
+        case -1: return nil
+        case 0: return .fit
+        default: return .css(tag)
+        }
+    }
+
+    /// A project's agent page width: the default, or one of the presets —
+    /// and a width set earlier that is none of them, as it is.
+    private func agentWidthPicker(for project: ProjectRecord) -> some View {
+        let own = model.agentViewportDefaults.override(for: project.id.rawValue)
+        let choices = ViewportWidth.presets + (own.map { ViewportWidth.presets.contains($0) ? [] : [$0] } ?? [])
+        return Picker("", selection: Binding<Int>(
+            get: { Self.widthTag(own) },
+            set: { model.setAgentDefaultViewportWidth(Self.width(tag: $0), for: project.id) })) {
+            Text("Default (\(model.agentViewportDefaults.global.label))").tag(-1)
+            ForEach(choices, id: \.label) { width in
+                Text(width.label).tag(Self.widthTag(width))
+            }
+        }
+        .labelsHidden()
+        .fixedSize()
+        .help("The page width this project's agent browsers open at")
+    }
+
     private var projectsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Project themes")
+            sectionTitle("Projects")
             card {
                 if model.projects.isEmpty {
                     Text("No project yet.")
@@ -531,6 +586,12 @@ struct SettingsPage: View {
                         }
                         .labelsHidden()
                         .fixedSize()
+                        .help("This project's theme")
+                        Image(systemName: "macwindow")
+                            .font(.system(size: 11))
+                            .foregroundStyle(DefaultTheme.mutedText)
+                            .help("Agent browser page width")
+                        agentWidthPicker(for: project)
                     }
                 }
             }
