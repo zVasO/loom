@@ -14,13 +14,17 @@ import Foundation
 struct PerfProbes {
 
     /// 3× the target in release, 10× in debug: unoptimised Swift is that
-    /// much slower on cell copies, and `swift test` builds debug.
+    /// much slower on cell copies, and `swift test` builds debug. Times
+    /// LOOM_PERF_SLACK for slower hardware than the Mac the targets come
+    /// from — CI's virtual runners (.github/workflows/ci.yml).
     static let slack: Double = {
         #if DEBUG
-        return 10
+        let build: Double = 10
         #else
-        return 3
+        let build: Double = 3
         #endif
+        let hardware = ProcessInfo.processInfo.environment["LOOM_PERF_SLACK"].flatMap(Double.init) ?? 1
+        return build * max(1, hardware)
     }()
 
     /// The bound a probe asserts for a target in milliseconds.

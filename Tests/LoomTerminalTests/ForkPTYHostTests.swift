@@ -217,6 +217,7 @@ struct ForkPTYHostSignalTests {
         guard case .terminated(let report) = await iterator.next() else { Issue.record("no .terminated"); return }
         #expect(report.exitStatus.code == 0, "the handler exited 0; the 8 s sleep was never reached")
         #expect(ContinuousClock().now - sentAt < .seconds(4), "the handler ran on the signal, not on the timer")
+        _ = await waitFor("30 90", in: transcript)
         #expect(transcript.text.contains("30 90"),
                 "the handler must see the new grid — saw: \(transcript.text)")
     }
