@@ -142,3 +142,7 @@ Ce qu'une extension demande dans son manifeste au-delà de sa propre page : des 
 **Autorisation** :
 Les permissions que l'utilisateur a accordées. Une extension tourne avec ce que son manifeste demande *et* que l'autorisation couvre ; un manifeste qui demande plus attend une nouvelle autorisation.
 _Avoid_ : grant, consentement (le consentement est le geste, l'autorisation son résultat)
+
+**Hôte accordé** :
+Un hôte réseau qu'une extension a demandé à l'usage (`optionalNetwork`, ADR-0015) — le site d'un flux que l'utilisateur vient d'ajouter — et que l'utilisateur a approuvé dans une feuille de Loom. Gardé à côté de l'autorisation, jamais dedans ; retiré dans les réglages.
+_Avoid_ : permission dynamique, hôte optionnel

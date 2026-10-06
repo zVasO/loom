@@ -160,6 +160,20 @@ public enum LoomSDKScript {
     }
   }
 
+  // A URL or a host becomes a host: "https://blog.example.com/feed" → "blog.example.com".
+  function toHosts(value) {
+    const list = Array.isArray(value) ? value : [value];
+    return list.map((entry) => {
+      const text = String(entry).trim();
+      if (!text.includes("/")) return text;
+      try {
+        return new URL(text).hostname;
+      } catch (_) {
+        return text;
+      }
+    });
+  }
+
   const loom = {
     apiVersion: 1,
     extensionId: boot.extensionId || null,
@@ -231,6 +245,17 @@ public enum LoomSDKScript {
       clear: (name) => call("alarms.clear", { name: String(name) }).then(() => undefined),
       list: () => call("alarms.list").then((result) => result.alarms),
     },
+    claude: {
+      complete: (options) => {
+        const params = typeof options === "string" ? { prompt: options } : Object.assign({}, options || {});
+        return call("claude.complete", params);
+      },
+    },
+    network: {
+      request: (hosts) => call("network.request", { hosts: toHosts(hosts) }),
+      granted: () => call("network.granted"),
+      revoke: (hosts) => call("network.revoke", { hosts: toHosts(hosts) }).then(() => undefined),
+    },
   };
 
   Object.freeze(loom.projects);
@@ -240,6 +265,8 @@ public enum LoomSDKScript {
   Object.freeze(loom.storage);
   Object.freeze(loom.ui);
   Object.freeze(loom.alarms);
+  Object.freeze(loom.claude);
+  Object.freeze(loom.network);
   Object.defineProperty(window, "loom", { value: Object.freeze(loom), writable: false, configurable: false });
 })();
 """#

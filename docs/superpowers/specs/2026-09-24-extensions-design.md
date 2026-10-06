@@ -165,3 +165,10 @@ distantes, `http://localhost`, secrets substitués côté natif (le jeton ne
 passerait jamais par le JavaScript), WebSocket et SSE, notifications,
 `alert`/`confirm`, OAuth Jira (3LO), reprise d'une session dormante depuis une
 extension.
+
+## Suites
+
+- ADR-0012 : arrière-plan, alarmes, barre du haut, écran de premier plan.
+- ADR-0015 : `claude.complete` (Claude en texte seul, avec le compte de
+  l'utilisateur) et hôtes accordés à l'usage (`optionalNetwork`) — pour
+  l'exemple `tech-watch`.
