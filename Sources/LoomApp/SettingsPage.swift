@@ -32,6 +32,11 @@ struct SettingsPage: View {
     /// half-typed list in force.
     @State private var hostsDraft = ""
     @State private var agentDataCleared = false
+    /// The model's engine choice, mirrored so the picker shows what was just
+    /// set (it applies to sessions started or resumed afterwards).
+    @State private var engineChoice: AgentBrowserEnginePreference = .webkit
+    /// The Chromium Loom finds, looked up when the card shows and after a choice.
+    @State private var chromiumStatus: AppModel.AgentChromiumStatus?
     @State private var removalCandidate: InstalledExtension?
 
     var body: some View {
@@ -159,6 +164,90 @@ struct SettingsPage: View {
         model.agentBrowsersAllowedHosts = hostsDraft
     }
 
+    /// ADR-0015: which engine drives the agents' pages, and the Chromium found.
+    @ViewBuilder
+    private var agentEngineRows: some View {
+        HStack(spacing: 12) {
+            Text("Agent browser engine")
+                .font(.system(size: 13))
+                .foregroundStyle(DefaultTheme.primaryText)
+            Spacer()
+            Picker("", selection: $engineChoice) {
+                Text("Automatic").tag(AgentBrowserEnginePreference.automatic)
+                Text("Chromium").tag(AgentBrowserEnginePreference.chromium)
+                Text("WebKit").tag(AgentBrowserEnginePreference.webkit)
+            }
+            .labelsHidden()
+            .fixedSize()
+            .onChange(of: engineChoice) { _, choice in
+                model.agentBrowserEngineChoice = choice
+                refreshChromiumStatus()
+            }
+        }
+        .onAppear {
+            engineChoice = model.agentBrowserEngineChoice
+            refreshChromiumStatus()
+        }
+        if let status = chromiumStatus {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(status.summary)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                if let path = status.path {
+                    Text(path)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                if let warning = status.warning {
+                    Text(warning)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.danger)
+                }
+                if let hint = status.hint {
+                    Text(hint)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                }
+            }
+        }
+        HStack(spacing: 10) {
+            GhostButton("Choose…", systemImage: "folder") { chooseChromium() }
+            if chromiumStatus?.hasChoice == true {
+                GhostButton("Use automatic search", systemImage: "arrow.uturn.backward") {
+                    model.agentChromiumPath = nil
+                    refreshChromiumStatus()
+                }
+            }
+        }
+        Text("Chromium runs the agent's pages headless, panel shown or not, with real clicks and keys (isTrusted, :hover); WebKit stays the fallback. Automatic picks Chromium when Loom finds chrome-headless-shell (its own download or Playwright's) or the browser chosen here; a full Chrome, Chromium or Edge is used only once chosen. Each engine keeps its own logins. Applies to sessions started or resumed after the change.")
+            .font(.system(size: 11))
+            .foregroundStyle(DefaultTheme.secondaryText)
+    }
+
+    private func refreshChromiumStatus() {
+        chromiumStatus = model.agentChromiumStatus()
+    }
+
+    /// An .app or a bare executable (chrome-headless-shell): the locator
+    /// tells them apart.
+    private func chooseChromium() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a browser for the agents"
+        panel.message = "chrome-headless-shell, Chrome for Testing, Chromium, Google Chrome or Microsoft Edge"
+        panel.prompt = "Use"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.treatsFilePackagesAsDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        model.agentChromiumPath = url.path
+        refreshChromiumStatus()
+    }
+
     private var agentsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Agents")
@@ -171,9 +260,11 @@ struct SettingsPage: View {
                 .toggleStyle(.switch)
                 // Through the model: turning them off also cancels what is queued.
                 .onChange(of: browserToolsOn) { _, on in model.agentBrowserToolsEnabled = on }
-                Text("Each session's agent gets its own browser — shown beside its terminal, on a profile kept per project and never your own cookies (reviews get a private one) — and browser_* tools to open your dev server, click, type, read the console and take screenshots. Off: calls are refused at once; sessions started or resumed afterwards no longer list the tools.")
+                Text("Each session's agent gets its own browser — shown beside its terminal, on a profile kept per project and never your own cookies (reviews get a private one) — and browser_* tools to open your dev server, click, type, read the console and take screenshots. Off: calls are refused at once, and the agents' Chromium stops; sessions started or resumed afterwards no longer list the tools.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
+                Divider().overlay(DefaultTheme.cardBorder)
+                agentEngineRows
                 Divider().overlay(DefaultTheme.cardBorder)
                 Toggle(isOn: $preapproveOn) {
                     Text("Run Loom's tools without asking")
@@ -192,7 +283,7 @@ struct SettingsPage: View {
                 }
                 .toggleStyle(.switch)
                 .onChange(of: localOnlyOn) { _, on in model.agentBrowsersLocalOnly = on }
-                Text("The agents' browsers load from your machine's own addresses (localhost, 127.0.0.1) and the hosts below, nothing else: pages, scripts, images, requests and web sockets, filtered by WebKit. WebRTC and DNS prefetching are turned off where WebKit allows it. Open pages start again under the mode when it is turned on. The agent's other tools stay under Claude Code's own permissions.")
+                Text("The agents' browsers load from your machine's own addresses (localhost, 127.0.0.1) and the hosts below, nothing else: pages, scripts, images, requests and web sockets — under both engines. WebKit filters every load, with WebRTC and DNS prefetching off where it allows; Chromium sends everything else to a proxy Loom holds that refuses it, with QUIC, WebRTC and DNS prefetching off, and stays closed if that proxy cannot start. Open pages start again under the mode when it is turned on (under Chromium, on any change). The agent's other tools stay under Claude Code's own permissions.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
                 if localOnlyOn {
@@ -246,7 +337,7 @@ struct SettingsPage: View {
                             .foregroundStyle(DefaultTheme.secondaryText)
                     }
                 }
-                Text("Signs the agents out of every site they or you logged in to in their browsers, and empties their storage. Your own browser is untouched.")
+                Text("Signs the agents out of every site they or you logged in to in their browsers — WebKit's and Chromium's — and empties their storage. Your own browser is untouched.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }

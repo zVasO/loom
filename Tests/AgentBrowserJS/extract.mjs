@@ -20,6 +20,7 @@ export const helperSource = () => literal("helper");
 export const pageHookSource = () => literal("pageHook");
 export const relaySource = () => literal("relay");
 export const serializerSource = () => literal("serializer");
+export const helperFunctionSource = () => literal("helperFunction");
 
 /** The helper's pure functions, in a bare context: no DOM needed. */
 export function pureHelper() {

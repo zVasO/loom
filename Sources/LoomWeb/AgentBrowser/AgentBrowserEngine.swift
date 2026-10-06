@@ -46,6 +46,9 @@ extension AgentBrowserEngine {
 public enum AgentBrowserPanelContent {
     /// The user's own browser chrome over WebKit views (BrowserPanelView).
     case webKit(BrowserController)
+    /// A live picture of headless Chromium's pages, under the same chrome
+    /// (ChromiumBrowserPanelView).
+    case chromium(ChromiumAgentSurface)
 }
 
 /// Which engine a session's agent browser uses (Settings ▸ Agents).

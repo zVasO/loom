@@ -224,7 +224,10 @@ if (XHR) {
 
     /// Loom's world, document start, every frame: the page hook's events,
     /// checked for size and rate, posted to `messageHandlerName` — a handler
-    /// that exists in Loom's world only.
+    /// that exists in Loom's world only. Without it (Chromium, ADR-0015) they
+    /// go to the `__loomHookBinding` binding Loom adds to that world after
+    /// each commit, held until it is there; requests are not relayed then:
+    /// the Network domain sees them.
     public static let relay = #"""
 (() => {
 "use strict";
@@ -237,15 +240,27 @@ if (XHR) {
 // flood anyway.
 // A response passes when its request did, so a chatty page never leaves one
 // pending.
+// Chromium has no message handler: Loom adds a binding to this world, but
+// only to the documents that exist when it does — after each commit, so
+// maybe after this script ran. What is admitted meanwhile waits here (200 at
+// most, the rest counted) and goes with the next post, or a retry 15 ms
+// later for 3 s. Requests are not relayed there: Loom's Network domain sees
+// them.
 if (globalThis.__loomAgentRelay) return;
 globalThis.__loomAgentRelay = true;
 const handlers = globalThis.webkit && globalThis.webkit.messageHandlers;
 const channel = handlers && handlers.loomAgent;
-if (!channel) return;
+// WebKit whose channel a flood cut (window.webkit goes with its last
+// handler): silent, as it always was.
+if (!channel && /^Apple/.test(String(navigator.vendor || ""))) return;
+const BINDING = "__loomHookBinding";
 
 const EVENT = "loom-agent-hook";
 const MAX_DETAIL = 4096;
 const MAX_ADMITTED = 2000;
+const MAX_WAITING = 200;
+const RETRY_MS = 15;
+const MAX_RETRIES = 200;
 let sameOrigin = true;
 try { void window.top.location.href; } catch (_) { sameOrigin = false; }
 const RATE = sameOrigin ? 200 : 20;
@@ -254,8 +269,44 @@ let refilled = Date.now();
 let dropped = 0;
 const admitted = new Set();
 
+// Binding mode only: what waits for the binding, and what did not fit.
+const waiting = [];
+let overflow = 0;
+let retryTimer = 0;
+let retries = 0;
+
+/** Sends what waits, in order, once the binding is there; false while it is not. */
+function flush() {
+  const binding = globalThis[BINDING];
+  if (typeof binding !== "function") {
+    if (!retryTimer && retries < MAX_RETRIES && (waiting.length || overflow)) {
+      retryTimer = setTimeout(() => { retryTimer = 0; retries++; flush(); }, RETRY_MS);
+    }
+    return false;
+  }
+  retries = 0;
+  try {
+    while (waiting.length) {
+      binding(JSON.stringify(waiting[0]));
+      waiting.shift();
+    }
+    if (overflow) {
+      binding(JSON.stringify({ t: "dropped", n: overflow }));
+      overflow = 0;
+    }
+  } catch (_) { /* the binding was cut: what is left waits */ }
+  return true;
+}
+
 function post(message) {
-  try { channel.postMessage(message); } catch (_) { /* the frame is going away */ }
+  if (channel) {
+    try { channel.postMessage(message); } catch (_) { /* the frame is going away */ }
+    return;
+  }
+  if (waiting.length >= MAX_WAITING) flush();
+  if (waiting.length >= MAX_WAITING) { overflow++; return; }
+  waiting.push(message);
+  flush();
 }
 
 function admit() {
@@ -274,6 +325,7 @@ document.addEventListener(EVENT, (event) => {
   let message;
   try { message = JSON.parse(detail); } catch (_) { return; }
   if (!message || typeof message !== "object" || Array.isArray(message)) return;
+  if (!channel && (message.t === "req" || message.t === "res")) return;
   if (message.t === "res") {
     if (admitted.delete(message.id)) post(message);
     return;
@@ -835,6 +887,7 @@ function collectChildren(el, ctx) {
 }
 
 function snapshot(args) {
+  if (args.afterFrame) return snapshotAfterFrame(args);
   const doc = document;
   let roots;
   if (args.target) {
@@ -935,6 +988,7 @@ function containsDeep(el, node) {
  * here, a hidden page throttles them.
  */
 function prepare(args) {
+  if (args.trusted) return prepareTrusted(args);
   const resolved = resolveTarget(args.target);
   if (resolved.error) return resolved;
   const el = resolved.element;
@@ -1356,6 +1410,7 @@ function visibleText(doc) {
 }
 
 function waitText(args) {
+  if (args.maxMs !== undefined || args.observe === true) return waitTextObserved(args);
   const text = collapse(visibleText(document));
   if (args.text != null) return { ok: true, found: text.includes(collapse(args.text)) };
   if (args.textGone != null) return { ok: true, found: !text.includes(collapse(args.textGone)) };
@@ -1425,8 +1480,322 @@ function stamp(args) {
   return { ok: true, nonce, description: describe(resolved.element) };
 }
 
+// ---------------------------------------------------------------- Chromium
+// What only Loom's Chromium engine asks (ADR-0015): its input is real
+// (Input.*), so the helper finds where to press and when the page has had
+// its turn. WebKit never passes `trusted`, `afterFrame` or `maxMs`, nor
+// calls `barrier`, `documentRect` or `dispatchCancel`: its paths above are
+// unchanged.
+
+/** One task of the page's event loop: what the page queued before with a
+ * setTimeout(0) has run, and the DevTools events it caused are on the pipe
+ * before this call's reply (design §4). */
+function nextTask() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** One rendering frame: a rAF, raced with 50 ms — a page that does not
+ * paint never stalls a command. */
+function oneFrame() {
+  return new Promise((resolve) => {
+    let timer = 0;
+    const done = () => { clearTimeout(timer); resolve(); };
+    timer = setTimeout(done, 50);
+    try { requestAnimationFrame(done); } catch (_) { /* no rendering here: the timer */ }
+  });
+}
+
+/** `rect` (top viewport) cut to the top viewport. */
+function clipToTop(r) {
+  const left = Math.max(r.left, 0);
+  const top = Math.max(r.top, 0);
+  const right = Math.min(r.left + r.width, window.innerWidth);
+  const bottom = Math.min(r.top + r.height, window.innerHeight);
+  return { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+}
+
+function inTopViewport(el) {
+  const visible = clipToTop(topRect(el));
+  return visible.width > 0 && visible.height > 0;
+}
+
+function sameRect(a, b) {
+  return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
+}
+
+const round2 = (value) => Math.round(value * 100) / 100;
+
+/** The element a pointer at (x, y) of `doc`'s viewport lands on — shadow roots traversed. */
+function elementAt(doc, x, y) {
+  let hit = doc.elementFromPoint(x, y);
+  while (hit && hit.shadowRoot) {
+    const inner = hit.shadowRoot.elementFromPoint(x, y);
+    if (!inner || inner === hit) break;
+    hit = inner;
+  }
+  return hit;
+}
+
+/** Whether a press on `hit` reaches `el`: inside it, or on a label of it. */
+function reaches(el, hit) {
+  if (!hit) return false;
+  if (containsDeep(el, hit)) return true;
+  const label = hit.closest ? hit.closest("label") : null;
+  return !!(label && label.control === el);
+}
+
+/**
+ * What would take a press at `point` (top viewport) instead of `el`, or
+ * null: `el`'s own document is hit at the frame-local point, then each frame
+ * it sits in must be what its parent document hits there — an overlay over
+ * the iframe takes the press too.
+ */
+function interceptor(el, point) {
+  const levels = [];   // innermost frame first
+  for (let view = el.ownerDocument.defaultView; view && view.frameElement;
+       view = view.frameElement.ownerDocument.defaultView) {
+    const frame = view.frameElement;
+    const outer = frame.getBoundingClientRect();
+    const style = styleOf(frame) || {};
+    levels.push({
+      frame,
+      dx: outer.left + frame.clientLeft + (parseFloat(style.paddingLeft) || 0),
+      dy: outer.top + frame.clientTop + (parseFloat(style.paddingTop) || 0),
+    });
+  }
+  let x = point.x;
+  let y = point.y;
+  for (const level of levels) { x -= level.dx; y -= level.dy; }
+  const hit = elementAt(el.ownerDocument, x, y);
+  if (!reaches(el, hit)) return { hit };
+  for (const level of levels) {
+    x += level.dx;
+    y += level.dy;
+    const outer = elementAt(level.frame.ownerDocument, x, y);
+    if (outer !== level.frame) return { hit: outer };
+  }
+  return null;
+}
+
+const SET_VALUE_TYPES = /^(date|datetime-local|month|time|week|color|range|number)$/;
+
+/** How text reaches the field: typed by Input.insertText, set by the
+ * helper's `type` (a picker's value: date, color, range, number), or not at all. */
+function fillMode(el) {
+  const field = editableIn(el) || el;
+  if (field.localName === "input") {
+    const type = (field.getAttribute("type") || "text").toLowerCase();
+    if (SET_VALUE_TYPES.test(type)) return "setValue";
+    return isEditable(field) ? "insertText" : "none";
+  }
+  if (field.localName === "textarea") return isEditable(field) ? "insertText" : "none";
+  return field.isContentEditable ? "insertText" : "none";
+}
+
+/**
+ * `prepare` for real input: the checks of the single shot, then — for a
+ * pointer — the box unchanged over one frame and nothing else under its
+ * centre, through the frames it sits in. Answers the point to press, in
+ * the top viewport's CSS pixels, and how `type` fills it; `focus` and
+ * `selectAll` ready the field for Input.insertText. One call, no timer
+ * loop: Loom calls again on `retry`.
+ */
+async function prepareTrusted(args) {
+  const resolved = resolveTarget(args.target);
+  if (resolved.error) return resolved;
+  const el = resolved.element;
+  const action = args.action;
+  const pointer = action === "click" || action === "hover";
+  if (!el.isConnected) return { ok: true, status: "retry", reason: "element is not attached to the page" };
+  if (!isVisible(el) && !(action === "upload" && el.localName === "input")) {
+    return { ok: true, status: "retry", reason: "element is not visible" };
+  }
+  if ((action === "click" || action === "type" || action === "select") && isDisabled(el)) {
+    return { ok: true, status: "retry", reason: "element is disabled" };
+  }
+  if (action === "type" && !isEditable(el) && !el.isContentEditable) {
+    const inner = el.querySelector && el.querySelector("input, textarea, [contenteditable='true'], [contenteditable='']");
+    if (!inner) return { error: { code: "notEditable", message: describe(el) + " is not an editable field" } };
+  }
+  if (action === "select" && el.localName !== "select") {
+    return { error: { code: "notSelect", message: describe(el) + " is not a <select>: click it, then click the option's ref" } };
+  }
+  if (!inTopViewport(el)) {
+    el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+  }
+  let r = topRect(el);
+  if (pointer) {
+    await oneFrame();
+    if (!el.isConnected) return { ok: true, status: "retry", reason: "element is not attached to the page" };
+    const after = topRect(el);
+    if (!sameRect(r, after)) return { ok: true, status: "retry", reason: "element is moving", rect: box(after) };
+    r = after;
+  }
+  const visible = clipToTop(r);
+  const shown = visible.width > 0 && visible.height > 0;
+  if (pointer && !shown) {
+    return { ok: true, status: "retry", reason: "element is outside of the viewport", rect: box(r) };
+  }
+  const area = shown ? visible : r;
+  const point = { x: round2(area.left + area.width / 2), y: round2(area.top + area.height / 2) };
+  if (pointer) {
+    const blocked = interceptor(el, point);
+    if (blocked) {
+      return { ok: true, status: "retry", reason: describe(blocked.hit) + " intercepts pointer events", rect: box(r) };
+    }
+  }
+  if (args.focus) {
+    const field = editableIn(el) || el;
+    field.focus({ preventScroll: true });
+    if (args.selectAll) selectAllIn(field);
+  }
+  return { ok: true, status: "ready", rect: box(r), point, description: describe(el), fill: fillMode(el) };
+}
+
+/** A checkbox, radio or switch's state, as `setChecked` reads it. */
+function checkedState(el) {
+  const input = el.localName === "input" ? el : (el.control || (el.querySelector && el.querySelector("input")));
+  return input ? input.checked : el.getAttribute("aria-checked") === "true";
+}
+
+/** Where the page stands: what `barrier` answers, and a snapshot `afterFrame`. */
+function pageFacts(args) {
+  const facts = {
+    url: location.href,
+    title: document.title,
+    visibility: document.visibilityState,
+    focused: describe(deepActiveElement(document)),
+  };
+  if (args.checkedOf != null) {
+    const resolved = resolveTarget(args.checkedOf);
+    if (!resolved.error) facts.checked = checkedState(resolved.element);
+  }
+  return facts;
+}
+
+/** After an action: one task of the page's event loop, then where it stands. */
+async function barrier(args) {
+  await nextTask();
+  return Object.assign({ ok: true }, pageFacts(args));
+}
+
+/** The barrier, then one frame for what renders in a rAF, then the walk. */
+async function snapshotAfterFrame(args) {
+  await nextTask();
+  await oneFrame();
+  const answer = snapshot(Object.assign({}, args, { afterFrame: false }));
+  if (answer.error) return answer;
+  return Object.assign(answer, pageFacts(args));
+}
+
+/**
+ * `waitText` that waits, up to `maxMs` (2000 by default, 30 s at most):
+ * checked again a frame after the DOM changes, at most once a frame — and
+ * every 250 ms for what no observer here sees (a frame's own document, a
+ * stylesheet's effect). `found` as the single shot's.
+ */
+function waitTextObserved(args) {
+  if (args.text == null && args.textGone == null) {
+    return { error: { code: "invalid", message: "text or textGone is required" } };
+  }
+  const met = () => {
+    let text = "";
+    try { text = collapse(visibleText(document)); } catch (_) { return false; }
+    return args.text != null ? text.includes(collapse(args.text)) : !text.includes(collapse(args.textGone));
+  };
+  if (met()) return { ok: true, found: true };
+  const raw = args.maxMs == null ? NaN : Number(args.maxMs);
+  const maxMs = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), 30000) : 2000;
+  if (maxMs === 0) return { ok: true, found: false };
+  return new Promise((resolve) => {
+    let finished = false;
+    let pending = false;
+    let timer = 0;
+    let poll = 0;
+    let observer = null;
+    const finish = (found) => {
+      if (finished) return;
+      finished = true;
+      if (observer) observer.disconnect();
+      clearTimeout(timer);
+      clearInterval(poll);
+      resolve({ ok: true, found });
+    };
+    const check = () => {
+      if (pending || finished) return;
+      pending = true;
+      oneFrame().then(() => {
+        pending = false;
+        if (!finished && met()) finish(true);
+      });
+    };
+    observer = new MutationObserver(check);
+    observer.observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
+    poll = setInterval(check, 250);
+    timer = setTimeout(() => finish(met()), maxMs);
+  });
+}
+
+/**
+ * The element's box in the top DOCUMENT's coordinates (its top-viewport
+ * box plus the scroll): Page.captureScreenshot's clip. Scrolled into view
+ * first when none of it shows, as `rect` does; `viewport` is the part of
+ * the document on screen.
+ */
+function documentRect(args) {
+  const resolved = resolveTarget(args.target);
+  if (resolved.error) return resolved;
+  const el = resolved.element;
+  if (!inTopViewport(el)) {
+    el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+  }
+  const r = topRect(el);
+  const x = window.scrollX;
+  const y = window.scrollY;
+  return {
+    ok: true,
+    rect: box({ left: r.left + x, top: r.top + y, width: r.width, height: r.height }),
+    viewport: { x, y, width: window.innerWidth, height: window.innerHeight },
+    description: describe(el),
+  };
+}
+
+/** The element `stamp` (or Loom) marked with `nonce`, in the top document or a same-origin frame. */
+function stamped(doc, nonce) {
+  const found = doc.querySelector('[data-loom-eval="' + nonce.replace(/["\\]/g, "\\$&") + '"]');
+  if (found) return found;
+  for (const frame of doc.querySelectorAll("iframe")) {
+    let inner = null;
+    try { inner = frame.contentDocument; } catch (_) { inner = null; }
+    const hit = inner ? stamped(inner, nonce) : null;
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** A file chooser Loom cancelled: the input's `cancel` event, as a person's
+ * cancel fires it. `target` (a ref or selector) or `nonce` (a stamp). */
+function dispatchCancel(args) {
+  let el = null;
+  if (args.nonce != null) {
+    el = stamped(document, String(args.nonce));
+    if (!el) return { error: { code: "notFound", message: "the file input is no longer in the page" } };
+    el.removeAttribute("data-loom-eval");
+  } else {
+    const resolved = resolveTarget(args.target);
+    if (resolved.error) return resolved;
+    el = resolved.element;
+  }
+  if (el.localName !== "input" || (el.getAttribute("type") || "").toLowerCase() !== "file") {
+    return { error: { code: "invalid", message: describe(el) + " is not a file input" } };
+  }
+  const view = el.ownerDocument.defaultView || window;
+  el.dispatchEvent(new view.Event("cancel", { bubbles: true }));
+  return { ok: true, description: describe(el) };
+}
+
 const OPS = { snapshot, prepare, click, hover, type, selectOption, pressKey, waitText, rect, pageInfo, stamp,
-  setChecked, setValue, focusField, typeKeys, scrollTo };
+  setChecked, setValue, focusField, typeKeys, scrollTo, barrier, documentRect, dispatchCancel };
 
 async function run(op, argsJSON) {
   try {
@@ -1507,6 +1876,15 @@ Object.defineProperty(globalThis, "__loomAgent", {
         ? await globalThis.__loomAgent.run(op, args) \
         : JSON.stringify({ error: { code: "helperMissing", message: "the helper is not loaded" } });
     """
+
+    /// The function every helper call runs in Chromium (ADR-0015, design
+    /// §3.2): `Runtime.callFunctionOn` in the `worldName` world, with `op`
+    /// and `args` (a JSON string) as its arguments, `awaitPromise` and
+    /// `returnByValue` — the JSON text `helperCall` answers in WebKit. One
+    /// line, as `Tests/AgentBrowserCDP/fixtures/init.json` has it.
+    public static let helperFunction = #"""
+async function(op, args) { return globalThis.__loomAgent ? await globalThis.__loomAgent.run(op, args) : JSON.stringify({ error: { code: "helperMissing", message: "the helper is not loaded" } }); }
+"""#
 
     /// The body `browser_evaluate` runs in the PAGE's world: the agent's
     /// function, spliced in as code (an injected script is not subject to the

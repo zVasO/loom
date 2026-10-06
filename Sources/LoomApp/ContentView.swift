@@ -201,15 +201,17 @@ struct ContentView: View {
             applyTheme()
         }
         .task {
-            // The agent's browser against real WebKit (ADR-0014): a report in
+            // The agent's browser against a real engine (ADR-0014, ADR-0015):
+            // LOOM_AUTOTEST_ENGINE=webkit|chromium (WebKit when unsaid; Chromium
+            // from LOOM_CHROMIUM, else the one Loom finds). A report in
             // /tmp/loom-agent-browser-report.json, the exit code says it all.
             if ProcessInfo.processInfo.environment["LOOM_AUTOTEST"] == "agent-browser" {
                 let fixtures = ProcessInfo.processInfo.environment["LOOM_AUTOTEST_FIXTURES"]
                     .map { URL(fileURLWithPath: $0) }
                     ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
                         .appendingPathComponent("Tests/AgentBrowserJS/fixtures")
-                let passed = await AgentBrowserSelfTest.run(fixturesDirectory: fixtures,
-                                                            reportPath: "/tmp/loom-agent-browser-report.json")
+                let passed = await model.runAgentBrowserSelfTest(fixturesDirectory: fixtures,
+                                                                 reportPath: "/tmp/loom-agent-browser-report.json")
                 exit(passed ? 0 : 1)
             }
             // Autonomous repro (diagnostics): LOOM_AUTOTEST=1 simulates the

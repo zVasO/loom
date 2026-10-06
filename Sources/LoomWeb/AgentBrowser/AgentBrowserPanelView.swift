@@ -51,17 +51,25 @@ public struct AgentBrowserPanelView: View {
             .frame(height: 22)
             .background(DefaultTheme.background)
             page
-                .overlay(alignment: .top) { overlays }
         }
     }
+
+    private static let emptyHint = "The agent hasn't opened a page yet — it will appear here."
 
     @ViewBuilder
     private var page: some View {
         switch browser.panelContent {
         case .webKit(let controller):
-            BrowserPanelView(controller: controller,
-                             emptyHint: "The agent hasn't opened a page yet — it will appear here.",
-                             newTabAddress: "about:blank")
+            BrowserPanelView(controller: controller, emptyHint: Self.emptyHint, newTabAddress: "about:blank")
+                .overlay(alignment: .top) {
+                    overlays.padding(.top, 52)   // below the address bar and the tab strip
+                }
+        case .chromium(let surface):
+            // Laid over the page area itself: no chrome height to allow for.
+            ChromiumBrowserPanelView(surface: surface, emptyHint: Self.emptyHint,
+                                     agentBusy: browser.activity?.isRunning == true) {
+                overlays.padding(.top, 8)
+            }
         }
     }
 
@@ -124,7 +132,6 @@ public struct AgentBrowserPanelView: View {
                 dialogBanner(dialog)
             }
         }
-        .padding(.top, 52)   // below the address bar and the tab strip
         .padding(.horizontal, 12)
     }
 

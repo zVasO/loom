@@ -1,5 +1,6 @@
 import LoomAgents
 import LoomAPI
+import LoomChromium
 import LoomCore
 import LoomExtensions
 import LoomGit
@@ -494,6 +495,7 @@ public final class AppModel {
             restoreSidePanels()
             pruneAgentScreenshots()
             sweepAgentStores()
+            prepareAgentChromium()
             reindexAllSessions()
         } catch {
             if case IPCError.anotherInstanceRunning = error {
@@ -2054,6 +2056,18 @@ public final class AppModel {
     /// The page width each project's agent browsers open at (Settings, the
     /// panel's menu) — AgentBrowserAPI.swift reads and writes it.
     var agentViewportDefaults = AgentViewportDefaults.load(from: .standard)
+
+    /// Every agent Chromium of this run (ADR-0015), made on first use —
+    /// `agentChromiumPool` in AgentBrowserAPI.swift.
+    @ObservationIgnored var agentChromiumPoolStorage: ChromiumPool? = nil
+    /// The launch-time sweep of Chromium profiles; the pool's first launch
+    /// waits for it.
+    @ObservationIgnored var agentChromiumSweep: Task<Void, Never>? = nil
+    /// The last local-only change on its way to the pool: the next one
+    /// follows it, so the pool ends on the last setting.
+    @ObservationIgnored var agentChromiumNetworkChange: Task<Void, Never>? = nil
+    /// The model of this run, for the app delegate's quit (LoomApp.swift).
+    static weak var live: AppModel?
 
     /// Each open creates a dedicated pane, child of the session (or global if nil).
     @discardableResult

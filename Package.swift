@@ -60,7 +60,7 @@ let package = Package(
             dependencies: [
                 "LoomCore", "LoomAPI", "LoomUI", "LoomTerminal", "LoomAgents",
                 "LoomGit", "LoomWeb", "LoomPersistence", "LoomIPC",
-                "LoomSessions", "LoomExtensions",
+                "LoomSessions", "LoomExtensions", "LoomChromium",
             ],
             resources: [.process("Resources")]
         ),
