@@ -172,3 +172,23 @@ extension.
 - ADR-0015 : `claude.complete` (Claude en texte seul, avec le compte de
   l'utilisateur) et hôtes accordés à l'usage (`optionalNetwork`) — pour
   l'exemple `tech-watch`.
+
+### Validation sur Mac — ADR-0015
+
+1. `swift build` sans avertissement « nearly matches » ; `swift test --filter LoomExtensionsTests`,
+   `--filter LoomAgentsTests` (`ClaudeOneShotTests`), `--filter LoomGitTests` (`ProcessDrain` a
+   déménagé dans LoomCore).
+2. Lier `Examples/extensions/tech-watch/` : la feuille de consentement liste « Ask you for other
+   sites… » et « Ask Claude for text answers… ».
+3. Réglages de l'extension › Flux : ajouter `https://<un blog>/feed.xml` → feuille d'hôtes ;
+   *Don't Allow* → rien n'est ajouté ; *Allow* → le flux est nommé, ses articles dans « Flux ».
+4. Réglages › Extensions : le site apparaît sous « Sites you added » ; ✕ → la page affiche
+   « accès retiré », la lecture suivante échoue en `forbidden`.
+5. « Résumer maintenant » : pendant le run, `ps` ne montre pas le prompt, le cwd est sous
+   `$TMPDIR` ; après, rien de neuf dans `~/.claude/projects`, aucun hook de Loom n'a sonné ;
+   le digest affiche le modèle et le coût, la barre du haut « 📰 N », un clic ouvre l'onglet.
+6. `claude` renommé → digest sans résumé (`unavailable`) ; Loom quitté à l'heure du digest puis
+   relancé → rattrapage en une minute ; désactiver l'extension pendant un digest → plus de
+   process `claude`.
+7. « → session Claude » sur un article : la feuille de lancement est préremplie.
+8. La visite guidée d'une PR marche toujours (son diff passe maintenant par stdin).
