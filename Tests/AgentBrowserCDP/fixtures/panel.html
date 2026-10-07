@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Panel</title>
+<style>
+  html, body { margin: 0; }
+  body { font: 16px/20px sans-serif; height: 2400px; }
+  .at { position: absolute; box-sizing: border-box; }
+  .mono { font: 16px/20px monospace; }
+  #field { left: 40px; top: 40px; width: 240px; height: 30px; padding: 2px 6px; border: 1px solid rgb(136, 136, 136); }
+  #area { left: 40px; top: 90px; width: 240px; height: 110px; padding: 4px; border: 1px solid rgb(136, 136, 136); resize: none; }
+  #editor { left: 40px; top: 220px; width: 240px; min-height: 60px; padding: 4px; border: 1px solid rgb(136, 136, 136); }
+  #password { left: 40px; top: 300px; width: 240px; height: 30px; }
+  #otp { left: 40px; top: 340px; width: 240px; height: 30px; }
+  #custom { left: 40px; top: 390px; margin: 0; }
+  #loose { left: 40px; top: 420px; margin: 0; }
+  #late { left: 40px; top: 450px; margin: 0; }
+  #plain { left: 40px; top: 480px; margin: 0; }
+  #pick { left: 340px; top: 40px; width: 200px; height: 30px; }
+  #link { left: 340px; top: 90px; color: rgb(0, 0, 238); }
+  #link:hover { color: rgb(1, 2, 3); }
+  #press { left: 340px; top: 130px; width: 120px; height: 30px; cursor: pointer; }
+  #grab { left: 340px; top: 180px; width: 160px; height: 60px; cursor: grab; background: rgb(238, 238, 238); user-select: none; }
+  #host { left: 340px; top: 260px; width: 200px; height: 40px; }
+  #frame { left: 340px; top: 320px; width: 200px; height: 80px; border: 2px solid rgb(0, 0, 0); padding: 0; }
+  #fancy { left: 340px; top: 420px; width: 200px; height: 30px; appearance: base-select; }
+  #fancy::picker(select) { appearance: base-select; }
+  #nocursor { left: 340px; top: 470px; width: 200px; height: 30px; cursor: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==") 4 4, crosshair; }
+  #scroller { left: 600px; top: 40px; width: 300px; height: 300px; overflow: auto; border: 1px solid rgb(136, 136, 136); }
+  #scroller .tall { height: 3000px; background: linear-gradient(rgb(255, 255, 255), rgb(0, 0, 0)); }
+  #form { left: 600px; top: 380px; }
+</style>
+</head>
+<body>
+<!-- The interactive panel (panel-input.test.mjs, design panel.md §2): what a
+     person's mouse, wheel, keyboard, IME and clipboard reach, through
+     Input.* and through the panel script (AgentPanelScript). window.__log
+     records every event the page can see, with what it can read of it. -->
+<input id="field" class="at mono" aria-label="Field">
+<textarea id="area" class="at mono" aria-label="Area"></textarea>
+<div id="editor" class="at mono" contenteditable="true" aria-label="Editor"></div>
+<input id="password" class="at" type="password" aria-label="Password">
+<input id="otp" class="at" aria-label="One-time code">
+<p id="custom" class="at">Custom copy text</p>
+<p id="loose" class="at">Loose copy text</p>
+<p id="late" class="at">Late copy text</p>
+<p id="plain" class="at">Plain copy text</p>
+<select id="pick" class="at" aria-label="Fruit">
+  <option value="apple">Apple</option>
+  <option value="banana" disabled>Banana</option>
+  <optgroup label="Citrus">
+    <option value="lemon">Lemon</option>
+    <option value="lime">  Lime   green </option>
+  </optgroup>
+  <optgroup label="Gone" disabled>
+    <option value="kiwi">Kiwi</option>
+  </optgroup>
+  <option value="pear" label="Pear (label)">ignored text</option>
+</select>
+<a id="link" class="at" href="#linked"><span id="inner">Hover link</span></a>
+<button id="press" class="at" type="button">Pointer</button>
+<div id="grab" class="at"><span id="grabbed">grab me</span></div>
+<div id="host" class="at"></div>
+<iframe id="frame" class="at" title="Frame" srcdoc="<!doctype html><style>html,body{margin:0;height:100%}#cross{height:100%;cursor:crosshair}</style><div id=cross><input id=inner-field style='margin:10px;font:16px monospace'></div>"></iframe>
+<select id="fancy" class="at" aria-label="Fancy"><option>One</option><option>Two</option></select>
+<div id="nocursor" class="at">url cursor</div>
+<div id="scroller" class="at"><div class="tall"></div></div>
+<form id="form" class="at" action="/echo" method="get">
+  <input id="q" name="q" aria-label="Query">
+  <button id="go" type="submit">Go</button>
+</form>
+<script>
+  window.__log = [];
+  window.__submits = 0;
+  window.__pastes = [];
+  const id = (node) => (node && (node.id || node.localName || node.nodeName)) || null;
+  const types = [
+    "pointerover", "pointerenter", "pointerdown", "pointermove", "pointerup", "pointerout", "pointerleave",
+    "mouseover", "mouseenter", "mousedown", "mousemove", "mouseup", "mouseout", "mouseleave",
+    "click", "dblclick", "auxclick", "contextmenu",
+    "keydown", "keypress", "keyup", "beforeinput", "input", "change",
+    "compositionstart", "compositionupdate", "compositionend",
+    "copy", "cut", "paste", "focus", "blur", "submit",
+  ];
+  for (const type of types) {
+    // Capture on the document: non-bubbling events (enter, leave, focus) pass too.
+    document.addEventListener(type, (event) => {
+      window.__log.push({
+        type, target: id(event.target), trusted: event.isTrusted,
+        pointerType: event.pointerType ?? null, button: event.button ?? null, buttons: event.buttons ?? null,
+        detail: event.detail ?? null, key: event.key ?? null, code: event.code ?? null, keyCode: event.keyCode ?? null,
+        inputType: event.inputType ?? null, data: event.data ?? null, isComposing: event.isComposing ?? null,
+        shift: event.shiftKey ?? null, ctrl: event.ctrlKey ?? null, alt: event.altKey ?? null, meta: event.metaKey ?? null,
+      });
+    }, true);
+  }
+  document.getElementById("form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    window.__submits++;
+  });
+  // A page that writes its own clipboard data (preventDefault: Chromium copies it).
+  document.getElementById("custom").addEventListener("copy", (event) => {
+    event.clipboardData.setData("text/plain", "custom:" + String(getSelection()));
+    event.preventDefault();
+  });
+  // Data set without preventDefault: Chromium ignores it and copies the selection.
+  document.getElementById("loose").addEventListener("copy", (event) => {
+    event.clipboardData.setData("text/plain", "loose:ignored");
+  });
+  // A paste handler that keeps the data for itself (a one-time-code splitter).
+  document.getElementById("otp").addEventListener("paste", (event) => {
+    event.preventDefault();
+    event.target.value = event.clipboardData.getData("text/plain").toUpperCase();
+  });
+  document.addEventListener("paste", (event) => {
+    window.__pastes.push({ target: id(event.target), text: event.clipboardData ? event.clipboardData.getData("text/plain") : null,
+      trusted: event.isTrusted, composed: event.composed, cancelable: event.cancelable });
+  });
+  // An open shadow root: a pointer button and a field inside.
+  const shadow = document.getElementById("host").attachShadow({ mode: "open" });
+  shadow.innerHTML = '<style>button{cursor:pointer;width:90px;height:30px}input{width:90px;height:24px}</style>'
+    + '<button id="shadow-button">In shadow</button><input id="shadow-field">';
+  // A page listener on window registered after the panel script (document start):
+  // it runs after the panel's own copy listener unless the panel reorders it.
+  window.addEventListener("load", () => {
+    window.addEventListener("copy", (event) => {
+      if (!document.getElementById("late").contains(getSelection().anchorNode)) return;
+      event.clipboardData.setData("text/plain", "late:" + String(getSelection()));
+      event.preventDefault();
+    });
+  });
+  // Where the caret is, measured by the page itself (the reference for caretRect).
+  window.__textWidth = (font, text) => {
+    const probe = document.createElement("span");
+    probe.style.cssText = "position:absolute;left:-9999px;top:0;white-space:pre;font:" + font;
+    probe.textContent = text;
+    document.body.appendChild(probe);
+    const width = probe.getBoundingClientRect().width;
+    probe.remove();
+    return width;
+  };
+  window.__select = (id) => {
+    const range = document.createRange();
+    range.selectNodeContents(document.getElementById(id));
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  };
+</script>
+</body>
+</html>
