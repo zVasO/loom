@@ -43,6 +43,14 @@ jobs:
         run: |
           git config --global user.name "Loom CI"
           git config --global user.email "ci@loom.invalid"
+      # A real chrome-headless-shell for the Chromium engine's end-to-end
+      # tests (LOOM_CHROMIUM); without it they are skipped, never failed.
+      - name: Chromium for the agent browser's tests
+        run: |
+          npx --yes playwright@1.56.1 install chromium-headless-shell
+          shell="$(find "$HOME/Library/Caches/ms-playwright" -type f \( -name headless_shell -o -name chrome-headless-shell \) -perm -u+x | sort | tail -1)"
+          echo "headless shell: $shell"
+          test -n "$shell" && echo "LOOM_CHROMIUM=$shell" >> "$GITHUB_ENV"
       - name: Build
         id: build
         run: |
@@ -122,6 +130,12 @@ jobs:
           restore-keys: spm-release-${{ runner.os }}-
       - name: Build (release)
         run: swift build -c release
+      - name: Chromium for the Chromium run
+        if: matrix.engine == 'chromium'
+        run: |
+          npx --yes playwright@1.56.1 install chromium-headless-shell
+          shell="$(find "$HOME/Library/Caches/ms-playwright" -type f \( -name headless_shell -o -name chrome-headless-shell \) -perm -u+x | sort | tail -1)"
+          test -n "$shell" && echo "LOOM_CHROMIUM=$shell" >> "$GITHUB_ENV"
       - name: Self-test
         timeout-minutes: 20
         env:
