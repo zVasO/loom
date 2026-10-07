@@ -94,11 +94,16 @@ struct ClaudeAndHostsParamsTests {
     func budget() {
         var budget = ClaudeCompletionBudget()
         let start = Date(timeIntervalSince1970: 1_000_000)
+        // Taken before #expect: it hands a checked call's receiver to a
+        // closure as an immutable value, and admit is mutating.
         for minute in 0..<ClaudeCompletionBudget.maxPerHour {
-            #expect(budget.admit(now: start.addingTimeInterval(Double(minute) * 60)))
+            let admitted = budget.admit(now: start.addingTimeInterval(Double(minute) * 60))
+            #expect(admitted)
         }
-        #expect(!budget.admit(now: start.addingTimeInterval(40 * 60)))
-        #expect(budget.admit(now: start.addingTimeInterval(3600)))
+        let thirtyFirst = budget.admit(now: start.addingTimeInterval(40 * 60))
+        #expect(!thirtyFirst)
+        let anHourLater = budget.admit(now: start.addingTimeInterval(3600))
+        #expect(anHourLater)
     }
 
     @Test("hosts asked at use: exact names, lowercased, each once, at most ten")

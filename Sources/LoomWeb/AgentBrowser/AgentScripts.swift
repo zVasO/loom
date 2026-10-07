@@ -224,7 +224,7 @@ if (XHR) {
 
     /// Loom's world, document start, every frame: the page hook's events,
     /// checked for size and rate, posted to `messageHandlerName` — a handler
-    /// that exists in Loom's world only. Without it (Chromium, ADR-0015) they
+    /// that exists in Loom's world only. Without it (Chromium, ADR-0016) they
     /// go to the `__loomHookBinding` binding Loom adds to that world after
     /// each commit, held until it is there; requests are not relayed then:
     /// the Network domain sees them.
@@ -1481,7 +1481,7 @@ function stamp(args) {
 }
 
 // ---------------------------------------------------------------- Chromium
-// What only Loom's Chromium engine asks (ADR-0015): its input is real
+// What only Loom's Chromium engine asks (ADR-0016): its input is real
 // (Input.*), so the helper finds where to press and when the page has had
 // its turn. WebKit never passes `trusted`, `afterFrame` or `maxMs`, nor
 // calls `barrier`, `documentRect` or `dispatchCancel`: its paths above are
@@ -1877,7 +1877,7 @@ Object.defineProperty(globalThis, "__loomAgent", {
         : JSON.stringify({ error: { code: "helperMissing", message: "the helper is not loaded" } });
     """
 
-    /// The function every helper call runs in Chromium (ADR-0015, design
+    /// The function every helper call runs in Chromium (ADR-0016, design
     /// §3.2): `Runtime.callFunctionOn` in the `worldName` world, with `op`
     /// and `args` (a JSON string) as its arguments, `awaitPromise` and
     /// `returnByValue` — the JSON text `helperCall` answers in WebKit. One

@@ -10,7 +10,7 @@ public enum ChromiumFenceError: Error, Equatable, Sendable {
     case addressUnknown(errno: Int32)
 }
 
-/// The proxy Chromium is pointed at in local-only mode (ADR-0015): a TCP
+/// The proxy Chromium is pointed at in local-only mode (ADR-0016): a TCP
 /// listener Loom owns on 127.0.0.1, which accepts every connection and closes
 /// it at once. Whatever the bypass list does not send direct fails there, and
 /// fails fast. A "dead" port would do the same until another process took it;

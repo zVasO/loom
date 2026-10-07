@@ -1,7 +1,7 @@
 import Foundation
 import LoomChromium
 
-/// `browser_press_key` and `browser_type slowly` as trusted input (ADR-0015):
+/// `browser_press_key` and `browser_type slowly` as trusted input (ADR-0016):
 /// a `KeySpec` as `CDPInput` sends it.
 ///
 /// "ControlOrMeta" is already Meta: `KeySpec.parse` reads it so, Loom runs

@@ -1,6 +1,6 @@
 import Foundation
 
-/// The waits of `settle` (ADR-0015, design §4), with the numbers the step-0
+/// The waits of `settle` (ADR-0016, design §4), with the numbers the step-0
 /// probe measured. They replace WebKit's fixed 300 + 150 ms: every wait here
 /// ends on an event, the caps only bound pages that never calm down.
 public struct SettlePolicy: Sendable, Equatable {

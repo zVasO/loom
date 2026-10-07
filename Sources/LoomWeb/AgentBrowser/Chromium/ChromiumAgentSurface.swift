@@ -3,7 +3,7 @@ import Foundation
 import LoomChromium
 import Observation
 
-/// The agent's Chromium browser as the side panel shows it (ADR-0015): the
+/// The agent's Chromium browser as the side panel shows it (ADR-0016): the
 /// main-thread copy of the core's tabs, the current page's connection and
 /// session for its live picture, and what the person does from the panel —
 /// each an operation the core runs between the agent's commands, and refuses

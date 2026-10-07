@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// The agent's Chromium profiles on disk (ADR-0015), under
+/// The agent's Chromium profiles on disk (ADR-0016), under
 /// `<support>/agent-browser/chromium/`:
 ///
 /// - `profiles/<store identifier>/`: a project's `--user-data-dir`, named by

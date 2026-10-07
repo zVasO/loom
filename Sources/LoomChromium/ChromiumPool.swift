@@ -2,7 +2,7 @@ import Darwin
 import Dispatch
 import Foundation
 
-// ChromiumPool — every Chromium the agents' browsers run (ADR-0015).
+// ChromiumPool — every Chromium the agents' browsers run (ADR-0016).
 //
 //   init(profiles:network:executable:…)   sweeps `private/` (a Loom that died)
 //   acquire(_ key) → ChromiumLease        launches lazily; a private key's lease

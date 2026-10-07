@@ -2043,7 +2043,7 @@ public final class AppModel {
     /// panel's menu) — AgentBrowserAPI.swift reads and writes it.
     var agentViewportDefaults = AgentViewportDefaults.load(from: .standard)
 
-    /// Every agent Chromium of this run (ADR-0015), made on first use —
+    /// Every agent Chromium of this run (ADR-0016), made on first use —
     /// `agentChromiumPool` in AgentBrowserAPI.swift.
     @ObservationIgnored var agentChromiumPoolStorage: ChromiumPool? = nil
     /// The launch-time sweep of Chromium profiles; the pool's first launch

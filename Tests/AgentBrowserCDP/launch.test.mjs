@@ -1,4 +1,4 @@
-// Launching Chromium as Loom does (ADR-0015): CDP over --remote-debugging-pipe
+// Launching Chromium as Loom does (ADR-0016): CDP over --remote-debugging-pipe
 // only — no TCP port another process could drive the agent's logged-in
 // profile through — and a browser that cannot outlive Loom: when the pipe
 // closes (Loom quits, or is killed), Chromium and its whole process group go.

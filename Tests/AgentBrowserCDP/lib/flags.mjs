@@ -15,7 +15,7 @@ export const flagsFixture = resolve(here, "../fixtures/flags.json");
 
 export const FLAGS = Object.freeze({
   $comment: [
-    "Chromium launch flags for Loom's agent browser (ADR-0015), produced by Tests/AgentBrowserCDP/lib/flags.mjs.",
+    "Chromium launch flags for Loom's agent browser (ADR-0016), produced by Tests/AgentBrowserCDP/lib/flags.mjs.",
     "Launch arguments = base + headless[kind] + userDataDir + (localOnly when the fence is on).",
     "forbidden: never on Loom's command line (a ChromiumFlags test checks it). The Node harness adds",
     "--no-sandbox (Linux CI as root or under AppArmor only) and --no-proxy-server; neither belongs here.",
@@ -27,7 +27,7 @@ export const FLAGS = Object.freeze({
     "--no-first-run",
     "--no-default-browser-check",
     "--no-service-autorun",
-    // The macOS keychain is never touched; cookies are keyed by a constant (ADR-0015).
+    // The macOS keychain is never touched; cookies are keyed by a constant (ADR-0016).
     "--use-mock-keychain",
     "--password-store=basic",
     // Pages keep running with no viewer (background.test.mjs).

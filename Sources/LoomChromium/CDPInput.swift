@@ -95,7 +95,7 @@ public struct CDPKey: Sendable, Equatable {
     public static let meta = CDPKey(key: "Meta", code: "MetaLeft", keyCode: 91, location: 1)
 }
 
-/// The `Input.*` commands of trusted input (ADR-0015), as (method, params)
+/// The `Input.*` commands of trusted input (ADR-0016), as (method, params)
 /// ready for `CDPConnection.post(batch:)`. Pure: the caller decides what
 /// goes in one write — a click's three mouse events always do, so nothing
 /// runs between them — and what waits for the previous acks.

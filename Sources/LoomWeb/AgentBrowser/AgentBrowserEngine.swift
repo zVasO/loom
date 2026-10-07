@@ -4,7 +4,7 @@ import Observation
 
 /// What the app and the side panel ask of a session agent's browser, whatever
 /// drives its pages: WebKit (`AgentBrowser`, ADR-0014) or headless Chromium
-/// over the DevTools protocol (ADR-0015). The commands, their answers and
+/// over the DevTools protocol (ADR-0016). The commands, their answers and
 /// the panel's caption, width menu, activity and dialog banner are the same.
 @MainActor
 public protocol AgentBrowserEngine: AnyObject, Observable {

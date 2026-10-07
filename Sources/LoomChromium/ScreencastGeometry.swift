@@ -3,7 +3,7 @@ import CoreGraphics
 #endif
 import Foundation
 
-// The live picture of the agent's page in the side panel (ADR-0015): what a
+// The live picture of the agent's page in the side panel (ADR-0016): what a
 // `Page.screencastFrame` carries, and where its page lands in the view.
 // Pure, so the arithmetic is tested without AppKit; the view and the stream
 // live in LoomWeb.

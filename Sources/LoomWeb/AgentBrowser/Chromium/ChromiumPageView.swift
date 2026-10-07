@@ -3,7 +3,7 @@ import LoomChromium
 import SwiftUI
 
 // The live picture of the agent's Chromium tab in the side panel
-// (ADR-0015), watch-only for now: no click, key or focus reaches the page
+// (ADR-0016), watch-only for now: no click, key or focus reaches the page
 // from here — the user's input comes with its own step. The view is flipped
 // so a view point reads like a CSS point (ScreencastGeometry).
 

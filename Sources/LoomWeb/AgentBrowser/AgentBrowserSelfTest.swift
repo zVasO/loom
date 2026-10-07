@@ -4,7 +4,7 @@ import LoomAPI
 import LoomChromium
 import Network
 
-/// The agent's browser against a real engine (ADR-0014, ADR-0015):
+/// The agent's browser against a real engine (ADR-0014, ADR-0016):
 /// `LOOM_AUTOTEST=agent-browser swift run LoomApp` serves the fixture page of
 /// `Tests/AgentBrowserJS/fixtures/` on 127.0.0.1, drives it through the same
 /// commands the agent sends, writes a report and exits non-zero on any

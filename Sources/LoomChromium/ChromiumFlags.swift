@@ -1,6 +1,6 @@
 import Foundation
 
-/// What the agent's Chromium may reach (ADR-0015): everything, or the
+/// What the agent's Chromium may reach (ADR-0016): everything, or the
 /// machine itself plus the hosts the person listed. Equal modes launch with
 /// equal flags; a different one relaunches the process.
 public enum ChromiumNetworkMode: Equatable, Sendable {
@@ -20,7 +20,7 @@ public enum ChromiumFlagsError: Error, Equatable, Sendable, CustomStringConverti
     }
 }
 
-/// The command line of the agent's Chromium (ADR-0015, step-0 probes).
+/// The command line of the agent's Chromium (ADR-0016, step-0 probes).
 /// `--user-data-dir` is the launch plan's (ChromiumLaunchPlan.spawnArguments).
 ///
 /// The CDP harness (Tests/AgentBrowserCDP/lib/flags.mjs, written out to
@@ -61,7 +61,7 @@ public enum ChromiumFlags {
         "--no-first-run",
         "--no-default-browser-check",
         "--no-service-autorun",
-        // Cookies under a fixed key, readable on disk like WebKit's store (ADR-0015):
+        // Cookies under a fixed key, readable on disk like WebKit's store (ADR-0016):
         // the real Keychain would prompt in the name of Google Chrome for Testing.
         "--use-mock-keychain",
         "--password-store=basic",

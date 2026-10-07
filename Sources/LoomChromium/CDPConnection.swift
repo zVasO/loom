@@ -72,7 +72,7 @@ public final class CDPReply: @unchecked Sendable {
     }
 }
 
-/// The DevTools protocol over `--remote-debugging-pipe` (ADR-0015).
+/// The DevTools protocol over `--remote-debugging-pipe` (ADR-0016).
 ///
 /// One reader queue does everything that must stay in wire order: it cuts
 /// the frames, parses them, hands each event to its session's sink

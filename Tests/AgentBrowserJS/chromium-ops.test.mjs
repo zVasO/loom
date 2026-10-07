@@ -1,4 +1,4 @@
-// The helper's Chromium-only side (ADR-0015) on a real Chromium, as Loom's
+// The helper's Chromium-only side (ADR-0016) on a real Chromium, as Loom's
 // engine drives it: the scripts installed by Page.addScriptToEvaluateOnNewDocument
 // in the "loom-agent" world (the helper in the top frame only), every call
 // AgentScripts.helperFunction by Runtime.callFunctionOn there, the input

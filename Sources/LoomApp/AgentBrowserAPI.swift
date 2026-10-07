@@ -139,7 +139,7 @@ extension AppModel {
         return browser
     }
 
-    // MARK: - Engine (ADR-0015)
+    // MARK: - Engine (ADR-0016)
 
     /// Settings ▸ Agents: which engine new sessions' browsers use; nil until
     /// the person chooses (WebKit).
@@ -353,7 +353,7 @@ extension AppModel {
 }
 
 
-// MARK: - Chromium (ADR-0015)
+// MARK: - Chromium (ADR-0016)
 
 // The agents' headless Chromium: one pool for the app, made on first use —
 // a Loom that never runs Chromium launches, sweeps and waits for nothing.

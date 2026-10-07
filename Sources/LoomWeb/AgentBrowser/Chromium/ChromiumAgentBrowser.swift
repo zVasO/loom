@@ -4,7 +4,7 @@ import LoomChromium
 import Observation
 import os
 
-/// A session agent's own browser on headless Chromium (ADR-0015): what the
+/// A session agent's own browser on headless Chromium (ADR-0016): what the
 /// app and the side panel see of `ChromiumAgentCore`. The work happens in the
 /// core, off the main thread — `run` only hands the command over; what the
 /// panel shows (activity, dialog, width, tabs) comes back as one state at a

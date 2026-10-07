@@ -3,7 +3,7 @@ import Dispatch
 import Foundation
 
 // ChromiumBrowser — the browser (root) session of one Chromium process, and
-// the router of its page targets (ADR-0015).
+// the router of its page targets (ADR-0016).
 //
 // Lifecycle
 //   init(process:version:)      a Chromium spawned and ready (ChromiumPool does it)

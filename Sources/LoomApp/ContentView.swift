@@ -201,7 +201,7 @@ struct ContentView: View {
             applyTheme()
         }
         .task {
-            // The agent's browser against a real engine (ADR-0014, ADR-0015):
+            // The agent's browser against a real engine (ADR-0014, ADR-0016):
             // LOOM_AUTOTEST_ENGINE=webkit|chromium (WebKit when unsaid; Chromium
             // from LOOM_CHROMIUM, else the one Loom finds). A report in
             // /tmp/loom-agent-browser-report.json, the exit code says it all.

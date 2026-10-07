@@ -40,7 +40,7 @@ let package = Package(
         .target(name: "LoomWeb", dependencies: ["LoomCore", "LoomUI", "LoomExtensions", "LoomAPI", "LoomChromium"]),
         .target(name: "LoomPersistence", dependencies: ["LoomCore", "LoomTerminal", "LoomAgents", .product(name: "GRDB", package: "GRDB.swift")]),
         .target(name: "LoomIPC", dependencies: ["LoomCore", "LoomAPI"]),
-        // The agent browser's Chromium (ADR-0015): the DevTools protocol over a
+        // The agent browser's Chromium (ADR-0016): the DevTools protocol over a
         // pipe, the process, its flags and its fence — Foundation only, no UI.
         .target(name: "LoomChromium", dependencies: ["LoomCore"]),
         // The helper the agents' hooks call (ADR-0005): stdin → socket, no dependencies.

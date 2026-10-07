@@ -164,7 +164,7 @@ struct SettingsPage: View {
         model.agentBrowsersAllowedHosts = hostsDraft
     }
 
-    /// ADR-0015: which engine drives the agents' pages, and the Chromium found.
+    /// ADR-0016: which engine drives the agents' pages, and the Chromium found.
     @ViewBuilder
     private var agentEngineRows: some View {
         HStack(spacing: 12) {

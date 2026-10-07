@@ -5,7 +5,7 @@ import ImageIO
 import LoomChromium
 import os
 
-// The live picture of a Chromium tab (ADR-0015): `Page.startScreencast`
+// The live picture of a Chromium tab (ADR-0016): `Page.startScreencast`
 // while a page view shows the tab on screen, frames taken raw off the
 // connection's reader queue, parsed and acknowledged at once, decoded by
 // ImageIO off the main thread, the latest one only handed to the main actor.

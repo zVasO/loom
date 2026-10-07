@@ -1,6 +1,6 @@
 import Foundation
 
-/// A Chromium-family binary Loom can drive (ADR-0015), and where it was found.
+/// A Chromium-family binary Loom can drive (ADR-0016), and where it was found.
 public struct ChromiumExecutable: Sendable, Equatable {
 
     public enum Kind: Sendable, Equatable {

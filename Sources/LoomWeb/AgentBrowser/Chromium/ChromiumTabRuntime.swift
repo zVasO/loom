@@ -4,7 +4,7 @@ import Foundation
 import LoomChromium
 
 // ChromiumTabRuntime — one live tab of the agent's Chromium: one page target,
-// one flattened session (ADR-0015, design §3 and §6, step-0 probes).
+// one flattened session (ADR-0016, design §3 and §6, step-0 probes).
 //
 // Lifecycle
 //   init(browser:target:viewport:userAgent:)   nothing sent yet

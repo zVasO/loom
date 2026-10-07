@@ -6,7 +6,7 @@ import Foundation
 // `element` is the agent's own description of the element, echoed back.
 // Numbers are Doubles on the wire: JSON has no integers.
 
-/// The engine behind a session's browser (ADR-0014, ADR-0015): WebKit with
+/// The engine behind a session's browser (ADR-0014, ADR-0016): WebKit with
 /// synthetic events, or headless Chromium driven over the DevTools protocol
 /// with real ones. Chosen when the session launches, kept until it resumes.
 public enum APIBrowserEngine: String, Codable, Sendable, CaseIterable {

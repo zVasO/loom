@@ -3,7 +3,7 @@ import LoomChromium
 import LoomUI
 import SwiftUI
 
-// The agent's Chromium browser in the side panel (ADR-0015): the user's
+// The agent's Chromium browser in the side panel (ADR-0016): the user's
 // browser chrome laid over a live picture of the page instead of a web
 // view. Watch-only for now: no click or key reaches the page yet. The bar,
 // the buttons and the tabs act through the engine's panel operations — the

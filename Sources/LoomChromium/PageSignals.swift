@@ -119,7 +119,7 @@ public struct PageSignalsState: Sendable, Equatable {
     public var requestsInFlight: Int
 }
 
-/// One per target session (ADR-0015, design §4 and §6): the sink of its
+/// One per target session (ADR-0016, design §4 and §6): the sink of its
 /// DevTools events. On the CDP reader queue, in wire order, it turns them
 /// into `SettleEvent`s it keeps, applies them to the settles waiting, keeps
 /// the dialog ledger, and hands the facts to its owner — all before any

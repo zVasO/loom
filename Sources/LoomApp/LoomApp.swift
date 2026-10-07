@@ -8,7 +8,7 @@ final class LoomAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     /// The agents' Chromium saves its profiles (cookies, storage) before Loom
-    /// goes (ADR-0015): Loom waits for it 1.5 s at most, then quits anyway —
+    /// goes (ADR-0016): Loom waits for it 1.5 s at most, then quits anyway —
     /// a Chromium still there exits when its pipe closes with Loom.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let model = AppModel.live, model.runsAgentChromium else { return .terminateNow }

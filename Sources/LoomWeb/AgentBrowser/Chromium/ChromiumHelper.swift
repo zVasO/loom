@@ -3,7 +3,7 @@ import Foundation
 import LoomChromium
 
 /// Calls into Loom's helper (`AgentScripts.helper`) in the `loom-agent`
-/// world of a tab's main frame (ADR-0015, design §3.2, step-0 probes).
+/// world of a tab's main frame (ADR-0016, design §3.2, step-0 probes).
 ///
 /// No `Runtime.enable`, so no `executionContextCreated`: the world's context
 /// id comes from `Page.createIsolatedWorld`, which hands back the world

@@ -4,7 +4,7 @@ import Foundation
 import LoomChromium
 import LoomExtensions
 
-// ChromiumAgentCore — one session's agent browser on Chromium (ADR-0015,
+// ChromiumAgentCore — one session's agent browser on Chromium (ADR-0016,
 // design §3.5): its tabs, its queue of commands with their deadlines, its
 // lease on the profile's Chromium. An actor: no command runs on the main
 // thread, and the panel's copy of its state is published whole at every
