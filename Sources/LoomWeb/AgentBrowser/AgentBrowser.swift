@@ -930,8 +930,10 @@ public final class AgentBrowser: NSObject {
                 // [actual, actual + viewport): never past what it shows — a
                 // page that shrank, or would not scroll, ends the capture.
                 // A set width scales the page: WebKit keeps the scroll in
-                // whole device pixels, a fraction of a CSS pixel off.
-                let slack = 1 / zoom + 0.5
+                // whole device pixels, a fraction of a CSS pixel off; and
+                // scrollHeight is rounded up, scrollY down, a pixel each at
+                // most — on a 1× screen the page's last pixel was "cut".
+                let slack = 1 / zoom + 1.5
                 let shown = actual + webView.bounds.height / zoom
                 var bottom = min(top + viewportHeight, total)
                 if actual + viewportHeight + slack < bottom {
