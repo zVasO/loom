@@ -201,7 +201,7 @@ struct RunCodeBridgeTests {
         #expect(refusal(#"{"id":10,"op":"mouse","action":"click","x":1}"#)?.id == 10, "a click needs x and y")
         let paths = (0...32).map { "\"/w/\($0).png\"" }.joined(separator: ",")
         #expect(refusal(##"{"id":11,"op":"files","target":"#f","paths":[\##(paths)]}"##)?.id == 11, "32 files at most")
-        let chain = String(repeating: #"{"css":"div"},"#, 1_500) + #"{"css":"p"}"#
+        let chain = String(repeating: #"{"css":"div"},"#, count: 1_500) + #"{"css":"p"}"#
         #expect(refusal(#"{"id":12,"op":"count","target":{"chain":[\#(chain)],"desc":"big"}}"#)?.id == 12, "16 KB at most")
         let huge = ##"{"id":13,"op":"fill","target":"#a","value":""## + String(repeating: "x", count: 262_144) + #""}"#
         #expect(refusal(huge)?.id == nil, "over 256 KB: dropped unparsed")
