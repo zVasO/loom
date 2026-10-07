@@ -110,9 +110,26 @@ jobs:
           npx --yes playwright@1.56.1 install --with-deps chromium chromium-headless-shell
       - name: Agent browser scripts on a real DOM
         run: node --test Tests/AgentBrowserJS/*.test.mjs
+      # One file at a time, each with a watchdog: a file that hangs is named
+      # and stopped, and the others still report.
       - name: Agent browser over the Chrome DevTools Protocol
         if: hashFiles('Tests/AgentBrowserCDP/*.test.mjs') != ''
-        run: node --test --test-concurrency=1 Tests/AgentBrowserCDP/*.test.mjs
+        run: |
+          failed=""
+          for file in Tests/AgentBrowserCDP/*.test.mjs; do
+            echo "::group::$file"
+            start=$(date +%s)
+            node --test --test-timeout=120000 "$file" &
+            pid=$!
+            ( sleep 300; if kill -0 "$pid" 2>/dev/null; then echo "::error::$file still running after 300 s: stopped"; pkill -9 -P "$pid"; kill -9 "$pid"; fi ) &
+            watchdog=$!
+            if wait "$pid"; then status=0; else status=$?; fi
+            kill "$watchdog" 2>/dev/null || true
+            echo "$file: exit $status after $(( $(date +%s) - start )) s"
+            echo "::endgroup::"
+            if [ "$status" -ne 0 ]; then failed="$failed $file"; fi
+          done
+          if [ -n "$failed" ]; then echo "::error::failed:$failed"; exit 1; fi
       - name: Extension SDK and examples
         working-directory: Examples/extensions
         run: npm test
