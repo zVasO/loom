@@ -59,11 +59,12 @@ eachBrowser((browser) => {
 
   test("two tabs, each its own window, no viewer: everything advances in both", options(), async (t) => {
     const tabs = await openBackgroundTabs(chrome, server, 2, {});
-    // Measured on macOS runners: a full Chrome with --headless=new paints
-    // only its newest window at full rate — the other drops to a few frames a
-    // second, its timers and observers still running. chrome-headless-shell,
-    // Loom's own pick, keeps both at full rate; a full browser runs only when
-    // chosen in Settings, and the guide says so.
+    // Measured on macOS runners: a full Chrome with --headless=new, two
+    // windows open, drops requestAnimationFrame to a few frames a second in
+    // either window or both (3-4/s), while timers, observers and focus keep
+    // running. chrome-headless-shell, Loom's own pick, keeps both at full
+    // rate; a full browser runs only when chosen in Settings, and the guide
+    // says so. Under it on macOS, frames are only required not to stop.
     const fullOnMac = browser.kind === "fullBrowser" && process.platform === "darwin";
     try {
       const rates = await sample(tabs);
@@ -71,8 +72,9 @@ eachBrowser((browser) => {
         t.diagnostic(`tab ${i + 1}: ${JSON.stringify(rate)}`);
         const which = `tab ${i + 1} of 2`;
         // 60 a second on an idle machine; a loaded CI runner still does far better than this.
-        assert.ok(rate.raf >= (fullOnMac && i < rates.length - 1 ? 1 : 15), `${which}: rAF ${rate.raf}/s`);
-        assert.ok(rate.animationAdvancedMs >= SAMPLE_MS / 3, `${which}: the animation advanced ${rate.animationAdvancedMs} ms`);
+        assert.ok(rate.raf >= (fullOnMac ? 1 : 15), `${which}: rAF ${rate.raf}/s`);
+        assert.ok(rate.animationAdvancedMs >= (fullOnMac ? 1 : SAMPLE_MS / 3),
+          `${which}: the animation advanced ${rate.animationAdvancedMs} ms`);
         assert.ok(rate.interval >= 5, `${which}: timers ${rate.interval}/s`);
         assert.ok(rate.io > 0, `${which}: IntersectionObserver ${rate.io}/s`);
         assert.ok(rate.ro > 0, `${which}: ResizeObserver ${rate.ro}/s`);
