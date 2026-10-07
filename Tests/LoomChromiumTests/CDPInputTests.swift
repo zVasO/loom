@@ -294,6 +294,26 @@ struct CDPInputTests {
         #expect(wordBack == ["moveWordBackwardAndModifySelection"])
     }
 
+    @Test("the agent's keys never carry copy, cut or paste (one clipboard per Chromium process); the rest of the table stays")
+    func pressePapiersPartage() {
+        #expect(CDPInput.sharedClipboardCommands == ["copy", "cut", "paste"])
+        for (letter, code, keyCode) in [("c", "KeyC", 67), ("x", "KeyX", 88), ("v", "KeyV", 86)] {
+            let down = CDPInput.keyDown(CDPKey(key: letter, code: code, keyCode: keyCode, text: letter, modifiers: .meta))
+            expectCommand(down, key, ["type": "rawKeyDown", "key": letter, "code": code, "windowsVirtualKeyCode": keyCode,
+                                      "nativeVirtualKeyCode": keyCode, "modifiers": 4])
+        }
+        let selectAll = CDPInput.keyDown(CDPKey(key: "a", code: "KeyA", keyCode: 65, text: "a", modifiers: .meta))
+        let undo = CDPInput.keyDown(CDPKey(key: "z", code: "KeyZ", keyCode: 90, text: "z", modifiers: .meta))
+        let redo = CDPInput.keyDown(CDPKey(key: "z", code: "KeyZ", keyCode: 90, text: "z", modifiers: [.shift, .meta]))
+        #expect(selectAll.1["commands"] as? [String] == ["selectAll"])
+        #expect(undo.1["commands"] as? [String] == ["undo"])
+        #expect(redo.1["commands"] as? [String] == ["redo"])
+        // The table itself keeps them: the person's own copy in the panel
+        // (PanelEditCommand) is the key with its command.
+        #expect(PanelEditCommand.copy.editingCommands == ["copy"])
+        #expect(PanelEditCommand.cut.editingCommands == ["cut"])
+    }
+
     @Test("insert* commands are dropped, several commands kept in order, the colon stripped")
     func filtreInsert() {
         let control: CDPModifiers = .control

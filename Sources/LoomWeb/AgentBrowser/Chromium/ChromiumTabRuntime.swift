@@ -8,10 +8,11 @@ import LoomChromium
 //
 // Lifecycle
 //   init(browser:target:viewport:userAgent:)   nothing sent yet
-//   start()           the session's sink, then the per-target init in ONE write,
-//                     ending with Runtime.runIfWaitingForDebugger: the paused
-//                     target runs. Never waits: a popup's attach calls it on
-//                     the reader queue (the opener is blocked until it runs).
+//   start()           the session's sink, then the per-target init in ONE write
+//                     (the panel script beside the helper), ending with
+//                     Runtime.runIfWaitingForDebugger: the paused target runs.
+//                     Never waits: a popup's attach calls it on the reader
+//                     queue (the opener is blocked until it runs).
 //   initialized()     the init's replies; a refusal is the tab's failure
 //   close()           Target.closeTarget (no beforeunload), sinks off
 //   forget()          sinks off, nothing sent (the browser is gone)
@@ -28,6 +29,8 @@ import LoomChromium
 // Commands (any task; never on the reader queue)
 //   mark / settle             the event-driven settle (SettleMachine)
 //   helper / barrier          the helper in the loom-agent world (ChromiumHelper)
+//   panelCall                 the panel script there too (AgentPanelScript), for
+//                             the person's input; beside the agent's queue
 //   dispatch                  Input.* in one write, raced against dialogs
 //   evaluate                  the agent's function in the page's world
 //   capture                   Page.captureScreenshot, CSS size, capped
@@ -287,7 +290,7 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
             self?.apply(fact)
         }
         connection.setSink(sessionSink, for: session)
-        let commands = Self.initCommands(viewport: viewport, userAgent: userAgent)
+        let commands = Self.startCommands(viewport: viewport, userAgent: userAgent)
         let replies = connection.post(batch: commands, session: session,
                                       options: CDPCallOptions(deadline: ContinuousClock.now + .seconds(10)))
         lock.withLock { initReplies = replies }
@@ -460,6 +463,15 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
         lock.withLock { appendNote(event) }
     }
 
+    /// `note`, unless the very same line already waits for the next answer:
+    /// once per gap between the answers that take them.
+    func noteOnce(_ event: String) {
+        lock.withLock {
+            guard !events.contains(event) else { return }
+            appendNote(event)
+        }
+    }
+
     /// The notes since the last answer, which no longer holds them.
     public func takeEvents() -> [String] {
         let taken: [String] = lock.withLock {
@@ -564,6 +576,48 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
             if let cdp = error as? CDPError, cdp == .cancelled { throw CancellationError() }
             return nil
         }
+    }
+
+    // MARK: - The panel script
+
+    /// One op of the panel script (`AgentPanelScript.callFunction`) in the
+    /// helper's world of the main frame, by value: its answer — JSON null
+    /// included, `{error: {code, message}}` as the script gives it — or nil:
+    /// a dialog blocks the page, the document went, the page crashed, or no
+    /// answer came by `timeout`. Any thread; it never waits behind the
+    /// agent's commands, and is not one of the helper calls a stuck check
+    /// counts. A document the injected script missed gets it once, then the
+    /// op again.
+    func panelCall(_ op: String, _ arg: PanelJSON = .null, timeout: Duration) async -> PanelJSON? {
+        let deadline = ContinuousClock.now + timeout
+        let options = CDPCallOptions(deadline: deadline, interruptible: ChromiumHelper.interruptible)
+        var injected = false
+        while !blocksPage, !isDetached, !isCrashed {
+            guard let world = try? await calls.contextId(deadline: deadline) else { return nil }
+            let arguments: [[String: Any]] = [["value": op], ["value": arg.foundationValue]]
+            let params: [String: Any] = [
+                "functionDeclaration": AgentPanelScript.callFunction,
+                "executionContextId": world.id,
+                "arguments": arguments,
+                "returnByValue": true,
+                "silent": true,
+            ]
+            guard let result = try? await connection.call("Runtime.callFunctionOn", params, session: session,
+                                                           options: options),
+                  result.object("exceptionDetails") == nil else { return nil }
+            let value = result.object("result")?.raw["value"].flatMap { PanelJSON(foundation: $0) } ?? .null
+            guard !injected, value["error"]?["code"]?.stringValue == "panelMissing" else { return value }
+            injected = true
+            let inject: [String: Any] = [
+                "functionDeclaration": Self.panelInjectFunction,
+                "executionContextId": world.id,
+                "returnByValue": true,
+                "silent": true,
+            ]
+            guard (try? await connection.call("Runtime.callFunctionOn", inject, session: session,
+                                              options: options)) != nil else { return nil }
+        }
+        return nil
     }
 
     // MARK: - Input
@@ -1138,6 +1192,33 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
         commands.append(("Page.setWebLifecycleState", lifecycle))
         commands.append(("Target.setAutoAttach", autoAttachParams))
         commands.append(("Runtime.runIfWaitingForDebugger", empty))
+        return commands
+    }
+
+    /// The panel script (AgentPanelScript: what the person's input in the
+    /// panel asks of the page), top frame only behind the helper's own guard.
+    static let panelTopFrame = "if (window === window.top) {\n" + AgentPanelScript.source + "\n}"
+
+    /// The panel script as a function body, for a document the injected
+    /// script missed (its own guard keeps it to one install).
+    static let panelInjectFunction = "function() {\n" + AgentPanelScript.source + "\n}"
+
+    /// The panel script for every document of the tab, in the helper's
+    /// world (`runImmediately`: the current one too).
+    static var panelScriptCommand: (String, [String: Any]) {
+        let params: [String: Any] = ["source": panelTopFrame, "worldName": ChromiumHelper.worldName,
+                                     "runImmediately": true]
+        return ("Page.addScriptToEvaluateOnNewDocument", params)
+    }
+
+    /// What `start` sends: the CDP harness's init (`initCommands`, exactly
+    /// fixtures/init.json), with the panel script right after the helper —
+    /// before the target runs, so its first document has it. The harness
+    /// installs the panel script on its own (panel-input.test.mjs).
+    static func startCommands(viewport: CGSize, userAgent: ChromiumUserAgent) -> [(String, [String: Any])] {
+        var commands = initCommands(viewport: viewport, userAgent: userAgent)
+        let helper = commands.lastIndex { $0.0 == "Page.addScriptToEvaluateOnNewDocument" } ?? (commands.count - 1)
+        commands.insert(panelScriptCommand, at: helper + 1)
         return commands
     }
 

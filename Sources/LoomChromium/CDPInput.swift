@@ -185,9 +185,20 @@ public enum CDPInput {
 
     // MARK: - Keys
 
+    /// Never among the agent's key commands, though Playwright's Mac table
+    /// has them on Meta+C, Meta+X and Meta+V: Chromium keeps ONE clipboard
+    /// per browser process, shared by every browser context in it (step-9
+    /// probe "Clipboard scope"). With them, the agent's Meta+V would paste
+    /// what the person — or another session on the same Chromium — copied in
+    /// a panel, and its Meta+C would write where they paste. The person's own
+    /// copy and paste never come here (PanelEditCommand, the panel's
+    /// clipboard bridge).
+    public static let sharedClipboardCommands: Set<String> = ["copy", "cut", "paste"]
+
     /// A key goes down: `keyDown` when it types text (keypress, beforeinput
     /// and input follow), `rawKeyDown` when it does not (Tab moves focus,
-    /// Escape, arrows). On a Mac, the editing commands of its combination.
+    /// Escape, arrows). On a Mac, the editing commands of its combination,
+    /// but for the shared clipboard's (`sharedClipboardCommands`).
     public static func keyDown(_ key: CDPKey, mac: Bool = true, autoRepeat: Bool = false) -> (String, [String: Any]) {
         let text = key.typedText
         var params: [String: Any] = [
@@ -207,6 +218,7 @@ public enum CDPInput {
         if autoRepeat { params["autoRepeat"] = true }
         if mac {
             let commands = MacEditingCommands.commands(code: key.code, modifiers: key.modifiers)
+                .filter { !CDPInput.sharedClipboardCommands.contains($0) }
             if !commands.isEmpty { params["commands"] = commands }
         }
         return (dispatchKeyEvent, params)

@@ -5,9 +5,11 @@ import SwiftUI
 
 // The agent's Chromium browser in the side panel (ADR-0016): the user's
 // browser chrome laid over a live picture of the page instead of a web
-// view. Watch-only for now: no click or key reaches the page yet. The bar,
-// the buttons and the tabs act through the engine's panel operations — the
-// agent's address rules, never while the agent runs a command.
+// view. A click into the picture gives the page the person's mouse and
+// keyboard (ChromiumPageView, through the surface's input pump), never while
+// the agent runs a command. The bar, the buttons and the tabs act through
+// the engine's panel operations — the agent's address rules, never while the
+// agent runs a command either.
 
 /// What the panel reads and asks of the engine's main-thread copy of its
 /// state (`ChromiumAgentSurface`). An `@Observable` surface drives the view
@@ -95,6 +97,21 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
         .onChange(of: surface.activeTab) { _, _ in
             if !addressFocused { address = shownAddress }
         }
+        // ⌘L in the page view.
+        .onChange(of: agentSurface?.addressFocusRequests ?? 0) { _, _ in
+            addressFocused = true
+        }
+    }
+
+    /// The engine's own surface: the page view's input and its notices.
+    private var agentSurface: ChromiumAgentSurface? {
+        surface as? ChromiumAgentSurface
+    }
+
+    /// Why the person's input did not reach the page, for a few seconds;
+    /// else the engine's status (a refused address, a crash…).
+    private var notice: String? {
+        agentSurface?.inputNotice ?? surface.statusMessage
     }
 
     private var activeURL: URL? {
@@ -188,10 +205,11 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
             // the agent's first page opens at.
             ChromiumPageViewRepresentable(
                 source: surface.activeTab.flatMap { surface.screencastSource(for: $0) },
+                input: agentSurface?.input,
                 onPageArea: { [surface] size, scale, onScreen in
                     surface.viewerDidChange(pageArea: size, backingScale: scale, onScreen: onScreen)
                 })
-            if let status = surface.statusMessage {
+            if let status = notice {
                 Text(status)
                     .font(.system(size: 12))
                     .foregroundStyle(DefaultTheme.secondaryText)

@@ -1935,6 +1935,42 @@ actor ChromiumAgentCore {
         emitState()
     }
 
+    // MARK: - The panel's input (panel design §2–§3)
+    //
+    // Added for the interactive panel, and only this: the panel script's
+    // queries, and the line the agent reads when the person used the page.
+    // The person's Input.* go from the page view's pump straight to the
+    // tab's session — never through this queue.
+
+    /// What the agent's next answer on a tab says when the person clicked or
+    /// typed in its page from the panel.
+    static let userInputNote = "The user used this page in the panel (clicks or typing) — take a snapshot "
+        + "before relying on earlier refs."
+
+    /// One op of the panel script (AgentPanelScript) on the active tab — the
+    /// one the pump believes current — run beside the command queue, never
+    /// in it. nil when refused: an agent command runs or waits, a dialog
+    /// blocks the page, the tab is another or has no live page; or when no
+    /// answer came within `timeout`.
+    func panelQuery(_ op: String, _ arg: PanelJSON, tab: BrowserTabsModel.TabID,
+                    timeout: Duration) async -> PanelJSON? {
+        guard !tornDown, !control.isBusy, activeTab == tab, let index = position(of: tab),
+              let runtime = tabs[index].runtime, !runtime.isDetached, !runtime.isCrashed,
+              !runtime.blocksPage else { return nil }
+        return await runtime.panelCall(op, arg, timeout: timeout)
+    }
+
+    /// The person clicked or typed in the tab's page: ONE line in its next
+    /// answer's `### Events`, however much they did before that answer.
+    func noteUserInput(tab: BrowserTabsModel.TabID) {
+        guard !tornDown, let index = position(of: tab) else { return }
+        if let runtime = tabs[index].runtime, !runtime.isDetached {
+            runtime.noteOnce(Self.userInputNote)
+        } else if !tabs[index].notes.contains(Self.userInputNote) {
+            tabs[index].notes.append(Self.userInputNote)
+        }
+    }
+
     /// A message the panel shows for 4 s.
     func flash(_ text: String) {
         transientToken += 1

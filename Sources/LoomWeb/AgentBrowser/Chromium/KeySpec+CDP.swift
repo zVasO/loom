@@ -5,10 +5,17 @@ import LoomChromium
 /// a `KeySpec` as `CDPInput` sends it.
 ///
 /// "ControlOrMeta" is already Meta: `KeySpec.parse` reads it so, Loom runs
-/// on a Mac. The Mac editing commands (Meta+A selectAll, Meta+C/V copy and
-/// paste, Alt+Backspace…) go with the combinations `MacEditingCommands`
-/// lists and with no other: Chromium runs any command it is given, whatever
-/// the modifiers (step-0 probe: a plain "a" carrying selectAll selects all).
+/// on a Mac. The Mac editing commands (Meta+A selectAll, Meta+Z undo,
+/// Alt+Backspace…) go with the combinations `MacEditingCommands` lists and
+/// with no other: Chromium runs any command it is given, whatever the
+/// modifiers (step-0 probe: a plain "a" carrying selectAll selects all).
+///
+/// Never copy, cut or paste (`CDPInput.sharedClipboardCommands`, dropped in
+/// `CDPInput.keyDown`, so browser_run_code's keyboard too): Chromium's
+/// clipboard is one per browser process, shared by every context in it
+/// (step-9 probe "Clipboard scope") — the agent's Meta+V would paste what the
+/// person copied in another session's panel. Meta+C and Meta+V still go as
+/// keys; the page's own key handlers see them.
 extension KeySpec {
 
     /// The key's modifiers as `Input.dispatchKeyEvent` counts them.

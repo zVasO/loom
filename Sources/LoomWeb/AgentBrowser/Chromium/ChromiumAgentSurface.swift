@@ -8,6 +8,11 @@ import Observation
 /// session for its live picture, and what the person does from the panel —
 /// each an operation the core runs between the agent's commands, and refuses
 /// while the agent holds the browser.
+///
+/// It owns the pump of the person's input in the page view (`input`, panel
+/// design §2–§3): attached to the current tab's page, reset whenever that
+/// page changes (another tab, a relaunch, a crash), told when a dialog
+/// blocks it; its notices show over the page for 4 s.
 @MainActor
 @Observable
 public final class ChromiumAgentSurface: ChromiumPanelSurface {
@@ -23,13 +28,30 @@ public final class ChromiumAgentSurface: ChromiumPanelSurface {
     /// keeps the panel's aspect).
     public private(set) var viewport: CGSize = .zero
     private var sources: [BrowserTabsModel.TabID: ChromiumScreencastSource] = [:]
+    /// Why the person's input in the page did not reach it ("claude is using
+    /// the page…"), for `inputNoticeDuration`; shown over the page.
+    private(set) var inputNotice: String? = nil
+    /// ⌘L in the page view: the address bar takes the keyboard.
+    private(set) var addressFocusRequests = 0
     /// Whether the page view last said it was on screen.
     @ObservationIgnored private var viewerOnScreen = false
+    /// The page the pump was last attached to.
+    @ObservationIgnored private var inputPage: (tab: BrowserTabsModel.TabID?, source: ChromiumScreencastSource?)?
+    @ObservationIgnored private var noticeToken = 0
+
+    /// The person's input in the page view, on its way to the current tab.
+    let input: UserInputPump
 
     private let core: ChromiumAgentCore
 
+    static let inputNoticeDuration: Duration = .seconds(4)
+
     init(core: ChromiumAgentCore) {
         self.core = core
+        self.input = UserInputPump()
+        input.host = self
+        let control = core.control
+        input.agentBusy = { control.isBusy }
     }
 
     // MARK: - The live picture
@@ -149,5 +171,68 @@ public final class ChromiumAgentSurface: ChromiumPanelSurface {
         if statusMessage != state.statusMessage { statusMessage = state.statusMessage }
         if viewport != state.viewport { viewport = state.viewport }
         if sources != state.sources { sources = state.sources }
+        attachInput(state)
+    }
+
+    /// The pump follows the current tab's page: another one — a tab switch,
+    /// a relaunch, a crash, no page — resets it.
+    private func attachInput(_ state: ChromiumBrowserState) {
+        let source = state.activeTab.flatMap { state.sources[$0] }
+        if let inputPage, inputPage.tab == state.activeTab, inputPage.source == source {
+            // The same page.
+        } else {
+            inputPage = (state.activeTab, source)
+            input.attach(source.map { ChromiumPanelWire(source: $0) }, tab: state.activeTab)
+        }
+        input.setPageBlocked(Self.blocksPage(state.activeDialog))
+        // The core's own word on its command: still running when the
+        // command's caller already returned (the core's backstop answered).
+        input.setAgentRunningInCore(state.activity?.isRunning == true)
+    }
+
+    /// A JavaScript dialog holds the page's script: no input until it is
+    /// answered. A file chooser does not.
+    static func blocksPage(_ modal: AgentModalState?) -> Bool {
+        guard let modal else { return false }
+        switch modal.kind {
+        case .alert, .confirm, .prompt: return true
+        case .fileChooser: return false
+        }
+    }
+}
+
+// MARK: - What the pump asks of the panel
+
+extension ChromiumAgentSurface: UserInputPumpHost {
+
+    func panelQuery(_ op: String, _ arg: PanelJSON, on tab: BrowserTabsModel.TabID,
+                    timeout: Duration) async -> PanelJSON? {
+        await core.panelQuery(op, arg, tab: tab, timeout: timeout)
+    }
+
+    func noteUserActed(on tab: BrowserTabsModel.TabID) {
+        let core = self.core
+        Task { await core.noteUserInput(tab: tab) }
+    }
+
+    func showInputNotice(_ text: String) {
+        noticeToken += 1
+        let token = noticeToken
+        inputNotice = text
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: ChromiumAgentSurface.inputNoticeDuration)
+            guard let self, self.noticeToken == token else { return }
+            self.inputNotice = nil
+        }
+    }
+
+    /// ⌘⇧R reloads as ⌘R does: the core's reload has one kind.
+    func performPanelAction(_ action: PanelAction) {
+        switch action {
+        case .focusAddress: addressFocusRequests += 1
+        case .reload: reload()
+        case .back: goBack()
+        case .forward: goForward()
+        }
     }
 }

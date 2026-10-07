@@ -57,10 +57,28 @@ public final class ChromiumAgentBrowser {
     // MARK: - Commands
 
     /// Runs `command` after the ones before it, within `deadline` — in the
-    /// core: nothing of it runs on the main thread.
+    /// core: nothing of it runs on the main thread, nor waits for it. The
+    /// agent takes the page: what the person holds in the panel comes up and
+    /// their input waits until the command returns or throws (panel design
+    /// §3) — told to the main actor, never awaited (a terminal drawing there
+    /// would add its frame to every command). Until the takeover lands, the
+    /// pump reads the core's busy count itself.
     nonisolated public func run(_ command: AgentCommand, options: AgentCommandOptions,
                                 deadline: ContinuousClock.Instant) async throws -> AgentResult {
-        try await core.run(command, options: options, deadline: deadline)
+        Task { @MainActor [weak self] in self?.agentWillAct() }
+        defer { Task { @MainActor [weak self] in self?.agentDidFinish() } }
+        return try await core.run(command, options: options, deadline: deadline)
+    }
+
+    /// The person's held buttons and keys come up, their composition is
+    /// cancelled, and the panel's input waits (the pump counts the commands
+    /// in the core's queue).
+    private func agentWillAct() {
+        surface.input.agentWillAct()
+    }
+
+    private func agentDidFinish() {
+        surface.input.agentDidFinish()
     }
 
     /// Pending and running commands fail at once with `reason`.

@@ -90,17 +90,26 @@ struct ChromiumKeySpecTests {
                                        "nativeVirtualKeyCode": 91, "modifiers": 0, "location": 1])
     }
 
-    @Test("Meta+C and Meta+V carry copy and paste; Control+A the Mac's own; Backspace deleteBackward")
+    @Test("Meta+C, Meta+X and Meta+V go as keys without copy, cut or paste (one clipboard per Chromium); Control+A the Mac's own; Backspace deleteBackward")
     func commandesMac() throws {
         let copy = try KeySpec.parse("Meta+c").cdpPress()
+        let cut = try KeySpec.parse("Meta+x").cdpPress()
         let paste = try KeySpec.parse("Meta+v").cdpPress()
+        let undo = try KeySpec.parse("Meta+z").cdpPress()
         let controlA = try KeySpec.parse("Control+a").cdpPress()
         let backspace = try KeySpec.parse("Backspace").cdpPress()
-        let copyCommands = copy.count == 4 ? copy[1].1["commands"] as? [String] : nil
-        let pasteCommands = paste.count == 4 ? paste[1].1["commands"] as? [String] : nil
+        try #require(copy.count == 4 && cut.count == 4 && paste.count == 4 && undo.count == 4)
+        // The shared clipboard is never the agent's: the keys still go, with no command.
+        for press in [copy, cut, paste] {
+            let down = press[1]
+            let carriesCommands = down.1.keys.contains("commands")
+            #expect(!carriesCommands, "\(shown(rendered(press)))")
+            #expect(down.1["type"] as? String == "rawKeyDown")
+            #expect(down.1["modifiers"] as? Int == 4)
+        }
+        let undoCommands = undo[1].1["commands"] as? [String]
         let controlCommands = controlA.count == 4 ? controlA[1].1["commands"] as? [String] : nil
-        #expect(copyCommands == ["copy"])
-        #expect(pasteCommands == ["paste"])
+        #expect(undoCommands == ["undo"])
         #expect(controlCommands == ["moveToBeginningOfParagraph"])
         try #require(backspace.count == 2)
         expectCommand(backspace[0], key, ["type": "rawKeyDown", "key": "Backspace", "code": "Backspace",
