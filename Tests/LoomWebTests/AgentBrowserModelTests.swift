@@ -699,14 +699,16 @@ struct AgentViewportDefaultsTests {
 @Suite("Agent browser — engine")
 struct AgentBrowserEngineTests {
 
-    @Test("WebKit until chosen otherwise; Chromium only when one can run; the environment wins")
+    @Test("Automatic until chosen otherwise; Chromium only when one can run; the environment wins")
     func choixDuMoteur() {
         func resolve(_ preference: AgentBrowserEnginePreference?, _ environment: [String: String] = [:],
                      chromium: Bool) -> APIBrowserEngine {
             AgentBrowserEnginePreference.resolve(preference: preference, environment: environment,
                                                  chromiumAvailable: chromium)
         }
-        #expect(resolve(nil, chromium: true) == .webkit, "nothing chosen yet")
+        #expect(AgentBrowserEnginePreference.standard == .automatic)
+        #expect(resolve(nil, chromium: true) == .chromium, "nothing chosen yet: Automatic")
+        #expect(resolve(nil, chromium: false) == .webkit, "nothing chosen, no Chromium: WebKit")
         #expect(resolve(.automatic, chromium: true) == .chromium)
         #expect(resolve(.automatic, chromium: false) == .webkit)
         #expect(resolve(.chromium, chromium: false) == .webkit, "never without a browser")

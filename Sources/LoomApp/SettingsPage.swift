@@ -35,7 +35,7 @@ struct SettingsPage: View {
     @State private var agentDataCleared = false
     /// The model's engine choice, mirrored so the picker shows what was just
     /// set (it applies to sessions started or resumed afterwards).
-    @State private var engineChoice: AgentBrowserEnginePreference = .webkit
+    @State private var engineChoice: AgentBrowserEnginePreference = .standard
     /// The Chromium Loom finds, looked up when the card shows and after a choice.
     @State private var chromiumStatus: AppModel.AgentChromiumStatus?
     /// Why the download could not be removed, until the next try.

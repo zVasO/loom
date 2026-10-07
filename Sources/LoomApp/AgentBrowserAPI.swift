@@ -142,7 +142,7 @@ extension AppModel {
     // MARK: - Engine (ADR-0016)
 
     /// Settings ▸ Agents: which engine new sessions' browsers use; nil until
-    /// the person chooses (WebKit).
+    /// the person chooses (Automatic).
     var agentBrowserEnginePreference: AgentBrowserEnginePreference? {
         get {
             UserDefaults.standard.string(forKey: AgentBrowserEnginePreference.defaultsKey)
@@ -154,10 +154,10 @@ extension AppModel {
     }
 
     /// What Settings ▸ Agents shows: the engine in force for new sessions,
-    /// WebKit until the person chooses. Set to what is already in force, it
-    /// stores nothing — an untouched choice keeps following the default.
+    /// Automatic until the person chooses. Set to what is already in force,
+    /// it stores nothing — an untouched choice keeps following the default.
     var agentBrowserEngineChoice: AgentBrowserEnginePreference {
-        get { agentBrowserEnginePreference ?? .webkit }
+        get { agentBrowserEnginePreference ?? AgentBrowserEnginePreference.standard }
         set {
             guard newValue != agentBrowserEngineChoice else { return }
             agentBrowserEnginePreference = newValue

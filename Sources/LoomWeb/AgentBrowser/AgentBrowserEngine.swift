@@ -59,6 +59,10 @@ public enum AgentBrowserEnginePreference: String, CaseIterable, Sendable {
     case webkit
 
     public static let defaultsKey = "loom.agents.browserEngine"
+    /// Until the person chooses: Chromium when Loom finds one — its own
+    /// download, Playwright's headless shell, or a browser chosen in
+    /// Settings — else WebKit.
+    public static let standard: AgentBrowserEnginePreference = .automatic
     /// For support and the self-test: `webkit` or `chromium`, over Settings.
     public static let environmentKey = "LOOM_AGENT_ENGINE"
 
@@ -68,7 +72,7 @@ public enum AgentBrowserEnginePreference: String, CaseIterable, Sendable {
     public static func resolve(preference: AgentBrowserEnginePreference?, environment: [String: String],
                                chromiumAvailable: Bool) -> APIBrowserEngine {
         let wanted: AgentBrowserEnginePreference = environment[environmentKey]
-            .flatMap(AgentBrowserEnginePreference.init(rawValue:)) ?? preference ?? .webkit
+            .flatMap(AgentBrowserEnginePreference.init(rawValue:)) ?? preference ?? standard
         switch wanted {
         case .webkit: return .webkit
         case .chromium, .automatic: return chromiumAvailable ? .chromium : .webkit
