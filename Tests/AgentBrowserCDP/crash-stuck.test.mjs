@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { delay, launch, performance, settle, settlesWithin, within } from "./lib/cdp.mjs";
 import { openTab, WORLD } from "./lib/init.mjs";
 import { startServer } from "./lib/server.mjs";
-import { eachBrowser, options } from "./lib/suite.mjs";
+import { CRASH_UNREPORTED, eachBrowser, options } from "./lib/suite.mjs";
 
 const PROBE_MS = 500;
 
@@ -99,7 +99,7 @@ eachBrowser((browser) => {
     await tab.close();
   });
 
-  test("Page.crash: no reply, the crash reported twice, Page.reload brings the page back", options(), async () => {
+  test("Page.crash: no reply, the crash reported twice, Page.reload brings the page back", options({ skip: CRASH_UNREPORTED }), async () => {
     const tab = await openTab(chrome, { url: server.url("/") });
     const inspector = tab.session.waitForEvent("Inspector.targetCrashed", { timeout: 10_000 });
     const target = chrome.conn.waitForEvent("Target.targetCrashed", { predicate: (p) => p.targetId === tab.targetId, timeout: 10_000 });
@@ -133,7 +133,7 @@ eachBrowser((browser) => {
     }
   });
 
-  test("the helper's world id survives nothing: after a crash and reload, the old id is refused", options(), async () => {
+  test("the helper's world id survives nothing: after a crash and reload, the old id is refused", options({ skip: CRASH_UNREPORTED }), async () => {
     const tab = await openTab(chrome, { url: server.url("/") });
     const { executionContextId: old } = await tab.session.send("Page.createIsolatedWorld", { frameId: tab.frameId, worldName: WORLD });
     const crashed = tab.session.waitForEvent("Inspector.targetCrashed", { timeout: 10_000 });

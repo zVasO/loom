@@ -39,7 +39,7 @@ import http from "node:http";
 import { openTab, prepareBrowser } from "./lib/init.mjs";
 import { RunPage, Runner, runCode } from "./lib/runcore.mjs";
 import { startServer } from "./lib/server.mjs";
-import { eachBrowser, options } from "./lib/suite.mjs";
+import { CRASH_UNREPORTED, eachBrowser, options } from "./lib/suite.mjs";
 
 // The facade and its doors, as AgentRunnerScript.swift has them (null while it is not there).
 const RUNNER_SWIFT = (() => {
@@ -428,6 +428,10 @@ eachBrowser((browser) => {
     assert.ok(closedMs < 1500, `within 1.5 s (took ${closedMs.toFixed(1)})`);
     await settle(chrome.conn.send("Target.disposeBrowserContext", { browserContextId: closing.browserContextId }));
 
+    if (CRASH_UNREPORTED) {
+      t.diagnostic(`Page.crash rung not run: ${CRASH_UNREPORTED}`);
+      return;
+    }
     const crashing = await openRunner();
     try {
       const world = await newWorld(crashing);
@@ -453,7 +457,11 @@ eachBrowser((browser) => {
         return performance.now() - start;
       })()`);
       t.diagnostic(`20 × setTimeout(10): ${elapsed.toFixed(1)} ms`);
-      assert.ok(elapsed < 400, `not throttled (${elapsed.toFixed(1)} ms)`);
+      // Background throttling aligns a hidden page's timers to 1 s: 20 s here.
+      // What is checked is that it is off. Not the timers' grain: about 10 ms
+      // on Linux, but macOS coalesces a renderer with nothing on screen
+      // (≈ 37 ms a 10 ms timer, 750 ms in all, on the macOS runners).
+      assert.ok(elapsed < 2000, `not throttled (${elapsed.toFixed(1)} ms)`);
       const answer = await within(evaluate(runner, ctx, "confirm('leave?')"), 5000, "no answer");
       assert.equal(answer, false, "dismissed by the runner's sink");
     } finally {

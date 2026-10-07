@@ -46,10 +46,25 @@ async function startUdpSink() {
 }
 
 async function startLoopback6() {
-  const server = net.createServer((socket) => socket.end("HTTP/1.1 200 OK\r\naccess-control-allow-origin: *\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok"));
+  // Sockets are destroyed at close: server.close() alone waits for every
+  // connection to end, and Chromium may keep one open (on CI, where [::1]
+  // exists, the suite hung there for 30 minutes).
+  const sockets = new Set();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("error", () => {});
+    socket.end("HTTP/1.1 200 OK\r\naccess-control-allow-origin: *\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok");
+  });
   try {
     await new Promise((done, fail) => { server.once("error", fail); server.listen(0, "::1", done); });
-    return { port: server.address().port, close: () => new Promise((done) => server.close(done)) };
+    return {
+      port: server.address().port,
+      close: () => new Promise((done) => {
+        for (const socket of sockets) socket.destroy();
+        server.close(() => done());
+      }),
+    };
   } catch {
     return null;
   }

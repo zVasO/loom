@@ -34,8 +34,9 @@ navigateurs « Web n » (qui, eux, restent toujours WebKit).
   Google est vérifiée et affichée ; il n'est jamais mis à jour de lui-même ;
   **Remove** le retire), sinon celui de Playwright s'il est installé. Un Chrome,
   Chromium ou Edge complet ne sert que choisi par **Choose…** : il se met à jour
-  sous Loom et contacte ses services en arrière-plan. Rien n'est téléchargé sans
-  votre clic.
+  sous Loom, contacte ses services en arrière-plan, et sur Mac il ne fait
+  tourner à pleine vitesse que le dernier onglet ouvert (les animations des
+  autres ralentissent). Rien n'est téléchargé sans votre clic.
 - Chaque moteur a son profil : un login fait sous WebKit n'existe pas sous
   Chromium.
 
@@ -175,7 +176,10 @@ Sous les deux :
   actions attendent `browser_file_upload` (sans chemin, il l'annule).
 - Sous WebKit, un bouton « Copier » que l'agent clique écrit dans votre
   presse-papiers, comme si vous l'aviez cliqué : Loom ne le restaure pas, faute
-  de distinguer cette copie d'une des vôtres faite au même moment.
+  de distinguer cette copie d'une des vôtres faite au même moment. Sous Chromium,
+  la copie reste dans le presse-papiers propre à Chromium : celui du Mac n'est
+  ni écrit ni lu (mesuré), seul ce que vous copiez vous-même dans le panneau y
+  arrive.
 - `browser_file_upload` ne prend que des fichiers du dossier de travail de la
   session, ou du dossier que son refus indique (Loom y range ce que l'agent veut
   envoyer d'ailleurs) : envoyer un fichier à une page, c'est le faire sortir de

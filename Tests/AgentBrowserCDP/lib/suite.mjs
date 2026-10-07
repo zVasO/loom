@@ -18,3 +18,13 @@ export function eachBrowser(body, { kinds, skip } = {}) {
 }
 
 export const options = (extra = {}) => ({ timeout: TEST_TIMEOUT, ...extra });
+
+/**
+ * Measured on GitHub's Ubuntu runners, both builds: a renderer killed by
+ * Page.crash is never reported (no Inspector.targetCrashed nor
+ * Target.targetCrashed in 10 s) — the runner's crash handling, not Loom's
+ * code: the same tests pass on macOS runners (Loom's platform) and on other
+ * Linux machines. A skip reason there, false everywhere else.
+ */
+export const CRASH_UNREPORTED = process.platform === "linux" && process.env.GITHUB_ACTIONS === "true"
+  && "GitHub's Ubuntu runners never report a renderer killed by Page.crash (both builds, measured); macOS, Loom's platform, runs it";
