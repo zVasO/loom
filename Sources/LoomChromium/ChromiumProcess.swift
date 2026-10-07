@@ -181,7 +181,9 @@ public final class ChromiumProcess: @unchecked Sendable {
         pid = child.pid
         self.log = log
         exitQueue = DispatchQueue(label: "app.loom.chromium.exit.\(child.pid)")
-        stderrQueue = DispatchQueue(label: "app.loom.chromium.stderr.\(child.pid)", qos: .utility)
+        // Not .utility: starved behind a busy app, the words of an early exit
+        // (a profile in use) came after the error was already worded.
+        stderrQueue = DispatchQueue(label: "app.loom.chromium.stderr.\(child.pid)", qos: .userInitiated)
         connection = CDPConnection(read: child.readDescriptor, write: child.writeDescriptor,
                                    label: "\(child.pid)", log: log)
         exitSource = DispatchSource.makeProcessSource(identifier: child.pid, eventMask: .exit, queue: exitQueue)
@@ -292,7 +294,7 @@ public final class ChromiumProcess: @unchecked Sendable {
     }
 
     private func earlyExitError(_ exit: ChromiumExit) async -> ChromiumProcessError {
-        await stderrSettled(within: .milliseconds(500))
+        await stderrSettled(within: .seconds(2))
         return .exitedBeforeReady(exit, stderrTail: stderrTail)
     }
 

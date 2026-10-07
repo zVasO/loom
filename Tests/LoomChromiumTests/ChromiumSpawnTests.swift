@@ -270,7 +270,12 @@ struct ChromiumProcessTests {
             let known = await process.exited()
             #expect(known == .status(3), "once known, the exit is answered at once")
         }
-        await process.stderrSettled(within: .seconds(2))
+        // Drained on a queue of its own: while the whole test run starts,
+        // the words can take seconds to be read.
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !process.stderrTail.contains("profile is busy"), ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
         #expect(process.stderrTail.contains("profile is busy"))
         let permissions = try FileManager.default.attributesOfItem(atPath: profile.path)[.posixPermissions] as? Int
         #expect(permissions == 0o700, "the profile holds cookies: private from its creation")
@@ -295,7 +300,7 @@ struct ChromiumProcessTests {
         defer { try? FileManager.default.removeItem(at: profile) }
         // The signal goes out once the trap is installed, never on a timer's guess.
         var polls = 0
-        while !process.stderrTail.contains("trapped") && polls < 100 {
+        while !process.stderrTail.contains("trapped") && polls < 500 {
             try await Task.sleep(for: .milliseconds(20))
             polls += 1
         }
