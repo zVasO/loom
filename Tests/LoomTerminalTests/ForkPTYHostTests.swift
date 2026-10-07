@@ -250,14 +250,16 @@ struct ForkPTYHostSignalTests {
           .enabled(if: perlAvailable))
     func dispositionsRemisesParDefaut() async throws {
         let transcript = MemoryTranscriptSink()
-        let (_, events) = try withSignalIgnored(SIGUSR1) {
-            try launch(perl(#"$| = 1; print defined $SIG{USR1} ? "usr1-$SIG{USR1}" : "usr1-DEFAULT""#),
+        // Like the mask probe: alive until its line is read, then stopped.
+        let (runtime, events) = try withSignalIgnored(SIGUSR1) {
+            try launch(perl(#"$| = 1; print defined $SIG{USR1} ? "usr1-$SIG{USR1}\n" : "usr1-DEFAULT\n"; sleep 20"#),
                        transcript: transcript)
         }
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else { Issue.record("no .started"); return }
-        guard case .terminated = await iterator.next() else { Issue.record("no .terminated"); return }
-        #expect(transcript.text.contains("usr1-DEFAULT"),
+        let answered = await waitFor("usr1-", in: transcript, within: .seconds(15))
+        _ = await runtime.stop(.graceful)
+        #expect(answered && transcript.text.contains("usr1-DEFAULT"),
                 "SIG_IGN survives execve unless the child resets it — saw: \(transcript.text)")
     }
 
