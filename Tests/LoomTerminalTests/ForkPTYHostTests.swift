@@ -172,12 +172,14 @@ struct ForkPTYHostSignalTests {
 
     /// The child's last bytes and its exit reach Loom on two sources: the
     /// exit may come first, its output a moment later.
-    private func waitFor(_ text: String, in transcript: MemoryTranscriptSink) async -> Bool {
-        for _ in 0..<200 {   // 5 s
+    private func waitFor(_ text: String, in transcript: MemoryTranscriptSink,
+                         within budget: Duration = .seconds(5)) async -> Bool {
+        let deadline = ContinuousClock().now + budget
+        while ContinuousClock().now < deadline {
             if transcript.text.contains(text) { return true }
             try? await Task.sleep(for: .milliseconds(25))
         }
-        return false
+        return transcript.text.contains(text)
     }
 
     @Test("born from a thread that blocks SIGWINCH, the child's mask is empty",
@@ -186,20 +188,18 @@ struct ForkPTYHostSignalTests {
         let transcript = MemoryTranscriptSink()
         // SIGWINCH is not a POSIX signal: perl's POSIX module does not export
         // it, so the number comes from Config (28 on Darwin).
-        // The runtime is kept: released, it no longer feeds the transcript,
-        // and the probe's line would be lost while its exit still arrives.
-        // The probe lingers after its line: a session leader that exits at
-        // once can take its unread output with it (seen on CI runners).
+        // The probe lives on after its line, like its siblings: one that
+        // exited at once lost its unread line on loaded CI runners (it runs
+        // as the whole test run starts). The test stops it once read.
         let (runtime, events) = try withSignalBlocked(SIGWINCH) {
-            try launch(perl(#"use strict; use warnings; use POSIX; use Config; $| = 1; my %sig; @sig{split " ", $Config{sig_name}} = split " ", $Config{sig_num}; my $old = POSIX::SigSet->new; POSIX::sigprocmask(SIG_BLOCK, POSIX::SigSet->new, $old); my $member = $old->ismember($sig{WINCH}); print $member == 1 ? "mask-blocked" : $member == 0 ? "mask-clear" : "mask-error"; select(undef, undef, undef, 0.5)"#),
+            try launch(perl(#"use strict; use warnings; use POSIX; use Config; $| = 1; my %sig; @sig{split " ", $Config{sig_name}} = split " ", $Config{sig_num}; my $old = POSIX::SigSet->new; POSIX::sigprocmask(SIG_BLOCK, POSIX::SigSet->new, $old); my $member = $old->ismember($sig{WINCH}); print $member == 1 ? "mask-blocked\n" : $member == 0 ? "mask-clear\n" : "mask-error\n"; sleep 20"#),
                        transcript: transcript)
         }
-        defer { withExtendedLifetime(runtime) {} }
         var iterator = events.makeAsyncIterator()
         guard case .started = await iterator.next() else { Issue.record("no .started"); return }
-        guard case .terminated(let report) = await iterator.next() else { Issue.record("no .terminated"); return }
-        _ = await waitFor("mask-", in: transcript)
-        #expect(transcript.text.contains("mask-clear") && !transcript.text.contains("mask-blocked"),
+        let answered = await waitFor("mask-", in: transcript, within: .seconds(15))
+        let report = await runtime.stop(.graceful)
+        #expect(answered && transcript.text.contains("mask-clear") && !transcript.text.contains("mask-blocked"),
                 "the child must not inherit the forking thread's mask — saw: \(transcript.text) (exit \(report.exitStatus))")
     }
 
