@@ -2,7 +2,42 @@
 
 Chaque session claude a son propre navigateur, que son agent pilote pour tester ce
 qu'il construit : ouvrir le serveur de dev, cliquer, remplir, lire la console et les
-requêtes, prendre une capture. La décision et ses garde-fous : [ADR-0014](adr/0014-navigateur-de-l-agent-isole-par-projet.md).
+requêtes, prendre une capture. La décision et ses garde-fous : [ADR-0014](adr/0014-navigateur-de-l-agent-isole-par-projet.md) ;
+son moteur Chromium : [ADR-0016](adr/0016-chromium-pour-le-navigateur-de-l-agent.md).
+
+## Deux moteurs
+
+Les pages de l'agent tournent sur **Chromium sans fenêtre**, piloté par le
+protocole DevTools, quand Loom en trouve un ; sinon sur **WebKit**, comme les
+navigateurs « Web n » (qui, eux, restent toujours WebKit).
+
+- **Sous Chromium**, les clics et les touches sont ceux du navigateur
+  (`isTrusted`, séquence pointer complète, `:hover`, `(hover: hover)`), les pages
+  continuent de tourner panneau caché (animations, `requestAnimationFrame`,
+  observers), l'attente après une action suit la navigation et les requêtes
+  qu'elle déclenche au lieu de pauses fixes, et `browser_run_code` est disponible.
+  Mesuré sur le runner macOS de la CI (environ trois fois plus lent qu'un Mac) :
+
+  | Commande | WebKit | Chromium |
+  |---|---|---|
+  | `browser_click` (p50) | 720 ms | 136 ms |
+  | `browser_click`, `snapshot: "none"` | 774 ms | 75 ms |
+  | `browser_type`, `snapshot: "none"` | 550 ms | 4 ms |
+  | `browser_press_key`, `snapshot: "none"` | 613 ms | 26 ms |
+
+- **Réglages ▸ Agents ▸ Agent browser engine** : Automatique (par défaut :
+  Chromium s'il y en a un, sinon WebKit), Chromium ou WebKit. Une session garde
+  son moteur jusqu'à sa reprise.
+- **Quel Chromium.** Le `chrome-headless-shell` que Loom télécharge quand vous
+  cliquez sur **Download chrome-headless-shell** (environ 95 Mo, depuis Chrome
+  for Testing ; sa taille et son SHA-256 sont fixés dans Loom, la signature de
+  Google est vérifiée et affichée ; il n'est jamais mis à jour de lui-même ;
+  **Remove** le retire), sinon celui de Playwright s'il est installé. Un Chrome,
+  Chromium ou Edge complet ne sert que choisi par **Choose…** : il se met à jour
+  sous Loom et contacte ses services en arrière-plan. Rien n'est téléchargé sans
+  votre clic.
+- Chaque moteur a son profil : un login fait sous WebKit n'existe pas sous
+  Chromium.
 
 ## Le regarder
 
@@ -18,6 +53,17 @@ requêtes, prendre une capture. La décision et ses garde-fous : [ADR-0014](adr/
   « <hôte> says: » : l'agent ou vous pouvez y répondre.
 - La carte de la session dans la barre latérale montre un globe quand son agent
   navigue ; dans l'onglet PR, l'en-tête du tiroir aussi.
+- **Sous Chromium, le panneau est la page** : cliquez dedans pour vous en servir —
+  vous connecter, remplir, faire défiler. La page ne prend le clavier qu'après
+  ce clic ; ⌃Tab le rend au terminal. ⌘C ⌘X ⌘V ⌘A ⌘Z vont à la page, ⌘L ⌘R ⌘[ ⌘]
+  à la barre d'adresse et à l'historique, tous les autres raccourcis restent à
+  Loom. Les touches mortes et les méthodes de saisie marchent (`^` puis `e` donne
+  `ê`). Copier dans la page remplit le presse-papiers du Mac, et l'inverse. Un
+  `<select>` s'ouvre en menu Mac. **L'agent passe d'abord** : pendant ses
+  commandes, vos clics et vos touches attendent (un avis le dit), et ce que vous
+  teniez est relâché ; ensuite, sa réponse suivante lui dit que vous avez utilisé
+  la page, pour qu'il reprenne un instantané. Le survol sans clic ne passe
+  qu'une fois la page cliquée, pour ne pas défaire un `browser_hover` de l'agent.
 - **La largeur de la page** : chaque projet a une largeur par défaut
   (**Réglages ▸ Projects**, sinon celle de **Réglages ▸ Agents**, 1280 px au
   départ) : le terminal garde ses 80 colonnes, le panneau est souvent étroit, et
@@ -56,7 +102,11 @@ arrêtée, avec un mot dans `### Events`. Activé, le mode recharge les pages ou
 sous ses règles ; changer la liste garde les anciennes règles jusqu'à ce que les
 nouvelles les remplacent ; si elles ne peuvent être mises en place, rien ne charge.
 WebRTC et la résolution DNS anticipée, qui échappent aux règles, sont coupés dans
-ce mode quand WebKit le permet.
+ce mode quand WebKit le permet. Sous Chromium, tout ce qui n'est pas local ni
+listé part vers un proxy que Loom tient et qui refuse tout ; QUIC, WebRTC et la
+résolution anticipée sont coupés, et si ce proxy ne peut démarrer, Chromium ne se
+lance pas. Changer le mode ou la liste relance le Chromium du projet : ses pages
+rechargent.
 
 ## Les outils
 
@@ -78,6 +128,11 @@ Les outils MCP `browser_*` suivent Playwright MCP, que les agents connaissent :
 | `browser_run_code` | Chromium seulement : un script Playwright `async (page) => { … }` en un appel, exécuté hors de la page, dans un bac à sable sans réseau ; chaque appel de `page` passe par les mêmes contrôles que les outils. Répond la valeur en JSON, la sortie de `console.log`, puis l'instantané ; une erreur vient en premier (`### Error`) et marque le résultat comme erreur. 56 s, 1 000 appels ; un dialogue sans `page.on('dialog')` arrête le script |
 | `browser_handle_dialog`, `browser_tabs`, `browser_navigate_back`, `browser_close` | Le reste |
 
+Un élément se désigne par une référence de l'instantané (`e12`), un sélecteur CSS
+ou un sélecteur Playwright (`role=button[name="Save"]`, `text=Envoyer`,
+`label=Email`, `data-testid=submit`) ; plusieurs éléments pour une action, c'est
+une erreur qui les liste.
+
 Chaque action répond l'instantané de la page qui en résulte ; avec `snapshot: "none"`,
 elle ne répond que `### Page`, un dialogue et les événements — bien plus court,
 pour enchaîner des actions sur les références du dernier instantané. Depuis un shell :
@@ -86,13 +141,31 @@ pour enchaîner des actions sur les références du dernier instantané. Depuis 
 
 ## Les limites
 
+Sous WebKit seulement :
+
 - Les événements sont synthétiques : pas de `:hover` CSS, pas de glisser natif ;
   Tab, Entrée, Espace et le défilement sont émulés. Un code qui exige
   `event.isTrusted` les refuse.
-- Les iframes d'une autre origine ne sont pas inspectables.
 - Panneau masqué, la page tourne mais WebKit suspend son rendu (animations,
   `requestAnimationFrame`) : `### Page` l'indique.
 - Les captures ne voient pas WebGL ni la vidéo.
+- Une capture pleine page fait défiler la page tranche par tranche, puis la
+  remet où elle était : un en-tête fixe apparaît dans chaque tranche, et au-delà
+  de 8 000 pixels CSS la capture s'arrête.
+- `browser_run_code` répond qu'il lui faut Chromium.
+
+Sous Chromium seulement :
+
+- Le panneau montre une image de la page : VoiceOver ne la lit pas (WebKit, lui,
+  reste lisible). Pas d'outils de développement : aucun port n'est ouvert.
+- Des pages de connexion Google ou Microsoft peuvent refuser un navigateur
+  piloté.
+- Le glisser-déposer HTML et le dépôt de fichiers depuis le Finder ne passent
+  pas par le panneau ; un collage n'apporte que du texte.
+
+Sous les deux :
+
+- Les iframes d'une autre origine ne sont pas inspectables.
 - Les messages de console et les requêtes d'un cadre d'une autre origine (une
   publicité, un widget) sont plafonnés à 20 par seconde ; ceux de la page et de
   ses propres cadres à 200. Une page qui envoie des messages par rafales (des
@@ -100,12 +173,9 @@ pour enchaîner des actions sur les références du dernier instantané. Depuis 
   sa navigation suivante : `### Events` le dit.
 - Un sélecteur de fichier ouvert n'empêche ni l'instantané ni la capture ; les
   actions attendent `browser_file_upload` (sans chemin, il l'annule).
-- Un bouton « Copier » que l'agent clique écrit dans votre presse-papiers, comme
-  si vous l'aviez cliqué : Loom ne le restaure pas, faute de distinguer cette
-  copie d'une des vôtres faite au même moment.
-- Une capture pleine page fait défiler la page tranche par tranche, puis la
-  remet où elle était : un en-tête fixe apparaît dans chaque tranche, et au-delà
-  de 8 000 pixels CSS la capture s'arrête.
+- Sous WebKit, un bouton « Copier » que l'agent clique écrit dans votre
+  presse-papiers, comme si vous l'aviez cliqué : Loom ne le restaure pas, faute
+  de distinguer cette copie d'une des vôtres faite au même moment.
 - `browser_file_upload` ne prend que des fichiers du dossier de travail de la
   session, ou du dossier que son refus indique (Loom y range ce que l'agent veut
   envoyer d'ailleurs) : envoyer un fichier à une page, c'est le faire sortir de
@@ -118,6 +188,11 @@ pour enchaîner des actions sur les références du dernier instantané. Depuis 
 - En développement (`swift run`, sans Info.plist), préférez `localhost` à
   `127.0.0.1` : App Transport Security peut refuser une adresse IP en http.
 - Les outils n'apparaissent pas : une session déjà lancée les reçoit à sa reprise.
+- « No Chromium found — WebKit is used » : cliquez **Download chrome-headless-shell**
+  dans **Réglages ▸ Agents**, ou choisissez un navigateur avec **Choose…** ; les
+  sessions lancées ou reprises ensuite passent à Chromium.
+- Un Chromium trop ancien (avant la version 120) est refusé, et le panneau dit
+  pourquoi : mettez-le à jour ou téléchargez celui de Loom.
 
 ## Sécurité et confidentialité
 

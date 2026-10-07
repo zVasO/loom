@@ -25,9 +25,9 @@ L'ADR-0014 donne à chaque agent un navigateur WebKit, piloté par des scripts i
 
 **Choix du moteur.**
 - Il est fixé au lancement ou à la reprise d'une session : `LOOM_BROWSER_ENGINE` dans l'environnement de `loom mcp`. La liste des outils et leurs mots sont figés au démarrage du serveur MCP.
-- Le réglage offre Automatique, Chromium ou WebKit. Sans Chromium, c'est WebKit, qui reste le repli.
+- Le réglage offre Automatique (par défaut), Chromium ou WebKit. Sans Chromium, c'est WebKit, qui reste le repli.
 
-**Binaire.** Un navigateur de la famille Chromium déjà installé, sinon `chrome-headless-shell` téléchargé **sur un clic** dans les Réglages.
+**Binaire.** `chrome-headless-shell`, choisi d'office : celui que Loom télécharge **sur un clic** dans les Réglages (Chrome for Testing, version épinglée avec sa taille et son SHA-256 dans l'app, jamais mis à jour seul), sinon celui du cache de Playwright. Un navigateur complet (Chrome for Testing, Chromium, Chrome, Edge) ne sert que choisi par la personne : il se met à jour sous Loom, suit les politiques de sa marque et contacte ses services en arrière-plan. Brave n'est jamais pris d'office.
 
 **Alternatives rejetées :**
 - Garder WebKit en réduisant ses pauses : sans événements de navigation ni de réseau, les réduire rend les actions incertaines, et le rendu suspendu demeure.
@@ -65,7 +65,10 @@ L'ADR-0014 donne à chaque agent un navigateur WebKit, piloté par des scripts i
   - Un script qui boucle est arrêté par `Runtime.terminateExecution`.
   - Il est pré-autorisable : il ne donne rien de plus que `browser_evaluate`, les actions et `browser_file_upload` réunis, mais il en enchaîne beaucoup sans instantané intermédiaire. La pastille d'activité montre chaque étape.
 - **Mémoire (NFR-M) :** un processus par projet actif, fermé 60 s après sa dernière session ou son dernier panneau.
+- **Presse-papiers :** Chromium en garde un par processus, partagé par tous ses contextes — donc par les sessions d'un projet, et par les sessions privées du processus partagé. Les commandes `copy`, `cut` et `paste` ne figurent donc jamais dans les touches de l'agent, et le coller de la personne passe par un événement `paste` et `Input.insertText`, jamais par ce presse-papiers.
+- **Panneau interactif :** l'agent passe d'abord. Quand une commande commence, ce que la personne tient remonte et sa saisie attend, avec un avis ; la prise de main est annoncée au fil principal sans être attendue, pour ne rien ajouter à la latence de l'agent. Une réponse suivante dit une fois à l'agent que la personne a utilisé la page. La page ne prend le clavier que sur un clic en elle. Un `<select>` s'ouvre en menu Mac, la liste de Chromium n'apparaissant dans aucune image.
 - **Régressions acceptées :**
   - Pas d'outils de développement pour la personne : aucun port.
-  - VoiceOver ne lit qu'une image. Une vue « texte de la page » compense en partie, et WebKit reste sélectionnable.
+  - VoiceOver ne lit qu'une image ; WebKit reste sélectionnable pour qui en a besoin.
   - Des connexions Google ou Microsoft peuvent refuser un navigateur automatisé.
+  - Glisser-déposer HTML natif et dépôt de fichiers depuis le Finder ne sont pas relayés dans le panneau.

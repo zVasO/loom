@@ -33,15 +33,19 @@ _Avoid_ : onglet (terme UI, pas domaine)
 Checkout Git isolé créé pour une session, sur sa propre branche. Détruit ou conservé indépendamment de la session.
 
 **Navigateur de l'agent** :
-Le navigateur propre à une session, que son agent pilote par les outils `browser_*` (ADR-0014) : distinct des navigateurs « Web n » de l'utilisateur, il s'affiche dans le panneau latéral. Il exécute des scripts dans ses pages — le seul de Loom à le faire.
+Le navigateur propre à une session, que son agent pilote par les outils `browser_*` (ADR-0014) : distinct des navigateurs « Web n » de l'utilisateur, il s'affiche dans le panneau latéral. Il exécute des scripts dans ses pages — le seul de Loom à le faire. Il tourne sur l'un de deux **moteurs**, fixé au lancement de la session (ADR-0016) : Chromium sans fenêtre, piloté par le protocole DevTools, ou WebKit.
 _Avoid_ : navigateur de test, bot, navigateur headless
 
+**Moteur du navigateur de l'agent** :
+Ce qui fait tourner les pages du navigateur de l'agent : Chromium (`chrome-headless-shell` téléchargé par Loom sur un clic, celui de Playwright, ou un navigateur Chromium choisi dans les Réglages) ou WebKit, le repli. Réglage Automatique (par défaut), Chromium ou WebKit ; une session garde le sien jusqu'à sa reprise. Les navigateurs « Web n » de l'utilisateur restent WebKit.
+_Avoid_ : navigateur (pour le moteur), backend, driver
+
 **Profil web de l'agent** :
-Le stockage WebKit (cookies, localStorage, IndexedDB) des navigateurs d'agent d'un même projet, persistant d'une session à l'autre ; privé et oublié pour une session sans projet ou une revue. Jamais celui de l'utilisateur. Supprimé avec son projet.
+Le stockage (cookies, localStorage, IndexedDB) des navigateurs d'agent d'un même projet, persistant d'une session à l'autre ; privé et oublié pour une session sans projet ou une revue. Jamais celui de l'utilisateur. Supprimé avec son projet. Chaque moteur a le sien : un login fait sous WebKit n'existe pas sous Chromium.
 _Avoid_ : profil (seul — WEB-02 réserve « profils » à ceux de l'utilisateur), session web, cookies
 
 **Mode sites locaux** :
-Le réglage qui borne les navigateurs d'agent aux adresses de la machine (localhost, 127.0.0.1) et aux hôtes listés : chaque chargement http(s) et ws(s) — page, script, requête, socket — filtré par WebKit ; WebRTC et la résolution DNS anticipée coupés. Désactivé par défaut. Il ne borne que les pages, pas les autres outils de l'agent.
+Le réglage qui borne les navigateurs d'agent aux adresses de la machine (localhost, 127.0.0.1) et aux hôtes listés : chaque chargement http(s) et ws(s) — page, script, requête, socket — filtré par WebKit, ou envoyé par Chromium à un proxy de Loom qui refuse tout le reste ; WebRTC et la résolution DNS anticipée coupés. Désactivé par défaut. Il ne borne que les pages, pas les autres outils de l'agent.
 _Avoid_ : pare-feu, sandbox, mode hors ligne
 
 **Instantané de page** :

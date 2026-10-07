@@ -19,8 +19,11 @@ swift run -c release LoomApp    # IMPORTANT : release — le debug est 10-50× p
 Tests : `swift test` (process réels, repos Git réels, sockets réels).
 SDK des extensions et exemple Jira : `cd Examples/extensions && npm test`.
 Scripts du navigateur de l'agent : `node --test Tests/AgentBrowserJS/*.test.mjs`
-(sur un vrai DOM si Playwright est installé) ; WebKit lui-même :
-`LOOM_AUTOTEST=agent-browser swift run LoomApp` (rapport dans `/tmp/loom-agent-browser-report.json`).
+(sur un vrai DOM si Playwright est installé) ; son moteur Chromium sur un vrai
+Chromium, par le protocole DevTools : `node --test --test-concurrency=1 Tests/AgentBrowserCDP/*.test.mjs`
+(et `LOOM_CHROMIUM=<chrome-headless-shell> swift test` pour les tests Swift de bout en bout) ;
+l'app entière : `LOOM_AUTOTEST=agent-browser LOOM_AUTOTEST_ENGINE=chromium|webkit swift run LoomApp`
+(rapport et latences p50/p90 dans `/tmp/loom-agent-browser-report.json`).
 
 Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 étapes).
 
@@ -53,13 +56,16 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   un navigateur de la pile à côté du terminal de la session, sans jamais
   réduire le terminal sous 80 colonnes de lui-même ni le redimensionner pendant
   un glisser.
-- **Navigateur de l'agent** (ADR-0014) : chaque session claude a son propre
+- **Navigateur de l'agent** (ADR-0014, ADR-0016) : chaque session claude a son propre
   navigateur, à côté de son terminal, sur un profil isolé par projet (jamais les
-  cookies de l'utilisateur ; privé pour les revues), piloté par les outils MCP
+  cookies de l'utilisateur ; privé pour les revues) — Chromium sans fenêtre quand
+  Loom en trouve un (événements de confiance, pages qui tournent panneau caché,
+  panneau interactif), WebKit sinon —, piloté par les outils MCP
   `browser_*` au format de Playwright MCP — naviguer, instantané d'accessibilité à
   références, cliquer, taper, remplir un formulaire, envoyer un fichier, touches,
   attendre, console, requêtes, capture (pleine page comprise), largeur de page,
-  JavaScript, dialogues, onglets — et par `loom browser <outil>`. L'agent ouvre le
+  JavaScript, dialogues, onglets, scripts Playwright (`browser_run_code`, Chromium) —
+  et par `loom browser <outil>`. L'agent ouvre le
   panneau sur son navigateur la première fois qu'il s'en sert. Outils
   pré-autorisés par défaut, coupables dans les Réglages. Guide :
   [`docs/agent-browser.md`](docs/agent-browser.md).
@@ -97,7 +103,8 @@ Exécutables compagnons : `loom-hook` (hooks) et `loom` (CLI + serveur MCP de
 l'API agents, ADR-0010 ; sa logique vit dans `LoomCLI`). Dans une session,
 `loom docs` imprime la référence de l'API ; `loom mcp` la sert en outils MCP,
 branché par `--mcp-config` au lancement. Le navigateur de l'agent vit dans
-`LoomWeb/AgentBrowser` (ADR-0014).
+`LoomWeb/AgentBrowser` (ADR-0014) ; son moteur Chromium dans `LoomChromium`
+(transport, processus, profils, attente) et `LoomWeb/AgentBrowser/Chromium` (ADR-0016).
 
 Aucun service ne dépend de l'UI ; l'UI ne voit que des valeurs (`TerminalScreen`),
 jamais le moteur. Tout accès moteur est confiné à la queue sérielle de sa session.
