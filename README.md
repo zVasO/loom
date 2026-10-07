@@ -73,7 +73,10 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   commandes dans ⌘K ; extensions d'arrière-plan, alarmes natives, statut dans
   la barre du haut et écran de premier plan (ADR-0012). Exemples : un board Jira
   qui démarre une session depuis un ticket (`Examples/extensions/jira-board/`),
-  un Pomodoro qui couvre Loom pendant les pauses (`Examples/extensions/pomodoro/`).
+  un Pomodoro qui couvre Loom pendant les pauses (`Examples/extensions/pomodoro/`),
+  une veille techno dont Claude résume les nouveautés chaque matin
+  (`Examples/extensions/tech-watch/`, ADR-0015 : `claude -p` sans outils et
+  hôtes accordés à l'usage).
   Guide : [`docs/extensions.md`](docs/extensions.md).
 - **Thèmes** : 9 familles intégrées, chacune en clair et en sombre ; apparence
   Système / Clair / Sombre (suivi de macOS en direct) ; override par projet ;

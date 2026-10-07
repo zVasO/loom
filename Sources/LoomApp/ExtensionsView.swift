@@ -195,6 +195,15 @@ struct ExtensionsWiring: ViewModifier {
                 })
     }
 
+    /// Dismissing the sheet any other way is a refusal.
+    private var hostsBinding: Binding<PendingHostRequest?> {
+        Binding(get: { model.extensions.pendingHostRequest },
+                set: { value in
+                    guard value == nil, let shown = model.extensions.pendingHostRequest else { return }
+                    model.extensions.finishHostRequest([], for: shown)
+                })
+    }
+
     private var consentBinding: Binding<ExtensionConsentRequest?> {
         Binding(get: { model.extensions.consentRequest },
                 set: { value in
@@ -217,6 +226,9 @@ struct ExtensionsWiring: ViewModifier {
             }
             .sheet(item: launchBinding) { request in
                 ExtensionLaunchSheet(model: model, request: request)
+            }
+            .sheet(item: hostsBinding) { request in
+                ExtensionHostsSheet(model: model, request: request)
             }
             // ADR-0012: an extension's page over everything, wherever the user is.
             .overlay {

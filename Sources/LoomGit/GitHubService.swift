@@ -1,4 +1,5 @@
 import Foundation
+import LoomCore
 
 /// v4 — PR review: everything goes through the user's authenticated `gh` CLI.
 /// JSON parsing is pure (the tested seam); process execution mirrors GitService.

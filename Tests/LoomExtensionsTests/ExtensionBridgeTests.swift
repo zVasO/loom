@@ -49,6 +49,32 @@ final class FakeServices: ExtensionAppServices {
         overlays.append((page, until, dismissLabel))
     }
     func dismissOverlay(for extensionID: String) { overlayDismissals += 1 }
+
+    // ADR-0015.
+    var completions: [ClaudeCompletionRequest] = []
+    var completionAnswer: Result<BridgeClaudeCompletion, BridgeError> =
+        .success(BridgeClaudeCompletion(text: "Résumé", model: "claude-sonnet", costUsd: 0.01, durationMs: 1200))
+    /// Set: the next completion waits until the test resumes it.
+    var completionGate: CheckedContinuation<Void, Never>?
+    var holdCompletions = false
+    var hostRequests: [[String]] = []
+    /// What the user allows of each request; nil allows everything asked.
+    var hostAnswer: [String]?
+    var revoked: [[String]] = []
+
+    func completeWithClaude(_ request: ClaudeCompletionRequest,
+                            for manifest: ExtensionManifest) async throws -> BridgeClaudeCompletion {
+        completions.append(request)
+        if holdCompletions {
+            await withCheckedContinuation { completionGate = $0 }
+        }
+        return try completionAnswer.get()
+    }
+    func requestHosts(_ hosts: [String], from manifest: ExtensionManifest) async throws -> [String] {
+        hostRequests.append(hosts)
+        return hostAnswer.map { answer in hosts.filter(answer.contains) } ?? hosts
+    }
+    func revokeHosts(_ hosts: [String], for extensionID: String) throws { revoked.append(hosts) }
 }
 
 @MainActor

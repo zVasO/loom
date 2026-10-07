@@ -30,6 +30,30 @@ final class PendingExtensionLaunch: Identifiable {
     }
 }
 
+/// Hosts an extension asked for at use (ADR-0015), waiting on the user's
+/// answer in the hosts sheet. Resolves once, with the hosts they allowed.
+@MainActor
+final class PendingHostRequest: Identifiable {
+    nonisolated let id = UUID()
+    let extensionID: String
+    let extensionName: String
+    let hosts: [String]
+    private var continuation: CheckedContinuation<[String], Never>?
+
+    init(extensionID: String, extensionName: String, hosts: [String],
+         continuation: CheckedContinuation<[String], Never>) {
+        self.extensionID = extensionID
+        self.extensionName = extensionName
+        self.hosts = hosts
+        self.continuation = continuation
+    }
+
+    func resolve(_ approved: [String]) {
+        continuation?.resume(returning: approved)
+        continuation = nil
+    }
+}
+
 /// A consent the user is asked for: to install a folder, to link one, or to
 /// approve what an updated manifest now asks.
 struct ExtensionConsentRequest: Identifiable {
@@ -96,6 +120,9 @@ final class ExtensionsModel {
     /// Kept in step with the main tab by ContentView.
     var isTabVisible = false
     var pendingLaunch: PendingExtensionLaunch?
+    var pendingHostRequest: PendingHostRequest?
+    /// The hosts each extension was granted at use, for Settings (ADR-0015).
+    private(set) var grantedHosts: [String: [String]] = [:]
     var consentRequest: ExtensionConsentRequest?
     /// A live session an extension asked to bring on screen.
     var openSessionRequest: SessionOpenRequest?
@@ -119,6 +146,7 @@ final class ExtensionsModel {
     @ObservationIgnored private var detector = SessionChangeDetector()
     @ObservationIgnored private var theme: BridgeTheme?
     @ObservationIgnored private let alarms: ExtensionAlarmScheduler
+    @ObservationIgnored let claudeRunner = ExtensionClaudeRunner()
     @ObservationIgnored private var overlayTimeout: Task<Void, Never>?
     /// When the user last dismissed each extension's overlay: it may not come
     /// straight back — an extension never keeps the user out of Loom.
@@ -166,6 +194,7 @@ final class ExtensionsModel {
         registry.scan()
         extensions = registry.extensions
         problems = registry.problems
+        refreshGrantedHosts()
         for (id, built) in hostedFrom where extensionNamed(id) != built {
             tearDownHost(id)
         }
@@ -275,7 +304,8 @@ final class ExtensionsModel {
             manifest: installed.manifest, permissions: installed.effectivePermissions,
             services: services,
             storage: ExtensionStorage(file: registry.storageFile(for: id)),
-            secrets: secrets, http: http)
+            secrets: secrets, http: http,
+            grantedHosts: registry.grantedHosts(for: id))
         let host = makeHost(installed, bridge: bridge, page: nil)
         // The first listener: the detector's baseline is now, or the first
         // change would only set it.
@@ -320,6 +350,10 @@ final class ExtensionsModel {
         if let pending = pendingLaunch, pending.extensionID == id {
             finishLaunch(BridgeLaunchResult(launched: false), for: pending)
         }
+        if let pending = pendingHostRequest, pending.extensionID == id {
+            finishHostRequest([], for: pending)
+        }
+        claudeRunner.cancel(extensionID: id)
     }
 
     /// Every page of the extension hears it: its view (or background page)
@@ -472,10 +506,69 @@ final class ExtensionsModel {
         }
     }
 
+    // MARK: - Hosts granted at use (ADR-0015)
+
+    private func refreshGrantedHosts() {
+        var all: [String: [String]] = [:]
+        for installed in extensions {
+            let hosts = registry.grantedHosts(for: installed.id)
+            if !hosts.isEmpty { all[installed.id] = hosts }
+        }
+        grantedHosts = all
+    }
+
+    func beginHostRequest(_ hosts: [String], from manifest: ExtensionManifest) async throws -> [String] {
+        guard pendingHostRequest == nil, pendingLaunch == nil else {
+            throw BridgeError(.conflict, "another request is already waiting for the user")
+        }
+        return await withCheckedContinuation { continuation in
+            pendingHostRequest = PendingHostRequest(extensionID: manifest.id, extensionName: manifest.name,
+                                                    hosts: hosts, continuation: continuation)
+        }
+    }
+
+    /// The user's answer: `approved` is saved before the page hears it, so a
+    /// fetch right after already passes.
+    func finishHostRequest(_ approved: [String], for request: PendingHostRequest) {
+        var saved: [String] = []
+        if !approved.isEmpty {
+            do {
+                try registry.grantHosts(approved, to: request.extensionID)
+                saved = approved
+            } catch {
+                lastError = "\(error)"
+            }
+            refreshGrantedHosts()
+        }
+        request.resolve(saved)
+        if pendingHostRequest === request { pendingHostRequest = nil }
+    }
+
+    /// From the page itself (`network.revoke`): its bridge already knows.
+    func revokeHostsAsked(_ hosts: [String], for id: String) throws {
+        try registry.revokeHosts(hosts, from: id)
+        refreshGrantedHosts()
+    }
+
+    /// From Settings: nil revokes them all. The page hears `network.changed`.
+    func revokeHosts(_ hosts: [String]?, for id: String) {
+        do {
+            try registry.revokeHosts(hosts, from: id)
+        } catch {
+            lastError = "\(error)"
+        }
+        refreshGrantedHosts()
+        let remaining = registry.grantedHosts(for: id)
+        bridges[id]?.setGrantedHosts(remaining)
+        if bridges[id]?.permissions.allows(.optionalNetwork) == true {
+            emit(.networkChanged(granted: remaining), to: id)
+        }
+    }
+
     // MARK: - Launches
 
     func beginLaunch(_ params: BridgeLaunchParams, from manifest: ExtensionManifest) async throws -> BridgeLaunchResult {
-        guard pendingLaunch == nil else {
+        guard pendingLaunch == nil, pendingHostRequest == nil else {
             throw BridgeError(.conflict, "another launch is already waiting for the user")
         }
         return await withCheckedContinuation { continuation in

@@ -21,6 +21,7 @@ function makePage({ reply, boot } = {}) {
     console,
     TextDecoder,
     TextEncoder,
+    URL,
     atob: (text) => Buffer.from(text, "base64").toString("binary"),
     document: { documentElement, addEventListener() {} },
     webkit: {
@@ -174,4 +175,34 @@ test("alarms and overlays accept Dates and send milliseconds", async () => {
     { method: "ui.presentOverlay", params: { page: "break.html", until: 1_800_000_060_000, dismissLabel: "Skip" } },
     { method: "alarms.clear", params: { name: "tick" } },
   ]);
+});
+
+// ADR-0015: Claude for text, and hosts granted at use.
+
+test("claude.complete posts the options, or a bare prompt", async () => {
+  const page = makePage({ reply: answer({ text: "Résumé", durationMs: 10, truncated: false }) });
+  const completion = await page.loom.claude.complete({ prompt: "Résume", model: "haiku", timeoutMs: 60000 });
+  assert.equal(completion.text, "Résumé");
+  assert.equal(page.posted[0].method, "claude.complete");
+  assert.deepEqual(plain(page.posted[0].params), { prompt: "Résume", model: "haiku", timeoutMs: 60000 });
+  await page.loom.claude.complete("Bonjour");
+  assert.deepEqual(plain(page.posted[1].params), { prompt: "Bonjour" });
+});
+
+test("network.request and revoke take hosts or URLs; granted lists both kinds", async () => {
+  const page = makePage({ reply: answer({ granted: ["blog.example.com"], denied: [] }) });
+  const grant = await page.loom.network.request(["https://Blog.example.com/feed.xml", " news.example.org "]);
+  assert.deepEqual(plain(grant), { granted: ["blog.example.com"], denied: [] });
+  assert.equal(page.posted[0].method, "network.request");
+  assert.deepEqual(plain(page.posted[0].params), { hosts: ["blog.example.com", "news.example.org"] });
+  assert.equal(await page.loom.network.revoke("https://blog.example.com/x"), undefined);
+  assert.deepEqual(plain(page.posted[1].params), { hosts: ["blog.example.com"] });
+  await page.loom.network.granted();
+  assert.equal(page.posted[2].method, "network.granted");
+});
+
+test("the new namespaces are frozen like the others", () => {
+  const page = makePage();
+  assert.ok(Object.isFrozen(page.loom.claude));
+  assert.ok(Object.isFrozen(page.loom.network));
 });

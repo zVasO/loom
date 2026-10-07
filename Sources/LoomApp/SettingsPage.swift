@@ -797,6 +797,37 @@ struct SettingsPage: View {
             Text(granted.isEmpty ? "No permission beyond its own page." : granted.joined(separator: " · "))
                 .font(.system(size: 11))
                 .foregroundStyle(DefaultTheme.secondaryText)
+            // ADR-0015: the sites the user granted at use, each revocable.
+            if installed.effectivePermissions.optionalNetwork,
+               let hosts = extensions.grantedHosts[installed.id], !hosts.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("SITES YOU ADDED")
+                            .font(.system(size: 10, weight: .semibold))
+                            .kerning(0.8)
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                        Spacer()
+                        GhostButton("Revoke All") { extensions.revokeHosts(nil, for: installed.id) }
+                    }
+                    ForEach(hosts, id: \.self) { host in
+                        HStack(spacing: 6) {
+                            Text("https://\(host)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(DefaultTheme.primaryText)
+                            Spacer()
+                            Button {
+                                extensions.revokeHosts([host], for: installed.id)
+                            } label: {
+                                Image(systemName: "xmark.circle")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(DefaultTheme.secondaryText)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Revoke \(host)")
+                        }
+                    }
+                }
+            }
             HStack(spacing: 4) {
                 GhostButton("Reload", systemImage: "arrow.clockwise") { extensions.reload(installed.id) }
                 GhostButton("Show in Finder", systemImage: "folder") { extensions.revealInFinder(installed.id) }

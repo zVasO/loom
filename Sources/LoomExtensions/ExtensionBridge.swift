@@ -31,6 +31,16 @@ public protocol ExtensionAppServices: AnyObject {
     func presentOverlay(page: String, until: Date, dismissLabel: String,
                         for manifest: ExtensionManifest) throws
     func dismissOverlay(for extensionID: String)
+
+    // ADR-0015 — Claude, and hosts granted at use.
+    /// Runs `claude -p` with no tools and answers its text. Throws
+    /// `unavailable`, `timeout`, or `conflict` when Loom runs too many.
+    func completeWithClaude(_ request: ClaudeCompletionRequest,
+                            for manifest: ExtensionManifest) async throws -> BridgeClaudeCompletion
+    /// Shows the hosts sheet and waits for the user's answer: the hosts they
+    /// allowed, already saved. Throws `conflict` while another is waiting.
+    func requestHosts(_ hosts: [String], from manifest: ExtensionManifest) async throws -> [String]
+    func revokeHosts(_ hosts: [String], for extensionID: String) throws
 }
 
 /// The native side of `window.loom` for one extension: decodes a request,
@@ -41,20 +51,38 @@ public final class ExtensionBridge {
     public let manifest: ExtensionManifest
     /// What the extension runs with: the manifest's asks the user granted.
     public let permissions: ExtensionPermissions
+    /// Hosts the user granted at use (ADR-0015); reach them only with
+    /// `optionalNetwork` granted. The app keeps them current.
+    public private(set) var grantedHosts: [String]
     private weak var services: ExtensionAppServices?
     private let storage: ExtensionStorage
     private let secrets: any SecretStore
     private let http: ExtensionHTTPClient
+    /// One Claude run at a time per extension, and a budget per hour.
+    private var claudeInFlight = false
+    private var claudeBudget = ClaudeCompletionBudget()
 
     public init(manifest: ExtensionManifest, permissions: ExtensionPermissions,
                 services: ExtensionAppServices, storage: ExtensionStorage,
-                secrets: any SecretStore, http: ExtensionHTTPClient) {
+                secrets: any SecretStore, http: ExtensionHTTPClient,
+                grantedHosts: [String] = []) {
         self.manifest = manifest
         self.permissions = permissions
+        self.grantedHosts = grantedHosts
         self.services = services
         self.storage = storage
         self.secrets = secrets
         self.http = http
+    }
+
+    public func setGrantedHosts(_ hosts: [String]) {
+        grantedHosts = hosts
+    }
+
+    /// What `http.fetch` may reach: the manifest's hosts, and those granted at use.
+    public var allowedHostPatterns: [HostPattern] {
+        permissions.hostPatterns
+            + (permissions.optionalNetwork ? grantedHosts.compactMap { try? HostPattern($0) } : [])
     }
 
     /// JSON text in, JSON text out — what the message handler passes through.
@@ -132,7 +160,7 @@ public final class ExtensionBridge {
 
         case .httpFetch:
             let params = try request.decodeParams(BridgeHTTPRequest.self)
-            return .ok(request.id, try await http.perform(params, allowed: permissions.hostPatterns))
+            return .ok(request.id, try await http.perform(params, allowed: allowedHostPatterns))
 
         case .secretsGet:
             let params = try request.decodeParams(BridgeKeyParams.self)
@@ -212,6 +240,47 @@ public final class ExtensionBridge {
 
         case .uiDismissOverlay:
             services.dismissOverlay(for: id)
+            return .ok(request.id, BridgeOK())
+
+        case .claudeComplete:
+            // From the background too: a morning digest is nobody's click.
+            let checked = try request.decodeParams(BridgeClaudeCompleteParams.self).validated()
+            guard !claudeInFlight else {
+                throw BridgeError(.conflict, "claude.complete is already running for this extension")
+            }
+            guard claudeBudget.admit(now: Date()) else {
+                throw BridgeError(.conflict,
+                                  "claude.complete runs at most \(ClaudeCompletionBudget.maxPerHour) times an hour")
+            }
+            claudeInFlight = true
+            defer { claudeInFlight = false }
+            return .ok(request.id, try await services.completeWithClaude(checked, for: manifest))
+
+        case .networkRequest:
+            let hosts = try request.decodeParams(BridgeHostsParams.self).validatedHosts()
+            let allowed = allowedHostPatterns
+            let missing = hosts.filter { host in !allowed.contains { $0.matches(host: host) } }
+            guard !missing.isEmpty else {
+                return .ok(request.id, BridgeHostsGrant(granted: hosts, denied: []))
+            }
+            guard services.isFrontmost(extensionID: id) else {
+                throw BridgeError(.forbidden, "network.request is only accepted while the extension is on screen")
+            }
+            let approved = try await services.requestHosts(missing, from: manifest)
+            for host in approved where !grantedHosts.contains(host) { grantedHosts.append(host) }
+            let now = allowedHostPatterns
+            let granted = hosts.filter { host in now.contains { $0.matches(host: host) } }
+            return .ok(request.id, BridgeHostsGrant(granted: granted,
+                                                    denied: hosts.filter { !granted.contains($0) }))
+
+        case .networkGranted:
+            return .ok(request.id, BridgeHostsList(declared: permissions.network,
+                                                   granted: permissions.optionalNetwork ? grantedHosts : []))
+
+        case .networkRevoke:
+            let hosts = try request.decodeParams(BridgeHostsParams.self).validatedHosts()
+            try services.revokeHosts(hosts, for: id)
+            grantedHosts.removeAll { hosts.contains($0) }
             return .ok(request.id, BridgeOK())
         }
     }
