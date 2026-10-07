@@ -634,6 +634,13 @@ extension AppModel {
         var warning: String?
         /// A full browser that is installed but used only once chosen.
         var hint: String?
+        /// The chrome-headless-shell Loom downloaded, if it is still there.
+        var downloaded: ChromiumInstallRecord? = nil
+    }
+
+    /// An agent's browser runs on Chromium: its binary must stay.
+    var agentChromiumInUse: Bool {
+        agentBrowsers.values.contains { $0.engine == .chromium }
     }
 
     func agentChromiumStatus() -> AgentChromiumStatus {
@@ -641,7 +648,8 @@ extension AppModel {
         let choice = agentChromiumPath
         let found = AgentChromiumBinary.locate(supportDirectory: supportDirectory, choice: choice, locator: locator)
         var status = AgentChromiumStatus(summary: "", path: found?.url.path, hasChoice: choice != nil,
-                                         warning: nil, hint: nil)
+                                         warning: nil, hint: nil,
+                                         downloaded: chromiumSetup.installed(supportDirectory: supportDirectory))
         if let found {
             let used = resolveAgentBrowserEngine() == .chromium
                 ? "new sessions use it"

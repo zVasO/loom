@@ -397,6 +397,7 @@ public final class AppModel {
         Self.migrateLegacySupportDirectory(to: resolved)
         self.supportDirectory = resolved
         self.extensions = ExtensionsModel(directory: resolved.appendingPathComponent("extensions"))
+        self.chromiumSetup = ChromiumSetupModel()
     }
 
     /// The app used to be called Bunshin: on first launch under the new name, the
@@ -2046,6 +2047,9 @@ public final class AppModel {
     /// Every agent Chromium of this run (ADR-0016), made on first use —
     /// `agentChromiumPool` in AgentBrowserAPI.swift.
     @ObservationIgnored var agentChromiumPoolStorage: ChromiumPool? = nil
+    /// Settings ▸ Agents' download of chrome-headless-shell: here so it goes
+    /// on when the Settings close.
+    let chromiumSetup: ChromiumSetupModel
     /// The launch-time sweep of Chromium profiles; the pool's first launch
     /// waits for it.
     @ObservationIgnored var agentChromiumSweep: Task<Void, Never>? = nil

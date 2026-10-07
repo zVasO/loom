@@ -1,4 +1,5 @@
 import LoomAgents
+import LoomChromium
 import LoomCore
 import LoomExtensions
 import LoomPersistence
@@ -37,6 +38,8 @@ struct SettingsPage: View {
     @State private var engineChoice: AgentBrowserEnginePreference = .webkit
     /// The Chromium Loom finds, looked up when the card shows and after a choice.
     @State private var chromiumStatus: AppModel.AgentChromiumStatus?
+    /// Why the download could not be removed, until the next try.
+    @State private var chromiumRemoveError: String?
     @State private var removalCandidate: InstalledExtension?
 
     var body: some View {
@@ -213,6 +216,7 @@ struct SettingsPage: View {
                 }
             }
         }
+        chromiumDownloadRows
         HStack(spacing: 10) {
             GhostButton("Choose…", systemImage: "folder") { chooseChromium() }
             if chromiumStatus?.hasChoice == true {
@@ -222,13 +226,76 @@ struct SettingsPage: View {
                 }
             }
         }
-        Text("Chromium runs the agent's pages headless, panel shown or not, with real clicks and keys (isTrusted, :hover); WebKit stays the fallback. Automatic picks Chromium when Loom finds chrome-headless-shell (its own download or Playwright's) or the browser chosen here; a full Chrome, Chromium or Edge is used only once chosen. Each engine keeps its own logins. Applies to sessions started or resumed after the change.")
+        Text("Chromium runs the agent's pages headless, panel shown or not, with real clicks and keys (isTrusted, :hover); WebKit stays the fallback. Automatic picks Chromium when Loom finds chrome-headless-shell (its own download or Playwright's) or the browser chosen here; a full Chrome, Chromium or Edge is used only once chosen. Loom downloads chrome-headless-shell only when you click, from Google's Chrome for Testing, checks it against the checksum built into this version of Loom, and never updates it on its own. Each engine keeps its own logins. Applies to sessions started or resumed after the change.")
             .font(.system(size: 11))
             .foregroundStyle(DefaultTheme.secondaryText)
     }
 
     private func refreshChromiumStatus() {
         chromiumStatus = model.agentChromiumStatus()
+    }
+
+    /// Loom's own chrome-headless-shell: downloaded on a click only (NFR-S),
+    /// checked against the SHA-256 this version of Loom pins.
+    @ViewBuilder
+    private var chromiumDownloadRows: some View {
+        let setup = model.chromiumSetup
+        let major = setup.pin.version.split(separator: ".").first.map(String.init) ?? setup.pin.version
+        Group {
+            switch setup.phase {
+            case .downloading(let received, let total):
+                HStack(spacing: 10) {
+                    ProgressView(value: Double(received), total: Double(max(total, 1)))
+                        .frame(maxWidth: 240)
+                    Text("\(received / 1_000_000) of \(max(total, 1) / 1_000_000) MB")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                    GhostButton("Cancel", systemImage: "xmark") { setup.cancel() }
+                }
+            case .verifying, .unpacking, .warming:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(setup.phase == .verifying ? "Checking the download (SHA-256)…"
+                         : setup.phase == .unpacking ? "Unpacking…" : "Starting it once…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                }
+            case .idle, .failed:
+                if let record = chromiumStatus?.downloaded {
+                    HStack(spacing: 10) {
+                        Text("chrome-headless-shell \(record.version) · SHA-256 verified"
+                             + (record.signature.map { " · " + $0 } ?? ""))
+                            .font(.system(size: 11))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                        Spacer()
+                        GhostButton("Remove", systemImage: "trash") {
+                            chromiumRemoveError = setup.remove(supportDirectory: model.supportDirectory,
+                                                               chromiumInUse: model.agentChromiumInUse)
+                            refreshChromiumStatus()
+                        }
+                    }
+                } else {
+                    GhostButton("Download chrome-headless-shell \(major) (\(setup.pin.sizeDescription))",
+                                systemImage: "arrow.down.circle") {
+                        chromiumRemoveError = nil
+                        setup.download(supportDirectory: model.supportDirectory)
+                    }
+                }
+                if case .failed(let message) = setup.phase {
+                    Text(message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.danger)
+                }
+                if let chromiumRemoveError {
+                    Text(chromiumRemoveError)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.danger)
+                }
+            }
+        }
+        .onChange(of: setup.phase) { _, phase in
+            if phase == .idle { refreshChromiumStatus() }
+        }
     }
 
     /// An .app or a bare executable (chrome-headless-shell): the locator
