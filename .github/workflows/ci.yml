@@ -22,6 +22,10 @@ concurrency:
   group: ci-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
   cancel-in-progress: true
 
+# The timing probes' suites: run alone, never beside the other tests.
+env:
+  PERF_PROBES: "PerfProbes|TerminalRowProbes|DiffRowsProbes"
+
 jobs:
   swift:
     name: swift build + test (macOS)
@@ -59,9 +63,11 @@ jobs:
           set -o pipefail
           swift build --build-tests 2>&1 | tee build.log
       - name: Test
+        env:
+          PROBES: ${{ env.PERF_PROBES }}
         run: |
           set -o pipefail
-          swift test --skip-build --skip PerfProbes 2>&1 | tee test.log
+          swift test --skip-build --skip "$PROBES" 2>&1 | tee test.log
       # Timing probes alone: their bounds are for a quiet Mac, and a virtual
       # runner is about three times slower (disk and CPU) — still an order of
       # magnitude under a lost cache, which is what they guard.
@@ -69,9 +75,10 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           LOOM_PERF_SLACK: "3"
+          PROBES: ${{ env.PERF_PROBES }}
         run: |
           set -o pipefail
-          swift test --skip-build --no-parallel --filter PerfProbes 2>&1 | tee perf.log
+          swift test --skip-build --no-parallel --filter "$PROBES" 2>&1 | tee perf.log
       # The last lines of a failed job: every distinct error, nothing else —
       # what a cloud session reads back to fix the push.
       - name: Errors
@@ -112,8 +119,8 @@ jobs:
 
   selftest:
     name: agent browser self-test (${{ matrix.engine }})
+    # Its own release build: it does not wait on the test job's verdict.
     if: github.event_name == 'workflow_dispatch' && inputs.selftest
-    needs: swift
     strategy:
       fail-fast: false
       matrix:
