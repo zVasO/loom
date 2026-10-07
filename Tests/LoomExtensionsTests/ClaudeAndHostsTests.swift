@@ -236,15 +236,20 @@ struct ClaudeAndHostsBridgeTests {
 
     @Test("http.fetch to a host never granted: forbidden, even with optionalNetwork")
     func fetchHorsListe() async {
-        let bridge = makeBridge(FakeServices(), permissions: ExtensionPermissions(optionalNetwork: true))
+        // The bridge holds its services weakly: they live as long as the test.
+        let services = FakeServices()
+        let bridge = makeBridge(services, permissions: ExtensionPermissions(optionalNetwork: true))
         let response = await call(bridge, "http.fetch", .object(["url": .string("https://blog.example.com/feed.xml")]))
         #expect(response.error?.code == .forbidden)
+        withExtendedLifetime(services) {}
     }
 
     @Test("hosts granted without optionalNetwork in the grant reach nothing")
     func hotesSansPermission() {
-        let bridge = makeBridge(FakeServices(), permissions: ExtensionPermissions(network: ["hn.algolia.com"]),
+        let services = FakeServices()
+        let bridge = makeBridge(services, permissions: ExtensionPermissions(network: ["hn.algolia.com"]),
                                 grantedHosts: ["blog.example.com"])
         #expect(!bridge.allowedHostPatterns.contains { $0.matches(host: "blog.example.com") })
+        withExtendedLifetime(services) {}
     }
 }
