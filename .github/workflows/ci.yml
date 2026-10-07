@@ -16,8 +16,10 @@ on:
 permissions:
   contents: read
 
+# A push cancels the run it outdates; a run started by hand (the self-test)
+# is in a group of its own and goes to the end.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
   cancel-in-progress: true
 
 jobs:
