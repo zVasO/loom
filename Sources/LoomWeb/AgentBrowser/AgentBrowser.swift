@@ -412,8 +412,15 @@ public final class AgentBrowser: NSObject {
             return try await fileUpload(paths, deadline: deadline)
         case .resize(let width):
             return try await resize(to: width, deadline: deadline)
+        case .runCode:
+            // No public way to stop a WebKit script that spins: never listed
+            // under WebKit; this answers a session that fell back to it.
+            throw AgentError.unavailable(Self.runCodeUnavailable)
         }
     }
+
+    nonisolated static let runCodeUnavailable = "browser_run_code needs the Chromium engine (Settings ▸ Agents); "
+        + "the other browser_* tools work"
 
     // MARK: - Navigation
 
@@ -1281,6 +1288,7 @@ public final class AgentBrowser: NSObject {
         case .fillForm(let fields): return "Filling \(fields.count == 1 ? "a field" : "\(fields.count) fields")"
         case .fileUpload: return "Choosing files"
         case .resize(let width): return "Setting the page width: \(width.label)"
+        case .runCode: return "Running code"
         }
     }
 

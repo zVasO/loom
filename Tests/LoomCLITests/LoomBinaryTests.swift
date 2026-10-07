@@ -59,6 +59,14 @@ struct LoomBinaryTests {
                         image: APIImageRef(path: file.path, mimeType: "image/png", width: 1, height: 1)))
                 case .browserSnapshot:
                     return .ok(request.id, APIToolContent(text: "### Snapshot\n```yaml\n- button \"Add\" [ref=e1]\n```"))
+                case .browserRunCode:
+                    // Like the app: a script that throws answers its ### Error, flagged.
+                    let code = request.params["code"]?.stringValue ?? ""
+                    if code.contains("throw") {
+                        return .ok(request.id, APIToolContent(text: "### Error\nError: boom (line 1 of your code)\n\n### Page\n- Page URL: about:blank",
+                                                              isError: true))
+                    }
+                    return .ok(request.id, APIToolContent(text: "### Result\n```json\n2\n```\n\n### Page\n- Page URL: about:blank"))
                 case .badgeList:
                     return .ok(request.id, APIBadgeListResult(badges: [APIBadge(name: "review", colorHex: "#4CC38A")]))
                 case .sessionGet:
@@ -241,6 +249,25 @@ struct LoomBinaryTests {
         #expect(FileManager.default.fileExists(atPath: marker.path), "what was in the directory stays")
         let saved = try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".png") }
         #expect(saved.count == 1)
+    }
+
+    @Test("`loom browser run_code` prints the Markdown; a script's error exits 1, its result 0")
+    func executerDuCode() throws {
+        let url = socketURL()
+        let server = appLikeServer(at: url, session: SessionID())
+        try server.start()
+        defer { server.stop() }
+        let environment = ["LOOM_SOCKET": url.path, "LOOM_SESSION_TOKEN": "session-token"]
+
+        let fine = try run(["browser", "run_code", "async (page) => 1 + 1"], environment: environment)
+        #expect(fine.status == 0, "\(fine.stderr)")
+        #expect(fine.stdout.hasPrefix("### Result\n```json\n2\n```"))
+
+        let failed = try run(["browser", "run_code", "async (page) => { throw new Error('boom'); }"],
+                             environment: environment)
+        #expect(failed.status == 1, "isError: a failure for the shell too")
+        #expect(failed.stdout.hasPrefix("### Error\nError: boom"), "the Markdown is printed all the same")
+        #expect(failed.stdout.contains("### Page"))
     }
 
     @Test("the global token never drives a session's browser")

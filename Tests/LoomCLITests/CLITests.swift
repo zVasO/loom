@@ -69,6 +69,27 @@ struct CLIParseTests {
         #expect(throws: CLI.ParseError.self) { try CLI.parse(["browser", "resize", "wide"]) }
     }
 
+    @Test("run_code: the code as it is, a script file with @, or JSON")
+    func executerDuCode() throws {
+        #expect(try CLI.parse(["browser", "run_code", "async (page) => { return await page.title(); }"]).0
+                == .browser(.browserRunCode, .object(["code": .string("async (page) => { return await page.title(); }")])))
+        #expect(try CLI.parse(["browser", "run_code", #"{"code":"async (page) => 1","snapshot":"none"}"#]).0
+                == .browser(.browserRunCode, .object(["code": .string("async (page) => 1"), "snapshot": .string("none")])))
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("loom-run-\(UUID().uuidString.prefix(6)).js")
+        let script = "async (page) => {\n  await page.getByRole('button', { name: 'Save' }).click();\n  return page.url();\n}\n"
+        try Data(script.utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        #expect(try CLI.parse(["browser", "run_code", "@" + file.path]).0
+                == .browser(.browserRunCode, .object(["code": .string(script)])), "read whole, newlines kept")
+        #expect(throws: CLI.ParseError.self, "a missing file") {
+            try CLI.parse(["browser", "run_code", "@/nonexistent/loom-script.js"])
+        }
+        let large = FileManager.default.temporaryDirectory.appendingPathComponent("loom-run-large-\(UUID().uuidString.prefix(6)).js")
+        try Data(repeating: 0x20, count: 70_000).write(to: large)
+        defer { try? FileManager.default.removeItem(at: large) }
+        #expect(throws: CLI.ParseError.self, "over 64 KB") { try CLI.parse(["browser", "run_code", "@" + large.path]) }
+    }
+
     @Test("browser usage errors are said plainly")
     func erreursNavigateur() {
         #expect(throws: CLI.ParseError.missingArgument("browser tool (see loom docs)")) { try CLI.parse(["browser"]) }

@@ -125,7 +125,8 @@ public struct MCPServer {
 
     /// Markdown as is; an image the app wrote, as an image block — read only
     /// from the screenshots directory (APIImageFile), never from a path a
-    /// result merely names.
+    /// result merely names. `isError` as the answer says (browser_run_code's
+    /// `### Error`): the Markdown still shows the page.
     func contentResult(_ content: APIToolContent) -> JSONValue {
         var blocks: [JSONValue] = [.object(["type": .string("text"), "text": .string(content.text)])]
         if let image = content.image {
@@ -138,7 +139,7 @@ public struct MCPServer {
                                        "text": .string("(The screenshot is at \(image.path).)")]))
             }
         }
-        return .object(["content": .array(blocks), "isError": .bool(false)])
+        return .object(["content": .array(blocks), "isError": .bool(content.isError == true)])
     }
 
     static func toolResult(text: String, isError: Bool) -> JSONValue {

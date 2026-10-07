@@ -77,6 +77,8 @@ public enum APIMethod: String, CaseIterable, Sendable {
     case browserFillForm = "browser.fillForm"
     case browserFileUpload = "browser.fileUpload"
     case browserResize = "browser.resize"
+    /// A Playwright script in one call (Chromium engine only, ADR-0016).
+    case browserRunCode = "browser.runCode"
 
     /// Drives the session's own browser.
     public var isBrowser: Bool { rawValue.hasPrefix("browser.") }
@@ -105,7 +107,7 @@ public enum APIMethod: String, CaseIterable, Sendable {
         switch self {
         case .browserNavigate, .browserNavigateBack, .browserClick, .browserType, .browserSelectOption,
              .browserHover, .browserPressKey, .browserWaitFor, .browserHandleDialog, .browserTabs,
-             .browserFillForm, .browserFileUpload, .browserResize:
+             .browserFillForm, .browserFileUpload, .browserResize, .browserRunCode:
             return true
         default:
             return false
@@ -118,6 +120,11 @@ public enum APIMethod: String, CaseIterable, Sendable {
     /// snapshot that follows.
     public var appDeadline: Duration? {
         switch self {
+        // 56 s of script — one cold 30 s navigation and a dozen 5 s waits —
+        // then 4 s to stop it, settle and answer. The largest, and it stays
+        // so: the browser's queue is serial, the person gets it back within
+        // a minute.
+        case .browserRunCode: return .seconds(60)
         case .browserFillForm: return .seconds(40)
         case .browserNavigate, .browserWaitFor, .browserTabs: return .seconds(35)
         case .browserType, .browserEvaluate: return .seconds(30)

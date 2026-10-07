@@ -75,6 +75,7 @@ Les outils MCP `browser_*` suivent Playwright MCP, que les agents connaissent :
 | `browser_console_messages`, `browser_network_requests` | Console, erreurs, fetch/XHR |
 | `browser_take_screenshot` | Capture de la page visible, d'un élément ou de toute la page (`fullPage`), rendue en image |
 | `browser_evaluate` | Une fonction JavaScript dans la page, son résultat en JSON |
+| `browser_run_code` | Chromium seulement : un script Playwright `async (page) => { … }` en un appel, exécuté hors de la page, dans un bac à sable sans réseau ; chaque appel de `page` passe par les mêmes contrôles que les outils. Répond la valeur en JSON, la sortie de `console.log`, puis l'instantané ; une erreur vient en premier (`### Error`) et marque le résultat comme erreur. 56 s, 1 000 appels ; un dialogue sans `page.on('dialog')` arrête le script |
 | `browser_handle_dialog`, `browser_tabs`, `browser_navigate_back`, `browser_close` | Le reste |
 
 Chaque action répond l'instantané de la page qui en résulte ; avec `snapshot: "none"`,

@@ -693,6 +693,8 @@ actor ChromiumAgentCore {
             return try await fileUpload(paths, deadline: deadline)
         case .resize(let width):
             return try await resize(to: width, deadline: deadline)
+        case .runCode(let code):
+            return try await runCode(code, deadline: deadline, host: ChromiumRunHost(options: currentOptions, environment: environment, page: { try await (self.activeTab == nil ? self.newTab(url: nil, deadline: $0) : self.currentTab(deadline: $0)).1 }, respond: { result, page, yaml in self.respond(result, id: self.tabs.first(where: { $0.runtime === page })?.id ?? BrowserTabsModel.TabID(rawValue: UUID()), runtime: page, snapshot: yaml) }, activity: { self.activity = AgentActivity(summary: $0, isRunning: true, at: Date()); self.emitState() }, resize: { self.viewportWidth = $0; await self.applyViewport() }))
         }
     }
 
@@ -2061,6 +2063,8 @@ actor ChromiumAgentCore {
     /// The session ended: the pages and the lease go, the tabs stay to look at.
     func suspend() {
         for index in tabs.indices { discardRuntime(at: index) }
+        // browser_run_code's offline runner goes with the browser it lives in.
+        ChromiumRunner.dispose(for: control)
         releaseLease()
         emitState()
     }
@@ -2068,6 +2072,7 @@ actor ChromiumAgentCore {
     /// The session is gone for good.
     func tearDown() {
         guard !tornDown else { return }
+        ChromiumRunner.dispose(for: control)
         closeAll()
         tornDown = true
         activity = activity.map { AgentActivity(summary: $0.summary, isRunning: false, at: $0.at) }
@@ -2079,6 +2084,7 @@ actor ChromiumAgentCore {
     /// profile is emptied — its tabs load again, signed out, at the next
     /// command; a private session's context goes with its lease.
     func clearData() async {
+        ChromiumRunner.dispose(for: control)
         switch profile {
         case .project(let identifier):
             try? await pool.clearProfile(identifier)
@@ -2296,6 +2302,7 @@ actor ChromiumAgentCore {
         case .fillForm(let fields): return "Filling \(fields.count == 1 ? "a field" : "\(fields.count) fields")"
         case .fileUpload: return "Choosing files"
         case .resize(let width): return "Setting the page width: \(width.label)"
+        case .runCode: return "Running code"
         }
     }
 

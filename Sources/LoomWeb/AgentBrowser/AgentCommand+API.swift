@@ -164,6 +164,22 @@ extension AgentCommand {
                 throw AgentError.invalid("width is \(ViewportWidth.range.lowerBound) to \(ViewportWidth.range.upperBound) CSS pixels, or 0 for the panel's")
             }
             return .resize(.css(width))
+        case .browserRunCode:
+            // Codable ignores unknown keys: `filename` is said, never dropped.
+            // Upstream gave it two meanings (save the result; read the code).
+            if let filename = params["filename"], filename != .null {
+                throw AgentError.invalid("filename is not supported: pass the script as code "
+                                         + "(from a shell: loom browser run_code @script.js)")
+            }
+            let p = try decode(APIBrowserRunCodeParams.self, params)
+            let code = p.code.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !code.isEmpty else {
+                throw AgentError.invalid("code is required: async (page) => { … }")
+            }
+            guard p.code.utf8.count <= maxCodeBytes else {
+                throw AgentError.invalid("code is \(maxCodeBytes / 1_024) KB at most (\(p.code.utf8.count) bytes given)")
+            }
+            return .runCode(p.code)
         default:
             throw APIError(code: .unknownMethod, message: "\(method.rawValue) is not a browser method")
         }
@@ -196,6 +212,6 @@ extension AgentResult {
     public var apiContent: APIToolContent {
         APIToolContent(text: text, image: image.map {
             APIImageRef(path: $0.url.path, mimeType: $0.mimeType, width: $0.width, height: $0.height)
-        })
+        }, isError: isError ? true : nil)
     }
 }

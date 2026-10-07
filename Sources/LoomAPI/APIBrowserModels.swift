@@ -195,15 +195,34 @@ public struct APIBrowserResizeParams: Codable, Equatable, Sendable {
     public var height: Double?
 }
 
+public struct APIBrowserRunCodeParams: Codable, Equatable, Sendable {
+    public var sessionId: String?
+    /// `async (page) => { … }`, or a body that uses `page` and may `return`.
+    public var code: String
+    /// full (default) or none: the page's snapshot after the script.
+    public var snapshot: String?
+
+    public init(sessionId: String? = nil, code: String, snapshot: String? = nil) {
+        self.sessionId = sessionId
+        self.code = code
+        self.snapshot = snapshot
+    }
+}
+
 /// A tool's answer meant to be read: Markdown, and maybe an image beside it.
 /// The MCP server shows the text as is and the image as an image.
 public struct APIToolContent: Codable, Equatable, Sendable {
     public var text: String
     public var image: APIImageRef?
+    /// The Markdown reports a failure (`### Error` first): the MCP result is
+    /// a tool error, the CLI exits with 1. nil for every other answer — their
+    /// JSON is unchanged.
+    public var isError: Bool?
 
-    public init(text: String, image: APIImageRef? = nil) {
+    public init(text: String, image: APIImageRef? = nil, isError: Bool? = nil) {
         self.text = text
         self.image = image
+        self.isError = isError
     }
 }
 

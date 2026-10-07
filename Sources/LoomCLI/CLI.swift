@@ -69,6 +69,7 @@ public enum CLI {
       loom browser <tool> [json|value]      your session's browser: navigate localhost:5173,
                                             snapshot, click e12, press_key Enter… (loom docs)
                                             --out <file> saves a screenshot
+                                            run_code '<code>' or run_code @script.js (Chromium)
       loom docs                             the API reference, as Markdown
       loom mcp                              serve the API as MCP tools on stdio
 
@@ -151,11 +152,20 @@ public enum CLI {
         "browser_hover": "target", "browser_press_key": "key", "browser_wait_for": "text",
         "browser_take_screenshot": "target", "browser_console_messages": "level",
         "browser_network_requests": "filter", "browser_evaluate": "function",
+        "browser_run_code": "code",
     ]
 
-    static func browserParams(name: String, argument: String) throws -> JSONValue {
+    /// `run_code @script.js`: the most a script file may hold (the API's own cap).
+    static let maxScriptFileBytes = 65_536
+
+    static func browserParams(name: String, argument: String,
+                              readFile: (String) throws -> Data = { try Data(contentsOf: URL(fileURLWithPath: $0)) })
+        throws -> JSONValue {
         let text = argument.trimmingCharacters(in: .whitespaces)
         if text.isEmpty { return .object([:]) }
+        if name == "browser_run_code" {
+            return try runCodeParams(text, readFile: readFile)
+        }
         if text.hasPrefix("{") {
             guard let value = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)),
                   case .object = value else {
@@ -207,6 +217,35 @@ public enum CLI {
         return .object([key: .string(text)])
     }
 
+    /// `run_code '<code>'`, `run_code @script.js` (read here, in the agent's
+    /// own shell, under its own permissions), or the parameters as JSON.
+    static func runCodeParams(_ text: String, readFile: (String) throws -> Data) throws -> JSONValue {
+        if text.hasPrefix("@") {
+            let path = (String(text.dropFirst()).trimmingCharacters(in: .whitespaces) as NSString).expandingTildeInPath
+            guard !path.isEmpty else { throw ParseError.invalidArgument("run_code @<file>: name the script file") }
+            let data: Data
+            do {
+                data = try readFile(path)
+            } catch {
+                throw ParseError.invalidArgument("run_code: cannot read \(path)")
+            }
+            guard data.count <= maxScriptFileBytes else {
+                throw ParseError.invalidArgument("run_code: \(path) is over \(maxScriptFileBytes / 1_024) KB")
+            }
+            guard let code = String(data: data, encoding: .utf8) else {
+                throw ParseError.invalidArgument("run_code: \(path) is not UTF-8 text")
+            }
+            return .object(["code": .string(code)])
+        }
+        // A JSON object with the code in it; any other text is the code (a
+        // function never starts with "{").
+        if text.hasPrefix("{"), let value = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)),
+           case .object(let fields) = value, fields["code"] != nil {
+            return value
+        }
+        return .object(["code": .string(text)])
+    }
+
     /// The whole run: parse, connect, call, print. Returns the exit code.
     public static func run(_ arguments: [String],
                            environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -256,6 +295,8 @@ public enum CLI {
             if case .browser = command, let content = try? result.decode(APIToolContent.self) {
                 // Markdown for a reader, not JSON — what the agent would see.
                 output(content.text + "\n")
+                // A failure reported in the Markdown (browser_run_code's ### Error).
+                let failed: Int32 = content.isError == true ? 1 : 0
                 if options.out != nil, content.image == nil {
                     error("loom: --out: this answer carries no image\n")
                     return 1
@@ -263,7 +304,7 @@ public enum CLI {
                 if let image = content.image {
                     guard let out = options.out else {
                         output("Image: \(image.path)\n")
-                        return 0
+                        return failed
                     }
                     guard let file = APIImageFile.validated(image, root: screenshots) else {
                         error("loom: the screenshot is not where Loom writes them: \(image.path)\n")
@@ -280,7 +321,7 @@ public enum CLI {
                     try Data(contentsOf: file).write(to: destination, options: .atomic)
                     output("Saved to \(destination.path)\n")
                 }
-                return 0
+                return failed
             }
             output(pretty(result) + "\n")
             return 0

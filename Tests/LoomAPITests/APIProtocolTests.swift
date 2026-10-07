@@ -107,7 +107,7 @@ struct APIProtocolTests {
     @Test("the browser answers its session's own token only, and answers Markdown")
     func outilsNavigateurPortesParLaSession() {
         let browser = APIMethod.allCases.filter(\.isBrowser)
-        #expect(browser.count == 19)
+        #expect(browser.count == 20)
         for method in browser {
             #expect(!method.allowsGlobalScope, "\(method.rawValue) refuses the global token")
             #expect(!method.requiresGlobalScope)
@@ -137,7 +137,8 @@ struct APIProtocolTests {
     @Test("the actions that answer a snapshot, and only they, may leave it out")
     func optionInstantane() {
         let answering = APIMethod.allCases.filter(\.answersSnapshot)
-        #expect(answering.count == 13)
+        #expect(answering.count == 14)
+        #expect(APIMethod.browserRunCode.answersSnapshot, "a snapshot at the end, unless snapshot none")
         #expect(!APIMethod.browserSnapshot.answersSnapshot, "it is the snapshot")
         #expect(!APIMethod.browserScreenshot.answersSnapshot && !APIMethod.browserEvaluate.answersSnapshot)
         for method in APIMethod.allCases where method.isBrowser {
@@ -218,10 +219,13 @@ struct APIProtocolTests {
 
     @Test("the tool catalog covers every method, with MCP-legal unique names")
     func catalogueDesOutils() {
-        let names = APIToolCatalog.all.map(\.name)
+        let names = APIToolCatalog.all(engine: .chromium).map(\.name)
         #expect(Set(names).count == names.count, "one name per tool")
         for method in APIMethod.allCases {
-            #expect(APIToolCatalog.all.contains { $0.method == method }, "\(method.rawValue) has a tool")
+            #expect(APIToolCatalog.all(engine: .chromium).contains { $0.method == method }, "\(method.rawValue) has a tool")
+            if method != .browserRunCode {
+                #expect(APIToolCatalog.all.contains { $0.method == method }, "\(method.rawValue) is on WebKit too")
+            }
         }
         for name in names {
             #expect(name.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" },
@@ -234,6 +238,55 @@ struct APIProtocolTests {
             #expect(docs.contains("`\(method.rawValue)`"), "the reference names \(method.rawValue)")
         }
         #expect(docs.contains("(required)"), "required parameters are marked")
+    }
+
+    @Test("browser_run_code: Chromium only, pre-approved there, the largest deadline, code required")
+    func executerDuCode() throws {
+        func names(_ engine: APIBrowserEngine) -> [String] {
+            APIToolCatalog.tools(browser: true, engine: engine).map(\.name)
+        }
+        #expect(names(.chromium).contains("browser_run_code"))
+        #expect(!names(.webkit).contains("browser_run_code"), "no public way stops a WebKit script that spins")
+        #expect(!APIToolCatalog.tools(browser: false, engine: .chromium).contains { $0.method == .browserRunCode })
+        #expect(APIToolCatalog.preapprovedRules(browser: true, engine: .chromium).contains("mcp__loom__browser_run_code"))
+        #expect(!APIToolCatalog.preapprovedRules(browser: true, engine: .webkit).contains("mcp__loom__browser_run_code"))
+        #expect(!APIToolCatalog.preapprovedRules(browser: false, engine: .chromium).contains { $0.contains("run_code") })
+        #expect(APIToolCatalog.agentInstructions(browser: true, engine: .chromium).contains("browser_run_code"))
+        #expect(!APIToolCatalog.agentInstructions(browser: true, engine: .webkit).contains("browser_run_code"))
+
+        let spec = APIToolCatalog.spec(for: .browserRunCode)
+        #expect(spec.name == "browser_run_code" && spec.preapprovable && spec.resultFormat == .content)
+        #expect(APIToolCatalog.spec(named: "browser_run_code")?.method == .browserRunCode)
+        #expect(spec.inputSchema["required"] == .array([.string("code")]))
+        #expect(spec.inputSchema["properties"]?["filename"] == nil, "refused, so never offered")
+        #expect(spec.inputSchema["properties"]?["snapshot"] != nil)
+        #expect(spec.description.contains("async (page) =>"))
+        #expect(APIMethod.browserRunCode.rawValue == "browser.runCode" && APIMethod.browserRunCode.isBrowser)
+        #expect(!APIMethod.browserRunCode.allowsGlobalScope, "it acts in the session's own profile")
+
+        // 56 s of script and 4 s to stop it, settle and answer; above every other method.
+        let deadline = try #require(APIMethod.browserRunCode.appDeadline)
+        #expect(deadline == .seconds(60))
+        #expect(APIMethod.browserRunCode.clientTimeout == .seconds(65))
+        for method in APIMethod.allCases where method != .browserRunCode {
+            #expect((method.appDeadline ?? .zero) < deadline, "\(method.rawValue)")
+        }
+        // loom docs: the reference names it, as Chromium's.
+        let docs = APIToolCatalog.markdown()
+        #expect(docs.contains("`browser.runCode`") && docs.contains("Chromium engine only"))
+    }
+
+    @Test("a tool answer's isError: nil, and absent from the JSON, unless the answer is a failure")
+    func contenuEnErreur() throws {
+        let plain = try JSONValue.from(APIToolContent(text: "### Page"))
+        #expect(plain["isError"] == nil, "every other tool's JSON is unchanged")
+        let failed = try JSONValue.from(APIToolContent(text: "### Error\nboom", isError: true))
+        #expect(failed["isError"] == .bool(true))
+        #expect(try failed.decode(APIToolContent.self).isError == true)
+        #expect(try plain.decode(APIToolContent.self).isError == nil)
+        let params = try JSONValue.object(["code": .string("async (page) => 1"), "snapshot": .string("none")])
+            .decode(APIBrowserRunCodeParams.self)
+        #expect(params == APIBrowserRunCodeParams(code: "async (page) => 1", snapshot: "none"))
     }
 
     @Test("the client finds its way from the environment Loom gives an agent")

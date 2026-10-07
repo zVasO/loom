@@ -101,7 +101,10 @@ public enum APIToolCatalog {
     /// answer the page's new snapshot, so one call both acts and shows.
     static func browserTools(engine: APIBrowserEngine) -> [APIToolSpec] {
         let chromium = engine == .chromium
-        return [
+        // One typed literal, then the Chromium-only tool: an `[…] + (… ? … : [])`
+        // around this literal would make the type checker solve every string
+        // concatenation in it together with the array `+`.
+        var tools: [APIToolSpec] = [
             browser(.browserNavigate, "browser_navigate",
                     "Navigate your browser to a URL and answer the page's snapshot. A bare host:port on "
                     + "localhost or 127.0.0.1 opens in http (a dev server); other bare hosts in https. "
@@ -233,7 +236,33 @@ public enum APIToolCatalog {
                      "height": number("Accepted for compatibility; the height follows the panel.")],
                     required: ["width"], cli: "loom browser resize 375"),
         ]
+        if chromium { tools.append(runCodeTool) }
+        return tools
     }
+
+    /// browser_run_code (ADR-0016): Chromium only — no public way stops a
+    /// WebKit script that spins. Pre-approved as the other browser tools: the
+    /// script runs in a sandbox with no network, and every page call it
+    /// makes goes through the tools' own checks.
+    static let runCodeTool = browser(
+        .browserRunCode, "browser_run_code",
+        "Run a Playwright script on your browser's current page in one call, e.g. "
+            + "async (page) => { await page.getByLabel('Email').fill('a@b.c'); "
+            + "await page.getByRole('button', { name: 'Sign in' }).click(); await page.waitForURL('**/home'); "
+            + "return page.url(); }. Loom runs it in a sandbox outside the page (it survives navigations; no Node, "
+            + "require or network), with Playwright's page and locator API: goto, reload, goBack, url, title, "
+            + "locator, getByRole/Text/Label/Placeholder/TestId/AltText/Title, filter, nth, first, last, click, "
+            + "dblclick, hover, fill, press, pressSequentially, check, uncheck, selectOption, setInputFiles, "
+            + "textContent, innerText, inputValue, getAttribute, isVisible, isEnabled, isChecked, count, all, "
+            + "waitFor, waitForSelector, waitForURL, waitForLoadState, waitForFunction, waitForTimeout, evaluate, "
+            + "keyboard, mouse, setViewportSize, screenshot, on('dialog'). Locators are strict; aria-ref=e12 (or "
+            + "e12) is a ref of your last snapshot. Each action waits up to 5 s for its element; the whole script "
+            + "has 55 s. A dialog with no page.on('dialog') handler stops the script. Answers the return value as "
+            + "JSON, console.log output, then the page's snapshot.",
+        ["code": string("An async function of page: async (page) => { … } (or its body). Its return value is "
+                        + "answered as JSON. 64 KB at most.")],
+        required: ["code"],
+        cli: #"loom browser run_code 'async (page) => { await page.getByRole("link", { name: "Docs" }).click(); return page.url(); }'"#)
 
     private static func browser(_ method: APIMethod, _ name: String, _ description: String,
                                 _ properties: [String: JSONValue], required: [String] = [],
@@ -284,7 +313,8 @@ public enum APIToolCatalog {
     static func browserInstructions(engine: APIBrowserEngine) -> String {
         browserInstructionsBody + " " + (engine == .chromium
             ? "Its events are real (trusted): CSS :hover applies, and pages keep running when "
-                + "the panel is hidden."
+                + "the panel is hidden. To chain several steps in one call, browser_run_code runs a "
+                + "Playwright script (async (page) => { … })."
             : "Events are synthetic: no CSS :hover, no native drag.")
     }
 
@@ -312,9 +342,16 @@ public enum APIToolCatalog {
                      + "authenticated by a token (`LOOM_SESSION_TOKEN` for your session; "
                      + "the global token in Loom's `api-token` file for every session). "
                      + "Protocol version \(APIProtocol.version).", ""]
-        for spec in all {
+        let webkitTools: [APIToolSpec] = all
+        let webkitNames = Set(webkitTools.map(\.name))
+        let chromiumOnly = all(engine: .chromium).filter { !webkitNames.contains($0.name) }
+        for spec in webkitTools + chromiumOnly {
             lines.append("## `\(spec.method.rawValue)`")
             lines.append("")
+            if chromiumOnly.contains(spec) {
+                lines.append("Chromium engine only (Settings ▸ Agents): not listed for a WebKit session.")
+                lines.append("")
+            }
             lines.append(spec.description)
             lines.append("")
             lines.append("- MCP tool: `\(spec.name)`")
