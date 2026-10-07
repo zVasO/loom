@@ -152,6 +152,10 @@ jobs:
           LOOM_AUTOTEST_ENGINE: ${{ matrix.engine }}
           LOOM_AUTOTEST_FIXTURES: ${{ github.workspace }}/Tests/AgentBrowserJS/fixtures
         run: swift run -c release LoomApp
+      # In the log too: a cloud session reads logs, not artifacts.
+      - name: Report (log)
+        if: always()
+        run: cat /tmp/loom-agent-browser-report.json 2>/dev/null || echo "no report"
       - name: Report
         if: always()
         uses: actions/upload-artifact@v4
