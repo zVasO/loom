@@ -121,8 +121,9 @@ export const LAUNCH_TAG = "LOOM_CDP_LAUNCH";
  * variable ever reaches it; `tag` marks the launch's processes, those outside
  * its process group included (the full browser's crash handler).
  */
-export function chromiumEnvironment(env = process.env, tag) {
-  const kept = { HOME: env.HOME || homedir(), PATH: "/usr/bin:/bin:/usr/sbin:/sbin", LANG: "en_US.UTF-8", TZ: env.TZ || "UTC" };
+export function chromiumEnvironment(env = process.env, tag, pathPrefix) {
+  const path = "/usr/bin:/bin:/usr/sbin:/sbin";
+  const kept = { HOME: env.HOME || homedir(), PATH: pathPrefix ? `${pathPrefix}:${path}` : path, LANG: "en_US.UTF-8", TZ: env.TZ || "UTC" };
   for (const name of ["TMPDIR", "USER", "LOGNAME"]) if (env[name]) kept[name] = env[name];
   if (tag) kept[LAUNCH_TAG] = tag;
   return kept;
@@ -446,7 +447,7 @@ function tail(text, lines = 6) {
  * local-only ones with `fencePort`), then the harness's own (--no-sandbox
  * where Linux needs it, --no-proxy-server unless a proxy is set), then `args`.
  */
-export async function launch(browser, { headless, args = [], userDataDir, canonical = true, fencePort, allowedHosts, timeoutMs = 30_000 } = {}) {
+export async function launch(browser, { headless, args = [], userDataDir, canonical = true, fencePort, allowedHosts, timeoutMs = 30_000, pathPrefix } = {}) {
   const profile = userDataDir || mkdtempSync(join(tmpdir(), "loom-cdp-"));
   const ownsProfile = !userDataDir;
   let flags = canonical ? canonicalArgs(browser.kind, { userDataDir: profile, fencePort, allowedHosts })
@@ -464,7 +465,7 @@ export async function launch(browser, { headless, args = [], userDataDir, canoni
     const child = spawn(browser.path, argv, {
       stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"],
       detached: true,
-      env: chromiumEnvironment(process.env, tag),
+      env: chromiumEnvironment(process.env, tag, pathPrefix),
     });
     let stderr = "";
     child.stderr.on("data", (data) => { stderr = (stderr + data).slice(-65_536); });

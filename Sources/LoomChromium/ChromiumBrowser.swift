@@ -573,7 +573,8 @@ public final class ChromiumBrowser: @unchecked Sendable {
                 return
             }
         }
-        log("chromium: a download from an unknown frame was refused: \(url)")
+        // The host only: a download's address can carry a page's secrets.
+        log("chromium: a download from an unknown frame was refused (\(URL(string: url)?.host ?? "no host"))")
     }
 
     // MARK: - Bookkeeping (under `lock`)

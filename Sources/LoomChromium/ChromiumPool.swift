@@ -719,10 +719,22 @@ public actor ChromiumPool {
             core = String(core.dropFirst(wrapper.count).dropLast())
         }
         let lastLine = stderr.split(separator: "\n")
-            .last(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+            .last(where: Self.isChromiumsOwn)
             .map { String($0.prefix(200)) }
         guard let lastLine else { return core }
         return "\(core): \(lastLine)"
+    }
+
+    /// A warning or an error Chromium itself logged ("[…:ERROR:file.cc(12)] …").
+    /// Never a page's console message — the headless shell writes them all
+    /// to stderr ("[…:INFO:CONSOLE:1] "token=…", source: http://…") — nor a
+    /// line it continues: a page's text does not reach Loom's log, nor the
+    /// error another session of the same Chromium reads.
+    static func isChromiumsOwn(_ line: Substring) -> Bool {
+        guard line.hasPrefix("["), let close = line.firstIndex(of: "]") else { return false }
+        let head = line[..<close]
+        guard !head.contains("CONSOLE") else { return false }
+        return head.contains(":ERROR:") || head.contains(":FATAL:") || head.contains(":WARNING:")
     }
 
     /// One line for the crash-loop message: the first and the last of a detail.

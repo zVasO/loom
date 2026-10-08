@@ -689,13 +689,18 @@ extension AppModel {
         } else if let found, case .fullBrowser(let name) = found.kind,
                   name.localizedCaseInsensitiveContains("brave") {
             status.warning = "Brave's shields change what pages load: the agent may test a web your users do not see."
+        } else if let found, case .fullBrowser = found.kind {
+            // Measured: no DevTools command stops it, local sites only included.
+            status.warning = "A full browser hands mailto: and news: links to your Mac's apps (Mail opens a message "
+                + "the page wrote), even with local sites only. chrome-headless-shell never does."
         }
         if found == nil,
            let installed = locator.candidates().first(where: {
                $0.source == .installed && locator.fileExists($0.url.path)
            }),
            case .fullBrowser(let name) = installed.kind {
-            status.hint = "\(name) is installed: Choose… to use it (headless, no window)."
+            status.hint = "\(name) is installed: Choose… to use it (headless, no window) — or download "
+                + "chrome-headless-shell, which opens no app of your Mac."
         }
         return status
     }

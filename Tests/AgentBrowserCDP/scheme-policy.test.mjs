@@ -10,7 +10,10 @@
 //   the panel's address bar included.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { launch, settle } from "./lib/cdp.mjs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { delay, launch, settle } from "./lib/cdp.mjs";
 import { openTab } from "./lib/init.mjs";
 import { startServer } from "./lib/server.mjs";
 import { eachBrowser, options } from "./lib/suite.mjs";
@@ -67,6 +70,41 @@ eachBrowser((browser) => {
     await tab.navigate(server.url("/blank?blob"));
     const committed = await commitAfter(() => tab.evaluate(`location.href = URL.createObjectURL(new Blob(["<p>blob</p>"], { type: "text/html" })); true`, { userGesture: true }), 10_000);
     assert.match(committed ?? "", /^blob:http:\/\/127\.0\.0\.1:\d+\//);
+  });
+
+  // mailto: and news: never commit: "nothing commits" cannot see them. A
+  // full browser hands them to the system (Chrome's external protocol
+  // handler allows them without asking): on Linux through xdg-email and
+  // xdg-open, faked here on Chromium's PATH; on a Mac through LaunchServices
+  // (Mail opens a message the page wrote), which a runner cannot observe.
+  test("mailto: and news: never leave chrome-headless-shell for an app of the system", options({
+    skip: process.platform !== "linux" && "the hand-off goes through LaunchServices on a Mac: the Mac checklist covers it",
+  }), async (t) => {
+    const bin = mkdtempSync(join(tmpdir(), "loom-xdg-"));
+    const marker = join(bin, "handed-off.log");
+    for (const name of ["xdg-email", "xdg-open"]) {
+      writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $@" >> ${marker}\n`);
+      chmodSync(join(bin, name), 0o755);
+    }
+    const own = await launch(browser, { pathPrefix: bin });
+    try {
+      const page = await openTab(own);
+      await page.navigate(server.url("/blank?mail"));
+      await page.evaluate(`location.href = "mailto:agent@example.com?subject=from&body=the-page"; true`, { userGesture: true });
+      await delay(800);
+      await page.evaluate(`(() => { const a = document.createElement("a"); a.id = "news"; a.href = "news:comp.lang.javascript"; a.textContent = "news"; a.style.cssText = "display:block;width:100px;height:30px"; document.body.prepend(a); return true; })()`);
+      const { x, y } = await page.centerOf("#news");
+      await Promise.all(page.click(x, y));
+      await delay(1200);
+      const handed = existsSync(marker) ? readFileSync(marker, "utf8").trim() : "";
+      t.diagnostic(`handed to the system: ${handed || "nothing"}`);
+      if (browser.kind === "headlessShell") {
+        assert.equal(handed, "", "Loom's pick hands nothing to the system");
+      }
+    } finally {
+      await own.close();
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 
   test("Loom's own Page.navigate is not filtered: data: and file: commit, javascript: runs — the engine must allow-list", options(), async () => {

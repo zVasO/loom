@@ -140,7 +140,9 @@ Réglages ▸ Projects (largeur). `APIToolCatalog` par moteur, `isError` dans
 ### Validation sur le Mac
 
 - Réglages : télécharger `chrome-headless-shell` (progression, annuler, SHA
-  faux simulé, hors ligne), « Remove » refusé tant qu'un agent l'utilise.
+  faux simulé, hors ligne), « Remove » refusé tant qu'un agent l'utilise ;
+  un Chrome complet choisi affiche l'avertissement `mailto:` (Mail s'ouvre sur
+  un lien `mailto:` cliqué par l'agent ; avec le shell, rien ne s'ouvre).
 - `kill -9` de Loom : Chromium s'arrête ; `lsof` : aucun port ouvert ; aucune
   icône dans le Dock ; `nettop` à zéro sur `about:blank`.
 - Panneau : IME et touches mortes d'un clavier français ; ⌘C/⌘V avec d'autres

@@ -34,11 +34,14 @@ navigateurs « Web n » (qui, eux, restent toujours WebKit).
   Google est vérifiée et affichée ; il n'est jamais mis à jour de lui-même ;
   **Remove** le retire), sinon celui de Playwright s'il est installé. Un Chrome,
   Chromium ou Edge complet ne sert que choisi par **Choose…** : il se met à jour
-  sous Loom, contacte ses services en arrière-plan, et sur Mac, dès que
+  sous Loom, contacte ses services en arrière-plan, confie les liens `mailto:`
+  et `news:` aux apps du Mac (Mail ouvre un message écrit par la page, même en
+  mode sites locaux : aucune commande du protocole ne l'en empêche ; les
+  Réglages le disent quand un tel navigateur est choisi), et sur Mac, dès que
   plusieurs onglets sont ouverts, leurs images (animations, `requestAnimationFrame`,
   observers) ralentissent à quelques-unes par seconde, voire s'arrêtent dans un
   onglet (mesuré ; les minuteurs, eux, tournent) ; `chrome-headless-shell` n'a
-  pas cette limite. Rien n'est téléchargé sans votre clic.
+  aucune de ces limites. Rien n'est téléchargé sans votre clic.
 - Chaque moteur a son profil : un login fait sous WebKit n'existe pas sous
   Chromium.
 

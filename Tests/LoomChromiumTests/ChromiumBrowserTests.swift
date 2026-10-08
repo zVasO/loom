@@ -690,6 +690,18 @@ struct ChromiumPoolLeaseTests {
         await pool.shutdownAll(grace: .milliseconds(300))
     }
 
+    @Test("a stop's detail is Chromium's own last warning or error, never a page's console line")
+    func detailSansConsole() {
+        let stderr = """
+            [1008/101530.100000:ERROR:gpu_init.cc(441)] Passthrough is not supported
+            [1008/101531.200000:INFO:CONSOLE:1] "token=SECRET", source: http://127.0.0.1:42251/?k=abc (1)
+            a second line of that message
+            """
+        #expect(ChromiumPool.detail("Chromium stopped (signal 9)", stderr: stderr)
+                == "signal 9: [1008/101530.100000:ERROR:gpu_init.cc(441)] Passthrough is not supported")
+        #expect(ChromiumPool.detail("Chromium stopped (signal 9)", stderr: "[1:2:INFO:CONSOLE(3)] \"secret\"") == "signal 9")
+    }
+
     @Test("a private folder left by a Loom that died is swept when the pool starts")
     func balayageAuDemarrage() throws {
         let root = try makeTemporaryRoot()
