@@ -60,24 +60,26 @@ eachBrowser((browser) => {
   test("two tabs, each its own window, no viewer: everything advances in both", options(), async (t) => {
     const tabs = await openBackgroundTabs(chrome, server, 2, {});
     // Measured on macOS runners: a full Chrome with --headless=new, two
-    // windows open, drops requestAnimationFrame to a few frames a second in
-    // either window or both (3-4/s), while timers, observers and focus keep
-    // running. chrome-headless-shell, Loom's own pick, keeps both at full
-    // rate; a full browser runs only when chosen in Settings, and the guide
-    // says so. Under it on macOS, frames are only required not to stop.
+    // windows open, renders either window at 0 to 4 frames a second from
+    // one run to the next (rAF, animations and the observers that follow
+    // frames), while timers, visibility and focus hold. chrome-headless-shell,
+    // Loom's own pick, keeps both at full rate there and everywhere; a full
+    // browser runs only when chosen in Settings, and the guide says what it
+    // costs. Under it on macOS, the frames are reported, not required.
     const fullOnMac = browser.kind === "fullBrowser" && process.platform === "darwin";
     try {
       const rates = await sample(tabs);
       for (const [i, rate] of rates.entries()) {
         t.diagnostic(`tab ${i + 1}: ${JSON.stringify(rate)}`);
         const which = `tab ${i + 1} of 2`;
-        // 60 a second on an idle machine; a loaded CI runner still does far better than this.
-        assert.ok(rate.raf >= (fullOnMac ? 1 : 15), `${which}: rAF ${rate.raf}/s`);
-        assert.ok(rate.animationAdvancedMs >= (fullOnMac ? 1 : SAMPLE_MS / 3),
-          `${which}: the animation advanced ${rate.animationAdvancedMs} ms`);
+        if (!fullOnMac) {
+          // 60 a second on an idle machine; a loaded CI runner still does far better than this.
+          assert.ok(rate.raf >= 15, `${which}: rAF ${rate.raf}/s`);
+          assert.ok(rate.animationAdvancedMs >= SAMPLE_MS / 3, `${which}: the animation advanced ${rate.animationAdvancedMs} ms`);
+          assert.ok(rate.io > 0, `${which}: IntersectionObserver ${rate.io}/s`);
+          assert.ok(rate.ro > 0, `${which}: ResizeObserver ${rate.ro}/s`);
+        }
         assert.ok(rate.interval >= 5, `${which}: timers ${rate.interval}/s`);
-        assert.ok(rate.io > 0, `${which}: IntersectionObserver ${rate.io}/s`);
-        assert.ok(rate.ro > 0, `${which}: ResizeObserver ${rate.ro}/s`);
         assert.equal(rate.visibility, "visible", which);
         assert.equal(rate.hasFocus, true, `${which}: document.hasFocus()`);
         assert.equal(rate.fieldFocused, true, `${which}: its input kept the focus`);
@@ -91,7 +93,7 @@ eachBrowser((browser) => {
   test("control: two tabs in one window, no focus emulation", options(), async (t) => {
     const tabs = await openBackgroundTabs(chrome, server, 2, { newWindow: null, focusEmulation: false });
     // As above: a full Chrome on macOS runners slows the front tab's frames
-    // too (9/s measured); there it is only required not to stop.
+    // too (9 to 49/s measured); there it is only required not to stop.
     const fullOnMac = browser.kind === "fullBrowser" && process.platform === "darwin";
     try {
       const [first, second] = await sample(tabs);
