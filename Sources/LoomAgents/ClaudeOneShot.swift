@@ -212,7 +212,9 @@ public enum ClaudeOneShot {
                     try? writer.close()
                 }
                 let timeout = request.timeout
-                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
+                // Not .utility: a deadline starved behind a busy app fired
+                // seconds late (seen at 10 s for 0.5 s on a loaded runner).
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout) {
                     run.stop(because: .timedOut)
                 }
             }
@@ -283,7 +285,7 @@ public enum ClaudeOneShot {
             guard process.isRunning else { return }
             process.terminate()
             let pid = process.processIdentifier
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3) {
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 3) {
                 if process.isRunning { kill(pid, SIGKILL) }
             }
         }

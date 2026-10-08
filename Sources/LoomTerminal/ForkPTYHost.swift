@@ -106,8 +106,12 @@ enum PTYSpawn {
         sigemptyset(&emptyMask)
 
         var master: Int32 = 0
+        // Under the spawn lock: another thread's pipe is never caught between
+        // its creation and its close-on-exec by this fork (SpawnLock).
+        SpawnLock.lock()
         let pid = forkpty(&master, nil, nil, &windowSize)
         if pid < 0 {
+            SpawnLock.unlock()
             return nil
         }
         if pid == 0 {
@@ -131,6 +135,7 @@ enum PTYSpawn {
         // The master is ours alone: the next session's child must not inherit
         // it (nor any other session's), and `forkpty` leaves it inheritable.
         _ = fcntl(master, F_SETFD, FD_CLOEXEC)
+        SpawnLock.unlock()
         return (pid, master)
     }
 

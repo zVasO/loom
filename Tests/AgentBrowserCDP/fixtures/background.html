@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Background</title>
+<style>
+  body { margin: 0; height: 3000px; font-family: sans-serif; }
+  @keyframes slide { from { transform: translateX(0); } to { transform: translateX(200px); } }
+  #anim { width: 20px; height: 20px; background: #c33; animation: slide 200ms linear infinite; }
+  #ro { width: 100px; height: 10px; background: #33c; }
+  #io { position: absolute; left: 0; top: 0; width: 10px; height: 10px; background: #3c3; }
+</style>
+</head>
+<body>
+<!-- What must keep running while nobody watches the agent's page
+     (background.test.mjs): rAF, a CSS animation, an IntersectionObserver and
+     a ResizeObserver fed by a timer, focus. read() samples the counters. -->
+<div id="anim"></div><div id="ro"></div><div id="io"></div>
+<input id="field" aria-label="Field">
+<script>
+  const counts = { raf: 0, interval: 0, io: 0, ro: 0, animationIterations: 0 };
+  const visibility = [];
+  (function frame() { counts.raf++; requestAnimationFrame(frame); })();
+  const io = document.getElementById("io");
+  const ro = document.getElementById("ro");
+  setInterval(() => {
+    counts.interval++;
+    io.style.top = (counts.interval % 2 ? 2500 : 0) + "px";   // in and out of the viewport
+    ro.style.width = (100 + (counts.interval % 50)) + "px";    // a new size every tick
+  }, 50);
+  new IntersectionObserver(() => { counts.io++; }).observe(io);
+  new ResizeObserver(() => { counts.ro++; }).observe(ro);
+  document.getElementById("anim").addEventListener("animationiteration", () => { counts.animationIterations++; });
+  document.addEventListener("visibilitychange", () => visibility.push(document.visibilityState));
+  window.read = () => ({
+    ...counts,
+    animationTime: document.getAnimations()[0]?.currentTime ?? null,
+    visibility: document.visibilityState,
+    hasFocus: document.hasFocus(),
+    fieldFocused: document.activeElement === document.getElementById("field"),
+    visibilityChanges: visibility.slice(),
+    now: performance.now(),
+  });
+</script>
+</body>
+</html>

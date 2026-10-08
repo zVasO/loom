@@ -31,6 +31,20 @@ public enum AgentNavigationPolicy {
     /// rules (loopback hosts in http), then the policy — no file:, data:,
     /// javascript: or custom scheme.
     public static func navigationURL(_ input: String) throws -> URL {
+        // "javascript:…", "data:…": a scheme the agent named is refused as
+        // such — the address bar would search for it, which is never what an
+        // agent asked. "host:port" is not a scheme.
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        if let colon = trimmed.firstIndex(of: ":"), !trimmed.contains("://"),
+           let scheme = URL(string: trimmed)?.scheme?.lowercased(),
+           scheme != "http", scheme != "https", trimmed.lowercased() != "about:blank" {
+            let rest = trimmed[trimmed.index(after: colon)...]
+            let port = rest.prefix(while: \.isNumber)
+            let isPort = !port.isEmpty && (rest.dropFirst(port.count).first.map { "/?#".contains($0) } ?? true)
+            if !isPort {
+                throw AgentError.invalid("the agent's browser opens http(s) addresses only, not \(scheme):")
+            }
+        }
         guard let url = BrowserController.normalize(input) else {
             throw AgentError.invalid("not an address: \(input)")
         }

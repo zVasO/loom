@@ -37,9 +37,12 @@ let package = Package(
         .target(name: "LoomExtensions", dependencies: ["LoomCore", "LoomAPI"]),
         // LoomAPI: the agent's browser maps the API's browser methods to its
         // commands where the tests reach the mapping (ADR-0014).
-        .target(name: "LoomWeb", dependencies: ["LoomCore", "LoomUI", "LoomExtensions", "LoomAPI"]),
+        .target(name: "LoomWeb", dependencies: ["LoomCore", "LoomUI", "LoomExtensions", "LoomAPI", "LoomChromium"]),
         .target(name: "LoomPersistence", dependencies: ["LoomCore", "LoomTerminal", "LoomAgents", .product(name: "GRDB", package: "GRDB.swift")]),
         .target(name: "LoomIPC", dependencies: ["LoomCore", "LoomAPI"]),
+        // The agent browser's Chromium (ADR-0016): the DevTools protocol over a
+        // pipe, the process, its flags and its fence — Foundation only, no UI.
+        .target(name: "LoomChromium", dependencies: ["LoomCore"]),
         // The helper the agents' hooks call (ADR-0005): stdin → socket, no dependencies.
         .executableTarget(name: "loom-hook"),
         // `loom`: the CLI and the MCP server, clients of the LoomAPI contract. The logic lives in
@@ -57,7 +60,7 @@ let package = Package(
             dependencies: [
                 "LoomCore", "LoomAPI", "LoomUI", "LoomTerminal", "LoomAgents",
                 "LoomGit", "LoomWeb", "LoomPersistence", "LoomIPC",
-                "LoomSessions", "LoomExtensions",
+                "LoomSessions", "LoomExtensions", "LoomChromium",
             ],
             resources: [.process("Resources")]
         ),
@@ -68,9 +71,10 @@ let package = Package(
         .testTarget(name: "LoomTerminalTests", dependencies: ["LoomTerminal", "LoomTerminalTestSupport", "LoomAgents"]),
         .testTarget(name: "LoomSessionsTests", dependencies: ["LoomSessions", "LoomTerminalTestSupport"]),
         .testTarget(name: "LoomIPCTests", dependencies: ["LoomIPC", "LoomAPI", "LoomCore"]),
+        .testTarget(name: "LoomChromiumTests", dependencies: ["LoomChromium", "LoomCore"]),
         .testTarget(name: "LoomGitTests", dependencies: ["LoomGit", "LoomCore"]),
         .testTarget(name: "LoomPersistenceTests", dependencies: ["LoomPersistence"]),
-        .testTarget(name: "LoomWebTests", dependencies: ["LoomWeb", "LoomAPI"]),
+        .testTarget(name: "LoomWebTests", dependencies: ["LoomWeb", "LoomAPI", "LoomChromium"]),
         .testTarget(name: "LoomExtensionsTests", dependencies: ["LoomExtensions", "LoomAPI", "LoomCore"]),
         .testTarget(name: "LoomUITests", dependencies: ["LoomUI", "LoomTerminal", "LoomGit"]),
     ]

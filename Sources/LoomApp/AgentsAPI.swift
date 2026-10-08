@@ -93,7 +93,7 @@ extension AppModel {
             case .browserNavigate, .browserNavigateBack, .browserSnapshot, .browserClick, .browserType,
                  .browserSelectOption, .browserHover, .browserPressKey, .browserWaitFor, .browserScreenshot,
                  .browserConsole, .browserNetwork, .browserEvaluate, .browserHandleDialog, .browserTabs,
-                 .browserClose, .browserFillForm, .browserFileUpload, .browserResize:
+                 .browserClose, .browserFillForm, .browserFileUpload, .browserResize, .browserRunCode:
                 return try await handleBrowserRequest(method, request, scope: scope)
             case .badgeList:
                 return .ok(request.id, APIBadgeListResult(badges: apiBadges))

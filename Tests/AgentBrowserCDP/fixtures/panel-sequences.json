@@ -1,0 +1,437 @@
+[
+  {
+    "name": "a click: a move to the point, then press and release with clickCount 1",
+    "input": [
+      {"kind": "geometry", "viewWidth": 640, "viewHeight": 400, "deviceWidth": 1280, "deviceHeight": 800},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseUp", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 200, "y": 100, "button": "none", "buttons": 0, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mousePressed", "x": 200, "y": 100, "button": "left", "buttons": 1, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseReleased", "x": 200, "y": 100, "button": "left", "buttons": 0, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}}
+    ]
+  },
+  {
+    "name": "a double click: the second press has no move and counts 2",
+    "input": [
+      {"kind": "geometry", "viewWidth": 640, "viewHeight": 400, "deviceWidth": 1280, "deviceHeight": 800},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseUp", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 0, "clickCount": 2, "modifiers": 0},
+      {"kind": "mouseUp", "x": 100, "y": 50, "button": 0, "clickCount": 2, "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 200, "y": 100, "button": "none", "buttons": 0, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mousePressed", "x": 200, "y": 100, "button": "left", "buttons": 1, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseReleased", "x": 200, "y": 100, "button": "left", "buttons": 0, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mousePressed", "x": 200, "y": 100, "button": "left", "buttons": 1, "clickCount": 2, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseReleased", "x": 200, "y": 100, "button": "left", "buttons": 0, "clickCount": 2, "modifiers": 0, "pointerType": "mouse"}}
+    ]
+  },
+  {
+    "name": "a right click with Option and Shift: button right, buttons 2, modifiers 9 on every event",
+    "input": [
+      {"kind": "geometry", "viewWidth": 640, "viewHeight": 400, "deviceWidth": 1280, "deviceHeight": 800},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 1, "clickCount": 1, "modifiers": 9},
+      {"kind": "mouseUp", "x": 100, "y": 50, "button": 1, "clickCount": 1, "modifiers": 9}
+    ],
+    "expected": [
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 200, "y": 100, "button": "none", "buttons": 0, "modifiers": 9, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mousePressed", "x": 200, "y": 100, "button": "right", "buttons": 2, "clickCount": 1, "modifiers": 9, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseReleased", "x": 200, "y": 100, "button": "right", "buttons": 0, "clickCount": 1, "modifiers": 9, "pointerType": "mouse"}}
+    ]
+  },
+  {
+    "name": "a drag: its moves carry the held button, unclamped past the view's edge",
+    "input": [
+      {"kind": "geometry", "viewWidth": 640, "viewHeight": 400, "deviceWidth": 1280, "deviceHeight": 800},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseDragged", "x": 300, "y": 50, "button": 0, "modifiers": 0},
+      {"kind": "mouseDragged", "x": 700, "y": 50, "button": 0, "modifiers": 0},
+      {"kind": "mouseUp", "x": 700, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 200, "y": 100, "button": "none", "buttons": 0, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mousePressed", "x": 200, "y": 100, "button": "left", "buttons": 1, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 600, "y": 100, "button": "left", "buttons": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 1400, "y": 100, "button": "left", "buttons": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseReleased", "x": 1400, "y": 100, "button": "left", "buttons": 0, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}}
+    ]
+  },
+  {
+    "name": "hover is armed by a click: a move before it is dropped, one after it goes, leaving clears :hover",
+    "input": [
+      {"kind": "geometry", "viewWidth": 640, "viewHeight": 400, "deviceWidth": 1280, "deviceHeight": 800},
+      {"kind": "mouseMoved", "x": 10, "y": 10, "modifiers": 0},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseUp", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseMoved", "x": 150, "y": 75, "modifiers": 0},
+      {"kind": "mouseExited"}
+    ],
+    "expected": [
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 200, "y": 100, "button": "none", "buttons": 0, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mousePressed", "x": 200, "y": 100, "button": "left", "buttons": 1, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseReleased", "x": 200, "y": 100, "button": "left", "buttons": 0, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 300, "y": 150, "button": "none", "buttons": 0, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": -1, "y": -1, "button": "none", "buttons": 0, "modifiers": 0, "pointerType": "mouse"}}
+    ]
+  },
+  {
+    "name": "a press in the letterbox is not the page's, nor its release; a press on the picture is",
+    "input": [
+      {"kind": "geometry", "viewWidth": 600, "viewHeight": 800, "deviceWidth": 1280, "deviceHeight": 720},
+      {"kind": "mouseDown", "x": 300, "y": 100, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseUp", "x": 300, "y": 100, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseDown", "x": 300, "y": 400, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseUp", "x": 300, "y": 400, "button": 0, "clickCount": 1, "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 640, "y": 360, "button": "none", "buttons": 0, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mousePressed", "x": 640, "y": 360, "button": "left", "buttons": 1, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseReleased", "x": 640, "y": 360, "button": "left", "buttons": 0, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}}
+    ]
+  },
+  {
+    "name": "the mouse's back and forward buttons are the panel's history, never the page's",
+    "input": [
+      {"kind": "geometry", "viewWidth": 640, "viewHeight": 400, "deviceWidth": 1280, "deviceHeight": 800},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 3, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseUp", "x": 100, "y": 50, "button": 3, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 4, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseUp", "x": 100, "y": 50, "button": 4, "clickCount": 1, "modifiers": 0}
+    ],
+    "expected": []
+  },
+  {
+    "name": "the wheel needs no click: trackpad points scale to CSS px, a wheel line is 40 px, the sign flips",
+    "input": [
+      {"kind": "geometry", "viewWidth": 640, "viewHeight": 400, "deviceWidth": 1280, "deviceHeight": 800},
+      {"kind": "scrollWheel", "x": 100, "y": 50, "dx": 0, "dy": -10, "precise": true, "modifiers": 0},
+      {"kind": "scrollWheel", "x": 100, "y": 50, "dx": 0, "dy": 1, "precise": false, "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseWheel", "x": 200, "y": 100, "deltaX": 0, "deltaY": 20, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseWheel", "x": 200, "y": 100, "deltaX": 0, "deltaY": -40, "modifiers": 0, "pointerType": "mouse"}}
+    ]
+  },
+  {
+    "name": "typing a: keyDown with its text, then keyUp",
+    "input": [
+      {"kind": "keyDown", "keyCode": 0, "characters": "a", "modifiers": 0, "actions": [{"insertText": "a"}]},
+      {"kind": "keyUp", "keyCode": 0, "characters": "a", "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyDown", "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 0, "modifiers": 0, "text": "a", "unmodifiedText": "a"}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 0, "modifiers": 0}}
+    ]
+  },
+  {
+    "name": "AZERTY: the key printed A is physical KeyQ and reads keyCode 65",
+    "input": [
+      {"kind": "keyDown", "keyCode": 12, "characters": "a", "modifiers": 0, "actions": [{"insertText": "a"}]},
+      {"kind": "keyUp", "keyCode": 12, "characters": "a", "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyDown", "key": "a", "code": "KeyQ", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 12, "modifiers": 0, "text": "a", "unmodifiedText": "a"}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "a", "code": "KeyQ", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 12, "modifiers": 0}}
+    ]
+  },
+  {
+    "name": "a French dead key: ^ then e composes ê, with no key event at all",
+    "input": [
+      {"kind": "keyDown", "keyCode": 33, "characters": "", "charactersIgnoringModifiers": "^", "modifiers": 0, "actions": [{"setMarkedText": "^", "location": 1, "length": 0}]},
+      {"kind": "keyUp", "keyCode": 33, "characters": "", "charactersIgnoringModifiers": "^", "modifiers": 0},
+      {"kind": "keyDown", "keyCode": 14, "characters": "ê", "charactersIgnoringModifiers": "e", "modifiers": 0, "actions": [{"insertText": "ê"}]},
+      {"kind": "keyUp", "keyCode": 14, "characters": "e", "charactersIgnoringModifiers": "e", "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.imeSetComposition", "params": {"text": "^", "selectionStart": 1, "selectionEnd": 1}},
+      {"method": "Input.insertText", "params": {"text": "ê"}}
+    ]
+  },
+  {
+    "name": "Option-( on a French keyboard types {, modifiers 1",
+    "input": [
+      {"kind": "flagsChanged", "keyCode": 58, "modifiers": 1},
+      {"kind": "keyDown", "keyCode": 23, "characters": "{", "charactersIgnoringModifiers": "(", "modifiers": 1, "actions": [{"insertText": "{"}]},
+      {"kind": "keyUp", "keyCode": 23, "characters": "{", "charactersIgnoringModifiers": "(", "modifiers": 1},
+      {"kind": "flagsChanged", "keyCode": 58, "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Alt", "code": "AltLeft", "windowsVirtualKeyCode": 18, "nativeVirtualKeyCode": 58, "modifiers": 1, "location": 1}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyDown", "key": "{", "code": "Digit5", "windowsVirtualKeyCode": 53, "nativeVirtualKeyCode": 23, "modifiers": 1, "text": "{", "unmodifiedText": "{"}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "{", "code": "Digit5", "windowsVirtualKeyCode": 53, "nativeVirtualKeyCode": 23, "modifiers": 1}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Alt", "code": "AltLeft", "windowsVirtualKeyCode": 18, "nativeVirtualKeyCode": 58, "modifiers": 0, "location": 1}}
+    ]
+  },
+  {
+    "name": "Enter types \"\\r\" with keyCode 13; insertNewline is not a command",
+    "input": [
+      {"kind": "keyDown", "keyCode": 36, "characters": "\r", "modifiers": 0, "actions": [{"doCommand": "insertNewline:"}]},
+      {"kind": "keyUp", "keyCode": 36, "characters": "\r", "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13, "nativeVirtualKeyCode": 36, "modifiers": 0, "text": "\r", "unmodifiedText": "\r"}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13, "nativeVirtualKeyCode": 36, "modifiers": 0}}
+    ]
+  },
+  {
+    "name": "Backspace deletes backward, Option-Backspace a word",
+    "input": [
+      {"kind": "keyDown", "keyCode": 51, "characters": "\u007f", "modifiers": 0, "actions": [{"doCommand": "deleteBackward:"}]},
+      {"kind": "keyUp", "keyCode": 51, "characters": "\u007f", "modifiers": 0},
+      {"kind": "flagsChanged", "keyCode": 58, "modifiers": 1},
+      {"kind": "keyDown", "keyCode": 51, "characters": "\u007f", "modifiers": 1, "actions": [{"doCommand": "deleteWordBackward:"}]},
+      {"kind": "keyUp", "keyCode": 51, "characters": "\u007f", "modifiers": 1},
+      {"kind": "flagsChanged", "keyCode": 58, "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Backspace", "code": "Backspace", "windowsVirtualKeyCode": 8, "nativeVirtualKeyCode": 51, "modifiers": 0, "commands": ["deleteBackward"]}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Backspace", "code": "Backspace", "windowsVirtualKeyCode": 8, "nativeVirtualKeyCode": 51, "modifiers": 0}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Alt", "code": "AltLeft", "windowsVirtualKeyCode": 18, "nativeVirtualKeyCode": 58, "modifiers": 1, "location": 1}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Backspace", "code": "Backspace", "windowsVirtualKeyCode": 8, "nativeVirtualKeyCode": 51, "modifiers": 1, "commands": ["deleteWordBackward"]}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Backspace", "code": "Backspace", "windowsVirtualKeyCode": 8, "nativeVirtualKeyCode": 51, "modifiers": 1}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Alt", "code": "AltLeft", "windowsVirtualKeyCode": 18, "nativeVirtualKeyCode": 58, "modifiers": 0, "location": 1}}
+    ]
+  },
+  {
+    "name": "Command-Left goes to the line's start; Command's up brings the arrow up first, its own keyUp never came",
+    "input": [
+      {"kind": "flagsChanged", "keyCode": 55, "modifiers": 4},
+      {"kind": "keyDown", "keyCode": 123, "characters": "\uf702", "modifiers": 4, "actions": [{"doCommand": "moveToLeftEndOfLine:"}]},
+      {"kind": "flagsChanged", "keyCode": 55, "modifiers": 0},
+      {"kind": "keyUp", "keyCode": 123, "characters": "\uf702", "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Meta", "code": "MetaLeft", "windowsVirtualKeyCode": 91, "nativeVirtualKeyCode": 55, "modifiers": 4, "location": 1}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "ArrowLeft", "code": "ArrowLeft", "windowsVirtualKeyCode": 37, "nativeVirtualKeyCode": 123, "modifiers": 4, "commands": ["moveToLeftEndOfLine"]}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "ArrowLeft", "code": "ArrowLeft", "windowsVirtualKeyCode": 37, "nativeVirtualKeyCode": 123, "modifiers": 4}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Meta", "code": "MetaLeft", "windowsVirtualKeyCode": 91, "nativeVirtualKeyCode": 55, "modifiers": 0, "location": 1}}
+    ]
+  },
+  {
+    "name": "Shift-Right extends the selection",
+    "input": [
+      {"kind": "flagsChanged", "keyCode": 56, "modifiers": 8},
+      {"kind": "keyDown", "keyCode": 124, "characters": "\uf703", "modifiers": 8, "actions": [{"doCommand": "moveRightAndModifySelection:"}]},
+      {"kind": "keyUp", "keyCode": 124, "characters": "\uf703", "modifiers": 8},
+      {"kind": "flagsChanged", "keyCode": 56, "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Shift", "code": "ShiftLeft", "windowsVirtualKeyCode": 16, "nativeVirtualKeyCode": 56, "modifiers": 8, "location": 1}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "ArrowRight", "code": "ArrowRight", "windowsVirtualKeyCode": 39, "nativeVirtualKeyCode": 124, "modifiers": 8, "commands": ["moveRightAndModifySelection"]}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "ArrowRight", "code": "ArrowRight", "windowsVirtualKeyCode": 39, "nativeVirtualKeyCode": 124, "modifiers": 8}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Shift", "code": "ShiftLeft", "windowsVirtualKeyCode": 16, "nativeVirtualKeyCode": 56, "modifiers": 0, "location": 1}}
+    ]
+  },
+  {
+    "name": "Tab is a rawKeyDown with keyCode 9 (insertTab is no command); Escape is 27",
+    "input": [
+      {"kind": "keyDown", "keyCode": 48, "characters": "\t", "modifiers": 0, "actions": [{"doCommand": "insertTab:"}]},
+      {"kind": "keyUp", "keyCode": 48, "characters": "\t", "modifiers": 0},
+      {"kind": "keyDown", "keyCode": 53, "characters": "\u001b", "modifiers": 0, "actions": [{"doCommand": "cancelOperation:"}]},
+      {"kind": "keyUp", "keyCode": 53, "characters": "\u001b", "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9, "nativeVirtualKeyCode": 48, "modifiers": 0}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9, "nativeVirtualKeyCode": 48, "modifiers": 0}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27, "nativeVirtualKeyCode": 53, "modifiers": 0, "commands": ["cancelOperation"]}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27, "nativeVirtualKeyCode": 53, "modifiers": 0}}
+    ]
+  },
+  {
+    "name": "Command-A, Command-Z and Command-Shift-Z are the page's; Command-N and Command-L are not",
+    "input": [
+      {"kind": "shortcut", "keyCode": 0, "characters": "a", "modifiers": 4},
+      {"kind": "shortcut", "keyCode": 6, "characters": "z", "modifiers": 4},
+      {"kind": "shortcut", "keyCode": 6, "characters": "z", "charactersIgnoringModifiers": "Z", "modifiers": 12},
+      {"kind": "shortcut", "keyCode": 45, "characters": "n", "modifiers": 4},
+      {"kind": "shortcut", "keyCode": 37, "characters": "l", "modifiers": 4}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 0, "modifiers": 4, "commands": ["selectAll"]}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 0, "modifiers": 4}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "z", "code": "KeyZ", "windowsVirtualKeyCode": 90, "nativeVirtualKeyCode": 6, "modifiers": 4, "commands": ["undo"]}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "z", "code": "KeyZ", "windowsVirtualKeyCode": 90, "nativeVirtualKeyCode": 6, "modifiers": 4}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "z", "code": "KeyZ", "windowsVirtualKeyCode": 90, "nativeVirtualKeyCode": 6, "modifiers": 12, "commands": ["redo"]}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "z", "code": "KeyZ", "windowsVirtualKeyCode": 90, "nativeVirtualKeyCode": 6, "modifiers": 12}}
+    ]
+  },
+  {
+    "name": "Copy from the Edit menu is Command-C with the copy command",
+    "input": [
+      {"kind": "edit", "command": "copy"}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "c", "code": "KeyC", "windowsVirtualKeyCode": 67, "nativeVirtualKeyCode": 8, "modifiers": 4, "commands": ["copy"]}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "c", "code": "KeyC", "windowsVirtualKeyCode": 67, "nativeVirtualKeyCode": 8, "modifiers": 4}}
+    ]
+  },
+  {
+    "name": "Japanese input: the marked text grows, converts, then commits — no key event",
+    "input": [
+      {"kind": "keyDown", "keyCode": 40, "characters": "k", "modifiers": 0, "actions": [{"setMarkedText": "k", "location": 1, "length": 0}]},
+      {"kind": "keyUp", "keyCode": 40, "characters": "k", "modifiers": 0},
+      {"kind": "keyDown", "keyCode": 0, "characters": "a", "modifiers": 0, "actions": [{"setMarkedText": "か", "location": 1, "length": 0}]},
+      {"kind": "keyUp", "keyCode": 0, "characters": "a", "modifiers": 0},
+      {"kind": "keyDown", "keyCode": 49, "characters": " ", "modifiers": 0, "actions": [{"setMarkedText": "蚊", "location": 0, "length": 1}]},
+      {"kind": "keyUp", "keyCode": 49, "characters": " ", "modifiers": 0},
+      {"kind": "keyDown", "keyCode": 36, "characters": "\r", "modifiers": 0, "actions": [{"insertText": "蚊"}]},
+      {"kind": "keyUp", "keyCode": 36, "characters": "\r", "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.imeSetComposition", "params": {"text": "k", "selectionStart": 1, "selectionEnd": 1}},
+      {"method": "Input.imeSetComposition", "params": {"text": "か", "selectionStart": 1, "selectionEnd": 1}},
+      {"method": "Input.imeSetComposition", "params": {"text": "蚊", "selectionStart": 0, "selectionEnd": 1}},
+      {"method": "Input.insertText", "params": {"text": "蚊"}}
+    ]
+  },
+  {
+    "name": "text from outside a keyDown (the emoji picker) is inserted as is",
+    "input": [
+      {"kind": "text", "actions": [{"insertText": "😀"}]}
+    ],
+    "expected": [
+      {"method": "Input.insertText", "params": {"text": "😀"}}
+    ]
+  },
+  {
+    "name": "the agent takes over: the user's button, key and composition are released, then input waits until it finishes",
+    "input": [
+      {"kind": "geometry", "viewWidth": 640, "viewHeight": 400, "deviceWidth": 1280, "deviceHeight": 800},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "flagsChanged", "keyCode": 56, "modifiers": 8},
+      {"kind": "keyDown", "keyCode": 33, "characters": "", "charactersIgnoringModifiers": "¨", "modifiers": 8, "actions": [{"setMarkedText": "¨", "location": 1, "length": 0}]},
+      {"kind": "agentWillAct"},
+      {"kind": "mouseUp", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "flagsChanged", "keyCode": 56, "modifiers": 0},
+      {"kind": "keyDown", "keyCode": 0, "characters": "a", "modifiers": 0, "actions": [{"insertText": "a"}]},
+      {"kind": "keyUp", "keyCode": 0, "characters": "a", "modifiers": 0},
+      {"kind": "agentDidFinish"},
+      {"kind": "mouseMoved", "x": 100, "y": 50, "modifiers": 0},
+      {"kind": "keyDown", "keyCode": 0, "characters": "a", "modifiers": 0, "actions": [{"insertText": "a"}]},
+      {"kind": "keyUp", "keyCode": 0, "characters": "a", "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 200, "y": 100, "button": "none", "buttons": 0, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mousePressed", "x": 200, "y": 100, "button": "left", "buttons": 1, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Shift", "code": "ShiftLeft", "windowsVirtualKeyCode": 16, "nativeVirtualKeyCode": 56, "modifiers": 8, "location": 1}},
+      {"method": "Input.imeSetComposition", "params": {"text": "¨", "selectionStart": 1, "selectionEnd": 1}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseReleased", "x": 200, "y": 100, "button": "left", "buttons": 0, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Shift", "code": "ShiftLeft", "windowsVirtualKeyCode": 16, "nativeVirtualKeyCode": 56, "modifiers": 0, "location": 1}},
+      {"method": "Input.imeSetComposition", "params": {"text": "", "selectionStart": 0, "selectionEnd": 0}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 200, "y": 100, "button": "none", "buttons": 0, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyDown", "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 0, "modifiers": 0, "text": "a", "unmodifiedText": "a"}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 0, "modifiers": 0}}
+    ]
+  },
+  {
+    "name": "a dialog opened by a press: its release still goes, new presses and keys wait for the answer",
+    "input": [
+      {"kind": "geometry", "viewWidth": 640, "viewHeight": 400, "deviceWidth": 1280, "deviceHeight": 800},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "dialog", "open": true},
+      {"kind": "mouseUp", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseUp", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "keyDown", "keyCode": 0, "characters": "a", "modifiers": 0, "actions": [{"insertText": "a"}]},
+      {"kind": "dialog", "open": false},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseUp", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 200, "y": 100, "button": "none", "buttons": 0, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mousePressed", "x": 200, "y": 100, "button": "left", "buttons": 1, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseReleased", "x": 200, "y": 100, "button": "left", "buttons": 0, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mousePressed", "x": 200, "y": 100, "button": "left", "buttons": 1, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseReleased", "x": 200, "y": 100, "button": "left", "buttons": 0, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}}
+    ]
+  },
+  {
+    "name": "modifier keys report their side: ShiftLeft, then MetaRight with keyCode 92",
+    "input": [
+      {"kind": "flagsChanged", "keyCode": 56, "modifiers": 8},
+      {"kind": "flagsChanged", "keyCode": 54, "modifiers": 12},
+      {"kind": "flagsChanged", "keyCode": 54, "modifiers": 8},
+      {"kind": "flagsChanged", "keyCode": 56, "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Shift", "code": "ShiftLeft", "windowsVirtualKeyCode": 16, "nativeVirtualKeyCode": 56, "modifiers": 8, "location": 1}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Meta", "code": "MetaRight", "windowsVirtualKeyCode": 92, "nativeVirtualKeyCode": 54, "modifiers": 12, "location": 2}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Meta", "code": "MetaRight", "windowsVirtualKeyCode": 92, "nativeVirtualKeyCode": 54, "modifiers": 8, "location": 2}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Shift", "code": "ShiftLeft", "windowsVirtualKeyCode": 16, "nativeVirtualKeyCode": 56, "modifiers": 0, "location": 1}}
+    ]
+  },
+  {
+    "name": "Control-A goes to the paragraph's start and reads key a",
+    "input": [
+      {"kind": "flagsChanged", "keyCode": 59, "modifiers": 2},
+      {"kind": "keyDown", "keyCode": 0, "characters": "\u0001", "charactersIgnoringModifiers": "a", "modifiers": 2, "actions": [{"doCommand": "moveToBeginningOfParagraph:"}]},
+      {"kind": "keyUp", "keyCode": 0, "characters": "\u0001", "charactersIgnoringModifiers": "a", "modifiers": 2},
+      {"kind": "flagsChanged", "keyCode": 59, "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Control", "code": "ControlLeft", "windowsVirtualKeyCode": 17, "nativeVirtualKeyCode": 59, "modifiers": 2, "location": 1}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 0, "modifiers": 2, "commands": ["moveToBeginningOfParagraph"]}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 0, "modifiers": 2}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Control", "code": "ControlLeft", "windowsVirtualKeyCode": 17, "nativeVirtualKeyCode": 59, "modifiers": 0, "location": 1}}
+    ]
+  },
+  {
+    "name": "losing focus mid-composition commits the marked text, and the pointer leaves",
+    "input": [
+      {"kind": "geometry", "viewWidth": 640, "viewHeight": 400, "deviceWidth": 1280, "deviceHeight": 800},
+      {"kind": "mouseDown", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "mouseUp", "x": 100, "y": 50, "button": 0, "clickCount": 1, "modifiers": 0},
+      {"kind": "keyDown", "keyCode": 33, "characters": "", "charactersIgnoringModifiers": "^", "modifiers": 0, "actions": [{"setMarkedText": "^", "location": 1, "length": 0}]},
+      {"kind": "resign"}
+    ],
+    "expected": [
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": 200, "y": 100, "button": "none", "buttons": 0, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mousePressed", "x": 200, "y": 100, "button": "left", "buttons": 1, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseReleased", "x": 200, "y": 100, "button": "left", "buttons": 0, "clickCount": 1, "modifiers": 0, "pointerType": "mouse"}},
+      {"method": "Input.imeSetComposition", "params": {"text": "^", "selectionStart": 1, "selectionEnd": 1}},
+      {"method": "Input.insertText", "params": {"text": "^"}},
+      {"method": "Input.dispatchMouseEvent", "params": {"type": "mouseMoved", "x": -1, "y": -1, "button": "none", "buttons": 0, "modifiers": 0, "pointerType": "mouse"}}
+    ]
+  },
+  {
+    "name": "an auto-repeated key says so",
+    "input": [
+      {"kind": "keyDown", "keyCode": 0, "characters": "a", "modifiers": 0, "actions": [{"insertText": "a"}]},
+      {"kind": "keyDown", "keyCode": 0, "characters": "a", "modifiers": 0, "isARepeat": true, "actions": [{"insertText": "a"}]},
+      {"kind": "keyUp", "keyCode": 0, "characters": "a", "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyDown", "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 0, "modifiers": 0, "text": "a", "unmodifiedText": "a"}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyDown", "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 0, "modifiers": 0, "text": "a", "unmodifiedText": "a", "autoRepeat": true}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 0, "modifiers": 0}}
+    ]
+  },
+  {
+    "name": "an unclaimed Command chord reaches the page as a rawKeyDown with Meta",
+    "input": [
+      {"kind": "flagsChanged", "keyCode": 55, "modifiers": 4},
+      {"kind": "keyDown", "keyCode": 11, "characters": "b", "modifiers": 4, "actions": [{"doCommand": "noop:"}]},
+      {"kind": "flagsChanged", "keyCode": 55, "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "Meta", "code": "MetaLeft", "windowsVirtualKeyCode": 91, "nativeVirtualKeyCode": 55, "modifiers": 4, "location": 1}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "b", "code": "KeyB", "windowsVirtualKeyCode": 66, "nativeVirtualKeyCode": 11, "modifiers": 4}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "b", "code": "KeyB", "windowsVirtualKeyCode": 66, "nativeVirtualKeyCode": 11, "modifiers": 4}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "Meta", "code": "MetaLeft", "windowsVirtualKeyCode": 91, "nativeVirtualKeyCode": 55, "modifiers": 0, "location": 1}}
+    ]
+  },
+  {
+    "name": "a function key with no binding is a bare rawKeyDown",
+    "input": [
+      {"kind": "keyDown", "keyCode": 96, "characters": "\uf708", "modifiers": 0, "actions": []},
+      {"kind": "keyUp", "keyCode": 96, "characters": "\uf708", "modifiers": 0}
+    ],
+    "expected": [
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "rawKeyDown", "key": "F5", "code": "F5", "windowsVirtualKeyCode": 116, "nativeVirtualKeyCode": 96, "modifiers": 0}},
+      {"method": "Input.dispatchKeyEvent", "params": {"type": "keyUp", "key": "F5", "code": "F5", "windowsVirtualKeyCode": 116, "nativeVirtualKeyCode": 96, "modifiers": 0}}
+    ]
+  }
+]

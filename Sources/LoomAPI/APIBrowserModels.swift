@@ -6,6 +6,18 @@ import Foundation
 // `element` is the agent's own description of the element, echoed back.
 // Numbers are Doubles on the wire: JSON has no integers.
 
+/// The engine behind a session's browser (ADR-0014, ADR-0016): WebKit with
+/// synthetic events, or headless Chromium driven over the DevTools protocol
+/// with real ones. Chosen when the session launches, kept until it resumes.
+public enum APIBrowserEngine: String, Codable, Sendable, CaseIterable {
+    case webkit, chromium
+
+    /// The engine `loom mcp` was launched for; WebKit when unsaid.
+    public init(environment: [String: String]) {
+        self = environment[APIProtocol.browserEngineEnvironmentKey].flatMap(Self.init(rawValue:)) ?? .webkit
+    }
+}
+
 /// Any browser method's session: omitted under a session token (yours).
 public struct APIBrowserSessionParams: Codable, Equatable, Sendable {
     public var sessionId: String?
@@ -183,15 +195,34 @@ public struct APIBrowserResizeParams: Codable, Equatable, Sendable {
     public var height: Double?
 }
 
+public struct APIBrowserRunCodeParams: Codable, Equatable, Sendable {
+    public var sessionId: String?
+    /// `async (page) => { … }`, or a body that uses `page` and may `return`.
+    public var code: String
+    /// full (default) or none: the page's snapshot after the script.
+    public var snapshot: String?
+
+    public init(sessionId: String? = nil, code: String, snapshot: String? = nil) {
+        self.sessionId = sessionId
+        self.code = code
+        self.snapshot = snapshot
+    }
+}
+
 /// A tool's answer meant to be read: Markdown, and maybe an image beside it.
 /// The MCP server shows the text as is and the image as an image.
 public struct APIToolContent: Codable, Equatable, Sendable {
     public var text: String
     public var image: APIImageRef?
+    /// The Markdown reports a failure (`### Error` first): the MCP result is
+    /// a tool error, the CLI exits with 1. nil for every other answer — their
+    /// JSON is unchanged.
+    public var isError: Bool?
 
-    public init(text: String, image: APIImageRef? = nil) {
+    public init(text: String, image: APIImageRef? = nil, isError: Bool? = nil) {
         self.text = text
         self.image = image
+        self.isError = isError
     }
 }
 

@@ -6,14 +6,31 @@ import SwiftUI
 /// the agent's actions), with the agent's activity and a page's dialog laid
 /// OVER the page rather than above it.
 public struct AgentBrowserPanelView: View {
-    private let browser: AgentBrowser
+    private let browser: any AgentBrowserEngine
     private let caption: String
+    /// The project whose default width the menu can set, and how — nil for
+    /// a session without one, or a review (it reads the default, never writes it).
+    private let defaultWidth: DefaultWidth?
 
     @State private var promptText = ""
 
-    public init(browser: AgentBrowser, caption: String) {
+    /// A project's default page width, as the panel's menu shows and sets it.
+    public struct DefaultWidth {
+        public var projectName: String
+        public var current: ViewportWidth
+        public var set: @MainActor (ViewportWidth) -> Void
+
+        public init(projectName: String, current: ViewportWidth, set: @escaping @MainActor (ViewportWidth) -> Void) {
+            self.projectName = projectName
+            self.current = current
+            self.set = set
+        }
+    }
+
+    public init(browser: any AgentBrowserEngine, caption: String, defaultWidth: DefaultWidth? = nil) {
         self.browser = browser
         self.caption = caption
+        self.defaultWidth = defaultWidth
     }
 
     public var body: some View {
@@ -33,10 +50,26 @@ public struct AgentBrowserPanelView: View {
             .padding(.horizontal, 10)
             .frame(height: 22)
             .background(DefaultTheme.background)
-            BrowserPanelView(controller: browser.controller,
-                             emptyHint: "The agent hasn't opened a page yet — it will appear here.",
-                             newTabAddress: "about:blank")
-                .overlay(alignment: .top) { overlays }
+            page
+        }
+    }
+
+    private static let emptyHint = "The agent hasn't opened a page yet — it will appear here."
+
+    @ViewBuilder
+    private var page: some View {
+        switch browser.panelContent {
+        case .webKit(let controller):
+            BrowserPanelView(controller: controller, emptyHint: Self.emptyHint, newTabAddress: "about:blank")
+                .overlay(alignment: .top) {
+                    overlays.padding(.top, 52)   // below the address bar and the tab strip
+                }
+        case .chromium(let surface):
+            // Laid over the page area itself: no chrome height to allow for.
+            ChromiumBrowserPanelView(surface: surface, emptyHint: Self.emptyHint,
+                                     agentBusy: browser.activity?.isRunning == true) {
+                overlays.padding(.top, 8)
+            }
         }
     }
 
@@ -59,6 +92,16 @@ public struct AgentBrowserPanelView: View {
                 Divider()
                 Label(browser.viewportWidth.label + " (set by claude)", systemImage: "checkmark")
             }
+            if let defaultWidth {
+                Divider()
+                if defaultWidth.current == browser.viewportWidth {
+                    Text("Default for \(defaultWidth.projectName): \(defaultWidth.current.label)")
+                } else {
+                    Button("Use \(browser.viewportWidth.label) as default for \(defaultWidth.projectName)") {
+                        defaultWidth.set(browser.viewportWidth)
+                    }
+                }
+            }
         } label: {
             Text(browser.viewportWidth == .fit ? "Fit" : browser.viewportWidth.label)
                 .font(.system(size: 10))
@@ -66,7 +109,7 @@ public struct AgentBrowserPanelView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .help("The page's width: the panel's, or a wider one scaled to fit")
+        .help("This session's page width: the panel's, or another scaled to fit. New sessions open at the project's default (Settings).")
     }
 
     @ViewBuilder
@@ -89,7 +132,6 @@ public struct AgentBrowserPanelView: View {
                 dialogBanner(dialog)
             }
         }
-        .padding(.top, 52)   // below the address bar and the tab strip
         .padding(.horizontal, 12)
     }
 

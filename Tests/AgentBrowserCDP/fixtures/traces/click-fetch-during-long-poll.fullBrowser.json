@@ -1,0 +1,458 @@
+{
+ "$comment": "Recorded by Tests/AgentBrowserCDP/settle.test.mjs for SettleMachine replay. t: ms from the mark (just before the click's write). Ids are tokens (F frame, L loader — a navigation's Document request shares its loader's —, R request); {origin} is the fixture server.",
+ "scenario": "click-fetch-during-long-poll",
+ "description": "A click that fetches while the page keeps a long-poll XHR open (700 ms each, re-sent at once): the poll was in flight at the mark.",
+ "binary": "fullBrowser",
+ "product": "Chrome/141.0.7390.37",
+ "mainFrame": "F1",
+ "loaderAtMark": "L1",
+ "barrier": "answered",
+ "entries": [
+  {
+   "t": -1640.1,
+   "event": "Page.frameStartedNavigating",
+   "params": {
+    "frameId": "F1",
+    "url": "{origin}/settle.html?poll",
+    "loaderId": "L1",
+    "navigationType": "differentDocument"
+   }
+  },
+  {
+   "t": -1639.6,
+   "event": "Page.frameStartedLoading",
+   "params": {
+    "frameId": "F1"
+   }
+  },
+  {
+   "t": -1638.3,
+   "event": "Network.requestWillBeSent",
+   "params": {
+    "requestId": "L1",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "Document",
+    "request": {
+     "method": "GET",
+     "url": "{origin}/settle.html?poll"
+    }
+   }
+  },
+  {
+   "t": -1631,
+   "event": "Network.responseReceived",
+   "params": {
+    "requestId": "L1",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "Document",
+    "response": {
+     "status": 200,
+     "url": "{origin}/settle.html?poll"
+    }
+   }
+  },
+  {
+   "t": -1627.4,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L1",
+    "name": "init"
+   }
+  },
+  {
+   "t": -1625.1,
+   "event": "Page.frameNavigated",
+   "params": {
+    "frame": {
+     "id": "F1",
+     "loaderId": "L1",
+     "url": "{origin}/settle.html?poll"
+    },
+    "type": "Navigation"
+   }
+  },
+  {
+   "t": -1616.2,
+   "event": "Network.requestWillBeSent",
+   "params": {
+    "requestId": "R1",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "XHR",
+    "request": {
+     "method": "GET",
+     "url": "{origin}/poll?hold=700&n=1"
+    }
+   }
+  },
+  {
+   "t": -1614.1,
+   "event": "Network.loadingFinished",
+   "params": {
+    "requestId": "L1"
+   }
+  },
+  {
+   "t": -1605.2,
+   "event": "Page.domContentEventFired",
+   "params": {}
+  },
+  {
+   "t": -1605.2,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L1",
+    "name": "DOMContentLoaded"
+   }
+  },
+  {
+   "t": -1603.6,
+   "event": "Page.loadEventFired",
+   "params": {}
+  },
+  {
+   "t": -1603.6,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L1",
+    "name": "load"
+   }
+  },
+  {
+   "t": -1603.6,
+   "event": "Page.frameStoppedLoading",
+   "params": {
+    "frameId": "F1"
+   }
+  },
+  {
+   "t": -1570.9,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L1",
+    "name": "firstMeaningfulPaintCandidate"
+   }
+  },
+  {
+   "t": -1570.8,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L1",
+    "name": "firstContentfulPaint"
+   }
+  },
+  {
+   "t": -1570.3,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L1",
+    "name": "firstPaint"
+   }
+  },
+  {
+   "t": -912,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L1",
+    "name": "networkAlmostIdle"
+   }
+  },
+  {
+   "t": -912,
+   "event": "Page.lifecycleEvent",
+   "params": {
+    "frameId": "F1",
+    "loaderId": "L1",
+    "name": "firstMeaningfulPaint"
+   }
+  },
+  {
+   "t": -910.4,
+   "event": "Network.responseReceived",
+   "params": {
+    "requestId": "R1",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "XHR",
+    "response": {
+     "status": 200,
+     "url": "{origin}/poll?hold=700&n=1"
+    }
+   }
+  },
+  {
+   "t": -909.8,
+   "event": "Network.requestWillBeSent",
+   "params": {
+    "requestId": "R2",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "XHR",
+    "request": {
+     "method": "GET",
+     "url": "{origin}/poll?hold=700&n=2"
+    }
+   }
+  },
+  {
+   "t": -909.8,
+   "event": "Network.loadingFinished",
+   "params": {
+    "requestId": "R1"
+   }
+  },
+  {
+   "t": -204.7,
+   "event": "Network.responseReceived",
+   "params": {
+    "requestId": "R2",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "XHR",
+    "response": {
+     "status": 200,
+     "url": "{origin}/poll?hold=700&n=2"
+    }
+   }
+  },
+  {
+   "t": -204,
+   "event": "Network.requestWillBeSent",
+   "params": {
+    "requestId": "R3",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "XHR",
+    "request": {
+     "method": "GET",
+     "url": "{origin}/poll?hold=700&n=3"
+    }
+   }
+  },
+  {
+   "t": -204,
+   "event": "Network.loadingFinished",
+   "params": {
+    "requestId": "R2"
+   }
+  },
+  {
+   "t": 0,
+   "mark": true
+  },
+  {
+   "t": 0.1,
+   "send": "Input.dispatchMouseEvent",
+   "ref": "click.moved",
+   "params": {
+    "type": "mouseMoved",
+    "x": 126,
+    "y": 108,
+    "button": "none",
+    "buttons": 0,
+    "modifiers": 0,
+    "pointerType": "mouse"
+   }
+  },
+  {
+   "t": 0.1,
+   "send": "Input.dispatchMouseEvent",
+   "ref": "click.pressed",
+   "params": {
+    "type": "mousePressed",
+    "x": 126,
+    "y": 108,
+    "button": "left",
+    "clickCount": 1,
+    "modifiers": 0,
+    "pointerType": "mouse",
+    "buttons": 1
+   }
+  },
+  {
+   "t": 0.1,
+   "send": "Input.dispatchMouseEvent",
+   "ref": "click.released",
+   "params": {
+    "type": "mouseReleased",
+    "x": 126,
+    "y": 108,
+    "button": "left",
+    "clickCount": 1,
+    "modifiers": 0,
+    "pointerType": "mouse",
+    "buttons": 0
+   }
+  },
+  {
+   "t": 1.8,
+   "reply": "click.moved"
+  },
+  {
+   "t": 3.5,
+   "reply": "click.pressed"
+  },
+  {
+   "t": 3.9,
+   "reply": "click.released"
+  },
+  {
+   "t": 4,
+   "send": "Runtime.callFunctionOn",
+   "ref": "barrier",
+   "params": {
+    "functionDeclaration": "async function() { await new Promise((resolve) => setTimeout(resolve, 0)); return JSON.stringify({ url: location.href, visibility: document.visibilityState }); }"
+   }
+  },
+  {
+   "t": 5.1,
+   "event": "Network.requestWillBeSent",
+   "params": {
+    "requestId": "R4",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "Fetch",
+    "request": {
+     "method": "GET",
+     "url": "{origin}/ok?s=fetch"
+    }
+   }
+  },
+  {
+   "t": 5.9,
+   "reply": "barrier",
+   "value": {
+    "url": "{origin}/settle.html?poll",
+    "visibility": "visible"
+   }
+  },
+  {
+   "t": 6.6,
+   "event": "Network.responseReceived",
+   "params": {
+    "requestId": "R4",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "Fetch",
+    "response": {
+     "status": 200,
+     "url": "{origin}/ok?s=fetch"
+    }
+   }
+  },
+  {
+   "t": 501.7,
+   "event": "Network.responseReceived",
+   "params": {
+    "requestId": "R3",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "XHR",
+    "response": {
+     "status": 200,
+     "url": "{origin}/poll?hold=700&n=3"
+    }
+   }
+  },
+  {
+   "t": 502.2,
+   "event": "Network.requestWillBeSent",
+   "params": {
+    "requestId": "R5",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "XHR",
+    "request": {
+     "method": "GET",
+     "url": "{origin}/poll?hold=700&n=4"
+    }
+   }
+  },
+  {
+   "t": 502.3,
+   "event": "Network.loadingFinished",
+   "params": {
+    "requestId": "R3"
+   }
+  },
+  {
+   "t": 1207.2,
+   "event": "Network.responseReceived",
+   "params": {
+    "requestId": "R5",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "XHR",
+    "response": {
+     "status": 200,
+     "url": "{origin}/poll?hold=700&n=4"
+    }
+   }
+  },
+  {
+   "t": 1207.6,
+   "event": "Network.requestWillBeSent",
+   "params": {
+    "requestId": "R6",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "XHR",
+    "request": {
+     "method": "GET",
+     "url": "{origin}/poll?hold=700&n=5"
+    }
+   }
+  },
+  {
+   "t": 1207.7,
+   "event": "Network.loadingFinished",
+   "params": {
+    "requestId": "R5"
+   }
+  },
+  {
+   "t": 1912.9,
+   "event": "Network.responseReceived",
+   "params": {
+    "requestId": "R6",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "XHR",
+    "response": {
+     "status": 200,
+     "url": "{origin}/poll?hold=700&n=5"
+    }
+   }
+  },
+  {
+   "t": 1914.5,
+   "event": "Network.requestWillBeSent",
+   "params": {
+    "requestId": "R7",
+    "loaderId": "L1",
+    "frameId": "F1",
+    "type": "XHR",
+    "request": {
+     "method": "GET",
+     "url": "{origin}/poll?hold=700&n=6"
+    }
+   }
+  },
+  {
+   "t": 1914.5,
+   "event": "Network.loadingFinished",
+   "params": {
+    "requestId": "R6"
+   }
+  }
+ ]
+}

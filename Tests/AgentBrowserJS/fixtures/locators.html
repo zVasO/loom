@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Account settings</title>
+<style>
+  body { font-family: sans-serif; margin: 16px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+             clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .gone { display: none; }
+  .ghost { visibility: hidden; }
+  .card { cursor: pointer; padding: 6px; border: 1px solid #ccc; }
+  dialog { position: static; display: block; margin: 8px 0; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid #ccc; padding: 2px 6px; }
+</style>
+</head>
+<!-- A realistic settings page for the locator engine: every element the
+     tests look for carries a unique data-k, the key both engines answer.
+     Shadow trees and the frame get theirs from the script at the end. -->
+<body data-k="body">
+<a data-k="skip" class="sr-only" href="#main">Skip to content</a>
+<header data-k="header">
+  <h1 data-k="h1">Account settings</h1>
+  <nav data-k="nav" aria-label="Main">
+    <ul data-k="nav-list">
+      <li data-k="nav-home"><a data-k="link-home" href="#home">Home</a></li>
+      <li data-k="nav-docs"><a data-k="link-docs" href="#docs" title="Documentation">Docs</a></li>
+      <li data-k="nav-plain"><a data-k="link-plain">Not a link</a></li>
+    </ul>
+  </nav>
+</header>
+<main data-k="main" id="main">
+  <section data-k="profile" aria-labelledby="profile-title">
+    <h2 data-k="h2-profile" id="profile-title">Profile</h2>
+    <form data-k="form" id="profile-form" onsubmit="event.preventDefault()">
+      <div class="row">
+        <label data-k="label-email" for="email">Email address</label>
+        <input data-k="email" id="email" type="email" placeholder="you@example.com" value="ada@example.com">
+      </div>
+      <div class="row">
+        <label data-k="label-name">Full name <input data-k="name" type="text" placeholder="Jane Doe"></label>
+      </div>
+      <div class="row">
+        <span data-k="bio-caption" id="bio-caption">Short bio</span>
+        <textarea data-k="bio" aria-labelledby="bio-caption" placeholder="A few words about you">Writes code.</textarea>
+      </div>
+      <div class="row">
+        <input data-k="search" type="search" aria-label="Search settings" placeholder="Search">
+        <input data-k="token" type="hidden" name="token" value="secret">
+      </div>
+      <div class="row">
+        <input data-k="password" id="pw" type="password">
+        <label data-k="label-pw" for="pw">Password</label>
+      </div>
+      <div data-k="notes" role="textbox" aria-multiline="true" contenteditable="true" aria-label="Notes">Remember the milk</div>
+      <div data-k="scratch" contenteditable="true">Scratch pad</div>
+      <div class="row">
+        <select data-k="country" id="country" aria-label="Country">
+          <option data-k="opt-fr" value="fr">France</option>
+          <option data-k="opt-de" value="de" selected>Germany</option>
+          <option data-k="opt-it" value="it">Italy</option>
+        </select>
+      </div>
+      <fieldset data-k="plan">
+        <legend data-k="plan-legend">Plan</legend>
+        <input data-k="plan-free" type="radio" name="plan" id="plan-free" value="free" checked>
+        <label data-k="label-free" for="plan-free">Free</label>
+        <input data-k="plan-pro" type="radio" name="plan" id="plan-pro" value="pro">
+        <label data-k="label-pro" for="plan-pro">Pro</label>
+      </fieldset>
+      <fieldset data-k="locked" disabled>
+        <legend data-k="locked-legend">Billing <button data-k="billing-help" type="button">Help</button></legend>
+        <input data-k="card-number" type="text" aria-label="Card number">
+      </fieldset>
+      <div class="row">
+        <label data-k="label-news"><input data-k="news" type="checkbox" checked> Newsletter</label>
+        <label data-k="label-terms"><input data-k="terms" type="checkbox"> I accept the terms</label>
+        <div data-k="select-all" role="checkbox" aria-checked="mixed" tabindex="0">Select all</div>
+        <div data-k="dark" role="switch" aria-checked="true" tabindex="0">Dark mode</div>
+      </div>
+      <div class="row">
+        <button data-k="save" type="submit">Save</button>
+        <button data-k="save-draft" type="button">Save draft</button>
+        <input data-k="send" type="submit" value="Send">
+        <input data-k="reset" type="reset">
+        <button data-k="delete" type="button" disabled>Delete account</button>
+        <button data-k="bold" type="button" aria-pressed="true">Bold</button>
+        <button data-k="italic" type="button" aria-pressed="false">Italic</button>
+        <button data-k="menu" type="button" aria-expanded="false" aria-haspopup="menu">More</button>
+        <span data-k="soon" role="button" aria-disabled="true" tabindex="0">Coming soon</span>
+      </div>
+    </form>
+  </section>
+
+  <section data-k="shopping" aria-label="Shopping list">
+    <h2 data-k="h2-shopping">Shopping list</h2>
+    <ul data-k="list" id="list">
+      <li data-k="row-milk"><input data-k="milk-done" type="checkbox" aria-label="Milk done" checked> <span data-k="milk-text">Milk</span> <button data-k="milk-delete" type="button">Delete</button></li>
+      <li data-k="row-eggs"><input data-k="eggs-done" type="checkbox" aria-label="Eggs done"> <span data-k="eggs-text">Eggs</span> <button data-k="eggs-delete" type="button">Delete</button></li>
+      <li data-k="row-bread"><input data-k="bread-done" type="checkbox" aria-label="Bread done"> <span data-k="bread-text">Bread</span> <button data-k="bread-delete" type="button">Delete</button></li>
+    </ul>
+    <p data-k="list-count">3 items, <b data-k="list-done">1 done</b></p>
+  </section>
+
+  <section data-k="orders" aria-label="Orders">
+    <table data-k="table">
+      <caption data-k="caption">Recent orders</caption>
+      <thead data-k="thead">
+        <tr data-k="tr-head"><th data-k="th-order" scope="col">Order</th><th data-k="th-status" scope="col">Status</th><th data-k="th-total">Total</th></tr>
+      </thead>
+      <tbody data-k="tbody">
+        <tr data-k="tr-1001"><td data-k="td-1001">#1001</td><td data-k="td-1001-status">Shipped</td><td data-k="td-1001-total">€12.00</td></tr>
+        <tr data-k="tr-1002"><td data-k="td-1002">#1002</td><td data-k="td-1002-status">Pending</td><td data-k="td-1002-total">€30.50</td></tr>
+      </tbody>
+    </table>
+    <button data-k="buy" type="button">Buy for €<span data-k="buy-price">12</span>.00</button>
+  </section>
+
+  <section data-k="misc" aria-label="Help">
+    <h3 data-k="h3">Danger zone</h3>
+    <div data-k="h4" role="heading" aria-level="4">Advanced</div>
+    <p data-k="hello">Hello <b data-k="world">world</b></p>
+    <p data-k="spaced">   Lots   of
+       space   here  </p>
+    <p data-k="zw">Zero&#8203;width&#173;text</p>
+    <p data-k="mixed-case">CASE Matters</p>
+    <div data-k="card" class="card" role="button" tabindex="0">Clickable card</div>
+    <button data-k="close" type="button" aria-label="Close">×</button>
+    <button data-k="btn-gone" class="gone" type="button">Ghost display none</button>
+    <div data-k="hidden-wrap" aria-hidden="true"><button data-k="btn-aria-hidden" type="button">Hidden from AT</button></div>
+    <button data-k="btn-ghost" class="ghost" type="button">Invisible ghost</button>
+    <button data-k="btn-sr" class="sr-only" type="button">Screen reader only</button>
+    <div data-k="inert-wrap" inert><button data-k="btn-inert" type="button">Inert action</button></div>
+    <img data-k="logo" alt="Company logo" width="40" height="20" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='20'/%3E">
+    <span data-k="help" title="Help text">?</span>
+    <button data-k="place" type="button" data-testid="submit-order">Place order</button>
+    <div data-k="summary-box" data-testid="order-summary">2 orders</div>
+    <details data-k="details">
+      <summary data-k="summary">More options</summary>
+      <p data-k="details-text">Hidden until opened</p>
+      <button data-k="details-button" type="button">Inside details</button>
+    </details>
+    <button data-k="long" type="button">Export every order of the last twelve months as a spreadsheet with one row per item and one column per field</button>
+    <div data-k="host" id="host"></div>
+    <div data-k="closed-host" id="closed-host"></div>
+  </section>
+
+  <dialog data-k="dialog" open aria-labelledby="dialog-title">
+    <h2 data-k="dialog-title" id="dialog-title">Confirm</h2>
+    <p data-k="dialog-text">Are you sure?</p>
+    <button data-k="dialog-ok" type="button">OK</button>
+    <button data-k="dialog-cancel" type="button">Cancel</button>
+  </dialog>
+
+  <iframe data-k="frame" title="Embedded" width="300" height="60"
+    srcdoc="<body style='margin:0'><button data-k='frame-button' type='button'>Frame button</button></body>"></iframe>
+</main>
+<footer data-k="footer"><p data-k="copyright">© Loom</p></footer>
+<script>
+  const host = document.getElementById("host");
+  const open = host.attachShadow({ mode: "open" });
+  open.innerHTML = "<div data-k='shadow-row'><span data-k='shadow-text'>Shadow text</span> "
+    + "<button data-k='shadow-button' type='button'>Shadow action</button></div>";
+  const closed = document.getElementById("closed-host").attachShadow({ mode: "closed" });
+  closed.innerHTML = "<button data-k='closed-button' type='button'>Closed action</button>";
+</script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Long</title>
+<style>
+  html, body { margin: 0; }
+  div.band { height: 100px; width: 1280px; }
+  #fixed { position: fixed; right: 0; top: 0; width: 50px; height: 50px; background: rgb(1, 2, 3); }
+</style>
+</head>
+<body>
+<!-- 24 bands of 100 CSS px, each its own colour (band i: rgb(10i, 255-10i, 37i mod 256)),
+     so a screenshot's pixels say which part of the document they show
+     (screenshot.test.mjs). st() reports the scroll position and what a
+     capture does to the page. -->
+<script>
+  window.bandColor = (i) => [i * 10, 255 - i * 10, (i * 37) % 256];
+  for (let i = 0; i < 24; i++) {
+    const band = document.createElement("div");
+    band.className = "band";
+    band.style.background = "rgb(" + bandColor(i).join(",") + ")";
+    document.body.append(band);
+  }
+  const fixed = document.createElement("div");
+  fixed.id = "fixed";
+  document.body.append(fixed);
+  window.counts = { resize: 0, ro: 0, scroll: 0 };
+  addEventListener("resize", () => counts.resize++);
+  addEventListener("scroll", () => counts.scroll++);
+  new ResizeObserver(() => counts.ro++).observe(document.documentElement);
+  window.st = () => ({ scrollY, innerWidth, innerHeight, devicePixelRatio, clientWidth: document.documentElement.clientWidth,
+    scrollHeight: document.documentElement.scrollHeight, ...counts });
+</script>
+</body>
+</html>

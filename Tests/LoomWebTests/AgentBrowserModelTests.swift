@@ -48,6 +48,10 @@ struct AgentBrowserPolicyTests {
         #expect(try AgentNavigationPolicy.navigationURL("example.com").absoluteString == "https://example.com")
         #expect(throws: AgentError.self) { try AgentNavigationPolicy.navigationURL("file:///etc/passwd") }
         #expect(throws: AgentError.self) { try AgentNavigationPolicy.navigationURL("javascript:alert(1)") }
+        #expect(throws: AgentError.self) { try AgentNavigationPolicy.navigationURL("data:text/html,hi") }
+        #expect(try AgentNavigationPolicy.navigationURL("example.com:8080/a").absoluteString == "https://example.com:8080/a",
+                "a port is not a scheme")
+        #expect(try AgentNavigationPolicy.navigationURL("about:blank").absoluteString == "about:blank")
     }
 }
 
@@ -204,7 +208,8 @@ struct AgentLogsTests {
         var limiter = AgentRateLimiter(perSecond: 10, burst: 10)
         let admitted = (0..<50).filter { _ in limiter.admit(at: 100) }.count
         #expect(admitted == 10)
-        #expect(limiter.admit(at: 100.5), "half a second later, five more")
+        let later = limiter.admit(at: 100.5)
+        #expect(later, "half a second later, five more")
     }
 }
 
@@ -448,6 +453,32 @@ struct AgentCommandAPITests {
                 == .invalidParams)
     }
 
+    @Test("snapshot: full unless the agent says none; anywhere else, an error it can fix")
+    func optionInstantane() throws {
+        func options(_ method: APIMethod, _ params: [String: JSONValue]) throws -> AgentCommandOptions {
+            try AgentCommandOptions(method: method, params: .object(params))
+        }
+        func code(_ method: APIMethod, _ params: [String: JSONValue]) -> APIError.Code? {
+            do {
+                _ = try options(method, params)
+                return nil
+            } catch let error as APIError {
+                return error.code
+            } catch {
+                return .internalError
+            }
+        }
+        #expect(try options(.browserClick, ["target": .string("e1")]).snapshot == .full, "Playwright's answer by default")
+        #expect(try options(.browserClick, ["target": .string("e1"), "snapshot": .string("none")]).snapshot == .none)
+        #expect(try options(.browserNavigate, ["url": .string("localhost:3000"), "snapshot": .string("full")]).snapshot == .full)
+        #expect(try options(.browserType, ["snapshot": .null]).snapshot == .full)
+        #expect(try options(.browserSnapshot, [:]) == AgentCommandOptions())
+        #expect(code(.browserClick, ["snapshot": .string("diff")]) == .invalidParams)
+        #expect(code(.browserClick, ["snapshot": .bool(false)]) == .invalidParams)
+        #expect(code(.browserSnapshot, ["snapshot": .string("none")]) == .invalidParams, "the snapshot itself")
+        #expect(code(.browserEvaluate, ["snapshot": .string("none")]) == .invalidParams)
+    }
+
     @Test("a set width is a page zoom: the CSS width shown in the view's points")
     func largeurDePage() {
         #expect(ViewportWidth.fit.zoom(forViewWidth: 640) == 1)
@@ -602,5 +633,88 @@ struct AgentNetworkRulesTests {
         #expect(AgentNetworkRules.refuses(URL(string: "https://example.com/"), under: access))
         #expect(AgentNetworkRules.refuses(URL(string: "WSS://example.com/socket"), under: access))
         #expect(!AgentNetworkRules.refuses(URL(string: "https://example.com/"), under: .open))
+    }
+}
+
+@Suite("Agent browser — default page width per project")
+struct AgentViewportDefaultsTests {
+
+    private func scratchDefaults() -> UserDefaults {
+        let name = "loom.tests.viewport.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
+    @Test("a laptop's width unless the project says otherwise; nil follows the default again")
+    func parProjet() {
+        var widths = AgentViewportDefaults()
+        let project = UUID()
+        #expect(widths.width(for: project) == .css(1_280))
+        #expect(widths.width(for: nil) == .css(1_280), "no project: the default")
+        widths.set(.css(375), for: project)
+        #expect(widths.width(for: project) == .css(375))
+        #expect(widths.width(for: UUID()) == .css(1_280), "another project keeps the default")
+        widths.global = .fit
+        #expect(widths.width(for: project) == .css(375))
+        #expect(widths.width(for: UUID()) == .fit)
+        widths.set(nil, for: project)
+        #expect(widths.override(for: project) == nil)
+        #expect(widths.width(for: project) == .fit)
+        widths.set(.css(768), for: project)
+        widths.forget(project)
+        #expect(widths.width(for: project) == .fit, "a removed project leaves nothing behind")
+    }
+
+    @Test("saved and read back; Fit survives as 0; nothing written for the factory default")
+    func persistance() {
+        let defaults = scratchDefaults()
+        let a = UUID(), b = UUID()
+        var widths = AgentViewportDefaults()
+        widths.set(.fit, for: a)
+        widths.set(.css(1_024), for: b)
+        widths.save(to: defaults)
+        #expect(defaults.object(forKey: AgentViewportDefaults.globalKey) == nil)
+        #expect(AgentViewportDefaults.load(from: defaults) == widths)
+        widths.global = .css(375)
+        widths.save(to: defaults)
+        #expect(AgentViewportDefaults.load(from: defaults).global == .css(375))
+        defaults.set(["not-a-uuid": 800, b.uuidString: 99_999], forKey: AgentViewportDefaults.projectsKey)
+        #expect(AgentViewportDefaults.load(from: defaults).perProject.isEmpty, "unreadable entries are dropped")
+    }
+
+    @Test("a project's last width from before becomes its default, once")
+    func migration() throws {
+        let defaults = scratchDefaults()
+        let project = UUID()
+        let legacy = AgentViewportDefaults.legacyPrefix + project.uuidString
+        defaults.set(try JSONEncoder().encode(ViewportWidth.css(375)), forKey: legacy)
+        let widths = AgentViewportDefaults.load(from: defaults)
+        #expect(widths.width(for: project) == .css(375))
+        #expect(defaults.object(forKey: legacy) == nil, "the old key goes")
+        #expect(AgentViewportDefaults.load(from: defaults).width(for: project) == .css(375), "and the default stays")
+    }
+}
+
+@Suite("Agent browser — engine")
+struct AgentBrowserEngineTests {
+
+    @Test("Automatic until chosen otherwise; Chromium only when one can run; the environment wins")
+    func choixDuMoteur() {
+        func resolve(_ preference: AgentBrowserEnginePreference?, _ environment: [String: String] = [:],
+                     chromium: Bool) -> APIBrowserEngine {
+            AgentBrowserEnginePreference.resolve(preference: preference, environment: environment,
+                                                 chromiumAvailable: chromium)
+        }
+        #expect(AgentBrowserEnginePreference.standard == .automatic)
+        #expect(resolve(nil, chromium: true) == .chromium, "nothing chosen yet: Automatic")
+        #expect(resolve(nil, chromium: false) == .webkit, "nothing chosen, no Chromium: WebKit")
+        #expect(resolve(.automatic, chromium: true) == .chromium)
+        #expect(resolve(.automatic, chromium: false) == .webkit)
+        #expect(resolve(.chromium, chromium: false) == .webkit, "never without a browser")
+        #expect(resolve(.webkit, chromium: true) == .webkit)
+        #expect(resolve(.webkit, ["LOOM_AGENT_ENGINE": "chromium"], chromium: true) == .chromium)
+        #expect(resolve(.chromium, ["LOOM_AGENT_ENGINE": "webkit"], chromium: true) == .webkit)
+        #expect(resolve(.chromium, ["LOOM_AGENT_ENGINE": "nonsense"], chromium: true) == .chromium)
     }
 }

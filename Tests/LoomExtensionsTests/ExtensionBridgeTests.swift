@@ -133,7 +133,9 @@ struct ExtensionBridgeTests {
 
     @Test("info, projects and sessions answer with the app's values")
     func lectures() async throws {
-        let bridge = makeBridge(FakeServices())
+        let services = FakeServices()   // the bridge holds it weakly, as the app does
+        let bridge = makeBridge(services)
+        defer { withExtendedLifetime(services) {} }
         let info = try #require(await call(bridge, "loom.info").result)
         #expect(info["extensionId"] == .string(Self.id))
         #expect(info["loomApi"] == .number(1))
@@ -176,7 +178,9 @@ struct ExtensionBridgeTests {
     @Test("storage and secrets round-trip through the bridge, secrets per extension")
     func stockageEtSecrets() async throws {
         let secrets = InMemorySecretStore()
-        let bridge = makeBridge(FakeServices(), secrets: secrets)
+        let services = FakeServices()   // the bridge holds it weakly, as the app does
+        let bridge = makeBridge(services, secrets: secrets)
+        defer { withExtendedLifetime(services) {} }
         _ = await call(bridge, "storage.set", .object(["key": .string("board"), "value": .number(12)]))
         #expect(await call(bridge, "storage.get", .object(["key": .string("board")])).result?["value"] == .number(12))
         _ = await call(bridge, "storage.delete", .object(["key": .string("board")]))
@@ -191,8 +195,10 @@ struct ExtensionBridgeTests {
 
     @Test("http.fetch to a host the extension may not reach is forbidden")
     func reseauHorsListe() async {
-        let response = await call(makeBridge(FakeServices()), "http.fetch",
+        let services = FakeServices()   // the bridge holds it weakly, as the app does
+        let response = await call(makeBridge(services), "http.fetch",
                                   .object(["url": .string("https://example.com/")]))
+        withExtendedLifetime(services) {}
         #expect(response.error?.code == .forbidden)
     }
 

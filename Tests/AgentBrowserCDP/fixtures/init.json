@@ -1,0 +1,322 @@
+{
+  "$comment": [
+    "The CDP sequences of Loom's Chromium engine, produced by Tests/AgentBrowserCDP/lib/init.mjs and checked",
+    "against Chromium by target-init.test.mjs. Placeholders: {relay} = AgentScripts.relay (with the binding",
+    "channel), {pageHook} = AgentScripts.pageHook, {helperTopFrame} = 'if (window === window.top) {\\n' +",
+    "AgentScripts.helper + '\\n}', {major}/{fullVersion} from Browser.getVersion's product."
+  ],
+  "browser": [
+    [
+      "Target.setDiscoverTargets",
+      {
+        "discover": true,
+        "filter": [
+          {
+            "type": "page"
+          }
+        ]
+      }
+    ],
+    [
+      "Target.setAutoAttach",
+      {
+        "autoAttach": true,
+        "waitForDebuggerOnStart": true,
+        "flatten": true,
+        "filter": [
+          {
+            "type": "page"
+          }
+        ]
+      }
+    ],
+    [
+      "Browser.setDownloadBehavior",
+      {
+        "behavior": "deny",
+        "eventsEnabled": true
+      }
+    ],
+    [
+      "Browser.setPermission",
+      {
+        "permission": {
+          "name": "camera"
+        },
+        "setting": "denied"
+      }
+    ],
+    [
+      "Browser.setPermission",
+      {
+        "permission": {
+          "name": "microphone"
+        },
+        "setting": "denied"
+      }
+    ],
+    [
+      "Browser.setPermission",
+      {
+        "permission": {
+          "name": "geolocation"
+        },
+        "setting": "denied"
+      }
+    ],
+    [
+      "Browser.setPermission",
+      {
+        "permission": {
+          "name": "notifications"
+        },
+        "setting": "denied"
+      }
+    ],
+    [
+      "Browser.setPermission",
+      {
+        "permission": {
+          "name": "midi"
+        },
+        "setting": "denied"
+      }
+    ],
+    [
+      "Browser.setPermission",
+      {
+        "permission": {
+          "name": "display-capture"
+        },
+        "setting": "denied"
+      }
+    ]
+  ],
+  "createTarget": [
+    "Target.createTarget",
+    {
+      "url": "about:blank",
+      "newWindow": true
+    }
+  ],
+  "target": [
+    [
+      "Page.enable",
+      {}
+    ],
+    [
+      "Page.setLifecycleEventsEnabled",
+      {
+        "enabled": true
+      }
+    ],
+    [
+      "Network.enable",
+      {
+        "maxTotalBufferSize": 0,
+        "maxResourceBufferSize": 0,
+        "maxPostDataSize": 0
+      }
+    ],
+    [
+      "Page.addScriptToEvaluateOnNewDocument",
+      {
+        "source": "{relay}",
+        "worldName": "loom-agent",
+        "runImmediately": true
+      }
+    ],
+    [
+      "Page.addScriptToEvaluateOnNewDocument",
+      {
+        "source": "{pageHook}",
+        "runImmediately": true
+      }
+    ],
+    [
+      "Page.addScriptToEvaluateOnNewDocument",
+      {
+        "source": "{helperTopFrame}",
+        "worldName": "loom-agent",
+        "runImmediately": true
+      }
+    ],
+    [
+      "Runtime.addBinding",
+      {
+        "name": "__loomHookBinding",
+        "executionContextName": "loom-agent"
+      }
+    ],
+    [
+      "Page.setInterceptFileChooserDialog",
+      {
+        "enabled": true
+      }
+    ],
+    [
+      "Emulation.setDeviceMetricsOverride",
+      {
+        "width": 1280,
+        "height": 800,
+        "deviceScaleFactor": 1,
+        "mobile": false,
+        "screenWidth": 1280,
+        "screenHeight": 800
+      }
+    ],
+    [
+      "Emulation.setFocusEmulationEnabled",
+      {
+        "enabled": true
+      }
+    ],
+    [
+      "Emulation.setUserAgentOverride",
+      {
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36",
+        "acceptLanguage": "en-US,en",
+        "platform": "MacIntel",
+        "userAgentMetadata": {
+          "brands": [
+            {
+              "brand": "Chromium",
+              "version": "{major}"
+            },
+            {
+              "brand": "Not?A_Brand",
+              "version": "24"
+            }
+          ],
+          "fullVersionList": [
+            {
+              "brand": "Chromium",
+              "version": "{fullVersion}"
+            },
+            {
+              "brand": "Not?A_Brand",
+              "version": "24.0.0.0"
+            }
+          ],
+          "platform": "macOS",
+          "platformVersion": "15.0.0",
+          "architecture": "arm",
+          "model": "",
+          "mobile": false,
+          "bitness": "64",
+          "wow64": false
+        }
+      }
+    ],
+    [
+      "Page.setWebLifecycleState",
+      {
+        "state": "active"
+      }
+    ],
+    [
+      "Target.setAutoAttach",
+      {
+        "autoAttach": true,
+        "waitForDebuggerOnStart": true,
+        "flatten": true
+      }
+    ],
+    [
+      "Runtime.runIfWaitingForDebugger",
+      {}
+    ]
+  ],
+  "onFrameNavigated": [
+    [
+      "Page.createIsolatedWorld",
+      {
+        "frameId": "{frameId}",
+        "worldName": "loom-agent",
+        "grantUniveralAccess": false
+      }
+    ],
+    [
+      "Runtime.addBinding",
+      {
+        "name": "__loomHookBinding",
+        "executionContextName": "loom-agent"
+      }
+    ]
+  ],
+  "helperCall": [
+    "Runtime.callFunctionOn",
+    {
+      "functionDeclaration": "async function(op, args) { return globalThis.__loomAgent ? await globalThis.__loomAgent.run(op, args) : JSON.stringify({ error: { code: \"helperMissing\", message: \"the helper is not loaded\" } }); }",
+      "executionContextId": "{world}",
+      "arguments": [
+        {
+          "value": "{op}"
+        },
+        {
+          "value": "{argsJSON}"
+        }
+      ],
+      "returnByValue": true,
+      "awaitPromise": true,
+      "silent": true
+    }
+  ],
+  "barrier": [
+    "Runtime.callFunctionOn",
+    {
+      "functionDeclaration": "async function() { await new Promise((resolve) => setTimeout(resolve, 0)); return JSON.stringify({ url: location.href, visibility: document.visibilityState }); }",
+      "executionContextId": "{world}",
+      "returnByValue": true,
+      "awaitPromise": true,
+      "silent": true
+    }
+  ],
+  "click": [
+    [
+      "Input.dispatchMouseEvent",
+      {
+        "type": "mouseMoved",
+        "x": "{x}",
+        "y": "{y}",
+        "button": "none",
+        "buttons": 0,
+        "modifiers": 0,
+        "pointerType": "mouse"
+      }
+    ],
+    [
+      "Input.dispatchMouseEvent",
+      {
+        "type": "mousePressed",
+        "x": "{x}",
+        "y": "{y}",
+        "button": "left",
+        "clickCount": 1,
+        "modifiers": 0,
+        "pointerType": "mouse",
+        "buttons": 1
+      }
+    ],
+    [
+      "Input.dispatchMouseEvent",
+      {
+        "type": "mouseReleased",
+        "x": "{x}",
+        "y": "{y}",
+        "button": "left",
+        "clickCount": 1,
+        "modifiers": 0,
+        "pointerType": "mouse",
+        "buttons": 0
+      }
+    ]
+  ],
+  "stuckProbe": [
+    "Runtime.evaluate",
+    {
+      "expression": "1",
+      "returnByValue": true
+    }
+  ]
+}

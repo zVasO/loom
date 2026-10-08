@@ -94,8 +94,8 @@ public enum ViewportWidth: Equatable, Sendable, Codable {
     case css(Int)
 
     public static let range = 320...3_840
-    /// The menu's presets: the panel, a small laptop, a laptop.
-    public static let presets: [ViewportWidth] = [.fit, .css(1_024), .css(1_280)]
+    /// The menus' presets: the panel, a phone, a tablet, a small laptop, a laptop.
+    public static let presets: [ViewportWidth] = [.fit, .css(375), .css(768), .css(1_024), .css(1_280)]
 
     /// The page zoom that shows `self` in a view `viewWidth` points wide.
     public func zoom(forViewWidth viewWidth: CGFloat) -> CGFloat {
@@ -133,6 +133,12 @@ public enum AgentCommand: Equatable, Sendable {
     /// nil or empty: the chooser is cancelled.
     case fileUpload(paths: [String]?)
     case resize(ViewportWidth)
+    /// browser_run_code: `async (page) => { … }` (or its body), run in the
+    /// engine's sandbox — Chromium only (ChromiumAgentCore+RunCode).
+    case runCode(String)
+
+    /// browser_run_code's code, in UTF-8 bytes.
+    public static let maxCodeBytes = 65_536
 
     /// `browser_type slowly`: one key press each, sent from Swift.
     public static let maxSlowText = 200
@@ -159,6 +165,8 @@ public enum AgentCommand: Equatable, Sendable {
         case .tabs(.new): return true
         // A width set before any page: kept for the project, the next page has it.
         case .resize: return true
+        // `page` exists on a fresh browser: about:blank.
+        case .runCode: return true
         default: return false
         }
     }

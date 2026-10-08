@@ -34,10 +34,14 @@ public struct ClaudeCodeAdapter: Sendable {
         /// `permissions.allow` for Loom's own tools: an agent testing in its
         /// browser does not stop — and flip to needs_input — at every click.
         public var preapproved: Bool
+        /// The engine behind the session's browser, pinned for this launch:
+        /// the tools `loom mcp` lists, and their words, follow it.
+        public var engine: APIBrowserEngine
 
-        public init(browser: Bool = true, preapproved: Bool = true) {
+        public init(browser: Bool = true, preapproved: Bool = true, engine: APIBrowserEngine = .webkit) {
             self.browser = browser
             self.preapproved = preapproved
+            self.engine = engine
         }
     }
 
@@ -70,7 +74,8 @@ public struct ClaudeCodeAdapter: Sendable {
             arguments.append(contentsOf: ["--settings", settings])
         }
         if let hooks, let hookToken,
-           let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken, browserTools: tools.browser) {
+           let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken, browserTools: tools.browser,
+                                        engine: tools.engine) {
             arguments.append(contentsOf: ["--mcp-config", mcp])
         }
         if let initialPrompt {
@@ -163,7 +168,8 @@ public struct ClaudeCodeAdapter: Sendable {
             arguments.append(contentsOf: ["--settings", settings])
         }
         if let hooks, let hookToken,
-           let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken, browserTools: tools.browser) {
+           let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken, browserTools: tools.browser,
+                                        engine: tools.engine) {
             arguments.append(contentsOf: ["--mcp-config", mcp])
         }
         return Command(executable: executable, arguments: arguments,
@@ -184,11 +190,13 @@ public struct ClaudeCodeAdapter: Sendable {
     /// accepts a JSON string as well as a file, so nothing lands on disk. The
     /// server runs `loom mcp` with the session's socket and token in its
     /// environment; nil without a `loom` binary to run.
-    static func mcpConfigJSON(wiring: HookWiring, token: String, browserTools: Bool = true) -> String? {
+    static func mcpConfigJSON(wiring: HookWiring, token: String, browserTools: Bool = true,
+                              engine: APIBrowserEngine = .webkit) -> String? {
         guard let cli = wiring.cli else { return nil }
         var environment = apiEnvironment(wiring: wiring, token: token)
         // Turned off in Settings: `loom mcp` lists no browser tool at all.
         if !browserTools { environment[APIProtocol.browserToolsEnvironmentKey] = "0" }
+        if browserTools, engine != .webkit { environment[APIProtocol.browserEngineEnvironmentKey] = engine.rawValue }
         let config: [String: Any] = [
             "mcpServers": [
                 "loom": [
@@ -217,7 +225,8 @@ public struct ClaudeCodeAdapter: Sendable {
             // later is not pre-approved unless its spec says so. The user's
             // own deny rules still win (Claude Code: deny > ask > allow).
             if tools.preapproved, wiring.cli != nil {
-                settings["permissions"] = ["allow": APIToolCatalog.preapprovedRules(browser: tools.browser)]
+                settings["permissions"] = ["allow": APIToolCatalog.preapprovedRules(browser: tools.browser,
+                                                                                    engine: tools.engine)]
             }
         }
         if let theme { settings["theme"] = theme }

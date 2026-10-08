@@ -170,6 +170,39 @@ struct MCPServerTests {
         #expect(call["error"] != nil, "an unlisted tool is an unknown tool")
     }
 
+    @Test("a run_code failure is a tool error whose Markdown still shows the page; isError absent is false")
+    func erreurDeScript() throws {
+        let calls = Calls()
+        let markdown = "### Error\nTimeoutError: locator.click: Timeout 5000ms exceeded.\n\n### Page\n- Page URL: http://localhost:5173/"
+        calls.answer = .success(try JSONValue.from(APIToolContent(text: markdown, isError: true)))
+        let server = MCPServer(call: { method, params in
+            calls.seen.append((method, params))
+            return try calls.answer.get()
+        }, tools: APIToolCatalog.tools(browser: true, engine: .chromium))
+        let reply = try #require(server.handle(message(
+            #"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"browser_run_code","arguments":{"code":"async (page) => 1"}}}"#)))
+        #expect(reply["result"]?["isError"] == .bool(true))
+        guard case .array(let blocks)? = reply["result"]?["content"] else {
+            Issue.record("no content")
+            return
+        }
+        #expect(blocks.count == 1)
+        #expect(blocks.first?["text"]?.stringValue == markdown, "the Markdown as it is, the page included")
+        #expect(calls.seen.first?.0 == .browserRunCode)
+        #expect(calls.seen.first?.1 == .object(["code": .string("async (page) => 1")]))
+
+        calls.answer = .success(try JSONValue.from(APIToolContent(text: "### Result\n```json\n1\n```")))
+        let fine = try #require(server.handle(message(
+            #"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"browser_run_code","arguments":{"code":"1"}}}"#)))
+        #expect(fine["result"]?["isError"] == .bool(false))
+
+        // A WebKit session's server does not list it: an unknown tool.
+        let webkit = MCPServer(call: { _, _ in .null }, tools: APIToolCatalog.tools(browser: true, engine: .webkit))
+        let refused = try #require(webkit.handle(message(
+            #"{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"browser_run_code","arguments":{"code":"1"}}}"#)))
+        #expect(refused["error"] != nil)
+    }
+
     @Test("a browser timeout reads as one, flagged as an error")
     func erreurTimeoutLisible() throws {
         let calls = Calls()

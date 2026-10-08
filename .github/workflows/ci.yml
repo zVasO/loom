@@ -1,0 +1,182 @@
+# Compile and test on every push: the app is macOS-only, and the agent browser's
+# scripts and its Chromium protocol harness run on a real Chromium.
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      selftest:
+        description: "Also run the agent browser self-test (LOOM_AUTOTEST) on both engines"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# A push cancels the run it outdates; a run started by hand (the self-test)
+# is in a group of its own and goes to the end.
+concurrency:
+  group: ci-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
+  cancel-in-progress: true
+
+# The timing probes' suites: run alone, never beside the other tests.
+env:
+  PERF_PROBES: "PerfProbes|TerminalRowProbes|DiffRowsProbes"
+
+jobs:
+  swift:
+    name: swift build + test (macOS)
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain (the newest Xcode on the runner)
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -v beta | sort -V | tail -1)"
+          swift --version
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}-${{ github.sha }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}-
+            spm-${{ runner.os }}-
+      - name: Git identity (tests commit in throwaway repos)
+        run: |
+          git config --global user.name "Loom CI"
+          git config --global user.email "ci@loom.invalid"
+      # A real chrome-headless-shell for the Chromium engine's end-to-end
+      # tests (LOOM_CHROMIUM); without it they are skipped, never failed.
+      - name: Chromium for the agent browser's tests
+        run: |
+          npx --yes playwright@1.56.1 install chromium-headless-shell
+          shell="$(find "$HOME/Library/Caches/ms-playwright" -type f \( -name headless_shell -o -name chrome-headless-shell \) -perm -u+x | sort | tail -1)"
+          echo "headless shell: $shell"
+          test -n "$shell" && echo "LOOM_CHROMIUM=$shell" >> "$GITHUB_ENV"
+      - name: Build
+        id: build
+        run: |
+          set -o pipefail
+          swift build --build-tests 2>&1 | tee build.log
+      - name: Test
+        env:
+          PROBES: ${{ env.PERF_PROBES }}
+        run: |
+          set -o pipefail
+          swift test --skip-build --skip "$PROBES" 2>&1 | tee test.log
+      # Timing probes alone: their bounds are for a quiet Mac, and a virtual
+      # runner is about three times slower (disk and CPU) — still an order of
+      # magnitude under a lost cache, which is what they guard.
+      - name: Performance probes
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          LOOM_PERF_SLACK: "3"
+          PROBES: ${{ env.PERF_PROBES }}
+        run: |
+          set -o pipefail
+          swift test --skip-build --no-parallel --filter "$PROBES" 2>&1 | tee perf.log
+      # The last lines of a failed job: every distinct error, nothing else —
+      # what a cloud session reads back to fix the push.
+      - name: Errors
+        if: failure()
+        run: |
+          echo "::group::distinct errors"
+          cat build.log test.log perf.log 2>/dev/null | grep -E "error:|✘|failed|Fatal error|originates here" | grep -v "^\s*|" | sed -E 's/^[0-9T:.Z-]+ //' | sort -u | head -80
+          echo "::endgroup::"
+          echo "::group::issues in full"
+          cat test.log perf.log 2>/dev/null | grep -A6 "recorded an issue" | head -150
+          echo "::endgroup::"
+
+  node:
+    name: node tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Playwright and its Chromium builds
+        run: |
+          npm install -g playwright@1.56.1
+          npx --yes playwright@1.56.1 install --with-deps chromium chromium-headless-shell
+      - name: Agent browser scripts on a real DOM
+        run: node --test Tests/AgentBrowserJS/*.test.mjs
+      # One file at a time, each with a watchdog: a file that hangs is named
+      # and stopped, and the others still report.
+      - name: Agent browser over the Chrome DevTools Protocol
+        if: hashFiles('Tests/AgentBrowserCDP/*.test.mjs') != ''
+        run: |
+          failed=""
+          for file in Tests/AgentBrowserCDP/*.test.mjs; do
+            echo "::group::$file"
+            start=$(date +%s)
+            node --test --test-timeout=120000 "$file" &
+            pid=$!
+            ( sleep 300; if kill -0 "$pid" 2>/dev/null; then echo "::error::$file still running after 300 s: stopped"; pkill -9 -P "$pid"; kill -9 "$pid"; fi ) &
+            watchdog=$!
+            if wait "$pid"; then status=0; else status=$?; fi
+            kill "$watchdog" 2>/dev/null || true
+            echo "$file: exit $status after $(( $(date +%s) - start )) s"
+            echo "::endgroup::"
+            if [ "$status" -ne 0 ]; then failed="$failed $file"; fi
+          done
+          if [ -n "$failed" ]; then echo "::error::failed:$failed"; exit 1; fi
+      - name: Extension SDK and examples
+        working-directory: Examples/extensions
+        run: npm test
+
+  selftest:
+    name: agent browser self-test (${{ matrix.engine }})
+    # Its own release build: it does not wait on the test job's verdict.
+    if: github.event_name == 'workflow_dispatch' && inputs.selftest
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [webkit, chromium]
+    runs-on: macos-26
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -v beta | sort -V | tail -1)"
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-release-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}-${{ github.sha }}
+          restore-keys: spm-release-${{ runner.os }}-
+      - name: Build (release)
+        run: swift build -c release
+      - name: Chromium for the Chromium run
+        if: matrix.engine == 'chromium'
+        run: |
+          npx --yes playwright@1.56.1 install chromium-headless-shell
+          shell="$(find "$HOME/Library/Caches/ms-playwright" -type f \( -name headless_shell -o -name chrome-headless-shell \) -perm -u+x | sort | tail -1)"
+          test -n "$shell" && echo "LOOM_CHROMIUM=$shell" >> "$GITHUB_ENV"
+      - name: Self-test
+        timeout-minutes: 20
+        env:
+          LOOM_AUTOTEST: agent-browser
+          LOOM_AUTOTEST_ENGINE: ${{ matrix.engine }}
+          LOOM_AUTOTEST_FIXTURES: ${{ github.workspace }}/Tests/AgentBrowserJS/fixtures
+        run: swift run -c release LoomApp
+      # In the log too: a cloud session reads logs, not artifacts.
+      - name: Report (log)
+        if: always()
+        run: cat /tmp/loom-agent-browser-report.json 2>/dev/null || echo "no report"
+      - name: Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-browser-report-${{ matrix.engine }}
+          path: /tmp/loom-agent-browser-report.json
+          if-no-files-found: warn

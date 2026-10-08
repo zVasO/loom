@@ -1,5 +1,6 @@
 import LoomAgents
 import LoomAPI
+import LoomChromium
 import LoomCore
 import LoomExtensions
 import LoomGit
@@ -351,14 +352,18 @@ public final class AppModel {
 
     /// The adapter talks to the CLI with the full hooks wiring (ADR-0005) and,
     /// when the `loom` binary is around, the API as MCP tools (ADR-0010).
-    private var adapter: ClaudeCodeAdapter {
-        ClaudeCodeAdapter(executable: claudePath?.path ?? "claude",
-                          hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
-                                       socket: socketURL,
-                                       cli: Self.companionBinaryURL(named: "loom",
-                                                                    fallback: supportDirectory)),
-                          tools: .init(browser: agentBrowserToolsEnabled,
-                                       preapproved: preapprovesLoomTools))
+    /// The session's browser engine is chosen here, once per launch or resume.
+    private func adapter(for session: SessionID) -> ClaudeCodeAdapter {
+        let engine = resolveAgentBrowserEngine()
+        agentEngines[session] = engine
+        return ClaudeCodeAdapter(executable: claudePath?.path ?? "claude",
+                                 hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
+                                              socket: socketURL,
+                                              cli: Self.companionBinaryURL(named: "loom",
+                                                                           fallback: supportDirectory)),
+                                 tools: .init(browser: agentBrowserToolsEnabled,
+                                              preapproved: preapprovesLoomTools,
+                                              engine: engine))
     }
 
     /// In development, `loom-hook` is a sibling product of the app; packaged,
@@ -392,6 +397,7 @@ public final class AppModel {
         Self.migrateLegacySupportDirectory(to: resolved)
         self.supportDirectory = resolved
         self.extensions = ExtensionsModel(directory: resolved.appendingPathComponent("extensions"))
+        self.chromiumSetup = ChromiumSetupModel()
     }
 
     /// The app used to be called Bunshin: on first launch under the new name, the
@@ -490,6 +496,7 @@ public final class AppModel {
             restoreSidePanels()
             pruneAgentScreenshots()
             sweepAgentStores()
+            prepareAgentChromium()
             reindexAllSessions()
         } catch {
             if case IPCError.anotherInstanceRunning = error {
@@ -1255,7 +1262,7 @@ public final class AppModel {
             // review nobody asked for yet). The setup command is typed after
             // the boot, from the outside, and only when the setting says so.
             var spec = SessionManager.SessionSpec(
-                command: adapter.launchCommand(session: sessionID, initialPrompt: nil,
+                command: adapter(for: sessionID).launchCommand(session: sessionID, initialPrompt: nil,
                                                hookToken: token,
                                                userStatusLine: userStatusLine(in: worktree),
                                                theme: claudeTheme(for: projectID)),
@@ -1597,7 +1604,7 @@ public final class AppModel {
             let sessionID = SessionID()
             let token = UUID().uuidString
             var spec = SessionManager.SessionSpec(
-                command: adapter.launchCommand(session: sessionID, initialPrompt: prompt,
+                command: adapter(for: sessionID).launchCommand(session: sessionID, initialPrompt: prompt,
                                                hookToken: token,
                                                userStatusLine: userStatusLine(in: worktree),
                                                theme: claudeTheme(for: projectID)),
@@ -1640,7 +1647,7 @@ public final class AppModel {
             let sessionID = SessionID()
             let token = UUID().uuidString
             var spec = SessionManager.SessionSpec(
-                command: adapter.launchCommand(
+                command: adapter(for: sessionID).launchCommand(
                     session: sessionID, initialPrompt: prompt, hookToken: token,
                     userStatusLine: userStatusLine(in: URL(fileURLWithPath: worktreePath)),
                     theme: claudeTheme(for: record.projectID)),
@@ -2027,7 +2034,31 @@ public final class AppModel {
 
     /// Each session agent's own browser (ADR-0014), created on its first use
     /// (AgentBrowserAPI.swift).
-    var agentBrowsers: [SessionID: AgentBrowser] = [:]
+    var agentBrowsers: [SessionID: any AgentBrowserEngine] = [:]
+
+    /// The engine each session's browser uses, pinned when it launched or
+    /// resumed: the browser tools `loom mcp` listed, and their words, follow it.
+    var agentEngines: [SessionID: APIBrowserEngine] = [:]
+
+    /// The page width each project's agent browsers open at (Settings, the
+    /// panel's menu) — AgentBrowserAPI.swift reads and writes it.
+    var agentViewportDefaults = AgentViewportDefaults.load(from: .standard)
+
+    /// Every agent Chromium of this run (ADR-0016), made on first use —
+    /// `agentChromiumPool` in AgentBrowserAPI.swift.
+    @ObservationIgnored var agentChromiumPoolStorage: ChromiumPool? = nil
+    /// Settings ▸ Agents' download of chrome-headless-shell: here so it goes
+    /// on when the Settings close.
+    let chromiumSetup: ChromiumSetupModel
+    /// The launch-time sweep of Chromium profiles; the pool's first launch
+    /// waits for it.
+    @ObservationIgnored var agentChromiumSweep: Task<Void, Never>? = nil
+    /// The last change of the pool's settings on its way to it (local
+    /// sites only, browser tools off or on): the next one follows it, so the
+    /// pool ends on the last setting.
+    @ObservationIgnored var agentChromiumNetworkChange: Task<Void, Never>? = nil
+    /// The model of this run, for the app delegate's quit (LoomApp.swift).
+    static weak var live: AppModel?
 
     /// Each open creates a dedicated pane, child of the session (or global if nil).
     @discardableResult
@@ -2268,11 +2299,12 @@ public final class AppModel {
         }
         let statusLine = userStatusLine(in: directory)
         let theme = claudeTheme(for: record.projectID)
+        let launcher = adapter(for: record.id)
         let command = nativeSessionExists(record)
-            ? adapter.resumeCommand(session: native, hookToken: token, userStatusLine: statusLine,
-                                    theme: theme)
-            : adapter.launchCommand(session: record.id, initialPrompt: nil, hookToken: token,
-                                    userStatusLine: statusLine, theme: theme)
+            ? launcher.resumeCommand(session: native, hookToken: token, userStatusLine: statusLine,
+                                     theme: theme)
+            : launcher.launchCommand(session: record.id, initialPrompt: nil, hookToken: token,
+                                     userStatusLine: statusLine, theme: theme)
         do {
             try await manager.resume(record, command: command, workingDirectory: directory,
                                      geometry: launchGrid(forStack: record.id),
@@ -2460,7 +2492,7 @@ public final class AppModel {
             let sessionID = SessionID()
             let token = UUID().uuidString
             var spec = SessionManager.SessionSpec(
-                command: adapter.launchCommand(session: sessionID, initialPrompt: initialPrompt,
+                command: adapter(for: sessionID).launchCommand(session: sessionID, initialPrompt: initialPrompt,
                                                hookToken: token,
                                                userStatusLine: userStatusLine(in: directory),
                                                theme: claudeTheme(for: project?.id)),

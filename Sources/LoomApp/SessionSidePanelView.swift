@@ -91,7 +91,8 @@ struct SessionSidePanelView: View {
     @ViewBuilder
     private var agentContent: some View {
         if let browser = model.agentBrowsers[parentID] {
-            AgentBrowserPanelView(browser: browser, caption: model.agentBrowserCaption(for: parentID))
+            AgentBrowserPanelView(browser: browser, caption: model.agentBrowserCaption(for: parentID),
+                                  defaultWidth: model.agentDefaultWidth(for: parentID))
                 .id(ObjectIdentifier(browser))
         } else {
             VStack(spacing: 8) {

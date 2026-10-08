@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Leak probes</title>
+</head>
+<body>
+<!-- Every way a page can reach the network (local-only.test.mjs): each
+     probe answers a short string once it has its outcome, or "timeout". -->
+<script>
+  const within = (ms, promise) => Promise.race([promise, new Promise((done) => setTimeout(() => done("timeout"), ms))]);
+  window.probes = {
+    fetch: (url) => fetch(url, { cache: "no-store" }).then((r) => "ok " + r.status, (e) => "error " + e.message),
+    noCors: (url) => fetch(url, { cache: "no-store", mode: "no-cors" }).then((r) => "ok " + r.type, (e) => "error " + e.message),
+    xhr: (url) => within(4000, new Promise((done) => {
+      const request = new XMLHttpRequest();
+      request.open("GET", url);
+      request.onload = () => done("ok " + request.status);
+      request.onerror = () => done("error");
+      request.send();
+    })),
+    webSocket: (url) => within(4000, new Promise((done) => {
+      let socket;
+      try { socket = new WebSocket(url); } catch (error) { return done("throw " + error.message); }
+      socket.onopen = () => { done("open"); socket.close(); };
+      socket.onerror = () => done("error");
+    })),
+    eventSource: (url) => within(4000, new Promise((done) => {
+      const source = new EventSource(url);
+      source.onopen = () => { done("open"); source.close(); };
+      source.onerror = () => { done("error"); source.close(); };
+    })),
+    element: (tag, attribute, url) => within(4000, new Promise((done) => {
+      const element = document.createElement(tag);
+      if (tag === "link") element.rel = "stylesheet";
+      element.onload = () => done("load");
+      element.onerror = () => done("error");
+      element[attribute] = url;
+      (tag === "iframe" ? document.body : document.head).append(element);
+    })),
+    linkRel: (rel, url) => {
+      const link = document.createElement("link");
+      link.rel = rel;
+      link.href = url;
+      document.head.append(link);
+      return "inserted";
+    },
+    speculation: (urls) => {
+      const script = document.createElement("script");
+      script.type = "speculationrules";
+      script.textContent = JSON.stringify({ prerender: [{ source: "list", urls }], prefetch: [{ source: "list", urls }] });
+      document.head.append(script);
+      return "inserted";
+    },
+    beacon: (url) => (navigator.sendBeacon(url, "x") ? "queued" : "refused"),
+    ping: (url) => {
+      const anchor = document.createElement("a");
+      anchor.href = "#pinged";
+      anchor.ping = url;
+      document.body.append(anchor);
+      anchor.click();
+      return "clicked";
+    },
+    open: (url) => (window.open(url) ? "opened" : "blocked"),
+    worker: (url) => within(5000, new Promise((done) => {
+      const worker = new Worker("/worker.js");
+      worker.onmessage = (event) => { done(event.data); worker.terminate(); };
+      worker.onerror = (event) => done("worker error " + event.message);
+      worker.postMessage(url);
+    })),
+    serviceWorker: (url) => within(5000, (async () => {
+      try {
+        await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        const active = (await navigator.serviceWorker.ready).active;
+        const answer = new Promise((done) => navigator.serviceWorker.addEventListener("message", (event) => done(event.data), { once: true }));
+        active.postMessage(url);
+        return await answer;
+      } catch (error) {
+        return "error " + error.message;
+      }
+    })()),
+    webrtc: async (stun) => {
+      const connection = new RTCPeerConnection({ iceServers: [{ urls: stun }] });
+      connection.createDataChannel("probe");
+      await connection.setLocalDescription(await connection.createOffer());
+      await new Promise((done) => setTimeout(done, 1500));
+      const candidates = (connection.localDescription.sdp.match(/a=candidate[^\r\n]*/g) || []).length;
+      connection.close();
+      return "candidates " + candidates;
+    },
+  };
+</script>
+</body>
+</html>

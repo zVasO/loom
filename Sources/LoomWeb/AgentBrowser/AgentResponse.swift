@@ -125,10 +125,15 @@ public struct AgentImage: Equatable, Sendable {
 public struct AgentResult: Equatable, Sendable {
     public var text: String
     public var image: AgentImage?
+    /// The answer reports a failure in its Markdown (browser_run_code's
+    /// `### Error`, Playwright MCP 1.63's shape): the MCP tool result is an
+    /// error, the CLI exits with 1. Every other answer leaves it false.
+    public var isError: Bool
 
-    public init(text: String, image: AgentImage? = nil) {
+    public init(text: String, image: AgentImage? = nil, isError: Bool = false) {
         self.text = text
         self.image = image
+        self.isError = isError
     }
 }
 

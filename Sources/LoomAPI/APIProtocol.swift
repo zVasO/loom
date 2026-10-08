@@ -25,6 +25,9 @@ public enum APIProtocol {
     /// "0" in the MCP server's environment: the browser tools are turned off
     /// in Loom's Settings, and `loom mcp` does not list them.
     public static let browserToolsEnvironmentKey = "LOOM_BROWSER_TOOLS"
+    /// The engine behind the session's browser (`webkit`, `chromium`), pinned
+    /// when the session launched: the tools and their wording follow it.
+    public static let browserEngineEnvironmentKey = "LOOM_BROWSER_ENGINE"
 
     /// Where the app writes the agent browser's screenshots (ADR-0014), beside
     /// its socket: the one place the app and `loom mcp` agree on. The MCP
@@ -74,6 +77,8 @@ public enum APIMethod: String, CaseIterable, Sendable {
     case browserFillForm = "browser.fillForm"
     case browserFileUpload = "browser.fileUpload"
     case browserResize = "browser.resize"
+    /// A Playwright script in one call (Chromium engine only, ADR-0016).
+    case browserRunCode = "browser.runCode"
 
     /// Drives the session's own browser.
     public var isBrowser: Bool { rawValue.hasPrefix("browser.") }
@@ -96,12 +101,30 @@ public enum APIMethod: String, CaseIterable, Sendable {
         !isBrowser
     }
 
+    /// A browser action whose answer ends with the page's new snapshot —
+    /// the methods that take the `snapshot` option ("none" leaves it out).
+    public var answersSnapshot: Bool {
+        switch self {
+        case .browserNavigate, .browserNavigateBack, .browserClick, .browserType, .browserSelectOption,
+             .browserHover, .browserPressKey, .browserWaitFor, .browserHandleDialog, .browserTabs,
+             .browserFillForm, .browserFileUpload, .browserResize, .browserRunCode:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// The app's own deadline for answering, when the method may wait on
     /// something slow (a page loading); nil = it answers at once. Each holds
     /// its command's worst case: a load (30 s), a wait (30 s), plus the
     /// snapshot that follows.
     public var appDeadline: Duration? {
         switch self {
+        // 56 s of script — one cold 30 s navigation and a dozen 5 s waits —
+        // then 4 s to stop it, settle and answer. The largest, and it stays
+        // so: the browser's queue is serial, the person gets it back within
+        // a minute.
+        case .browserRunCode: return .seconds(60)
         case .browserFillForm: return .seconds(40)
         case .browserNavigate, .browserWaitFor, .browserTabs: return .seconds(35)
         case .browserType, .browserEvaluate: return .seconds(30)

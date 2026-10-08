@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settle</title>
+<style>
+  body { margin: 0; font-family: sans-serif; }
+  a, button { display: block; width: 240px; height: 36px; margin: 6px; }
+  form { margin: 6px; }
+</style>
+</head>
+<body>
+<!-- What a click can set off, one button each (settle.test.mjs records the
+     DevTools events of each as a trace for LoomChromium's SettleMachine).
+     ?poll keeps a long-poll XHR loop running from the load on. -->
+<a id="link" href="/blank?from=link">Link to another page</a>
+<button id="noop" type="button">Nothing</button>
+<button id="fetch" type="button">Fetch</button>
+<button id="chain" type="button">Fetch, then fetch again</button>
+<button id="later" type="button">Navigate in a timer</button>
+<button id="push" type="button">Push state</button>
+<button id="hash" type="button">Change the hash</button>
+<form id="post" method="post" action="/echo"><input name="q" value="v" aria-label="Query"><button id="submit" type="submit">Post the form</button></form>
+<p id="status" role="status"></p>
+<script>
+  const status = document.getElementById("status");
+  let hashes = 0;
+  document.getElementById("fetch").addEventListener("click", () => {
+    fetch("/ok?s=fetch", { cache: "no-store" }).then((r) => { status.textContent = "fetched " + r.status; });
+  });
+  document.getElementById("chain").addEventListener("click", async () => {
+    await (await fetch("/ok?s=chain-1&delay=40", { cache: "no-store" })).text();
+    await (await fetch("/ok?s=chain-2&delay=40", { cache: "no-store" })).text();
+    status.textContent = "chained";
+  });
+  document.getElementById("later").addEventListener("click", () => setTimeout(() => { location.href = "/blank?from=timer"; }, 0));
+  document.getElementById("push").addEventListener("click", () => history.pushState({}, "", "/settle.html?pushed"));
+  document.getElementById("hash").addEventListener("click", () => { location.hash = "h" + (++hashes); });
+  window.polls = 0;
+  if (location.search.includes("poll")) {
+    (function poll() {
+      const request = new XMLHttpRequest();
+      request.open("GET", "/poll?hold=700&n=" + (++window.polls));
+      request.onloadend = () => poll();
+      request.send();
+    })();
+  }
+</script>
+</body>
+</html>

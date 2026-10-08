@@ -1,6 +1,8 @@
 import LoomAgents
+import LoomChromium
 import LoomCore
 import LoomExtensions
+import LoomPersistence
 import LoomUI
 import LoomWeb
 import SwiftUI
@@ -31,6 +33,13 @@ struct SettingsPage: View {
     /// half-typed list in force.
     @State private var hostsDraft = ""
     @State private var agentDataCleared = false
+    /// The model's engine choice, mirrored so the picker shows what was just
+    /// set (it applies to sessions started or resumed afterwards).
+    @State private var engineChoice: AgentBrowserEnginePreference = .standard
+    /// The Chromium Loom finds, looked up when the card shows and after a choice.
+    @State private var chromiumStatus: AppModel.AgentChromiumStatus?
+    /// Why the download could not be removed, until the next try.
+    @State private var chromiumRemoveError: String?
     @State private var removalCandidate: InstalledExtension?
 
     var body: some View {
@@ -158,6 +167,154 @@ struct SettingsPage: View {
         model.agentBrowsersAllowedHosts = hostsDraft
     }
 
+    /// ADR-0016: which engine drives the agents' pages, and the Chromium found.
+    @ViewBuilder
+    private var agentEngineRows: some View {
+        HStack(spacing: 12) {
+            Text("Agent browser engine")
+                .font(.system(size: 13))
+                .foregroundStyle(DefaultTheme.primaryText)
+            Spacer()
+            Picker("", selection: $engineChoice) {
+                Text("Automatic").tag(AgentBrowserEnginePreference.automatic)
+                Text("Chromium").tag(AgentBrowserEnginePreference.chromium)
+                Text("WebKit").tag(AgentBrowserEnginePreference.webkit)
+            }
+            .labelsHidden()
+            .fixedSize()
+            .onChange(of: engineChoice) { _, choice in
+                model.agentBrowserEngineChoice = choice
+                refreshChromiumStatus()
+            }
+        }
+        .onAppear {
+            engineChoice = model.agentBrowserEngineChoice
+            refreshChromiumStatus()
+        }
+        if let status = chromiumStatus {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(status.summary)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                if let path = status.path {
+                    Text(path)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                if let warning = status.warning {
+                    Text(warning)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.danger)
+                }
+                if let hint = status.hint {
+                    Text(hint)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                }
+            }
+        }
+        chromiumDownloadRows
+        HStack(spacing: 10) {
+            GhostButton("Choose…", systemImage: "folder") { chooseChromium() }
+            if chromiumStatus?.hasChoice == true {
+                GhostButton("Use automatic search", systemImage: "arrow.uturn.backward") {
+                    model.agentChromiumPath = nil
+                    refreshChromiumStatus()
+                }
+            }
+        }
+        Text("Chromium runs the agent's pages headless, panel shown or not, with real clicks and keys (isTrusted, :hover); WebKit stays the fallback. Automatic picks Chromium when Loom finds chrome-headless-shell (its own download or Playwright's) or the browser chosen here; a full Chrome, Chromium or Edge is used only once chosen. Loom downloads chrome-headless-shell only when you click, from Google's Chrome for Testing, checks it against the checksum built into this version of Loom, and never updates it on its own. Each engine keeps its own logins. Applies to sessions started or resumed after the change.")
+            .font(.system(size: 11))
+            .foregroundStyle(DefaultTheme.secondaryText)
+    }
+
+    private func refreshChromiumStatus() {
+        chromiumStatus = model.agentChromiumStatus()
+    }
+
+    /// Loom's own chrome-headless-shell: downloaded on a click only (NFR-S),
+    /// checked against the SHA-256 this version of Loom pins.
+    @ViewBuilder
+    private var chromiumDownloadRows: some View {
+        let setup = model.chromiumSetup
+        let major = setup.pin.version.split(separator: ".").first.map(String.init) ?? setup.pin.version
+        Group {
+            switch setup.phase {
+            case .downloading(let received, let total):
+                HStack(spacing: 10) {
+                    ProgressView(value: Double(received), total: Double(max(total, 1)))
+                        .frame(maxWidth: 240)
+                    Text("\(received / 1_000_000) of \(max(total, 1) / 1_000_000) MB")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                    GhostButton("Cancel", systemImage: "xmark") { setup.cancel() }
+                }
+            case .verifying, .unpacking, .warming:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(setup.phase == .verifying ? "Checking the download (SHA-256)…"
+                         : setup.phase == .unpacking ? "Unpacking…" : "Starting it once…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                }
+            case .idle, .failed:
+                if let record = chromiumStatus?.downloaded {
+                    HStack(spacing: 10) {
+                        Text("chrome-headless-shell \(record.version) · SHA-256 verified"
+                             + (record.signature.map { " · " + $0 } ?? ""))
+                            .font(.system(size: 11))
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                        Spacer()
+                        GhostButton("Remove", systemImage: "trash") {
+                            chromiumRemoveError = setup.remove(supportDirectory: model.supportDirectory,
+                                                               chromiumInUse: model.agentChromiumInUse)
+                            refreshChromiumStatus()
+                        }
+                    }
+                } else {
+                    GhostButton("Download chrome-headless-shell \(major) (\(setup.pin.sizeDescription))",
+                                systemImage: "arrow.down.circle") {
+                        chromiumRemoveError = nil
+                        setup.download(supportDirectory: model.supportDirectory)
+                    }
+                }
+                if case .failed(let message) = setup.phase {
+                    Text(message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.danger)
+                }
+                if let chromiumRemoveError {
+                    Text(chromiumRemoveError)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DefaultTheme.danger)
+                }
+            }
+        }
+        .onChange(of: setup.phase) { _, phase in
+            if phase == .idle { refreshChromiumStatus() }
+        }
+    }
+
+    /// An .app or a bare executable (chrome-headless-shell): the locator
+    /// tells them apart.
+    private func chooseChromium() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a browser for the agents"
+        panel.message = "chrome-headless-shell, Chrome for Testing, Chromium, Google Chrome or Microsoft Edge"
+        panel.prompt = "Use"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.treatsFilePackagesAsDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        model.agentChromiumPath = url.path
+        refreshChromiumStatus()
+    }
+
     private var agentsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Agents")
@@ -170,9 +327,11 @@ struct SettingsPage: View {
                 .toggleStyle(.switch)
                 // Through the model: turning them off also cancels what is queued.
                 .onChange(of: browserToolsOn) { _, on in model.agentBrowserToolsEnabled = on }
-                Text("Each session's agent gets its own browser — shown beside its terminal, on a profile kept per project and never your own cookies (reviews get a private one) — and browser_* tools to open your dev server, click, type, read the console and take screenshots. Off: calls are refused at once; sessions started or resumed afterwards no longer list the tools.")
+                Text("Each session's agent gets its own browser — shown beside its terminal, on a profile kept per project and never your own cookies (reviews get a private one) — and browser_* tools to open your dev server, click, type, read the console and take screenshots. Off: calls are refused at once, and the agents' Chromium stops; sessions started or resumed afterwards no longer list the tools.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
+                Divider().overlay(DefaultTheme.cardBorder)
+                agentEngineRows
                 Divider().overlay(DefaultTheme.cardBorder)
                 Toggle(isOn: $preapproveOn) {
                     Text("Run Loom's tools without asking")
@@ -191,7 +350,7 @@ struct SettingsPage: View {
                 }
                 .toggleStyle(.switch)
                 .onChange(of: localOnlyOn) { _, on in model.agentBrowsersLocalOnly = on }
-                Text("The agents' browsers load from your machine's own addresses (localhost, 127.0.0.1) and the hosts below, nothing else: pages, scripts, images, requests and web sockets, filtered by WebKit. WebRTC and DNS prefetching are turned off where WebKit allows it. Open pages start again under the mode when it is turned on. The agent's other tools stay under Claude Code's own permissions.")
+                Text("The agents' browsers load from your machine's own addresses (localhost, 127.0.0.1) and the hosts below, nothing else: pages, scripts, images, requests and web sockets — under both engines. WebKit filters every load, with WebRTC and DNS prefetching off where it allows; Chromium sends everything else to a proxy Loom holds that refuses it, with QUIC, WebRTC and DNS prefetching off, and stays closed if that proxy cannot start. Open pages start again under the mode when it is turned on (under Chromium, on any change). The agent's other tools stay under Claude Code's own permissions.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
                 if localOnlyOn {
@@ -208,6 +367,25 @@ struct SettingsPage: View {
                         .font(.system(size: 11))
                         .foregroundStyle(invalid.isEmpty ? DefaultTheme.secondaryText : DefaultTheme.danger)
                 }
+                Divider().overlay(DefaultTheme.cardBorder)
+                HStack(spacing: 12) {
+                    Text("Agent browser page width")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                    Spacer()
+                    Picker("", selection: Binding<Int>(
+                        get: { Self.widthTag(model.agentViewportDefaults.global) },
+                        set: { model.setAgentGlobalViewportWidth(Self.width(tag: $0) ?? AgentViewportDefaults.factoryDefault) })) {
+                        ForEach(ViewportWidth.presets, id: \.label) { width in
+                            Text(width.label).tag(Self.widthTag(width))
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                Text("The width an agent's page opens at in new sessions, unless its project sets its own (Projects, below). A width wider than the panel is scaled into it. The agent's browser_resize and the panel's menu change one session only.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
                 Divider().overlay(DefaultTheme.cardBorder)
                 HStack(spacing: 10) {
                     GhostButton("Clear agent browser data", systemImage: "trash") {
@@ -226,7 +404,7 @@ struct SettingsPage: View {
                             .foregroundStyle(DefaultTheme.secondaryText)
                     }
                 }
-                Text("Signs the agents out of every site they or you logged in to in their browsers, and empties their storage. Your own browser is untouched.")
+                Text("Signs the agents out of every site they or you logged in to in their browsers — WebKit's and Chromium's — and empties their storage. Your own browser is untouched.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
@@ -498,9 +676,44 @@ struct SettingsPage: View {
 
     // MARK: Per-project themes
 
+    /// A width as a picker's tag: 0 is Fit, -1 the default.
+    private static func widthTag(_ width: ViewportWidth?) -> Int {
+        switch width {
+        case nil: return -1
+        case .fit?: return 0
+        case .css(let pixels)?: return pixels
+        }
+    }
+
+    private static func width(tag: Int) -> ViewportWidth? {
+        switch tag {
+        case -1: return nil
+        case 0: return .fit
+        default: return .css(tag)
+        }
+    }
+
+    /// A project's agent page width: the default, or one of the presets —
+    /// and a width set earlier that is none of them, as it is.
+    private func agentWidthPicker(for project: ProjectRecord) -> some View {
+        let own = model.agentViewportDefaults.override(for: project.id.rawValue)
+        let choices = ViewportWidth.presets + (own.map { ViewportWidth.presets.contains($0) ? [] : [$0] } ?? [])
+        return Picker("", selection: Binding<Int>(
+            get: { Self.widthTag(own) },
+            set: { model.setAgentDefaultViewportWidth(Self.width(tag: $0), for: project.id) })) {
+            Text("Default (\(model.agentViewportDefaults.global.label))").tag(-1)
+            ForEach(choices, id: \.label) { width in
+                Text(width.label).tag(Self.widthTag(width))
+            }
+        }
+        .labelsHidden()
+        .fixedSize()
+        .help("The page width this project's agent browsers open at")
+    }
+
     private var projectsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Project themes")
+            sectionTitle("Projects")
             card {
                 if model.projects.isEmpty {
                     Text("No project yet.")
@@ -531,6 +744,12 @@ struct SettingsPage: View {
                         }
                         .labelsHidden()
                         .fixedSize()
+                        .help("This project's theme")
+                        Image(systemName: "macwindow")
+                            .font(.system(size: 11))
+                            .foregroundStyle(DefaultTheme.mutedText)
+                            .help("Agent browser page width")
+                        agentWidthPicker(for: project)
                     }
                 }
             }
