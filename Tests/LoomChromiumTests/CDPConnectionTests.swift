@@ -161,7 +161,7 @@ struct CDPConnectionTests {
         let chunk = try #require(peer.nextChunk())
         #expect(chunk.filter { $0 == 0 }.count == 3, "three frames in one read: they left in one write()")
         var framer = CDPFramer()
-        let frames = try framer.feed(chunk)
+        let frames = framer.feed(chunk)
         let types = frames.compactMap { frame -> String? in
             let message = (try? JSONSerialization.jsonObject(with: frame)) as? [String: Any]
             return (message?["params"] as? [String: Any])?["type"] as? String
@@ -321,21 +321,54 @@ struct CDPConnectionTests {
         #expect(isDisconnected(lateError))
     }
 
-    @Test("a frame over the size limit ends the connection")
-    func trameTropGrandeFerme() async throws {
+    @Test("a frame over the size limit fails its own call; the connection reads on")
+    func trameTropGrande() async throws {
         let peer = try FakeChromium()
-        defer { peer.finish() }
         let connection = peer.connection(maxFrameBytes: 64)
         let closes = Journal()
         connection.start(onClose: { reason in closes.append(reason) })
+        defer { connection.close(); peer.finish() }
 
         let capture = connection.post("Page.captureScreenshot", session: page, options: bounded())
-        peer.sendBytes(Data(repeating: UInt8(ascii: "x"), count: 100))
+        let next = connection.post("Runtime.evaluate", session: page, options: bounded())
+        // Reply 1 is 129 bytes, cut across two writes with its NUL in the second; reply 2 follows it.
+        peer.sendBytes(Data((#"{"id":1,"result":{"data":""# + String(repeating: "x", count: 80)).utf8))
+        peer.sendBytes(Data((String(repeating: "y", count: 20) + "\"}}\u{0}" + #"{"id":2,"result":{"v":1}}"# + "\u{0}").utf8))
+
         let error = await failure(of: capture)
-        #expect(isDisconnected(error))
-        let closed = await pollUntil { closes.entries.count == 1 }
-        #expect(closed)
-        #expect(connection.isClosed)
+        guard case .some(.protocolError(let method, let code, let message)) = error else {
+            Issue.record("expected the call's own failure, got \(String(describing: error))")
+            return
+        }
+        #expect(method == "Page.captureScreenshot" && code == CDPError.unreadableCode)
+        #expect(message.contains("over"))
+        let value = try await next.value()
+        #expect(value.int("v") == 1, "the stream stays in step: the next NUL ends the dropped frame")
+        #expect(closes.entries.isEmpty && !connection.isClosed)
+    }
+
+    @Test("a reply holding a lone surrogate is read with U+FFFD in its place; one that stays unreadable fails its call")
+    func surrogateSeul() async throws {
+        let peer = try FakeChromium()
+        let connection = peer.connection()
+        connection.start(onClose: { _ in })
+        defer { connection.close(); peer.finish() }
+
+        let cut = connection.post("Runtime.evaluate", session: page, options: bounded())
+        let broken = connection.post("Runtime.evaluate", session: page, options: bounded())
+        // What Chromium wrote for 'ab😀'.slice(0, 3) (measured): the high half alone.
+        peer.send(#"{"id":1,"result":{"result":{"type":"string","value":"ab\ud83d","pair":"\ud83d\ude00","escaped":"\\ud83d"}},"sessionId":"PAGE-1"}"#,
+                  #"{"id":2,"result":{"value":tru"#)
+        let value = try await cut.value()
+        #expect(value.object("result")?.string("value") == "ab\u{FFFD}")
+        #expect(value.object("result")?.string("pair") == "😀", "a whole pair is left as it is")
+        #expect(value.object("result")?.string("escaped") == "\\ud83d", "an escaped backslash is not an escape")
+        let error = await failure(of: broken)
+        guard case .some(.protocolError(_, let code, _)) = error else {
+            Issue.record("expected the call's own failure, got \(String(describing: error))")
+            return
+        }
+        #expect(code == CDPError.unreadableCode, "failed at once, not left to its deadline")
     }
 
     @Test("a reply split across writes is joined, and an unreadable frame is skipped")
@@ -434,9 +467,8 @@ private final class FakeChromium: @unchecked Sendable {
     /// The next command Loom wrote, parsed; nil if none comes within `timeout` ms.
     func nextCommand(timeout: Int32 = 2_000) -> [String: Any]? {
         while queued.isEmpty {
-            guard let chunk = nextChunk(timeout: timeout),
-                  let frames = try? framer.feed(chunk) else { return nil }
-            queued.append(contentsOf: frames)
+            guard let chunk = nextChunk(timeout: timeout) else { return nil }
+            queued.append(contentsOf: framer.feed(chunk))
         }
         let frame = queued.removeFirst()
         return (try? JSONSerialization.jsonObject(with: frame)) as? [String: Any]

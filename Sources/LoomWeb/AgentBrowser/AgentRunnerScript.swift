@@ -485,7 +485,7 @@ function post(task, op, target, args, attempt, guardMs) {
     const kb = (n) => Math.ceil(n / 1024) + " KB";
     return Promise.reject(new Error(task.api + ": this call is " + kb(utf8Length(payload)) + "; a call is " + kb(max) + " at most"));
   }
-  const binding = S.binding || G[BINDING];
+  const binding = S.binding;
   if (typeof binding !== "function") return Promise.reject(new Error(task.api + ": Loom's bridge is missing (" + BINDING + ")"));
   return new Promise((resolve) => {
     let timer = null;
@@ -1751,7 +1751,11 @@ function configure(raw) {
 function startRun(config) {
   if (S.started) return { ok: false, error: "already started" };
   configure(config);
+  // Kept here and taken off the world: the agent's code reaches Loom only
+  // through post(), which caps each message and stops at the run's end (a
+  // bare call could send a frame big enough to close the shared pipe).
   S.binding = typeof G[BINDING] === "function" ? G[BINDING] : null;
+  try { delete G[BINDING]; } catch (_) { /* not configurable: left as is */ }
   try { if (Error.stackTraceLimit < 50) Error.stackTraceLimit = 50; } catch (_) { /* kept */ }
   neutralize();
   S.started = true;

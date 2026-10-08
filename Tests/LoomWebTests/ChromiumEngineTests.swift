@@ -276,6 +276,61 @@ struct ChromiumEngineSessionTests {
     }
 }
 
+extension ChromiumEngineSessionTests {
+
+    static let opener = """
+        <!doctype html>
+        <html><head><title>Opener</title></head>
+        <body>
+        <h1>Opener</h1>
+        <script>
+        if (location.search === '?popup') {
+          document.title = 'Popup';
+          addEventListener('load', () => setTimeout(() => alert('from the popup'), 0));
+        }
+        </script>
+        </body></html>
+        """
+
+    @Test("A popup's alert holds its opener: the opener's commands say which tab to answer, and it is never replaced")
+    @MainActor
+    func dialogueDeLaPopup() async throws {
+        let path = try #require(ProcessInfo.processInfo.environment["LOOM_CHROMIUM"])
+        let server = TestPageServer(page: Data(Self.opener.utf8))
+        let started = await server.start()
+        let port = try #require(started, "the test page could not be served on 127.0.0.1")
+        defer { server.stop() }
+        let root = uniqueDirectory("chromium-popup")
+        let browser = ChromiumAgentBrowser.standalone(executablePath: path, root: root.appendingPathComponent("chromium"),
+                                                      environment: environment(in: root))
+        func send(_ command: AgentCommand) async throws -> String {
+            try await browser.run(command, deadline: ContinuousClock.now + .seconds(30)).text
+        }
+        do {
+            _ = try await send(.navigate(URL(string: "http://127.0.0.1:\(port)/")!))
+            _ = try await send(.evaluate(function: "() => { window.open('/?popup'); return 1; }", target: nil))
+            try await Task.sleep(for: .milliseconds(1_500))
+
+            let asked = ContinuousClock.now
+            let held = await failure(of: .snapshot(target: nil, depth: nil), on: browser)
+            #expect(held.contains("tab 1 has a JavaScript alert open") && held.contains("browser_tabs select 1"), "\(held)")
+            #expect(asked.duration(to: .now) < .seconds(5), "refused at once, not after its deadline")
+
+            let selected = try await send(.tabs(.select(1)))
+            #expect(selected.contains("from the popup"), "\(selected)")
+            _ = try await send(.handleDialog(accept: true, promptText: nil))
+            _ = try await send(.tabs(.select(0)))
+            let back = try await send(.snapshot(target: nil, depth: nil))
+            #expect(back.contains("heading \"Opener\""), "\(back)")
+            #expect(!back.contains("replaced by a fresh one"), "\(back)")
+        } catch {
+            Issue.record("\(error)")
+        }
+        await browser.shutDown()
+        try? FileManager.default.removeItem(at: root)
+    }
+}
+
 /// Serves one page on 127.0.0.1 — any other path is a JSON 404.
 private final class TestPageServer: @unchecked Sendable {
     private let page: Data

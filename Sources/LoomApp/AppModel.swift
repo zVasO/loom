@@ -2053,8 +2053,9 @@ public final class AppModel {
     /// The launch-time sweep of Chromium profiles; the pool's first launch
     /// waits for it.
     @ObservationIgnored var agentChromiumSweep: Task<Void, Never>? = nil
-    /// The last local-only change on its way to the pool: the next one
-    /// follows it, so the pool ends on the last setting.
+    /// The last change of the pool's settings on its way to it (local
+    /// sites only, browser tools off or on): the next one follows it, so the
+    /// pool ends on the last setting.
     @ObservationIgnored var agentChromiumNetworkChange: Task<Void, Never>? = nil
     /// The model of this run, for the app delegate's quit (LoomApp.swift).
     static weak var live: AppModel?

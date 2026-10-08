@@ -12,13 +12,21 @@ import Foundation
 public struct CDPFramer: Sendable {
 
     public enum Failure: Error, Equatable, Sendable {
-        /// A frame outgrew the limit before its NUL: the peer is not speaking
-        /// the protocol, and buffering on would only exhaust memory.
-        case frameTooLarge(limit: Int)
         /// JSONSerialization cannot write this message. Checked first: it
         /// would raise an Objective-C exception, which no `try` catches.
         case notJSON
     }
+
+    /// What a chunk completes, in wire order.
+    public enum Piece: Equatable, Sendable {
+        case frame(Data)
+        /// A frame past the limit, dropped as it came: its first bytes (a
+        /// reply's `{"id":N` names the call to fail) and its full length.
+        case oversized(head: Data, length: Int)
+    }
+
+    /// How much of an oversized frame is kept: enough for `{"id":N,`.
+    public static let headBytes = 64
 
     public let maxFrameBytes: Int
     private var pending = Data()
@@ -26,25 +34,50 @@ public struct CDPFramer: Sendable {
     /// screenshot arriving in 64 KB reads is not rescanned from its start
     /// at each of them.
     private var scanned = 0
+    /// Inside an oversized frame: its head and the bytes seen so far; the
+    /// rest is dropped up to its NUL. NUL never occurs inside JSON text, so
+    /// the next one always ends the frame and the stream stays in step.
+    private var skipping: (head: Data, length: Int)?
 
     public init(maxFrameBytes: Int = 256 << 20) {
         self.maxFrameBytes = maxFrameBytes
     }
 
     /// The frames `chunk` completes, in wire order, without their NUL. An
-    /// empty frame carries nothing and is skipped. After a throw the framer
-    /// is spent: a stream cut at an arbitrary byte cannot be resynchronised.
-    public mutating func feed(_ chunk: Data) throws -> [Data] {
+    /// empty frame carries nothing and is skipped; so is one over the limit
+    /// (`read` names it).
+    public mutating func feed(_ chunk: Data) -> [Data] {
+        read(chunk).compactMap { piece in
+            if case .frame(let frame) = piece { return frame }
+            return nil
+        }
+    }
+
+    /// `feed`, with the frames over the limit named where they were: one
+    /// answer too big fails its own call, never the whole connection.
+    public mutating func read(_ chunk: Data) -> [Piece] {
+        var pieces: [Piece] = []
+        var chunk = chunk
+        if let skipped = skipping {
+            guard let terminator = Self.firstNUL(in: chunk, from: 0) else {
+                skipping = (skipped.head, skipped.length + chunk.count)
+                return []
+            }
+            pieces.append(.oversized(head: skipped.head, length: skipped.length + terminator))
+            skipping = nil
+            chunk = chunk.subdata(in: (chunk.startIndex + terminator + 1)..<chunk.endIndex)
+        }
         pending.append(chunk)
-        var frames: [Data] = []
         var start = 0
         var cursor = scanned
         while let terminator = Self.firstNUL(in: pending, from: cursor) {
             let length = terminator - start
-            guard length <= maxFrameBytes else { throw Failure.frameTooLarge(limit: maxFrameBytes) }
-            if length > 0 {
-                let base = pending.startIndex
-                frames.append(pending.subdata(in: (base + start)..<(base + terminator)))
+            let base = pending.startIndex
+            if length > maxFrameBytes {
+                let head = pending.subdata(in: (base + start)..<(base + start + min(Self.headBytes, length)))
+                pieces.append(.oversized(head: head, length: length))
+            } else if length > 0 {
+                pieces.append(.frame(pending.subdata(in: (base + start)..<(base + terminator))))
             }
             start = terminator + 1
             cursor = start
@@ -54,8 +87,13 @@ public struct CDPFramer: Sendable {
             pending.removeSubrange(pending.startIndex..<(pending.startIndex + start))
         }
         scanned = pending.count
-        guard pending.count <= maxFrameBytes else { throw Failure.frameTooLarge(limit: maxFrameBytes) }
-        return frames
+        if pending.count > maxFrameBytes {
+            // No NUL yet and already too big: dropped as it arrives.
+            skipping = (Data(pending.prefix(Self.headBytes)), pending.count)
+            pending = Data()
+            scanned = 0
+        }
+        return pieces
     }
 
     /// One message as it goes on the wire: its JSON, then the NUL.

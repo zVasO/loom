@@ -421,7 +421,7 @@ final class UserInputPump {
         enqueue { [weak self] in
             guard let self else { return }
             let committed = self.keys.commitComposition()
-            if self.gate.isOpen {
+            if self.stillPersons() {
                 self.forward(committed)
             }
             guard self.admit(.mouseExited) else { return }
@@ -459,6 +459,17 @@ final class UserInputPump {
     /// threads (the core's control), so a takeover told to the main actor
     /// and not landed yet still shuts the gate.
     var agentBusy: (() -> Bool)?
+
+    /// Whether a flow that resumes may still send the person's input: an
+    /// agent command that entered the core meanwhile takes the page first,
+    /// as `admit` does — a paste's text, an Escape or a commit never lands
+    /// among the agent's own input.
+    func stillPersons() -> Bool {
+        if !gate.agentRunning, agentBusy?() == true {
+            takeOver()
+        }
+        return gate.isOpen
+    }
 
     /// The gate's verdict; a refused press, key or paste says why.
     func admit(_ event: GateEvent) -> Bool {

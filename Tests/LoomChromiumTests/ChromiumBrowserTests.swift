@@ -636,6 +636,60 @@ struct ChromiumPoolLeaseTests {
         }
     }
 
+    @Test("browser tools off: nothing launches, a running process stops; back on, it launches again")
+    func outilsCoupes() async throws {
+        let root = try makeTemporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let launcher = FakeLauncher()
+        defer { launcher.finish() }
+        let pool = makePool(launcher, profiles: ChromiumProfiles(root: root))
+        let key = ChromiumProfileKey.project(UUID())
+        _ = try await pool.acquire(key)
+        #expect(launcher.count == 1)
+
+        await pool.setLaunchesAllowed(false)
+        await pool.stop(key, reason: "Browser tools were turned off")
+        // An acquire that was under way when the tools went off comes back here.
+        await #expect(throws: ChromiumPoolError.toolsOff) {
+            try await pool.acquire(key)
+        }
+        #expect(launcher.count == 1, "no relaunch after the stop")
+        #expect(ChromiumPoolError.toolsOff.description.contains("Browser tools are turned off"))
+
+        await pool.setLaunchesAllowed(true)
+        _ = try await pool.acquire(key)
+        #expect(launcher.count == 2)
+        await pool.shutdownAll(grace: .milliseconds(300))
+    }
+
+    @Test("a stop Loom chose keeps the project's session cookies for its next launch; Clear data forgets them")
+    func cookiesDeSession() async throws {
+        let root = try makeTemporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let launcher = FakeLauncher(answer: { received in
+            guard received.method == "Storage.getCookies" else { return nil }
+            return [BrowserPeer.reply(received, #"{"cookies":[{"name":"sess","value":"abc","domain":"127.0.0.1","path":"/","expires":-1,"session":true},{"name":"keep","value":"1","domain":"127.0.0.1","path":"/","expires":1e10,"session":false}]}"#)]
+        })
+        defer { launcher.finish() }
+        let profiles = ChromiumProfiles(root: root)
+        let pool = makePool(launcher, profiles: profiles)
+        let identifier = UUID()
+        let key = ChromiumProfileKey.project(identifier)
+        _ = try await pool.acquire(key)
+
+        await pool.stop(key, reason: "Browser tools were turned off")
+        _ = try await pool.acquire(key)
+        let restored = launcher.peer(1).received("Storage.setCookies")
+        #expect(restored.count == 1, "put back before the browser is handed out")
+        let names = (restored.first?.params["cookies"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
+        #expect(names == ["sess"], "the session cookies only: the others are on disk")
+
+        try await pool.clearProfile(identifier)
+        _ = try await pool.acquire(key)
+        #expect(launcher.peer(2).received("Storage.setCookies").isEmpty, "signed out: nothing comes back")
+        await pool.shutdownAll(grace: .milliseconds(300))
+    }
+
     @Test("a private folder left by a Loom that died is swept when the pool starts")
     func balayageAuDemarrage() throws {
         let root = try makeTemporaryRoot()
@@ -836,7 +890,7 @@ private final class BrowserPeer: @unchecked Sendable {
             let count = read(commands, &buffer, buffer.count)
             // Loom closed its end: Chromium exits.
             if count <= 0 { break }
-            guard let frames = try? framer.feed(Data(buffer[0..<count])) else { break }
+            let frames = framer.feed(Data(buffer[0..<count]))
             for frame in frames {
                 guard let message = (try? JSONSerialization.jsonObject(with: frame)) as? [String: Any],
                       let id = message["id"] as? Int, let method = message["method"] as? String else { continue }
@@ -973,6 +1027,12 @@ private final class FakeLauncher: @unchecked Sendable {
     private var requestLog: [ChromiumLaunchRequest] = []
     private var failures: [Error] = []
     private var major = 141
+    /// What its peers answer before their defaults.
+    private let answer: BrowserPeer.Answer?
+
+    init(answer: BrowserPeer.Answer? = nil) {
+        self.answer = answer
+    }
 
     var requests: [ChromiumLaunchRequest] {
         lock.withLock { requestLog }
@@ -1012,7 +1072,7 @@ private final class FakeLauncher: @unchecked Sendable {
         if let failure { throw failure }
         // A launch takes a while: concurrent acquires overlap it.
         try await Task.sleep(for: .milliseconds(30))
-        let peer = try BrowserPeer()
+        let peer = try BrowserPeer(answer: answer)
         let browser = peer.browser(major: version)
         lock.lock()
         peers.append(peer)

@@ -409,6 +409,27 @@ public final class ChromiumBrowser: @unchecked Sendable {
         return contextId
     }
 
+    /// The default context's session cookies (no expiry: Chromium keeps
+    /// them in memory only, and they go with the process). Empty when it
+    /// cannot say in time.
+    public func sessionCookies(timeout: Duration = .seconds(2)) async -> [CDPObject] {
+        guard !isClosed else { return [] }
+        let options = CDPCallOptions(deadline: ContinuousClock.now + timeout)
+        guard let result = try? await connection.call("Storage.getCookies", [:], session: nil, options: options) else {
+            return []
+        }
+        return (result.objects("cookies") ?? []).filter { $0.bool("session") == true }
+    }
+
+    /// Puts back what `sessionCookies` read, as Chromium wrote it (measured:
+    /// `Storage.setCookies` takes its own cookie objects).
+    public func restoreCookies(_ cookies: [CDPObject], timeout: Duration = .seconds(2)) async {
+        guard !cookies.isEmpty, !isClosed else { return }
+        let options = CDPCallOptions(deadline: ContinuousClock.now + timeout)
+        _ = try? await connection.call("Storage.setCookies", ["cookies": cookies.map(\.raw)], session: nil,
+                                       options: options)
+    }
+
     /// Closes the context's targets and forgets everything it held.
     @discardableResult
     public func disposeBrowserContext(_ browserContextId: String) -> CDPReply {

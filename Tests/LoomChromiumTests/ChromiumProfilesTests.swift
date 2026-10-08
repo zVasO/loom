@@ -83,7 +83,9 @@ struct ChromiumProfilesTests {
         let profile = run.profileDirectory(for: identifier)
         let cache = run.cacheDirectory(for: identifier)
         let cleared = ChromiumProfiles.clearedOnFirstUse.map { profile.appendingPathComponent($0).appendingPathComponent("data") }
-            + [cache.appendingPathComponent("Default/Cache/index"), cache.appendingPathComponent("Default/Code Cache/js")]
+            + [cache.appendingPathComponent("Default/Cache/index"), cache.appendingPathComponent("Default/Code Cache/js"),
+               // chrome-headless-shell's HTTP cache, at the cache folder's root (measured).
+               cache.appendingPathComponent("Cache_Data/index")]
         let kept = [profile.appendingPathComponent("Default/Cookies"),
                     profile.appendingPathComponent("Default/Local Storage/leveldb/000003.log"),
                     profile.appendingPathComponent("Local State")]

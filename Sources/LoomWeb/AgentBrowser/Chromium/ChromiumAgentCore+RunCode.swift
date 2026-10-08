@@ -440,6 +440,12 @@ extension AgentRunCall {
             double(key).map { Int(max(-1e12, min(1e12, $0)).rounded()) }
         }
 
+        /// A point or a wheel delta, kept within ±10 million CSS pixels: a
+        /// script's 1e300 must not reach an Int conversion (a trap).
+        func coordinate(_ key: String) -> Double? {
+            double(key).map { max(-1e7, min(1e7, $0)) }
+        }
+
         func bool(_ key: String) -> Bool? {
             self[key] as? Bool
         }
@@ -572,7 +578,7 @@ extension AgentRunCall {
                 if let object = item as? [String: Any] {
                     if let value = object["value"] as? String { return .value(value) }
                     if let label = object["label"] as? String { return .label(label) }
-                    if let index = object["index"] as? Double, index.isFinite, index >= 0 { return .index(Int(index)) }
+                    if let index = object["index"] as? Double, index.isFinite, index >= 0, index < 1e9 { return .index(Int(index)) }
                 }
                 throw AgentRunFailure(message: "an option is a string, {value}, {label} or {index}")
             }
@@ -643,15 +649,15 @@ extension AgentRunCall {
             guard let action = AgentRunOp.MouseAction(rawValue: raw) else {
                 throw AgentRunFailure(message: "mouse's action is move, down, up, click, dblclick or wheel, not \(raw)")
             }
-            let x = f.double("x")
-            let y = f.double("y")
+            let x = f.coordinate("x")
+            let y = f.coordinate("y")
             if [AgentRunOp.MouseAction.move, .click, .dblclick].contains(action), x == nil || y == nil {
                 throw AgentRunFailure(message: "mouse.\(raw) needs x and y")
             }
             return .mouse(action, x: x, y: y, button: try f.button(),
                           clickCount: f.clamped("clickCount", 1...3, default: action == .dblclick ? 2 : 1),
                           steps: f.clamped("steps", 1...limits.maxMoveSteps, default: 1),
-                          deltaX: f.double("dx") ?? f.double("deltaX") ?? 0, deltaY: f.double("dy") ?? f.double("deltaY") ?? 0,
+                          deltaX: f.coordinate("dx") ?? f.coordinate("deltaX") ?? 0, deltaY: f.coordinate("dy") ?? f.coordinate("deltaY") ?? 0,
                           delay: f.delay)
         case "viewport":
             guard let width = f.int("width") else { throw AgentRunFailure(message: "width is required") }
@@ -1019,6 +1025,12 @@ extension ChromiumAgentCore {
         timer.cancel()
         dialogWatch.cancel()
         heapWatch.cancel()
+        if run.pageEvaluations > 0 {
+            // A page.evaluate still running in the page: stopped with the run.
+            // Read before anything awaits: its task, cancelled below, counts
+            // itself out as soon as the actor is free.
+            page.post("Runtime.terminateExecution")
+        }
         for task in run.tasks { task.cancel() }
         run.actionTail?.cancel()
         if stopped != nil || cancelled || outcome?.result == nil {
@@ -1029,10 +1041,6 @@ extension ChromiumAgentCore {
             if !runnerGone { await runner.stop() }
         }
         runner.finished()
-        if run.pageEvaluations > 0 {
-            // A page.evaluate still running in the page: stopped with the run.
-            page.post("Runtime.terminateExecution")
-        }
         await runReleaseInput(run)
         if cancelled { throw CancellationError() }
 
@@ -1383,11 +1391,13 @@ extension ChromiumAgentCore {
 
         case .evaluate(let function, let argument, let target, let all):
             var nonce = ""
+            var expected = 1
             if let target {
                 let (limit, ms) = Self.runLimit(nil, limits.actionTimeout, run)
                 let stamped: CDPObject
                 if all {
                     stamped = try await runHelper("stampAll", ["target": target.value], run, limit: limit)
+                    expected = stamped.int("count") ?? 0
                 } else {
                     stamped = try await runResolving("stamp", ["target": target.value], target: target, run,
                                                      limit: limit, ms: ms, api: api)
@@ -1395,7 +1405,8 @@ extension ChromiumAgentCore {
                 nonce = stamped.string("nonce") ?? ""
             }
             let raw = try await runPageEvaluate(Self.runEvaluateExpression(function: function, argument: argument,
-                                                                           nonce: nonce, all: all), run, api: api)
+                                                                           nonce: nonce, all: all, expected: expected),
+                                                run, api: api)
             // The serializer's JSON text, as a string: the facade parses it back.
             return AgentRunJSON.text((raw as? String) ?? "undefined")
 
@@ -1679,10 +1690,10 @@ extension ChromiumAgentCore {
                                               modifiers: modifiers))
             let went = try await page.dispatch(batch: down, deadline: end)
             if went != .acked { return went }
-            try await Task.sleep(for: .milliseconds(delay))
-            let up = try await page.dispatch(batch: [CDPInput.mouseReleased(x: point.x, y: point.y, button: pressed,
-                                                                            clickCount: count, modifiers: modifiers)],
-                                             deadline: end)
+            let release = [CDPInput.mouseReleased(x: point.x, y: point.y, button: pressed, clickCount: count,
+                                                  modifiers: modifiers)]
+            try await holding(release, on: page) { try await Task.sleep(for: .milliseconds(delay)) }
+            let up = try await page.dispatch(batch: release, deadline: end)
             if up != .acked { return up }
         }
         return .acked
@@ -1841,8 +1852,21 @@ extension ChromiumAgentCore {
         }
         let down = try await run.page.dispatch(batch: events.down, deadline: end)
         if down != .acked { return down }
-        try await Task.sleep(for: .milliseconds(delay))
+        try await holding(events.up, on: run.page) { try await Task.sleep(for: .milliseconds(delay)) }
         return try await run.page.dispatch(batch: events.up, deadline: end)
+    }
+
+    /// `wait` while a button or keys are down: cut short (the run stopped or
+    /// was cancelled), `release` still goes out — written at once, so even
+    /// from a cancelled task — and the page is never left with them down.
+    private func holding(_ release: [(String, [String: Any])], on page: ChromiumTabRuntime,
+                         _ wait: () async throws -> Void) async throws {
+        do {
+            try await wait()
+        } catch {
+            _ = try? await page.dispatch(batch: release, deadline: ContinuousClock.now + .seconds(1))
+            throw error
+        }
     }
 
     private func runKeyboard(_ action: AgentRunOp.KeyAction, key: String?, text: String?, delay: Int,
@@ -2011,8 +2035,7 @@ extension ChromiumAgentCore {
         let end = Self.runCallEnd(limit, run)
         let interruptible: Set<CDPInterruption> = [.dialogOpened, .navigated, .crashed, .detached]
         let found = try await page.call("Runtime.evaluate", [
-            "expression": "(() => { const e = document.querySelector('[data-loom-eval=\"" + nonce + "\"]'); "
-                + "if (e) e.removeAttribute('data-loom-eval'); return e; })()",
+            "expression": "(" + AgentScripts.stampLookup + ")(" + ChromiumTabRuntime.jsString(nonce) + ", 1)[0]",
             "returnByValue": false,
         ], deadline: end, interruptible: interruptible)
         guard let objectId = found.object("result")?.string("objectId") else {
@@ -2321,7 +2344,8 @@ extension ChromiumAgentCore {
     /// page.evaluate / locator.evaluate(All) in the page's world: the
     /// function called with the stamped element(s) first, then `argument`;
     /// its value through browser_evaluate's serializer.
-    static func runEvaluateExpression(function: String, argument: String, nonce: String, all: Bool) -> String {
+    static func runEvaluateExpression(function: String, argument: String, nonce: String, all: Bool,
+                                      expected: Int = 1) -> String {
         let trimmed = function.trimmingCharacters(in: .whitespacesAndNewlines)
         let callable = AgentScripts.isFunction(trimmed) ? trimmed : "() => (\n" + trimmed + "\n)"
         return """
@@ -2330,8 +2354,7 @@ extension ChromiumAgentCore {
         const __loomArg = (\(argument));
         let __loomTarget;
         if (__loomNonce) {
-          const found = Array.from(document.querySelectorAll('[data-loom-eval="' + __loomNonce + '"]'));
-          for (const element of found) element.removeAttribute("data-loom-eval");
+          const found = (\(AgentScripts.stampLookup))(__loomNonce, \(expected));
           __loomTarget = \(all ? "found" : "found[0]");
         }
         const __loomFunction = (

@@ -92,8 +92,15 @@ public final class ChromiumAgentSurface: ChromiumPanelSurface {
     /// loop by being looked at).
     public func viewerDidChange(pageArea: CGSize, backingScale: CGFloat, onScreen: Bool) {
         let appeared = onScreen && !viewerOnScreen
+        let left = !onScreen && viewerOnScreen
         viewerOnScreen = onScreen
-        guard onScreen else { return }
+        guard onScreen else {
+            if left {
+                let core = self.core
+                Task { await core.panelLeft() }
+            }
+            return
+        }
         reportPanelSize(pageArea)
         if appeared {
             setVisible(true)

@@ -1343,6 +1343,8 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
             return AgentError.unavailable("the agent's browser stopped during the command (\(reason))")
         case .cancelled:
             return CancellationError()
+        case .protocolError(_, CDPError.unreadableCode, let message):
+            return AgentError.failed("Loom could not read the page's answer: \(message)")
         case .protocolError(let method, _, let message):
             return AgentError.failed("Chromium refused \(method): \(message)")
         }

@@ -26,6 +26,8 @@ extension AppModel {
                     browser.cancelAll("Browser tools were turned off in Loom's Settings.")
                 }
                 stopAgentChromium(reason: "Browser tools were turned off in Loom's Settings")
+            } else {
+                allowAgentChromium()
             }
         }
     }
@@ -83,6 +85,11 @@ extension AppModel {
         }
         let command = try AgentCommand(method: method, params: request.params)
         let options = try AgentCommandOptions(method: method, params: request.params)
+        if case .runCode = command, (agentEngines[id] ?? .webkit) != .chromium {
+            // Refused before a browser is made or the panel opens for it
+            // (the CLI lists run_code whatever the session's engine).
+            throw AgentError.unavailable(AgentBrowser.runCodeUnavailable).apiError
+        }
         guard let browser = agentBrowser(for: id, create: command.createsBrowser) else {
             throw APIError(code: .unavailable, message: "No page is open yet — start with browser_navigate.")
         }
@@ -505,12 +512,27 @@ extension AppModel {
             keys.insert(.project(AgentBrowserProfile.storeIdentifier(forProject: project.id.rawValue)))
         }
         let stopping = keys
-        Task {
+        // In order with the pool's other settings; launches refused first,
+        // so that an acquire under way does not start one again after the stop.
+        let previous = agentChromiumNetworkChange
+        agentChromiumNetworkChange = Task {
+            if let previous { await previous.value }
+            await pool.setLaunchesAllowed(false)
             await withTaskGroup(of: Void.self) { group in
                 for key in stopping {
                     group.addTask { await pool.stop(key, reason: reason) }
                 }
             }
+        }
+    }
+
+    /// Browser tools back on: the agents' Chromium launches again.
+    fileprivate func allowAgentChromium() {
+        guard let pool = agentChromiumPoolStorage else { return }
+        let previous = agentChromiumNetworkChange
+        agentChromiumNetworkChange = Task {
+            if let previous { await previous.value }
+            await pool.setLaunchesAllowed(true)
         }
     }
 
@@ -638,9 +660,13 @@ extension AppModel {
         var downloaded: ChromiumInstallRecord? = nil
     }
 
-    /// An agent's browser runs on Chromium: its binary must stay.
+    /// An agent's browser runs on Chromium — or a live session is pinned to
+    /// it and has not opened its browser yet (its tools are Chromium's):
+    /// its binary must stay.
     var agentChromiumInUse: Bool {
-        agentBrowsers.values.contains { $0.engine == .chromium }
+        if agentBrowsers.values.contains(where: { $0.engine == .chromium }) { return true }
+        let live: Set<SessionState> = [.starting, .working, .needsInput, .idle]
+        return sessions.contains { agentEngines[$0.id] == .chromium && live.contains($0.state) }
     }
 
     func agentChromiumStatus() -> AgentChromiumStatus {

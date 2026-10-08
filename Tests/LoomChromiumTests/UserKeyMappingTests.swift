@@ -299,6 +299,15 @@ struct UserKeyMappingTests {
         ])
         let late = mapping.keyUp(MacKeyPress(keyCode: 0x7B, characters: "\u{F702}"))
         #expect(late.isEmpty)
+
+        // ⌘ held before the page had the keys (its down never went out): its
+        // up still brings up what was pressed under it.
+        var earlier = UserKeyMapping()
+        _ = earlier.keyDown(MacKeyPress(keyCode: 0x7B, characters: "\u{F702}", modifiers: [.meta]),
+                            actions: [.doCommand("moveToLeftEndOfLine:")])
+        let released = earlier.flagsChanged(MacKeyPress(keyCode: 0x37, modifiers: []))
+        #expect(released == [keyCommand("keyUp", key: "ArrowLeft", code: "ArrowLeft", vk: 37, native: 123, modifiers: 4)])
+        #expect(earlier.pressedUnderCommand.isEmpty && earlier.forwardedKeyCodes.isEmpty)
     }
 
     @Test("⌃A: AppKit's moveToBeginningOfParagraph on key a, keyCode 65")

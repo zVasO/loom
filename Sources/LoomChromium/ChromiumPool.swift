@@ -92,6 +92,8 @@ public enum ChromiumPoolError: Error, Equatable, Sendable, CustomStringConvertib
     case launchFailed(String)
     case profileFailed(String)
     case shutDown
+    /// Browser tools are off: nothing launches until they are back on.
+    case toolsOff
 
     public var description: String {
         switch self {
@@ -111,6 +113,8 @@ public enum ChromiumPoolError: Error, Equatable, Sendable, CustomStringConvertib
             return "The agent browser's profile folder failed: \(detail)"
         case .shutDown:
             return "Loom is quitting: the agent's browser is closed"
+        case .toolsOff:
+            return "Browser tools are turned off in Loom's Settings: the agent's browser stays closed"
         }
     }
 }
@@ -162,6 +166,15 @@ public actor ChromiumPool {
     private var nextGeneration = 0
     private var nextLease = 0
     private var isShutDown = false
+    /// A project's session cookies, read when Loom stopped its process on
+    /// purpose (the network setting, tools off, the idle grace) and put
+    /// back at its next launch: a relaunch does not sign the agent out of
+    /// a dev app, as WebKit keeps them for the app run too. Never written
+    /// to disk; Clear data and a removed project forget them.
+    private var savedSessionCookies: [ChromiumProfileKey: [CDPObject]] = [:]
+    /// Off while browser tools are: a launch already under way when they went
+    /// off (an acquire in flight) does not start Chromium again after the stop.
+    private var launchesAllowed = true
 
     /// `network` is required: local-only must hold from the very first launch.
     /// `executable` is asked at each launch (the Settings' choice may change).
@@ -267,7 +280,8 @@ public actor ChromiumPool {
         let outdated = running.filter { $0.value.network != mode }.map { $0.key }
         var tasks: [Task<Void, Never>] = []
         for key in outdated {
-            if let task = beginStop(key, reason: "The agent browser's network setting changed; its pages reload") {
+            if let task = beginStop(key, reason: "The agent browser's network setting changed; its pages reload",
+                                    keepingCookies: true) {
                 tasks.append(task)
             }
         }
@@ -277,13 +291,20 @@ public actor ChromiumPool {
         releaseFenceIfUnused()
     }
 
+    /// Browser tools off (false): every acquire that would launch throws
+    /// `toolsOff` — set before the processes are stopped. Back on: launches
+    /// again.
+    public func setLaunchesAllowed(_ allowed: Bool) {
+        launchesAllowed = allowed
+    }
+
     /// Stops the key's process now (browser tools turned off, a session's
     /// last panel and lease gone early). The next acquire launches again.
     public func stop(_ key: ChromiumProfileKey, reason: String) async {
         if let launch = launching[key] {
             _ = try? await launch.task.value
         }
-        if let task = beginStop(key, reason: reason) {
+        if let task = beginStop(key, reason: reason, keepingCookies: true) {
             await task.value
         }
     }
@@ -337,6 +358,7 @@ public actor ChromiumPool {
             if let launch = launching[key] {
                 return try await launch.task.value
             }
+            guard launchesAllowed else { throw ChromiumPoolError.toolsOff }
             try admitLaunch(key)
             nextGeneration += 1
             let generation = nextGeneration
@@ -367,6 +389,9 @@ public actor ChromiumPool {
             attempt += 1
             let mode = network
             let launched = try await launchOnce(key, mode: mode)
+            if let cookies = savedSessionCookies[key] {
+                await launched.browser.restoreCookies(cookies)
+            }
             if isShutDown {
                 await discard(launched, reason: "Loom is quitting")
                 throw ChromiumPoolError.shutDown
@@ -379,6 +404,7 @@ public actor ChromiumPool {
                 }
                 continue
             }
+            savedSessionCookies[key] = nil
             running[key] = Running(generation: generation, browser: launched.browser, network: mode,
                                    privateDirectory: launched.privateDirectory, leases: [], idleTimer: nil)
             watch(launched.browser, key: key, generation: generation)
@@ -558,7 +584,7 @@ public actor ChromiumPool {
     private func idleExpired(_ key: ChromiumProfileKey, generation: Int) {
         guard let entry = running[key], entry.generation == generation, entry.leases.isEmpty else { return }
         let seconds = idleGrace.components.seconds
-        beginStop(key, reason: "Chromium was stopped after \(seconds) s without a session")
+        beginStop(key, reason: "Chromium was stopped after \(seconds) s without a session", keepingCookies: true)
     }
 
     /// The process leaves `running` at once — it is no death — and its
@@ -567,7 +593,8 @@ public actor ChromiumPool {
     /// the shutdown, before any launch of the key.
     @discardableResult
     private func beginStop(_ key: ChromiumProfileKey, reason: String, grace: Duration = .seconds(2),
-                           force: Bool = false, then work: (@Sendable () -> Void)? = nil) -> Task<Void, Never>? {
+                           force: Bool = false, keepingCookies: Bool = false,
+                           then work: (@Sendable () -> Void)? = nil) -> Task<Void, Never>? {
         let entry = running.removeValue(forKey: key)
         if entry == nil && !force {
             return stopping[key]?.task
@@ -578,8 +605,16 @@ public actor ChromiumPool {
         let profiles = self.profiles
         nextGeneration += 1
         let generation = nextGeneration
+        let keeps: Bool
+        if case .project = key { keeps = keepingCookies } else { keeps = false }
         let task = Task { [weak self] in
             if let browser {
+                // Read before the stop, kept before any launch of the key
+                // (a launch waits for this task).
+                if keeps {
+                    let cookies = await browser.sessionCookies()
+                    await self?.saveSessionCookies(cookies, for: key)
+                }
                 await browser.shutdown(grace: grace, reason: reason)
             }
             if let directory {
@@ -590,6 +625,10 @@ public actor ChromiumPool {
         }
         stopping[key] = Stopping(generation: generation, task: task)
         return task
+    }
+
+    private func saveSessionCookies(_ cookies: [CDPObject], for key: ChromiumProfileKey) {
+        savedSessionCookies[key] = cookies.isEmpty ? nil : cookies
     }
 
     private func stopFinished(_ key: ChromiumProfileKey, generation: Int) {
@@ -615,6 +654,8 @@ public actor ChromiumPool {
             }
             break
         }
+        // Signed out (Clear data) or gone: no cookie of it comes back.
+        savedSessionCookies[key] = nil
         let failure = ChromiumOnce<String?>()
         let profiles = self.profiles
         let task = beginStop(key, reason: reason, force: true) {

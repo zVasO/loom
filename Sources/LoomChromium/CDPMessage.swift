@@ -77,6 +77,11 @@ public enum CDPError: Error, Equatable, Sendable {
     case disconnected(String)
     /// The awaiting task was cancelled; the late reply is dropped by id.
     case cancelled
+
+    /// `protocolError`'s code for a reply Loom could not read (over the
+    /// frame limit, or not JSON): JSON-RPC's server-error range, not one
+    /// Chromium uses.
+    public static let unreadableCode = -32_099
 }
 
 public struct CDPCallOptions: Sendable {
@@ -110,7 +115,11 @@ enum CDPInbound {
 
     /// nil for a frame that is not a JSON object, or neither a reply nor an event.
     static func parse(_ frame: Data) -> CDPInbound? {
-        guard let object = try? JSONSerialization.jsonObject(with: frame),
+        // Chromium escapes a lone UTF-16 surrogate as it is (a page's string
+        // cut in the middle of an emoji: "ab\ud83d"); JSONSerialization
+        // refuses the whole frame for it. Read again with U+FFFD in its place.
+        guard let object = (try? JSONSerialization.jsonObject(with: frame))
+                ?? wellFormed(frame).flatMap({ try? JSONSerialization.jsonObject(with: $0) }),
               let fields = object as? [String: Any] else { return nil }
         let message = CDPObject(fields)
         if let id = message.int("id") {
@@ -122,5 +131,60 @@ enum CDPInbound {
         guard let method = message.string("method") else { return nil }
         let session = message.string("sessionId").map { CDPSessionID($0) }
         return .event(method: method, params: message.object("params") ?? CDPObject([:]), session: session)
+    }
+
+    /// `frame` with each unpaired `\uD800`–`\uDFFF` escape written `\uFFFD`;
+    /// nil when it has none. Escapes are ASCII and a backslash only occurs
+    /// inside strings, so a byte scan that steps over `\\` is exact.
+    static func wellFormed(_ frame: Data) -> Data? {
+        let bytes = [UInt8](frame)
+        let count = bytes.count
+        let backslash = UInt8(ascii: "\\")
+        let letterU = UInt8(ascii: "u")
+        func unit(at index: Int) -> Int? {
+            guard index + 6 <= count, bytes[index] == backslash, bytes[index + 1] == letterU else { return nil }
+            var value = 0
+            for byte in bytes[(index + 2)..<(index + 6)] {
+                guard let digit = Int(String(UnicodeScalar(byte)), radix: 16) else { return nil }
+                value = value * 16 + digit
+            }
+            return value
+        }
+        let replacement = Array("\\uFFFD".utf8)
+        var out: [UInt8] = []
+        var changed = false
+        var index = 0
+        out.reserveCapacity(count)
+        while index < count {
+            guard bytes[index] == backslash, index + 1 < count else {
+                out.append(bytes[index])
+                index += 1
+                continue
+            }
+            guard let value = unit(at: index) else {
+                out.append(contentsOf: bytes[index...(index + 1)])   // \" \\ \n …: kept, and stepped over
+                index += 2
+                continue
+            }
+            switch value {
+            case 0xD800...0xDBFF:
+                if let low = unit(at: index + 6), (0xDC00...0xDFFF).contains(low) {
+                    out.append(contentsOf: bytes[index..<(index + 12)])
+                    index += 12
+                } else {
+                    out.append(contentsOf: replacement)
+                    changed = true
+                    index += 6
+                }
+            case 0xDC00...0xDFFF:
+                out.append(contentsOf: replacement)
+                changed = true
+                index += 6
+            default:
+                out.append(contentsOf: bytes[index..<(index + 6)])
+                index += 6
+            }
+        }
+        return changed ? Data(out) : nil
     }
 }

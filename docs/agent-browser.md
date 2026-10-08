@@ -108,7 +108,9 @@ ce mode quand WebKit le permet. Sous Chromium, tout ce qui n'est pas local ni
 listé part vers un proxy que Loom tient et qui refuse tout ; QUIC, WebRTC et la
 résolution anticipée sont coupés, et si ce proxy ne peut démarrer, Chromium ne se
 lance pas. Changer le mode ou la liste relance le Chromium du projet : ses pages
-rechargent.
+rechargent, et les cookies de session du projet (ceux sans date d'expiration)
+sont remis, comme après l'arrêt d'un Chromium inactif ou des outils coupés ; un
+profil privé, lui, repart vide.
 
 ## Les outils
 
@@ -132,7 +134,7 @@ Les outils MCP `browser_*` suivent Playwright MCP, que les agents connaissent :
 
 Un élément se désigne par une référence de l'instantané (`e12`), un sélecteur CSS
 ou un sélecteur Playwright (`role=button[name="Save"]`, `text=Envoyer`,
-`label=Email`, `data-testid=submit`) ; plusieurs éléments pour une action, c'est
+`id=email`, `data-testid=submit`) ; plusieurs éléments pour une action, c'est
 une erreur qui les liste.
 
 Chaque action répond l'instantané de la page qui en résulte ; avec `snapshot: "none"`,

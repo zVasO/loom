@@ -41,6 +41,16 @@ struct SelectMenuModel: Equatable, Sendable {
     /// Chromium's own popup is open (a press reached the select).
     var open: Bool
 
+    /// The same options in the same order: an index chosen in the menu
+    /// still names the option the person read (the page may have filled
+    /// the list again meanwhile, or put another select there).
+    func sameChoices(as other: SelectMenuModel) -> Bool {
+        entries.count == other.entries.count
+            && zip(entries, other.entries).allSatisfy {
+                $0.kind == $1.kind && $0.title == $1.title && $0.enabled == $1.enabled
+            }
+    }
+
     /// nil unless `hitInfo` found a select the menu stands for: one line
     /// (`size` ≤ 1), one choice (not `multiple`), enabled, with options. A
     /// list box, a multiple select or a base-select picker is drawn in the
@@ -206,7 +216,7 @@ extension UserInputPump {
     /// Nothing while the page is not the person's (the agent took it during
     /// the probe): no Escape among the agent's own input, no menu.
     private func bridge(_ menu: SelectMenuModel, at point: CGPoint, generation expected: Int) async {
-        guard expected == generation, gate.isOpen else { return }
+        guard expected == generation, stillPersons() else { return }
         if menu.open {
             forward(SelectMenuBridge.escapeKeys)
         }
@@ -225,7 +235,7 @@ extension UserInputPump {
         // first — and only if it is still there.
         guard let again = await host.panelQuery("hitInfo", UserInputPump.hitArguments(point), on: tab,
                                                 timeout: SelectMenuBridge.chooseBudget),
-              SelectMenuModel(hitInfo: again) != nil,
+              let now = SelectMenuModel(hitInfo: again), now.sameChoices(as: menu),
               expected == generation, gate.isOpen else { return }
         noteActed()
         let argument: PanelJSON = .object(["index": .number(Double(index))])

@@ -157,8 +157,8 @@ public final class CDPConnection: @unchecked Sendable {
     }
 
     /// Starts reading. `onClose` runs once, on the reader queue, when the pipe
-    /// ends (EOF, a read error, a frame over the limit), after every pending
-    /// call has failed with `.disconnected`.
+    /// ends (EOF, a read error — a frame over the limit fails its own call
+    /// only), after every pending call has failed with `.disconnected`.
     public func start(onClose: @escaping @Sendable (String) -> Void) {
         lock.lock()
         let alreadyStarted = started
@@ -427,16 +427,27 @@ public final class CDPConnection: @unchecked Sendable {
             finish("reading the pipe failed: \(String(cString: strerror(failure)))")
             return
         }
-        let frames: [Data]
-        do {
-            frames = try framer.feed(Data(readBuffer[0..<count]))
-        } catch {
-            finish("a frame over \(framer.maxFrameBytes) bytes: not the DevTools protocol")
-            return
+        for piece in framer.read(Data(readBuffer[0..<count])) {
+            switch piece {
+            case .frame(let frame):
+                route(frame)
+            case .oversized(let head, let length):
+                // One answer too big (a page's 300 MB string) fails its own
+                // call: the other sessions on this Chromium keep their pipe.
+                log("cdp[\(label)]: a frame of \(length) bytes dropped (over \(framer.maxFrameBytes))")
+                fail(replyIn: head, message: "the answer was \(length / (1 << 20)) MB, "
+                        + "over the \(framer.maxFrameBytes / (1 << 20)) MB Loom reads")
+            }
         }
-        for frame in frames {
-            route(frame)
-        }
+    }
+
+    /// A reply Loom cannot read fails its call at once (its id is in the
+    /// frame's first bytes: Chromium writes `{"id":N,` first), rather than
+    /// leaving it to wait out its deadline.
+    private func fail(replyIn head: Data, message: String) {
+        guard let id = Self.leadingID(head), let entry = take(id) else { return }
+        entry.reply.resolve(.failure(.protocolError(method: entry.reply.method, code: CDPError.unreadableCode,
+                                                    message: message)))
     }
 
     private func route(_ frame: Data) {
@@ -448,6 +459,7 @@ public final class CDPConnection: @unchecked Sendable {
         }
         guard let inbound = CDPInbound.parse(frame) else {
             log("cdp[\(label)]: unreadable frame of \(frame.count) bytes dropped")
+            fail(replyIn: frame.prefix(CDPFramer.headBytes), message: "the answer was not readable JSON")
             return
         }
         switch inbound {
@@ -486,6 +498,23 @@ public final class CDPConnection: @unchecked Sendable {
     }
 
     private static let methodLead = Array(#"{"method":""#.utf8)
+    private static let idLead = Array(#"{"id":"#.utf8)
+
+    /// The id of a frame that starts `{"id":N` (a reply), nil otherwise.
+    static func leadingID(_ frame: Data) -> Int? {
+        let lead = idLead
+        let bytes = Array(frame.prefix(lead.count + 19))
+        guard bytes.count > lead.count, Array(bytes[..<lead.count]) == lead else { return nil }
+        var id = 0
+        var digits = 0
+        for byte in bytes[lead.count...] {
+            guard byte >= UInt8(ascii: "0"), byte <= UInt8(ascii: "9") else { break }
+            guard digits < 15 else { return nil }
+            id = id * 10 + Int(byte - UInt8(ascii: "0"))
+            digits += 1
+        }
+        return digits > 0 ? id : nil
+    }
 
     /// The method of a frame that starts `{"method":"X"`. Chromium writes an
     /// event's method first, so a raw subscription is matched before any parse.

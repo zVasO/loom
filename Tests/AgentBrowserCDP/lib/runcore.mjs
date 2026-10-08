@@ -22,7 +22,7 @@
 // stand-in does not do …"): history, mouse, viewport, screenshot, files, aria.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { repoRoot, serializerSource } from "../../AgentBrowserJS/extract.mjs";
+import { repoRoot, serializerSource, stampLookupSource } from "../../AgentBrowserJS/extract.mjs";
 import { delay, performance, settle, withTimeout } from "./cdp.mjs";
 import { HELPER_FUNCTION, prepareBrowser } from "./init.mjs";
 import { charKey, keyPress, KEYS, mouseClick } from "./input.mjs";
@@ -49,6 +49,7 @@ const BODY_TAIL = runnerConstant("bodyTail");
 const ENTRY_TAIL = "))\n//# sourceURL=" + SOURCE_URL;
 export const BINDING = "__loomRunCall";
 const SERIALIZER = serializerSource();
+const STAMP_LOOKUP = stampLookupSource();
 
 /** AgentRunLimits. */
 export const RUN_LIMITS = Object.freeze({
@@ -984,14 +985,13 @@ async function pageEvaluate(expression, run) {
 const callable = (fn) => (isFunction(fn.trim()) ? fn.trim() : "() => (\n" + fn.trim() + "\n)");
 
 /** runEvaluateExpression. */
-function evaluateExpression(fn, argument, nonce, all) {
+function evaluateExpression(fn, argument, nonce, all, expected = 1) {
   return `(async () => {
 const __loomNonce = ${JSON.stringify(nonce)};
 const __loomArg = (${argument});
 let __loomTarget;
 if (__loomNonce) {
-  const found = Array.from(document.querySelectorAll('[data-loom-eval="' + __loomNonce + '"]'));
-  for (const element of found) element.removeAttribute("data-loom-eval");
+  const found = (${STAMP_LOOKUP})(__loomNonce, ${expected});
   __loomTarget = ${all ? "found" : "found[0]"};
 }
 const __loomFunction = (
@@ -1120,12 +1120,15 @@ async function perform(call, run) {
       return JSON.stringify((await helper("readAll", { target: op.target.value, what: op.what }, run, limitOf(undefined, limits.actionTimeout, run)[0])).value ?? []);
     case "evaluate": {
       let nonce = "";
+      let expected = 1;
       if (op.target) {
         const [limit, ms] = limitOf(undefined, limits.actionTimeout, run);
-        nonce = (op.all ? await helper("stampAll", { target: op.target.value }, run, limit)
-          : await retrying("stamp", { target: op.target.value }, op.target, run, limit, ms, api)).nonce ?? "";
+        const stamped = op.all ? await helper("stampAll", { target: op.target.value }, run, limit)
+          : await retrying("stamp", { target: op.target.value }, op.target, run, limit, ms, api);
+        nonce = stamped.nonce ?? "";
+        if (op.all) expected = stamped.count ?? 0;
       }
-      const raw = await pageEvaluate(evaluateExpression(op.fn, op.argument, nonce, op.all), run);
+      const raw = await pageEvaluate(evaluateExpression(op.fn, op.argument, nonce, op.all, expected), run);
       return JSON.stringify(typeof raw === "string" ? raw : "undefined");
     }
     case "waitState": {

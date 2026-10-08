@@ -186,8 +186,17 @@ public struct UserKeyMapping: Equatable, Sendable {
             return commands
         }
         if let flag = MacKeyCodes.modifierFlag(press.keyCode), !press.modifiers.contains(flag) {
-            // The release of a key pressed before the page had the keys.
-            return []
+            // The release of a key pressed before the page had the keys —
+            // but the keys pressed under that Command did reach it, and
+            // their keyUp never comes: they go up now.
+            guard flag == CDPModifiers.meta else { return [] }
+            var commands: [PanelCDPCommand] = []
+            for keyCode in pressedUnderCommand.sorted() {
+                guard let held = forwarded.removeValue(forKey: keyCode) else { continue }
+                commands.append(.keyEvent(.keyUp, held, nativeKeyCode: keyCode, modifiers: press.modifiers.union(.meta)))
+            }
+            pressedUnderCommand = []
+            return commands
         }
         let identity = KeyIdentity(key: entry.namedKey ?? "", code: entry.code,
                                    windowsKeyCode: entry.windowsKeyCode, location: entry.location)

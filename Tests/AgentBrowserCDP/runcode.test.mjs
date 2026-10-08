@@ -753,7 +753,7 @@ eachBrowser((browser) => {
     assert.equal(JSON.parse(next.report.value), "Page A", "a fresh runner target, not poisoned");
   });
 
-  test("1 000 page calls: the facade refuses the next one; a wait's two messages are one step; a script that posts itself is stopped", options({ skip: noFacade }), async () => {
+  test("1 000 page calls: the facade refuses the next one; a wait's two messages are one step; the bridge is out of the script's reach", options({ skip: noFacade }), async () => {
     const capped = await script("/a", `async (page) => {
   let n = 0;
   try { for (;;) { await page.locator('h1').count(); n++; } } catch (error) { return { n, error: error.message }; }
@@ -770,12 +770,15 @@ eachBrowser((browser) => {
     assert.equal(waited.run.steps, 1000);
     assert.equal(waited.run.messages, 1001);
 
-    const flood = await script("/a", `async (page) => {
-  for (let i = 0; i < 2500; i++) __loomRunCall(JSON.stringify({ id: 1e6 + i, op: 'count', target: { chain: [{ css: 'h1' }], desc: 'h1', strict: true }, args: {} }));
-  await page.waitForTimeout(5000);
+    // A bare call to the binding would skip the facade's caps: one message
+    // of 270 MB closes the pipe Chromium shares with every session.
+    const forged = await script("/a", `async (page) => {
+  const reach = [typeof __loomRunCall, typeof globalThis.__loomRunCall, Object.getOwnPropertyNames(globalThis).filter((n) => n.includes('loomRunCall')).length];
+  globalThis.__loomRunCall = () => { throw new Error('forged'); };
+  return { reach, count: await page.locator('h1').count() };
 }`);
-    assert.equal(flood.report.error, "The script made more than 1000 page calls: it was stopped.");
-    assert.equal(flood.run.maxInFlightSeen, 32, "never more than 32 in flight");
+    assert.equal(forged.report.error, undefined, forged.report.error);
+    assert.deepEqual(JSON.parse(forged.report.value), { reach: ["undefined", "undefined", 0], count: 1 }, "the facade kept its own reference");
   });
 
   test("the run's world: no network API, an opaque origin with no cookie or storage of the page's profile, no Node", options({ skip: noFacade }), async () => {

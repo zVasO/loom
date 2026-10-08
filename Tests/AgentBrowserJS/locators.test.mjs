@@ -18,7 +18,7 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
-import { helperSource, pureHelper, fixturesDirectory } from "./extract.mjs";
+import { helperSource, pureHelper, fixturesDirectory, stampLookupSource } from "./extract.mjs";
 
 // ---------------------------------------------------------------- pure
 
@@ -36,6 +36,9 @@ const parseError = (selector) => {
 
 const PARSED = [
   ["button.primary", [{ css: "button.primary" }]],
+  // An escaped colon is part of a class name (Tailwind), not an extension.
+  [".md\\:visible", [{ css: ".md\\:visible" }]],
+  [".dark\\:light >> nth=0", [{ css: ".dark\\:light" }, { nth: 0 }]],
   ["css=div > span", [{ css: "div > span" }]],
   ["text=Save", [{ text: { s: "Save", m: "ci" } }]],
   ['text="Save draft"', [{ text: { s: "Save draft", m: "eq" }, legacy: true }]],
@@ -420,6 +423,7 @@ const QUERIES = [
   ["css into a shadow root from its host", p.locator("#host").locator("button")],
   ["css inside a shadow root", p.locator("div[data-k=shadow-row] span")],
   ["css combinator across a shadow boundary", p.locator("#host button")],
+  ["a child of the scope, with a shadow root below it", p.locator("section[aria-label=Help]").locator("> button")],
   ["native :has()", p.locator("li:has(input:checked)")],
   ["role under main", p.locator("main").getByRole("button", { name: "Delete" })],
 
@@ -709,6 +713,27 @@ test("state: visible and hidden as Playwright's isVisible; enabled and disabled;
     { code: "notFound", retry: true, message: "waiting for locator('#nope')" });
   assert.equal((await run(page, "state", { target: saveButtons, what: "visible" })).error.code, "ambiguous");
   assert.equal((await run(page, "state", { target: { ...saveButtons, strict: false }, what: "visible" })).value, true);
+  await page.close();
+});
+
+test("what stamp and stampAll mark in an open shadow root or a same-origin frame, the page's lookup finds — then unmarks", { skip }, async () => {
+  const page = await open("/locators");
+  const lookup = stampLookupSource();
+  const find = (nonce, expected) => page.evaluate(([source, n, e]) => {
+    const found = eval(source)(n, e);
+    return found.map((el) => el.dataset.k);
+  }, [lookup, nonce, expected]);
+  const shadow = await run(page, "stamp", { target: { chain: [{ role: "button", name: { s: "Shadow action", m: "eq" } }], desc: "x" } });
+  assert.equal(shadow.ok, true);
+  assert.deepEqual(await find(shadow.nonce, 1), ["shadow-button"], "inside the open shadow root");
+  assert.deepEqual(await find(shadow.nonce, 1), [], "unmarked: found once");
+  const framed = await run(page, "stamp", { target: { chain: [{ role: "button", name: { s: "Frame button", m: "eq" } }], desc: "x" } });
+  if (framed.ok) assert.deepEqual(await find(framed.nonce, 1), ["frame-button"], "inside the same-origin frame");
+  const all = await run(page, "stampAll", { target: { chain: [{ role: "button" }], desc: "x" } });
+  const keys = await find(all.nonce, all.count);
+  assert.equal(keys.length, all.count, "every button the engine counted, the shadow one included: " + keys.join());
+  assert.ok(keys.includes("shadow-button"));
+  await unstamp(page);
   await page.close();
 });
 

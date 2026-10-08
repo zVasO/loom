@@ -45,11 +45,14 @@ public final class ChromiumProfiles: @unchecked Sendable {
 
     // MARK: - Project profiles
 
-    /// Deleted from a project's profile and cache the first time an app run
-    /// launches it: what a page could leave behind to intercept the NEXT
-    /// session's pages (a service worker, cached responses, compiled code).
-    /// Logins — cookies, local storage, IndexedDB — stay. The parity of
-    /// `AgentBrowserProfile.clearedOnFirstUse`.
+    /// Deleted from a project's profile the first time an app run launches
+    /// it, with everything in its cache folder: what a page could leave
+    /// behind to intercept the NEXT session's pages (a service worker,
+    /// cached responses, compiled code). Logins — cookies, local storage,
+    /// IndexedDB — stay. The parity of `AgentBrowserProfile.clearedOnFirstUse`.
+    /// (The cache folder holds caches only, laid out by the binary:
+    /// `Cache_Data` for chrome-headless-shell, `Default/Cache` for a full
+    /// browser — measured.)
     public static let clearedOnFirstUse = ["Default/Service Worker", "Default/Cache", "Default/Code Cache",
                                            "Default/GPUCache"]
 
@@ -64,13 +67,15 @@ public final class ChromiumProfiles: @unchecked Sendable {
         try Self.makeOwnedDirectory(cache)
         let first: Bool = lock.withLock { preparedThisRun.insert(identifier).inserted }
         if first {
-            for base in [profile, cache] {
-                for relative in Self.clearedOnFirstUse {
-                    let folder = base.appendingPathComponent(relative, isDirectory: true)
-                    if FileManager.default.fileExists(atPath: folder.path) {
-                        try? FileManager.default.removeItem(at: folder)
-                    }
+            for relative in Self.clearedOnFirstUse {
+                let folder = profile.appendingPathComponent(relative, isDirectory: true)
+                if FileManager.default.fileExists(atPath: folder.path) {
+                    try? FileManager.default.removeItem(at: folder)
                 }
+            }
+            let cached = (try? FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? []
+            for item in cached {
+                try? FileManager.default.removeItem(at: item)
             }
         }
         return profile

@@ -1034,7 +1034,8 @@ const CSS_EXTENSIONS = /:(?:has-text|text|text-is|text-matches|nth-match|right-o
 
 /** Playwright's CSS extensions are not CSS here: said, with the locator to use instead. */
 function checkCSSExtensions(css) {
-  const bare = css.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""');
+  // Escapes first (Tailwind's .md\:visible is a class name), then strings.
+  const bare = css.replace(/\\./g, "__").replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""');
   const found = CSS_EXTENSIONS.exec(bare);
   if (found) {
     throw invalidSelector("Playwright's CSS extension " + found[0].replace(/\($/, "()") + " in " + JSON.stringify(css)
@@ -1762,12 +1763,16 @@ function checkCSS(css) {
  */
 function queryCSS(scope, css) {
   const out = [];
+  // Inside a shadow root, a selector anchored on the scope ("> li") cannot
+  // match — the scope is outside that tree — and is not valid there alone.
+  const inShadow = splitTopLevel(css).filter((part) => !/^\s*[>+~]/.test(part)).join(", ");
   const visit = (node, selector) => {
     for (const el of node.querySelectorAll(selector)) out.push(el);
+    if (!inShadow) return;
     const shadows = [];
     if (node.shadowRoot) shadows.push(node.shadowRoot);
     for (const el of node.querySelectorAll("*")) if (el.shadowRoot) shadows.push(el.shadowRoot);
-    for (const shadow of shadows) visit(shadow, css);
+    for (const shadow of shadows) visit(shadow, inShadow);
   };
   visit(scope, scope.nodeType === 1 ? scopedCSS(css) : css);
   return out;
@@ -2969,17 +2974,23 @@ function documentRect(args) {
   };
 }
 
-/** The element `stamp` (or Loom) marked with `nonce`, in the top document or a same-origin frame. */
+/** The element `stamp` (or Loom) marked with `nonce`: in the top document, an open shadow root or a same-origin frame — where the engine finds elements. */
 function stamped(doc, nonce) {
-  const found = doc.querySelector('[data-loom-eval="' + nonce.replace(/["\\]/g, "\\$&") + '"]');
-  if (found) return found;
-  for (const frame of doc.querySelectorAll("iframe")) {
-    let inner = null;
-    try { inner = frame.contentDocument; } catch (_) { inner = null; }
-    const hit = inner ? stamped(inner, nonce) : null;
-    if (hit) return hit;
-  }
-  return null;
+  const selector = '[data-loom-eval="' + nonce.replace(/["\\]/g, "\\$&") + '"]';
+  const search = (root) => {
+    const found = root.querySelector(selector);
+    if (found) return found;
+    for (const el of root.querySelectorAll("*")) {
+      let inner = el.shadowRoot || null;
+      if (!inner && (el.localName === "iframe" || el.localName === "frame")) {
+        try { inner = el.contentDocument; } catch (_) { inner = null; }
+      }
+      const hit = inner ? search(inner) : null;
+      if (hit) return hit;
+    }
+    return null;
+  };
+  return search(doc);
 }
 
 /** A file chooser Loom cancelled: the input's `cancel` event, as a person's
@@ -3270,6 +3281,34 @@ Object.defineProperty(globalThis, "__loomAgent", {
 })();
 """#
 
+    /// In the page's world, `(nonce, expected) => elements`: what `stamp` or
+    /// `stampAll` marked, in the engine's order — the top document first,
+    /// then (when fewer than `expected` are there) its open shadow roots and
+    /// same-origin frames, where the engine also finds elements. Each mark
+    /// is removed.
+    public static let stampLookup = #"""
+((nonce, expected) => {
+  const selector = '[data-loom-eval="' + nonce + '"]';
+  let found = Array.from(document.querySelectorAll(selector));
+  if (found.length < expected) {
+    found = [];
+    const visit = (root) => {
+      for (const el of root.querySelectorAll(selector)) found.push(el);
+      for (const el of root.querySelectorAll("*")) {
+        let inner = el.shadowRoot || null;
+        if (!inner && (el.localName === "iframe" || el.localName === "frame")) {
+          try { inner = el.contentDocument; } catch (_) { inner = null; }
+        }
+        if (inner) visit(inner);
+      }
+    };
+    visit(document);
+  }
+  for (const el of found) el.removeAttribute("data-loom-eval");
+  return found;
+})
+"""#
+
     /// What `browser_evaluate` answers goes through this, in the page's world.
     public static let serializer = #"""
 ((value) => {
@@ -3344,8 +3383,7 @@ async function(op, args) { return globalThis.__loomAgent ? await globalThis.__lo
         let callable = isFunction(trimmed) ? trimmed : "() => (\n" + trimmed + "\n)"
         return """
         const __loomTarget = typeof nonce === "string" && nonce
-            ? document.querySelector('[data-loom-eval="' + nonce + '"]') : undefined;
-        if (__loomTarget) __loomTarget.removeAttribute("data-loom-eval");
+            ? (\(stampLookup))(nonce, 1)[0] : undefined;
         const __loomFunction = (
         \(callable)
         );

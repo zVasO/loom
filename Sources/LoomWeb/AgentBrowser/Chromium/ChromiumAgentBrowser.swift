@@ -18,6 +18,8 @@ public final class ChromiumAgentBrowser {
     public private(set) var activity: AgentActivity? = nil
     /// The dialog (or file chooser) the current tab waits on: the panel's banner.
     public private(set) var activeDialog: AgentModalState? = nil
+    /// Which dialog that banner shows: what its answer names.
+    @ObservationIgnored private var shownDialog: ChromiumShownDialog?
     /// The page's width: the panel's, or a CSS width it is scaled to.
     public private(set) var viewportWidth: ViewportWidth
     /// The panel's picture of the pages, and the person's buttons.
@@ -100,10 +102,12 @@ public final class ChromiumAgentBrowser {
         Task { await core.setViewportWidth(width) }
     }
 
-    /// The panel's banner answered the current tab's dialog.
+    /// The panel's banner answered the current tab's dialog — the one it
+    /// showed, never one that came after it.
     public func answerDialog(accept: Bool, text: String?) {
         let core = self.core
-        Task { await core.answerDialogFromPanel(accept: accept, text: text) }
+        let shown = shownDialog
+        Task { await core.answerDialogFromPanel(accept: accept, text: text, shown: shown) }
     }
 
     /// Signs out of everything, empties storage (Settings).
@@ -131,6 +135,7 @@ public final class ChromiumAgentBrowser {
     private func apply(_ state: ChromiumBrowserState) {
         if activity != state.activity { activity = state.activity }
         if activeDialog != state.activeDialog { activeDialog = state.activeDialog }
+        shownDialog = state.shownDialog
         if viewportWidth != state.viewportWidth { viewportWidth = state.viewportWidth }
         surface.apply(state)
     }

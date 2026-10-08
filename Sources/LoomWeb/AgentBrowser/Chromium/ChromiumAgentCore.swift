@@ -29,6 +29,9 @@ import LoomExtensions
 struct ChromiumBrowserState: Sendable, Equatable {
     var activity: AgentActivity?
     var activeDialog: AgentModalState?
+    /// Which dialog the banner shows: its answer names it, so that it never
+    /// lands on a later one or another tab's.
+    var shownDialog: ChromiumShownDialog? = nil
     var viewportWidth: ViewportWidth
     /// The CSS size the pages lay out at.
     var viewport: CGSize
@@ -38,6 +41,12 @@ struct ChromiumBrowserState: Sendable, Equatable {
     var sources: [BrowserTabsModel.TabID: ChromiumScreencastSource]
     var isLoading: Bool
     var statusMessage: String?
+}
+
+struct ChromiumShownDialog: Sendable, Equatable {
+    let tab: BrowserTabsModel.TabID
+    /// The dialog's ledger id.
+    let dialog: Int
 }
 
 /// What the person does from the panel. Run between the agent's commands,
@@ -88,6 +97,17 @@ final class ChromiumCoreControl: @unchecked Sendable {
 
     func setRunning(_ task: Task<AgentResult, Error>?) {
         lock.withLock { running = task }
+    }
+
+    /// Registers a command's worker. A `cancelAll` that came after the
+    /// command read `expected` (from another thread, between the two) did
+    /// not see this worker: it is cancelled here instead, never run.
+    func setRunning(_ task: Task<AgentResult, Error>, generation expected: Int) {
+        let current = lock.withLock { () -> Bool in
+            running = task
+            return generation == expected
+        }
+        if !current { task.cancel() }
     }
 
     func beginCommand() {
@@ -440,6 +460,9 @@ actor ChromiumAgentCore {
         var suspectStuck = false
         /// Released to keep 3 live: said when it comes back.
         var wasUnloaded = false
+        /// The tab whose page opened this one (window.open with its opener):
+        /// the two share a process, and a dialog in either holds both.
+        var opener: BrowserTabsModel.TabID?
     }
 
     /// How an action ended: its settle, what the page said after it (the
@@ -491,6 +514,9 @@ actor ChromiumAgentCore {
     private var transient: (text: String, token: Int)?
     private var transientToken = 0
     private var tornDown = false
+    /// The session ended (`suspend`) and no agent command came since: only
+    /// the panel holds its pages.
+    private var suspended = false
 
     init(profile: AgentBrowserProfile.Kind, environment: AgentBrowser.Environment, pool: ChromiumPool,
          updates: AsyncStream<ChromiumBrowserState>.Continuation,
@@ -592,13 +618,14 @@ actor ChromiumAgentCore {
 
     private func runNow(_ command: AgentCommand, options: AgentCommandOptions, deadline: ContinuousClock.Instant,
                         generation: Int) async throws -> AgentResult {
+        suspended = false
         currentOptions = options
         activity = AgentActivity(summary: Self.summary(of: command), isRunning: true, at: Date())
         emitState()
         let worker = Task<AgentResult, Error> {
             try await self.execute(command, deadline: deadline)
         }
-        control.setRunning(worker)
+        control.setRunning(worker, generation: generation)
         let timer = Task {
             do { try await Task.sleep(until: deadline, clock: .continuous) } catch { return }
             worker.cancel()
@@ -620,6 +647,10 @@ actor ChromiumAgentCore {
         } catch {
             let mapped = commandError(error, deadline: deadline, generation: generation)
             if let agent = mapped as? AgentError, case .timeout = agent {
+                // Another tab's dialog held the page: that is what to say.
+                if let id = activeTab, let other = dialogElsewhere(than: id, relatedOnly: false) {
+                    throw dialogHolds(at: other)
+                }
                 markSuspect()
             }
             throw mapped
@@ -671,11 +702,11 @@ actor ChromiumAgentCore {
         case .screenshot(let target, let format, let fullPage):
             return try await screenshot(target: target, format: format, fullPage: fullPage, deadline: deadline)
         case .console(let level, let all):
-            let (id, runtime) = try await currentTab(deadline: deadline, recoverCrash: false)
+            let (id, runtime) = try await currentTab(deadline: deadline, recoverCrash: false, pageCalls: false)
             let text = runtime.renderConsole(level: level, all: all, limit: environment.limits.consoleChars)
             return respond(text, id: id, runtime: runtime, snapshot: nil)
         case .network(let filter):
-            let (id, runtime) = try await currentTab(deadline: deadline, recoverCrash: false)
+            let (id, runtime) = try await currentTab(deadline: deadline, recoverCrash: false, pageCalls: false)
             let text = runtime.renderNetwork(filter: filter, limit: environment.limits.networkChars)
             return respond(text, id: id, runtime: runtime, snapshot: nil)
         case .evaluate(let function, let target):
@@ -714,6 +745,9 @@ actor ChromiumAgentCore {
         if let active = activeTab, let index = position(of: active) {
             id = active
             if let live = tabs[index].runtime, !live.isDetached, !live.isCrashed {
+                if !live.blocksPage, let other = dialogElsewhere(than: id, relatedOnly: true) {
+                    throw dialogHolds(at: other)
+                }
                 if live.dialog != nil {
                     // Leaving the page answers its dialog, as a browser does.
                     live.dismissDialog()
@@ -1242,7 +1276,7 @@ actor ChromiumAgentCore {
                 throw AgentError.invalid("no tab \(index): there are \(tabs.count)")
             }
             activate(tabs[index].id)
-            var (id, runtime) = try await currentTab(deadline: deadline)
+            var (id, runtime) = try await currentTab(deadline: deadline, pageCalls: false)
             // A call blocked on the tab's own dialog waits, it is not stuck;
             // a page merely busy loading is not either (only a call of ours
             // waiting in it, or a command that timed out on it, says so).
@@ -1388,8 +1422,8 @@ actor ChromiumAgentCore {
     /// crashed or replaced.
     /// `recoverCrash` false: a crashed page is answered as it is — its
     /// console and requests are what says why it stopped.
-    private func currentTab(deadline: ContinuousClock.Instant,
-                            recoverCrash: Bool = true) async throws -> (BrowserTabsModel.TabID, ChromiumTabRuntime) {
+    private func currentTab(deadline: ContinuousClock.Instant, recoverCrash: Bool = true,
+                            pageCalls: Bool = true) async throws -> (BrowserTabsModel.TabID, ChromiumTabRuntime) {
         drainRouter()
         guard let id = activeTab, let index = position(of: id) else {
             throw AgentError.unavailable("No page is open yet — start with browser_navigate")
@@ -1405,6 +1439,9 @@ actor ChromiumAgentCore {
         if runtime.isCrashed {
             let recovered = try await recoverCrashed(id, runtime, deadline: deadline)
             return (id, recovered)
+        }
+        if pageCalls, !runtime.blocksPage, let other = dialogElsewhere(than: id, relatedOnly: true) {
+            throw dialogHolds(at: other)
         }
         if tabs[index].suspectStuck {
             let live = try await responsive(id, runtime, replaceAt: runtime.url,
@@ -1495,6 +1532,7 @@ actor ChromiumAgentCore {
         while true {
             attempt += 1
             let lease = try await ensureLease()
+            let epoch = leaseEpoch
             let browser = lease.browser
             let left = max(Duration.seconds(1), min(Duration.seconds(10), ContinuousClock.now.duration(to: deadline - .seconds(1))))
             do {
@@ -1510,6 +1548,21 @@ actor ChromiumAgentCore {
                     router.unregister(runtime.targetId)
                     runtime.close()
                     throw error
+                }
+                // The session closed or let its pages go meanwhile (a panel's
+                // tab under way when it ended): the page goes too, never held
+                // without a lease.
+                if tornDown || leaseEpoch != epoch {
+                    router.unregister(runtime.targetId)
+                    runtime.close()
+                    throw AgentError.unavailable("the browser was closed")
+                }
+                if self.lease !== lease {
+                    // Its Chromium stopped meanwhile: a tab on the next one.
+                    router.unregister(runtime.targetId)
+                    runtime.close()
+                    if attempt < 2 { continue }
+                    throw AgentError.unavailable("the agent's browser stopped while the tab opened")
                 }
                 return runtime
             } catch {
@@ -1585,7 +1638,9 @@ actor ChromiumAgentCore {
         guard let index = position(of: id) else { return runtime }
         let suspect = tabs[index].suspectStuck || runtime.callsInFlight > 0 || force
         tabs[index].suspectStuck = false
-        guard suspect, !runtime.blocksPage, await runtime.isStuck() else { return runtime }
+        // Held by another tab's dialog, it is not stuck in a script: never replaced for it.
+        guard suspect, !runtime.blocksPage, dialogElsewhere(than: id, relatedOnly: false) == nil,
+              await runtime.isStuck() else { return runtime }
         if await runtime.unstick() {
             runtime.note("The page was stuck in a script: Loom stopped the script.")
             return runtime
@@ -1676,6 +1731,36 @@ actor ChromiumAgentCore {
     private func markSuspect() {
         guard let id = activeTab, let index = position(of: id) else { return }
         tabs[index].suspectStuck = true
+    }
+
+    /// Another tab waiting on a JavaScript dialog. A dialog holds its
+    /// page's script thread, and with it every page of the same process:
+    /// those linked to `id` by window.open, either way (`relatedOnly`), and
+    /// possibly others.
+    private func dialogElsewhere(than id: BrowserTabsModel.TabID, relatedOnly: Bool) -> Int? {
+        var linked: Set<BrowserTabsModel.TabID> = [id]
+        var grew = relatedOnly
+        while grew {
+            grew = false
+            for tab in tabs where !linked.contains(tab.id) {
+                let opened = tab.opener.map { linked.contains($0) } ?? false
+                let opener = tabs.contains { linked.contains($0.id) && $0.opener == tab.id }
+                if opened || opener {
+                    linked.insert(tab.id)
+                    grew = true
+                }
+            }
+        }
+        return tabs.indices.first { index in
+            tabs[index].id != id && tabs[index].runtime?.blocksPage == true
+                && (!relatedOnly || linked.contains(tabs[index].id))
+        }
+    }
+
+    private func dialogHolds(at index: Int) -> AgentError {
+        let kind = tabs[index].runtime?.dialog?.kind.rawValue ?? "dialog"
+        return AgentError.conflict("tab \(index) has a JavaScript \(kind) open; pages sharing its process are held until "
+                                   + "it is answered: browser_tabs select \(index), then browser_handle_dialog")
     }
 
     // MARK: - The lease
@@ -1854,6 +1939,7 @@ actor ChromiumAgentCore {
         touch(id)
         var kept: Set<BrowserTabsModel.TabID> = [id]
         if let opener, let source = tabs.firstIndex(where: { $0.runtime?.targetId == opener }) {
+            tabs[index].opener = tabs[source].id
             runtime.note("Opened by tab \(source) (\(address)).")
             tabs[source].runtime?.note("The page opened a new tab, tab \(index): \(address) — "
                                        + "browser_tabs select \(index) to use it.")
@@ -1922,13 +2008,19 @@ actor ChromiumAgentCore {
     }
 
     /// The banner's answer: the dialog it shows, or the file chooser cancelled.
-    func answerDialogFromPanel(accept: Bool, text: String?) async {
+    func answerDialogFromPanel(accept: Bool, text: String?, shown: ChromiumShownDialog?) async {
         drainRouter()
         guard let id = activeTab, let index = position(of: id), let runtime = tabs[index].runtime,
               let modal = runtime.modal else { return }
         switch modal {
         case .dialog(let dialog, _):
-            _ = runtime.answerDialog(accept: accept, promptText: text, dialogId: dialog.id)
+            // Only the one the banner showed: the agent may have answered it,
+            // or switched tabs, while the person read it.
+            guard let shown, shown.tab == id else {
+                emitState()
+                return
+            }
+            _ = runtime.answerDialog(accept: accept, promptText: text, dialogId: shown.dialog)
         case .fileChooser:
             await runtime.cancelFileChooser(deadline: ContinuousClock.now + .seconds(5))
         }
@@ -2098,11 +2190,20 @@ actor ChromiumAgentCore {
 
     /// The session ended: the pages and the lease go, the tabs stay to look at.
     func suspend() {
+        suspended = true
         for index in tabs.indices { discardRuntime(at: index) }
         // browser_run_code's offline runner goes with the browser it lives in.
         ChromiumRunner.dispose(for: control)
         releaseLease()
         emitState()
+    }
+
+    /// The panel left the screen. A session that ended keeps no page: what
+    /// the panel brought back to show goes again, and the hold on Chromium
+    /// with it (the pool's idle grace starts).
+    func panelLeft() {
+        guard suspended, !tornDown else { return }
+        suspend()
     }
 
     /// The session is gone for good.
@@ -2162,10 +2263,13 @@ actor ChromiumAgentCore {
             status = "This tab is unloaded: it loads again when claude or this panel uses it."
         }
         if let transient { status = transient.text }
-        let state = ChromiumBrowserState(activity: activity, activeDialog: runtime?.modalState,
+        var state = ChromiumBrowserState(activity: activity, activeDialog: runtime?.modalState,
                                          viewportWidth: viewportWidth, viewport: currentViewport(), tabs: list,
                                          activeTab: activeTab, sources: sources, isLoading: loading,
                                          statusMessage: status)
+        if let active = activeTab, let dialog = runtime?.dialog {
+            state.shownDialog = ChromiumShownDialog(tab: active, dialog: dialog.id)
+        }
         updates.yield(state)
     }
 

@@ -60,6 +60,8 @@ private final class FakeHost: UserInputPumpHost {
     var notices: [String] = []
     var acted: [BrowserTabsModel.TabID] = []
     var actions: [PanelAction] = []
+    /// Runs while a query is out (an agent command arriving meanwhile).
+    var whileQuerying: ((String) -> Void)?
 
     init(journal: Journal) {
         self.journal = journal
@@ -69,6 +71,7 @@ private final class FakeHost: UserInputPumpHost {
                     timeout: Duration) async -> PanelJSON? {
         queries.append((op, arg))
         journal.entries.append("query " + op)
+        whileQuerying?(op)
         return answers[op]
     }
 
@@ -482,6 +485,22 @@ struct UserInputPumpTests {
         #expect(rig.wire.drains == 1, "the keys before ⌘V are answered first")
     }
 
+    @Test("paste: an agent command that entered the core during firePaste takes the page; the text is not inserted")
+    func collerPendantLAgent() async {
+        let rig = Rig()
+        var busy = false
+        rig.pump.agentBusy = { busy }
+        rig.pasteboard.text = "hello"
+        rig.host.answers["firePaste"] = ["cancelled": false]
+        rig.host.whileQuerying = { op in
+            if op == "firePaste" { busy = true }
+        }
+        rig.pump.editCommand(.paste)
+        await rig.pump.waitForFlows()
+        #expect(!rig.wire.sent.contains(insertText("hello")), "never among the agent's own input")
+        #expect(rig.host.notices == [UserInputGate.Notice.agentRunning.text])
+    }
+
     @Test("paste: a page that cancels the event keeps the text to itself; no answer inserts nothing, with a notice")
     func collerAnnule() async {
         let cancelled = Rig()
@@ -703,11 +722,27 @@ struct UserInputPumpTests {
         #expect(rig.host.acted.isEmpty)
     }
 
-    private func selectInfo(open: Bool) -> PanelJSON {
+    @Test("a <select> whose options changed while the menu was up: the index is not applied to other options")
+    func listeChangee() async {
+        let rig = Rig(withViewer: true)
+        rig.host.answers["hitInfo"] = selectInfo(open: false)
+        rig.viewer.choice = 1
+        let host = rig.host
+        let refilled = selectInfo(open: false, labels: ["Lemon", "Lime", "Orange"])
+        rig.viewer.whileMenuIsUp = {
+            host.answers["hitInfo"] = refilled
+        }
+        rig.pump.mouseDown(leftClick(100, 50), geometry: halfScale)
+        await rig.pump.waitForFlows()
+        #expect(rig.host.queries.filter { $0.op == "chooseUserSelect" }.isEmpty)
+        #expect(rig.host.acted.isEmpty)
+    }
+
+    private func selectInfo(open: Bool, labels: [String] = ["One", "Two", "Three"]) -> PanelJSON {
         let rect: PanelJSON = ["x": 10, "y": 20, "width": 120, "height": 24]
-        let one: PanelJSON = ["label": "One", "value": "1", "disabled": false]
-        let two: PanelJSON = ["label": "Two", "value": "2", "disabled": false]
-        let three: PanelJSON = ["label": "Three", "value": "3", "disabled": false]
+        let one: PanelJSON = ["label": .string(labels[0]), "value": "1", "disabled": false]
+        let two: PanelJSON = ["label": .string(labels[1]), "value": "2", "disabled": false]
+        let three: PanelJSON = ["label": .string(labels[2]), "value": "3", "disabled": false]
         let select: PanelJSON = [
             "rect": rect, "options": .array([one, two, three]),
             "selectedIndex": 0, "multiple": false, "disabled": false, "size": 0, "open": .bool(open),

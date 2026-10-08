@@ -144,6 +144,12 @@ struct RunCodeBridgeTests {
                                    delay: 0))
         let nap = try call(#"{"id":4,"op":"sleep","ms":120000}"#)
         #expect(nap.op == .sleep(milliseconds: 60_000))
+        // A number past Int's range must not reach Int(Double), which traps.
+        let far = try call(#"{"id":5,"op":"mouse","action":"click","x":1e300,"y":-1e19,"dy":1e300}"#)
+        #expect(far.op == .mouse(.click, x: 10_000_000, y: -10_000_000, button: .left, clickCount: 1, steps: 1,
+                                 deltaX: 0, deltaY: 10_000_000, delay: 0))
+        #expect(far.op.summary == "mouse.click 10000000,-10000000")
+        #expect(refusal(##"{"id":6,"op":"select","target":"#s","options":[{"index":1e20}]}"##)?.id == 6)
     }
 
     @Test("each op its lane: actions in order, waits beside them, dialog answers at once")

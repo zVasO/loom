@@ -419,7 +419,7 @@ public final class AgentBrowser: NSObject {
         }
     }
 
-    nonisolated static let runCodeUnavailable = "browser_run_code needs the Chromium engine (Settings ▸ Agents); "
+    nonisolated public static let runCodeUnavailable = "browser_run_code needs the Chromium engine (Settings ▸ Agents); "
         + "the other browser_* tools work"
 
     // MARK: - Navigation

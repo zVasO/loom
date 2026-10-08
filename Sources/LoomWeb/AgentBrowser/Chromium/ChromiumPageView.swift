@@ -35,6 +35,11 @@ public final class ChromiumPageView: NSView, NSTextInputClient {
             }
             if source == nil {
                 clearPicture()
+                // No page left to type into: the window takes the keys back
+                // (the terminal reclaims an idle window's), none swallowed.
+                if let window, window.firstResponder === self {
+                    window.makeFirstResponder(nil)   // resignFirstResponder lets go of the page's keys
+                }
             }
             refresh()
         }
@@ -695,8 +700,11 @@ extension ChromiumPageView: UserInputPumpViewer {
         inputContext?.discardMarkedText()
     }
 
-    /// The select's options as a Mac menu over it. Popped up outside the
-    /// current event: the menu's own tracking loop runs from there.
+    /// The select's options as a Mac menu over it. Popped up from the run
+    /// loop, outside the current event and outside any main-queue block: the
+    /// menu's tracking loop drains the main queue only when no block of it is
+    /// running (from `DispatchQueue.main.async`, every main-actor job in Loom
+    /// — terminals, other sessions' browser calls — would wait for the menu).
     func pumpChoose(from menu: SelectMenuModel, completion: @escaping @MainActor (Int?) -> Void) {
         guard let geometry, window != nil else {
             completion(nil)
@@ -707,7 +715,7 @@ extension ChromiumPageView: UserInputPumpViewer {
         let nsMenu = SelectMenuBridge.menu(for: menu, target: choice, action: #selector(SelectMenuChoice.choose(_:)))
         nsMenu.minimumWidth = max(0, anchor.width)
         let checked = nsMenu.items.first { $0.state == .on }
-        DispatchQueue.main.async { [weak self] in
+        RunLoop.main.perform(inModes: [.default]) { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, self.window != nil else {
                     choice.finish(nil)

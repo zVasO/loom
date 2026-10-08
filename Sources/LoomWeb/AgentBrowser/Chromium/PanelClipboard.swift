@@ -137,7 +137,8 @@ extension UserInputPump {
                                                timeout: PanelClipboard.pasteBudget)
             }
             guard expected == self.generation else { return }
-            if turn != self.takeovers || !self.gate.isOpen {
+            let persons = self.stillPersons()
+            if turn != self.takeovers || !persons {
                 // The agent took the page (or a dialog came): say why, if it still holds it.
                 if !self.gate.isOpen {
                     _ = self.admit(.editCommand)
