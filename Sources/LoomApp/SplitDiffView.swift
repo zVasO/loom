@@ -123,10 +123,16 @@ struct SplitDiffView: View {
 
     var body: some View {
         // Lazy: a large PR materializes thousands of rows — only what is
-        // visible gets built.
-        LazyVStack(alignment: .leading, spacing: 10) {
+        // visible gets built. Each file is a section whose header PINS to the
+        // top while its code scrolls under it: the Viewed box stays one click
+        // away until the file has left the screen.
+        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
             ForEach(Array(files.enumerated()), id: \.element.id) { fileIndex, file in
-                fileSection(file, fileIndex: fileIndex)
+                Section {
+                    fileBody(file, fileIndex: fileIndex)
+                } header: {
+                    fileHeader(file, fileIndex: fileIndex)
+                }
             }
         }
         // ONE space for the whole diff: row positions and the drag's position
@@ -467,87 +473,107 @@ struct SplitDiffView: View {
             .joined(separator: "\n")
     }
 
-    private func fileSection(_ entry: DiffFileRows, fileIndex: Int) -> some View {
+    /// A file card's top: rounded on top, and all round once folded. Opaque —
+    /// pinned, the code scrolls underneath it.
+    private func fileHeader(_ entry: DiffFileRows, fileIndex: Int) -> some View {
         let file = entry.file
-        return VStack(alignment: .leading, spacing: 0) {
+        let radius: CGFloat = collapsed.contains(file.path) ? 9 : 0
+        let shape = UnevenRoundedRectangle(topLeadingRadius: 9, bottomLeadingRadius: radius,
+                                           bottomTrailingRadius: radius, topTrailingRadius: 9)
+        return HStack(spacing: 8) {
+            // The fold lives on the leading group (chevron, path, and the
+            // empty run up to the controls), not on the whole header: the
+            // checkbox and buttons on the right keep their own clicks.
             HStack(spacing: 8) {
-                // The fold lives on the leading group (chevron, path, and the
-                // empty run up to the controls), not on the whole header: the
-                // checkbox and buttons on the right keep their own clicks.
-                HStack(spacing: 8) {
-                    Image(systemName: collapsed.contains(file.path) ? "chevron.right" : "chevron.down")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(DefaultTheme.secondaryText)
-                    Text(file.path)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                        .lineLimit(1)
-                    if changedSinceViewed.contains(file.path) {
-                        Text("changed since viewed")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(DefaultTheme.badgeColor(for: .needsInput).opacity(0.15),
-                                        in: Capsule())
-                    }
-                    Spacer(minLength: 0)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if collapsed.contains(file.path) {
-                        collapsed.remove(file.path)
-                    } else {
-                        collapsed.insert(file.path)
-                    }
-                }
-                // The file-wide entry point to the same actions as a line
-                // selection: select every row, the action bar takes over.
-                HoverIconButton(systemImage: "selection.pin.in.out",
-                                help: "Select the whole file") {
-                    selectFile(fileIndex, entry: entry)
-                }
-                Text("+\(file.additions)")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.groupHeader)
-                Text("−\(file.deletions)")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.danger)
-                if onToggleViewed != nil {
-                    // GitHub's own checkbox: shared with the web, and what the
-                    // "n / m viewed" recap counts. Its click stays its own —
-                    // the header's tap (fold) must not fire with it.
-                    Toggle("Viewed", isOn: Binding(
-                        get: { viewed.contains(file.path) },
-                        set: { on in
-                            if on { collapsed.insert(file.path) } else { collapsed.remove(file.path) }
-                            onToggleViewed?(file.path, on)
-                        }))
-                    .toggleStyle(.checkbox)
-                    .font(.system(size: 11))
+                Image(systemName: collapsed.contains(file.path) ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(DefaultTheme.secondaryText)
-                    .help(viewed.contains(file.path) ? "Viewed — uncheck to reopen"
-                          : "Mark as viewed (folds the file)")
+                Text(file.path)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .lineLimit(1)
+                if changedSinceViewed.contains(file.path) {
+                    Text("changed since viewed")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(DefaultTheme.badgeColor(for: .needsInput).opacity(0.15),
+                                    in: Capsule())
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if collapsed.contains(file.path) {
+                    collapsed.remove(file.path)
+                } else {
+                    collapsed.insert(file.path)
                 }
             }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(DefaultTheme.surfaceRaised)
-
-            if !collapsed.contains(file.path) {
-                // Comments on the file itself (no line anchor) sit right
-                // under the header, before the code.
-                ForEach(fileThreadIndex[file.path] ?? [], id: \.root.id) { thread in
-                    CommentThreadView(thread: thread, onReply: onReply)
-                }
-                ForEach(Array(file.hunks.enumerated()), id: \.offset) { hunkIndex, hunk in
-                    hunkView(hunk, rows: entry.hunkRows[hunkIndex],
-                             file: file.path, fileIndex: fileIndex, hunkIndex: hunkIndex)
-                }
+            // The file-wide entry point to the same actions as a line
+            // selection: select every row, the action bar takes over.
+            HoverIconButton(systemImage: "selection.pin.in.out",
+                            help: "Select the whole file") {
+                selectFile(fileIndex, entry: entry)
+            }
+            Text("+\(file.additions)")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(DefaultTheme.groupHeader)
+            Text("−\(file.deletions)")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(DefaultTheme.danger)
+            if onToggleViewed != nil {
+                // GitHub's own checkbox: shared with the web, and what the
+                // "n / m viewed" recap counts. Its click stays its own —
+                // the header's tap (fold) must not fire with it.
+                Toggle("Viewed", isOn: Binding(
+                    get: { viewed.contains(file.path) },
+                    set: { on in
+                        if on { collapsed.insert(file.path) } else { collapsed.remove(file.path) }
+                        onToggleViewed?(file.path, on)
+                    }))
+                .toggleStyle(.checkbox)
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.secondaryText)
+                .help(viewed.contains(file.path) ? "Viewed — uncheck to reopen"
+                      : "Mark as viewed (folds the file)")
             }
         }
-        .background(DefaultTheme.contentBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(DefaultTheme.surfaceRaised, in: shape)
+        .overlay(shape.stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        // Pinned, the header floats over rows: a drag starting on it must not
+        // reach the diff's selection drag, which would pick the lines beneath.
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 0))
+    }
+
+    /// The rest of the card, rounded at the bottom, then the gap to the next
+    /// file — inside the section, so a pinned header lets go only once its
+    /// file has scrolled away entirely.
+    private func fileBody(_ entry: DiffFileRows, fileIndex: Int) -> some View {
+        let file = entry.file
+        let shape = UnevenRoundedRectangle(bottomLeadingRadius: 9, bottomTrailingRadius: 9)
+        return VStack(alignment: .leading, spacing: 0) {
+            if !collapsed.contains(file.path) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Comments on the file itself (no line anchor) sit right
+                    // under the header, before the code.
+                    ForEach(fileThreadIndex[file.path] ?? [], id: \.root.id) { thread in
+                        CommentThreadView(thread: thread, onReply: onReply)
+                    }
+                    ForEach(Array(file.hunks.enumerated()), id: \.offset) { hunkIndex, hunk in
+                        hunkView(hunk, rows: entry.hunkRows[hunkIndex],
+                                 file: file.path, fileIndex: fileIndex, hunkIndex: hunkIndex)
+                    }
+                }
+                .background(DefaultTheme.contentBackground)
+                .clipShape(shape)
+                .overlay(shape.stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            }
+            Color.clear.frame(height: 10)
+        }
     }
 
     private func hunkView(_ hunk: DiffParser.Hunk, rows: [DiffParser.SplitRow],
