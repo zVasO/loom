@@ -108,10 +108,117 @@ struct SplitDiffView: View {
     @State private var threadIndex: [CommentAnchor: [CommentThread]] = [:]
     @State private var fileThreadIndex: [String: [CommentThread]] = [:]
     @State private var draftIndex: [CommentAnchor: [DraftComment]] = [:]
+    /// Scrolls the pane while a selection drag holds the cursor near an edge
+    /// — a reference too: its clock must not re-run the body.
+    @State private var autoScroller = AutoScroller()
 
     private final class Geometry {
         var rowSpans: [DiffSelection.RowID: ClosedRange<CGFloat>] = [:]
         var diffSize: CGSize = .zero
+    }
+
+    /// Drag-selection autoscroll. A DragGesture only reports MOVES: with the
+    /// cursor held still at an edge, nothing would scroll and the selection
+    /// would stop at the last visible line. A clock does both instead —
+    /// scrolls the enclosing NSScrollView, then maps the cursor back into the
+    /// diff's space to extend the selection.
+    @MainActor
+    final class AutoScroller {
+        weak var probe: NSView?
+        private var timer: Timer?
+        /// The diff's y minus the document's top-down y, both of the cursor at
+        /// the last drag event: turns a document position into a diff one.
+        private var offset: CGFloat = 0
+        /// How deep into the pane an edge reaches — the top one covers the
+        /// pinned file header.
+        private let topBand: CGFloat = 48
+        private let bottomBand: CGFloat = 32
+
+        private var scrollView: NSScrollView? { probe?.enclosingScrollView }
+
+        func track(diffY: CGFloat) {
+            if let y = cursorY(clamped: false) { offset = diffY - y }
+        }
+
+        func start(extend: @escaping (CGFloat) -> Void) {
+            guard timer == nil else { return }
+            let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+                // Scheduled on the main run loop: the tick runs on the main thread.
+                MainActor.assumeIsolated {
+                    guard let self, self.scrollStep(), let y = self.cursorY(clamped: true) else { return }
+                    extend(y + self.offset)
+                }
+            }
+            // .common: the tick must keep firing while the mouse is held down.
+            RunLoop.main.add(timer, forMode: .common)
+            self.timer = timer
+        }
+
+        func stop() {
+            timer?.invalidate()
+            timer = nil
+        }
+
+        /// The cursor in the document, measured from its top. Clamped, it stays
+        /// inside the visible part: a cursor parked past the edge then still
+        /// lands on the row at that edge.
+        private func cursorY(clamped: Bool) -> CGFloat? {
+            guard let scrollView, let document = scrollView.documentView,
+                  let window = scrollView.window else { return nil }
+            var point = document.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            if clamped {
+                let visible = document.visibleRect
+                point.y = min(max(point.y, visible.minY + 1), visible.maxY - 1)
+            }
+            return document.isFlipped ? point.y : document.bounds.height - point.y
+        }
+
+        /// Scrolls one tick toward the edge the cursor is near, faster the
+        /// deeper it goes. false when it is clear of both edges, or the pane
+        /// is already at that end.
+        private func scrollStep() -> Bool {
+            guard let scrollView, let window = scrollView.window else { return false }
+            let clip = scrollView.contentView
+            let point = clip.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            let bounds = clip.bounds
+            let fromTop = clip.isFlipped ? point.y - bounds.minY : bounds.maxY - point.y
+            let fromBottom = bounds.height - fromTop
+            let down: CGFloat
+            if fromTop < topBand {
+                down = -min(topBand - fromTop, 160) / 4
+            } else if fromBottom < bottomBand {
+                down = min(bottomBand - fromBottom, 160) / 4
+            } else {
+                return false
+            }
+            var origin = bounds.origin
+            origin.y += clip.isFlipped ? down : -down
+            let target = clip.constrainBoundsRect(NSRect(origin: origin, size: bounds.size)).origin
+            guard target != bounds.origin else { return false }
+            clip.scroll(to: target)
+            scrollView.reflectScrolledClipView(clip)
+            return true
+        }
+    }
+
+    /// Hands the AutoScroller a view inside the scroll view's document — the
+    /// way to reach the NSScrollView behind SwiftUI's ScrollView.
+    private struct ScrollViewProbe: NSViewRepresentable {
+        let scroller: AutoScroller
+
+        func makeNSView(context: Context) -> NSView {
+            let view = Probe()
+            scroller.probe = view
+            return view
+        }
+
+        func updateNSView(_ view: NSView, context: Context) {
+            scroller.probe = view
+        }
+
+        private final class Probe: NSView {
+            override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        }
     }
 
     /// Where a comment hangs: a file, a side, the LAST line of its range.
@@ -123,10 +230,16 @@ struct SplitDiffView: View {
 
     var body: some View {
         // Lazy: a large PR materializes thousands of rows — only what is
-        // visible gets built.
-        LazyVStack(alignment: .leading, spacing: 10) {
+        // visible gets built. Each file is a section whose header PINS to the
+        // top while its code scrolls under it: the Viewed box stays one click
+        // away until the file has left the screen.
+        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
             ForEach(Array(files.enumerated()), id: \.element.id) { fileIndex, file in
-                fileSection(file, fileIndex: fileIndex)
+                Section {
+                    fileBody(file, fileIndex: fileIndex)
+                } header: {
+                    fileHeader(file, fileIndex: fileIndex)
+                }
             }
         }
         // ONE space for the whole diff: row positions and the drag's position
@@ -135,6 +248,8 @@ struct SplitDiffView: View {
         .background(GeometryReader { geometry in
             Color.clear.preference(key: DiffSizeKey.self, value: geometry.size)
         })
+        // Zero-sized and click-through: only there to find the scroll view.
+        .background(ScrollViewProbe(scroller: autoScroller).frame(width: 0, height: 0))
         .onPreferenceChange(DiffSizeKey.self) { geometry.diffSize = $0 }
         .onPreferenceChange(DiffRowSpansKey.self) { spans in
             guard !spans.isEmpty else { return }
@@ -159,6 +274,7 @@ struct SplitDiffView: View {
         }
         .animation(.hover, value: selectionSettled)
         .onExitCommand { clearSelection() }
+        .onDisappear { autoScroller.stop() }
         // A viewed file starts folded, the way GitHub folds it. Only ever
         // ADDS to the fold: a reviewer who re-opened a viewed file keeps it open.
         .onChange(of: viewed, initial: true) { _, viewed in
@@ -171,6 +287,7 @@ struct SplitDiffView: View {
     private var selectionDrag: some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.diffSpace))
             .onChanged { value in
+                autoScroller.track(diffY: value.location.y)
                 // Outside every row (a file header, a comment thread, the gap
                 // between cards): keep what we have rather than inventing a
                 // nearest row — that guesswork is what selected stray lines.
@@ -185,8 +302,14 @@ struct SplitDiffView: View {
                     }
                 }
                 head = current
+                // Past the visible lines, the pane follows: the selection
+                // keeps growing under a cursor held at (or beyond) an edge.
+                autoScroller.start { y in
+                    if let row = rowAt(y) { head = row }
+                }
             }
             .onEnded { _ in
+                autoScroller.stop()
                 dragging = false
                 if selection != nil { selectionSettled = true }
                 refreshBarAnchor()
@@ -467,87 +590,107 @@ struct SplitDiffView: View {
             .joined(separator: "\n")
     }
 
-    private func fileSection(_ entry: DiffFileRows, fileIndex: Int) -> some View {
+    /// A file card's top: rounded on top, and all round once folded. Opaque —
+    /// pinned, the code scrolls underneath it.
+    private func fileHeader(_ entry: DiffFileRows, fileIndex: Int) -> some View {
         let file = entry.file
-        return VStack(alignment: .leading, spacing: 0) {
+        let radius: CGFloat = collapsed.contains(file.path) ? 9 : 0
+        let shape = UnevenRoundedRectangle(topLeadingRadius: 9, bottomLeadingRadius: radius,
+                                           bottomTrailingRadius: radius, topTrailingRadius: 9)
+        return HStack(spacing: 8) {
+            // The fold lives on the leading group (chevron, path, and the
+            // empty run up to the controls), not on the whole header: the
+            // checkbox and buttons on the right keep their own clicks.
             HStack(spacing: 8) {
-                // The fold lives on the leading group (chevron, path, and the
-                // empty run up to the controls), not on the whole header: the
-                // checkbox and buttons on the right keep their own clicks.
-                HStack(spacing: 8) {
-                    Image(systemName: collapsed.contains(file.path) ? "chevron.right" : "chevron.down")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(DefaultTheme.secondaryText)
-                    Text(file.path)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                        .lineLimit(1)
-                    if changedSinceViewed.contains(file.path) {
-                        Text("changed since viewed")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(DefaultTheme.badgeColor(for: .needsInput).opacity(0.15),
-                                        in: Capsule())
-                    }
-                    Spacer(minLength: 0)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    if collapsed.contains(file.path) {
-                        collapsed.remove(file.path)
-                    } else {
-                        collapsed.insert(file.path)
-                    }
-                }
-                // The file-wide entry point to the same actions as a line
-                // selection: select every row, the action bar takes over.
-                HoverIconButton(systemImage: "selection.pin.in.out",
-                                help: "Select the whole file") {
-                    selectFile(fileIndex, entry: entry)
-                }
-                Text("+\(file.additions)")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.groupHeader)
-                Text("−\(file.deletions)")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.danger)
-                if onToggleViewed != nil {
-                    // GitHub's own checkbox: shared with the web, and what the
-                    // "n / m viewed" recap counts. Its click stays its own —
-                    // the header's tap (fold) must not fire with it.
-                    Toggle("Viewed", isOn: Binding(
-                        get: { viewed.contains(file.path) },
-                        set: { on in
-                            if on { collapsed.insert(file.path) } else { collapsed.remove(file.path) }
-                            onToggleViewed?(file.path, on)
-                        }))
-                    .toggleStyle(.checkbox)
-                    .font(.system(size: 11))
+                Image(systemName: collapsed.contains(file.path) ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(DefaultTheme.secondaryText)
-                    .help(viewed.contains(file.path) ? "Viewed — uncheck to reopen"
-                          : "Mark as viewed (folds the file)")
+                Text(file.path)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .lineLimit(1)
+                if changedSinceViewed.contains(file.path) {
+                    Text("changed since viewed")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(DefaultTheme.badgeColor(for: .needsInput).opacity(0.15),
+                                    in: Capsule())
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if collapsed.contains(file.path) {
+                    collapsed.remove(file.path)
+                } else {
+                    collapsed.insert(file.path)
                 }
             }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(DefaultTheme.surfaceRaised)
-
-            if !collapsed.contains(file.path) {
-                // Comments on the file itself (no line anchor) sit right
-                // under the header, before the code.
-                ForEach(fileThreadIndex[file.path] ?? [], id: \.root.id) { thread in
-                    CommentThreadView(thread: thread, onReply: onReply)
-                }
-                ForEach(Array(file.hunks.enumerated()), id: \.offset) { hunkIndex, hunk in
-                    hunkView(hunk, rows: entry.hunkRows[hunkIndex],
-                             file: file.path, fileIndex: fileIndex, hunkIndex: hunkIndex)
-                }
+            // The file-wide entry point to the same actions as a line
+            // selection: select every row, the action bar takes over.
+            HoverIconButton(systemImage: "selection.pin.in.out",
+                            help: "Select the whole file") {
+                selectFile(fileIndex, entry: entry)
+            }
+            Text("+\(file.additions)")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(DefaultTheme.groupHeader)
+            Text("−\(file.deletions)")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(DefaultTheme.danger)
+            if onToggleViewed != nil {
+                // GitHub's own checkbox: shared with the web, and what the
+                // "n / m viewed" recap counts. Its click stays its own —
+                // the header's tap (fold) must not fire with it.
+                Toggle("Viewed", isOn: Binding(
+                    get: { viewed.contains(file.path) },
+                    set: { on in
+                        if on { collapsed.insert(file.path) } else { collapsed.remove(file.path) }
+                        onToggleViewed?(file.path, on)
+                    }))
+                .toggleStyle(.checkbox)
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.secondaryText)
+                .help(viewed.contains(file.path) ? "Viewed — uncheck to reopen"
+                      : "Mark as viewed (folds the file)")
             }
         }
-        .background(DefaultTheme.contentBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(DefaultTheme.surfaceRaised, in: shape)
+        .overlay(shape.stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        // Pinned, the header floats over rows: a drag starting on it must not
+        // reach the diff's selection drag, which would pick the lines beneath.
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 0))
+    }
+
+    /// The rest of the card, rounded at the bottom, then the gap to the next
+    /// file — inside the section, so a pinned header lets go only once its
+    /// file has scrolled away entirely.
+    private func fileBody(_ entry: DiffFileRows, fileIndex: Int) -> some View {
+        let file = entry.file
+        let shape = UnevenRoundedRectangle(bottomLeadingRadius: 9, bottomTrailingRadius: 9)
+        return VStack(alignment: .leading, spacing: 0) {
+            if !collapsed.contains(file.path) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Comments on the file itself (no line anchor) sit right
+                    // under the header, before the code.
+                    ForEach(fileThreadIndex[file.path] ?? [], id: \.root.id) { thread in
+                        CommentThreadView(thread: thread, onReply: onReply)
+                    }
+                    ForEach(Array(file.hunks.enumerated()), id: \.offset) { hunkIndex, hunk in
+                        hunkView(hunk, rows: entry.hunkRows[hunkIndex],
+                                 file: file.path, fileIndex: fileIndex, hunkIndex: hunkIndex)
+                    }
+                }
+                .background(DefaultTheme.contentBackground)
+                .clipShape(shape)
+                .overlay(shape.stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            }
+            Color.clear.frame(height: 10)
+        }
     }
 
     private func hunkView(_ hunk: DiffParser.Hunk, rows: [DiffParser.SplitRow],
