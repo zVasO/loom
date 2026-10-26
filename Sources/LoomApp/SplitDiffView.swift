@@ -108,10 +108,117 @@ struct SplitDiffView: View {
     @State private var threadIndex: [CommentAnchor: [CommentThread]] = [:]
     @State private var fileThreadIndex: [String: [CommentThread]] = [:]
     @State private var draftIndex: [CommentAnchor: [DraftComment]] = [:]
+    /// Scrolls the pane while a selection drag holds the cursor near an edge
+    /// — a reference too: its clock must not re-run the body.
+    @State private var autoScroller = AutoScroller()
 
     private final class Geometry {
         var rowSpans: [DiffSelection.RowID: ClosedRange<CGFloat>] = [:]
         var diffSize: CGSize = .zero
+    }
+
+    /// Drag-selection autoscroll. A DragGesture only reports MOVES: with the
+    /// cursor held still at an edge, nothing would scroll and the selection
+    /// would stop at the last visible line. A clock does both instead —
+    /// scrolls the enclosing NSScrollView, then maps the cursor back into the
+    /// diff's space to extend the selection.
+    @MainActor
+    final class AutoScroller {
+        weak var probe: NSView?
+        private var timer: Timer?
+        /// The diff's y minus the document's top-down y, both of the cursor at
+        /// the last drag event: turns a document position into a diff one.
+        private var offset: CGFloat = 0
+        /// How deep into the pane an edge reaches — the top one covers the
+        /// pinned file header.
+        private let topBand: CGFloat = 48
+        private let bottomBand: CGFloat = 32
+
+        private var scrollView: NSScrollView? { probe?.enclosingScrollView }
+
+        func track(diffY: CGFloat) {
+            if let y = cursorY(clamped: false) { offset = diffY - y }
+        }
+
+        func start(extend: @escaping (CGFloat) -> Void) {
+            guard timer == nil else { return }
+            let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+                // Scheduled on the main run loop: the tick runs on the main thread.
+                MainActor.assumeIsolated {
+                    guard let self, self.scrollStep(), let y = self.cursorY(clamped: true) else { return }
+                    extend(y + self.offset)
+                }
+            }
+            // .common: the tick must keep firing while the mouse is held down.
+            RunLoop.main.add(timer, forMode: .common)
+            self.timer = timer
+        }
+
+        func stop() {
+            timer?.invalidate()
+            timer = nil
+        }
+
+        /// The cursor in the document, measured from its top. Clamped, it stays
+        /// inside the visible part: a cursor parked past the edge then still
+        /// lands on the row at that edge.
+        private func cursorY(clamped: Bool) -> CGFloat? {
+            guard let scrollView, let document = scrollView.documentView,
+                  let window = scrollView.window else { return nil }
+            var point = document.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            if clamped {
+                let visible = document.visibleRect
+                point.y = min(max(point.y, visible.minY + 1), visible.maxY - 1)
+            }
+            return document.isFlipped ? point.y : document.bounds.height - point.y
+        }
+
+        /// Scrolls one tick toward the edge the cursor is near, faster the
+        /// deeper it goes. false when it is clear of both edges, or the pane
+        /// is already at that end.
+        private func scrollStep() -> Bool {
+            guard let scrollView, let window = scrollView.window else { return false }
+            let clip = scrollView.contentView
+            let point = clip.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            let bounds = clip.bounds
+            let fromTop = clip.isFlipped ? point.y - bounds.minY : bounds.maxY - point.y
+            let fromBottom = bounds.height - fromTop
+            let down: CGFloat
+            if fromTop < topBand {
+                down = -min(topBand - fromTop, 160) / 4
+            } else if fromBottom < bottomBand {
+                down = min(bottomBand - fromBottom, 160) / 4
+            } else {
+                return false
+            }
+            var origin = bounds.origin
+            origin.y += clip.isFlipped ? down : -down
+            let target = clip.constrainBoundsRect(NSRect(origin: origin, size: bounds.size)).origin
+            guard target != bounds.origin else { return false }
+            clip.scroll(to: target)
+            scrollView.reflectScrolledClipView(clip)
+            return true
+        }
+    }
+
+    /// Hands the AutoScroller a view inside the scroll view's document — the
+    /// way to reach the NSScrollView behind SwiftUI's ScrollView.
+    private struct ScrollViewProbe: NSViewRepresentable {
+        let scroller: AutoScroller
+
+        func makeNSView(context: Context) -> NSView {
+            let view = Probe()
+            scroller.probe = view
+            return view
+        }
+
+        func updateNSView(_ view: NSView, context: Context) {
+            scroller.probe = view
+        }
+
+        private final class Probe: NSView {
+            override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        }
     }
 
     /// Where a comment hangs: a file, a side, the LAST line of its range.
@@ -141,6 +248,8 @@ struct SplitDiffView: View {
         .background(GeometryReader { geometry in
             Color.clear.preference(key: DiffSizeKey.self, value: geometry.size)
         })
+        // Zero-sized and click-through: only there to find the scroll view.
+        .background(ScrollViewProbe(scroller: autoScroller).frame(width: 0, height: 0))
         .onPreferenceChange(DiffSizeKey.self) { geometry.diffSize = $0 }
         .onPreferenceChange(DiffRowSpansKey.self) { spans in
             guard !spans.isEmpty else { return }
@@ -165,6 +274,7 @@ struct SplitDiffView: View {
         }
         .animation(.hover, value: selectionSettled)
         .onExitCommand { clearSelection() }
+        .onDisappear { autoScroller.stop() }
         // A viewed file starts folded, the way GitHub folds it. Only ever
         // ADDS to the fold: a reviewer who re-opened a viewed file keeps it open.
         .onChange(of: viewed, initial: true) { _, viewed in
@@ -177,6 +287,7 @@ struct SplitDiffView: View {
     private var selectionDrag: some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.diffSpace))
             .onChanged { value in
+                autoScroller.track(diffY: value.location.y)
                 // Outside every row (a file header, a comment thread, the gap
                 // between cards): keep what we have rather than inventing a
                 // nearest row — that guesswork is what selected stray lines.
@@ -191,8 +302,14 @@ struct SplitDiffView: View {
                     }
                 }
                 head = current
+                // Past the visible lines, the pane follows: the selection
+                // keeps growing under a cursor held at (or beyond) an edge.
+                autoScroller.start { y in
+                    if let row = rowAt(y) { head = row }
+                }
             }
             .onEnded { _ in
+                autoScroller.stop()
                 dragging = false
                 if selection != nil { selectionSettled = true }
                 refreshBarAnchor()
