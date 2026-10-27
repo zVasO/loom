@@ -453,6 +453,7 @@ struct WorkflowsView: View {
 
 // MARK: - Run status
 
+@MainActor
 enum RunStatusLabel {
     static func text(_ status: WorkflowRun.Status) -> String {
         switch status {

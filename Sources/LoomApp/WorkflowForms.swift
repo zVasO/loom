@@ -5,6 +5,7 @@ import LoomUI
 import LoomWorkflows
 import SwiftUI
 
+@MainActor
 private func formTitle(_ text: String) -> some View {
     Text(text.uppercased())
         .font(.system(size: 10, weight: .semibold))
@@ -12,6 +13,7 @@ private func formTitle(_ text: String) -> some View {
         .foregroundStyle(DefaultTheme.secondaryText)
 }
 
+@MainActor
 private func formHint(_ text: String) -> some View {
     Text(text).font(.system(size: 11)).foregroundStyle(DefaultTheme.mutedText).fixedSize(horizontal: false, vertical: true)
 }
