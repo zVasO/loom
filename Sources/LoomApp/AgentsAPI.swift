@@ -95,6 +95,9 @@ extension AppModel {
                  .browserConsole, .browserNetwork, .browserEvaluate, .browserHandleDialog, .browserTabs,
                  .browserClose, .browserFillForm, .browserFileUpload, .browserResize, .browserRunCode:
                 return try await handleBrowserRequest(method, request, scope: scope)
+            case .workflowGet, .workflowStepRead, .workflowStepAsk, .workflowStepRerun, .workflowStepSkip,
+                 .workflowStop, .workflowProceed, .workflowMessage:
+                return try await handleWorkflowRequest(method, request, scope: scope)
             case .badgeList:
                 return .ok(request.id, APIBadgeListResult(badges: apiBadges))
             case .badgeCreate:

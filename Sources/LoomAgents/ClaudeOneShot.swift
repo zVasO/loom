@@ -41,12 +41,15 @@ public enum ClaudeOneShot {
         /// With inherited tools: `--allowedTools` — what runs without a
         /// permission prompt nobody would answer. Empty passes nothing.
         public var allowedTools: [String]
+        /// With inherited tools: `--resume <id>` — a follow-up in the
+        /// conversation a previous run reported (`Result.sessionID`).
+        public var resume: String?
 
         public init(prompt: String, systemPrompt: String? = nil, model: String? = nil,
                     tools: ToolAccess = .none, timeout: TimeInterval = 120,
                     workingDirectory: URL? = nil, maxOutputBytes: Int = 4 << 20,
                     appendSystemPrompt: String? = nil, mcpConfig: String? = nil,
-                    strictMCPConfig: Bool = false, allowedTools: [String] = []) {
+                    strictMCPConfig: Bool = false, allowedTools: [String] = [], resume: String? = nil) {
             self.prompt = prompt
             self.systemPrompt = systemPrompt
             self.model = model
@@ -58,6 +61,7 @@ public enum ClaudeOneShot {
             self.mcpConfig = mcpConfig
             self.strictMCPConfig = strictMCPConfig
             self.allowedTools = allowedTools
+            self.resume = resume
         }
     }
 
@@ -69,15 +73,19 @@ public enum ClaudeOneShot {
         public var costUSD: Double?
         public var durationMs: Int?
         public var model: String?
+        /// The conversation, kept by inherited runs: `Request.resume` takes it.
+        public var sessionID: String?
 
         public init(text: String, isError: Bool = false, subtype: String? = nil,
-                    costUSD: Double? = nil, durationMs: Int? = nil, model: String? = nil) {
+                    costUSD: Double? = nil, durationMs: Int? = nil, model: String? = nil,
+                    sessionID: String? = nil) {
             self.text = text
             self.isError = isError
             self.subtype = subtype
             self.costUSD = costUSD
             self.durationMs = durationMs
             self.model = model
+            self.sessionID = sessionID
         }
     }
 
@@ -155,6 +163,9 @@ public enum ClaudeOneShot {
             if !request.allowedTools.isEmpty {
                 arguments += ["--allowedTools", request.allowedTools.joined(separator: ",")]
             }
+            if let resume = request.resume?.trimmingCharacters(in: .whitespacesAndNewlines), !resume.isEmpty {
+                arguments += ["--resume", resume]
+            }
         }
         if let model = request.model, !model.isEmpty {
             arguments += ["--model", model]
@@ -181,7 +192,7 @@ public enum ClaudeOneShot {
         return Result(text: text, isError: isError, subtype: subtype,
                       costUSD: (envelope["total_cost_usd"] as? NSNumber)?.doubleValue,
                       durationMs: (envelope["duration_ms"] as? NSNumber)?.intValue,
-                      model: model)
+                      model: model, sessionID: envelope["session_id"] as? String)
     }
 
     // MARK: - Run

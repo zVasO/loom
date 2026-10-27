@@ -78,3 +78,30 @@ test("a read-only run shows statuses and no palette", { skip }, async () => {
   assert.match(await tab.textContent('.react-flow__node[data-id="php"]'), /Running · pass 2/);
   await tab.close();
 });
+
+test("the orchestrator is switched on from the inspector and saved with the workflow", { skip }, async () => {
+  const { tab, errors } = await open();
+  await tab.click(".react-flow__pane", { position: { x: 20, y: 20 } });
+  await tab.click(".orchestrator-toggle input");
+  await tab.waitForSelector(".orchestrator textarea");
+  await tab.fill(".orchestrator textarea", "Rerun a vague expert.");
+  await tab.waitForTimeout(500);
+  const saved = await tab.evaluate(() => window.__loomWorkflowsStandIn.workflow.orchestrator);
+  assert.equal(saved.instructions, "Rerun a vague expert.");
+  assert.equal(saved.maxInterventions, 12);
+  assert.deepEqual(errors, []);
+  await tab.close();
+});
+
+test("a run shows what the orchestrator did on each step", { skip }, async () => {
+  const tab = await browser.newPage({ viewport: { width: 1400, height: 800 } });
+  const run = { status: "running", orchestrator: { sessionID: "x", interventions: 2, holding: true },
+    nodes: { intent: { status: "done", asked: 1 }, php: { status: "running", pass: 1, reruns: 1 } } };
+  await tab.addInitScript((s) => { window.__loomWorkflowsStandIn = s; }, { ...state, readOnly: true, run });
+  await tab.goto(page);
+  await tab.waitForSelector(".loom-node");
+  assert.match(await tab.textContent('.react-flow__node[data-id="php"]'), /rerun/);
+  assert.match(await tab.textContent('.react-flow__node[data-id="intent"]'), /asked/);
+  assert.match(await tab.textContent(".orchestrator"), /2 intervention\(s\) · the run waits for it/);
+  await tab.close();
+});

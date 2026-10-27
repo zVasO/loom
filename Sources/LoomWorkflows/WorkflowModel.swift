@@ -17,13 +17,16 @@ public struct Workflow: Codable, Identifiable, Equatable, Sendable {
     public var color: String
     public var nodes: [WorkflowNode]
     public var edges: [WorkflowEdge]
+    /// The run's conductor (ADR-0018): a Loom session that follows the run,
+    /// talks to its steps and steers it. nil: none.
+    public var orchestrator: OrchestratorConfig?
     public var createdAt: Date
     public var updatedAt: Date
     public var formatVersion: Int
 
     public init(id: UUID = UUID(), name: String, summary: String = "", tags: [String] = [],
                 color: String = "#0D6E74", nodes: [WorkflowNode] = [], edges: [WorkflowEdge] = [],
-                createdAt: Date = Date(), updatedAt: Date = Date(),
+                orchestrator: OrchestratorConfig? = nil, createdAt: Date = Date(), updatedAt: Date = Date(),
                 formatVersion: Int = Workflow.currentFormatVersion) {
         self.id = id
         self.name = name
@@ -32,6 +35,7 @@ public struct Workflow: Codable, Identifiable, Equatable, Sendable {
         self.color = color
         self.nodes = nodes
         self.edges = edges
+        self.orchestrator = orchestrator
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.formatVersion = formatVersion
@@ -47,6 +51,7 @@ public struct Workflow: Codable, Identifiable, Equatable, Sendable {
                   color: try c.decodeIfPresent(String.self, forKey: .color) ?? "#0D6E74",
                   nodes: try c.decodeIfPresent([WorkflowNode].self, forKey: .nodes) ?? [],
                   edges: try c.decodeIfPresent([WorkflowEdge].self, forKey: .edges) ?? [],
+                  orchestrator: try c.decodeIfPresent(OrchestratorConfig.self, forKey: .orchestrator),
                   createdAt: try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date(),
                   updatedAt: try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date(),
                   formatVersion: try c.decodeIfPresent(Int.self, forKey: .formatVersion)
@@ -387,4 +392,49 @@ public struct ArtifactConfig: Codable, Equatable, Sendable {
                   title: try c.decodeIfPresent(String.self, forKey: .title) ?? "{{pr.title}}",
                   importToPRTab: try c.decodeIfPresent(Bool.self, forKey: .importToPRTab) ?? false)
     }
+}
+
+/// The orchestrator of a workflow's runs (ADR-0018): a visible session that
+/// receives each step's result, may question any step, run one again with
+/// instructions, skip one or stop the run — within a budget.
+public struct OrchestratorConfig: Codable, Equatable, Sendable {
+    /// The expert it speaks as; nil runs claude as configured.
+    public var expertID: UUID?
+    /// Over the expert's: an alias (`opus`) or a model id.
+    public var model: String?
+    /// What this workflow expects of it, on top of Loom's own rules (a template).
+    public var instructions: String
+    /// Questions, reruns and skips, together, over a whole run.
+    public var maxInterventions: Int
+    /// How many times it may run one step again.
+    public var maxRerunsPerStep: Int
+    /// The report waits for its go-ahead (or the end of its turn).
+    public var reviewBeforeArtifact: Bool
+
+    public static let maxInterventionsAllowed = 50
+    public static let maxRerunsAllowed = 5
+
+    public init(expertID: UUID? = nil, model: String? = nil, instructions: String = "",
+                maxInterventions: Int = 12, maxRerunsPerStep: Int = 2, reviewBeforeArtifact: Bool = true) {
+        self.expertID = expertID
+        self.model = model
+        self.instructions = instructions
+        self.maxInterventions = maxInterventions
+        self.maxRerunsPerStep = maxRerunsPerStep
+        self.reviewBeforeArtifact = reviewBeforeArtifact
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(expertID: try c.decodeIfPresent(UUID.self, forKey: .expertID),
+                  model: try c.decodeIfPresent(String.self, forKey: .model),
+                  instructions: try c.decodeIfPresent(String.self, forKey: .instructions) ?? "",
+                  maxInterventions: try c.decodeIfPresent(Int.self, forKey: .maxInterventions) ?? 12,
+                  maxRerunsPerStep: try c.decodeIfPresent(Int.self, forKey: .maxRerunsPerStep) ?? 2,
+                  reviewBeforeArtifact: try c.decodeIfPresent(Bool.self, forKey: .reviewBeforeArtifact) ?? true)
+    }
+
+    /// The budget as the runner enforces it: never negative, never past the caps.
+    public var interventionLimit: Int { min(max(maxInterventions, 0), Self.maxInterventionsAllowed) }
+    public var rerunLimit: Int { min(max(maxRerunsPerStep, 0), Self.maxRerunsAllowed) }
 }

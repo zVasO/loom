@@ -110,6 +110,170 @@ public struct APIVersion: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - Workflow runs (ADR-0018)
+
+/// One step of the run, as `workflow.get` shows it.
+public struct APIWorkflowStep: Codable, Equatable, Sendable {
+    public var id: String
+    public var title: String
+    /// start, context, agent, condition, loop, artifact.
+    public var type: String
+    /// pending, running, waitingOnUser, done, failed, skipped.
+    public var status: String
+    public var pass: Int
+    public var expert: String?
+    /// headless or visible, for an agent.
+    public var mode: String?
+    /// A visible step's Loom session.
+    public var sessionId: String?
+    public var hasAnswer: Bool
+    /// Whether loom_workflow_step_ask can reach it now.
+    public var askable: Bool
+    public var reruns: Int
+    public var error: String?
+
+    public init(id: String, title: String, type: String, status: String, pass: Int, expert: String? = nil,
+                mode: String? = nil, sessionId: String? = nil, hasAnswer: Bool, askable: Bool, reruns: Int,
+                error: String? = nil) {
+        self.id = id
+        self.title = title
+        self.type = type
+        self.status = status
+        self.pass = pass
+        self.expert = expert
+        self.mode = mode
+        self.sessionId = sessionId
+        self.hasAnswer = hasAnswer
+        self.askable = askable
+        self.reruns = reruns
+        self.error = error
+    }
+}
+
+/// `workflow.get`.
+public struct APIWorkflowState: Codable, Equatable, Sendable {
+    public var runId: String
+    public var workflow: String
+    public var subject: String
+    /// running, succeeded, failed, cancelled, interrupted.
+    public var status: String
+    /// The run waits for the orchestrator (a checkpoint) — loom_workflow_proceed lets it go.
+    public var waitingForYou: Bool
+    public var interventionsLeft: Int
+    public var rerunsPerStep: Int
+    public var costUSD: Double
+    public var steps: [APIWorkflowStep]
+
+    public init(runId: String, workflow: String, subject: String, status: String, waitingForYou: Bool,
+                interventionsLeft: Int, rerunsPerStep: Int, costUSD: Double, steps: [APIWorkflowStep]) {
+        self.runId = runId
+        self.workflow = workflow
+        self.subject = subject
+        self.status = status
+        self.waitingForYou = waitingForYou
+        self.interventionsLeft = interventionsLeft
+        self.rerunsPerStep = rerunsPerStep
+        self.costUSD = costUSD
+        self.steps = steps
+    }
+}
+
+/// `workflow.step.read`: a step, and the pass wanted (the current one by default).
+public struct APIWorkflowStepRef: Codable, Equatable, Sendable {
+    public var step: String
+    public var pass: Int?
+    public init(step: String, pass: Int? = nil) {
+        self.step = step
+        self.pass = pass
+    }
+}
+
+/// A step's answer.
+public struct APIWorkflowAnswer: Codable, Equatable, Sendable {
+    public var step: String
+    public var pass: Int
+    public var status: String
+    /// The structured answer (its fields), when it has one.
+    public var output: JSONValue?
+    public var text: String?
+    public var error: String?
+    /// A visible step: the last things it said in its session.
+    public var recentMessages: [String]?
+
+    public init(step: String, pass: Int, status: String, output: JSONValue? = nil, text: String? = nil,
+                error: String? = nil, recentMessages: [String]? = nil) {
+        self.step = step
+        self.pass = pass
+        self.status = status
+        self.output = output
+        self.text = text
+        self.error = error
+        self.recentMessages = recentMessages
+    }
+}
+
+/// `workflow.step.ask`.
+public struct APIWorkflowAskParams: Codable, Equatable, Sendable {
+    public var step: String
+    public var message: String
+    public init(step: String, message: String) {
+        self.step = step
+        self.message = message
+    }
+}
+
+/// `workflow.step.rerun`.
+public struct APIWorkflowRerunParams: Codable, Equatable, Sendable {
+    public var step: String
+    public var instructions: String
+    public init(step: String, instructions: String) {
+        self.step = step
+        self.instructions = instructions
+    }
+}
+
+/// `workflow.step.skip`.
+public struct APIWorkflowSkipParams: Codable, Equatable, Sendable {
+    public var step: String
+    public var reason: String?
+    public init(step: String, reason: String? = nil) {
+        self.step = step
+        self.reason = reason
+    }
+}
+
+/// `workflow.stop`, `workflow.proceed`.
+public struct APIWorkflowReasonParams: Codable, Equatable, Sendable {
+    public var reason: String?
+    public init(reason: String? = nil) { self.reason = reason }
+}
+
+/// `workflow.message`: what a step writes to its orchestrator.
+public struct APIWorkflowMessageParams: Codable, Equatable, Sendable {
+    public var text: String
+    public init(text: String) { self.text = text }
+}
+
+/// What an orchestrator's move did.
+public struct APIWorkflowAck: Codable, Equatable, Sendable {
+    public var message: String
+    public var interventionsLeft: Int
+    /// `workflow.step.ask`: the step's answer.
+    public var answer: String?
+
+    public init(message: String, interventionsLeft: Int, answer: String? = nil) {
+        self.message = message
+        self.interventionsLeft = interventionsLeft
+        self.answer = answer
+    }
+}
+
+/// What the API takes from a workflow's sessions.
+public enum APIWorkflowLimits {
+    /// A question, an instruction, a step's message.
+    public static let messageMaxLength = 8_000
+}
+
 /// What an agent may write through the API. Loom's own tools run without a
 /// permission prompt (pre-approved), so what they write is bounded here: a
 /// session title also becomes a system notification's title, and a prompt-

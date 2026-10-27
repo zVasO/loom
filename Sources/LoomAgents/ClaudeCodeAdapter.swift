@@ -37,11 +37,15 @@ public struct ClaudeCodeAdapter: Sendable {
         /// The engine behind the session's browser, pinned for this launch:
         /// the tools `loom mcp` lists, and their words, follow it.
         public var engine: APIBrowserEngine
+        /// The session's part in a workflow run (ADR-0018): its tools are listed.
+        public var workflow: APIWorkflowRole?
 
-        public init(browser: Bool = true, preapproved: Bool = true, engine: APIBrowserEngine = .webkit) {
+        public init(browser: Bool = true, preapproved: Bool = true, engine: APIBrowserEngine = .webkit,
+                    workflow: APIWorkflowRole? = nil) {
             self.browser = browser
             self.preapproved = preapproved
             self.engine = engine
+            self.workflow = workflow
         }
     }
 
@@ -51,6 +55,9 @@ public struct ClaudeCodeAdapter: Sendable {
     /// Appended to claude's system prompt at every launch and resume
     /// (`SessionInstructions`); nil or blank adds nothing.
     public var instructions: String?
+    /// `--model` at launch and resume (a workflow's orchestrator, a visible
+    /// step); nil keeps the user's default.
+    public var model: String?
 
     public init(executable: String = "claude", hooks: HookWiring? = nil, tools: ToolOptions = ToolOptions(),
                 instructions: String? = nil) {
@@ -66,6 +73,11 @@ public struct ClaudeCodeAdapter: Sendable {
         guard let text = instructions?.trimmingCharacters(in: .whitespacesAndNewlines),
               !text.isEmpty else { return [] }
         return ["--append-system-prompt", text]
+    }
+
+    var modelArguments: [String] {
+        guard let model = model?.trimmingCharacters(in: .whitespacesAndNewlines), !model.isEmpty else { return [] }
+        return ["--model", model]
     }
 
     /// The session UUID is IMPOSED on the CLI (`--session-id`): Resume becomes
@@ -88,10 +100,11 @@ public struct ClaudeCodeAdapter: Sendable {
         }
         if let hooks, let hookToken,
            let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken, browserTools: tools.browser,
-                                        engine: tools.engine) {
+                                        engine: tools.engine, workflow: tools.workflow) {
             arguments.append(contentsOf: ["--mcp-config", mcp])
         }
         arguments += instructionArguments
+        arguments += modelArguments
         if let initialPrompt {
             arguments.append(initialPrompt)
         }
@@ -183,10 +196,11 @@ public struct ClaudeCodeAdapter: Sendable {
         }
         if let hooks, let hookToken,
            let mcp = Self.mcpConfigJSON(wiring: hooks, token: hookToken, browserTools: tools.browser,
-                                        engine: tools.engine) {
+                                        engine: tools.engine, workflow: tools.workflow) {
             arguments.append(contentsOf: ["--mcp-config", mcp])
         }
         arguments += instructionArguments
+        arguments += modelArguments
         return Command(executable: executable, arguments: arguments,
                        environment: Self.apiEnvironment(wiring: hooks, token: hookToken),
                        pathPrefix: Self.pathPrefix(wiring: hooks))
@@ -206,12 +220,15 @@ public struct ClaudeCodeAdapter: Sendable {
     /// server runs `loom mcp` with the session's socket and token in its
     /// environment; nil without a `loom` binary to run.
     static func mcpConfigJSON(wiring: HookWiring, token: String, browserTools: Bool = true,
-                              engine: APIBrowserEngine = .webkit) -> String? {
+                              engine: APIBrowserEngine = .webkit, workflow: APIWorkflowRole? = nil) -> String? {
         guard let cli = wiring.cli else { return nil }
         var environment = apiEnvironment(wiring: wiring, token: token)
         // Turned off in Settings: `loom mcp` lists no browser tool at all.
         if !browserTools { environment[APIProtocol.browserToolsEnvironmentKey] = "0" }
         if browserTools, engine != .webkit { environment[APIProtocol.browserEngineEnvironmentKey] = engine.rawValue }
+        // Only the listing: the app answers a workflow method for a session
+        // of a run alone, whatever the environment says.
+        if let workflow { environment[APIProtocol.workflowRoleEnvironmentKey] = workflow.rawValue }
         let config: [String: Any] = [
             "mcpServers": [
                 "loom": [
@@ -241,7 +258,8 @@ public struct ClaudeCodeAdapter: Sendable {
             // own deny rules still win (Claude Code: deny > ask > allow).
             if tools.preapproved, wiring.cli != nil {
                 settings["permissions"] = ["allow": APIToolCatalog.preapprovedRules(browser: tools.browser,
-                                                                                    engine: tools.engine)]
+                                                                                    engine: tools.engine,
+                                                                                    workflow: tools.workflow)]
             }
         }
         if let theme { settings["theme"] = theme }

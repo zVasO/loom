@@ -1,4 +1,5 @@
 import Foundation
+import LoomAPI
 import LoomCore
 import LoomExtensions
 import LoomWorkflows
@@ -271,4 +272,69 @@ final class WorkflowsModel {
 
     /// Where a run keeps its files: answers of visible steps, the artifact.
     func folder(for run: UUID) -> URL { runStore.folder(for: run) }
+
+    // MARK: Orchestrator (ADR-0018)
+
+    /// Runs waiting for their orchestrator: before the report, or before
+    /// ending on a failure.
+    var holding: Set<UUID> = []
+    /// What the orchestrator asked of a run's loop, read between two steps.
+    @ObservationIgnored var wakes: Set<UUID> = []
+    @ObservationIgnored var stopRequests: [UUID: String] = [:]
+    @ObservationIgnored var proceedRequests: Set<UUID> = []
+    /// Lines for the orchestrator, typed together once its session is idle.
+    @ObservationIgnored var pendingEvents: [UUID: [OrchestratorPrompt.Event]] = [:]
+    @ObservationIgnored var eventDeliveries: [UUID: Task<Void, Never>] = [:]
+    /// Questions being answered: one at a time per step.
+    @ObservationIgnored var asking: Set<String> = []
+
+    /// A session's part in a run: the newest run naming it as its
+    /// orchestrator or as one of its steps' sessions.
+    struct SessionPart {
+        var runID: UUID
+        var role: APIWorkflowRole
+        /// The step, for a step's session.
+        var step: String?
+    }
+
+    func part(of session: SessionID) -> SessionPart? {
+        let id = session.rawValue.uuidString.lowercased()
+        for run in runs {
+            if run.orchestratorSessionID?.lowercased() == id {
+                return SessionPart(runID: run.id, role: .orchestrator, step: nil)
+            }
+            if let step = run.step(ofSession: id) {
+                return SessionPart(runID: run.id, role: .step, step: step)
+            }
+        }
+        return nil
+    }
+
+    /// The run's loop looks at the orchestrator's requests now, not after
+    /// the step it waits on.
+    func wake(_ run: UUID) { wakes.insert(run) }
+
+    /// Consumes a wake-up.
+    func takeWake(_ run: UUID) -> Bool { wakes.remove(run) != nil }
+
+    /// The Sessions tab's WORKFLOWS section: each run with an orchestrator or
+    /// a visible step, newest first, its sessions in order — the
+    /// orchestrator, then the steps as the workflow lists them.
+    struct SessionGroup: Identifiable, Equatable {
+        var id: UUID
+        var title: String
+        var isActive: Bool
+        var orchestrator: SessionID?
+        var steps: [SessionID]
+    }
+
+    var sessionGroups: [SessionGroup] {
+        runs.compactMap { run -> SessionGroup? in
+            let orchestrator = run.orchestratorSessionID.flatMap(UUID.init(uuidString:)).map(SessionID.init)
+            let steps = run.stepSessionIDs.compactMap { UUID(uuidString: $0).map(SessionID.init) }
+            guard orchestrator != nil || !steps.isEmpty else { return nil }
+            return SessionGroup(id: run.id, title: "\(run.workflow.name) · \(run.subject)",
+                                isActive: run.status.isActive, orchestrator: orchestrator, steps: steps)
+        }
+    }
 }

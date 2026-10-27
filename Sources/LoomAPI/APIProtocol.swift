@@ -28,6 +28,9 @@ public enum APIProtocol {
     /// The engine behind the session's browser (`webkit`, `chromium`), pinned
     /// when the session launched: the tools and their wording follow it.
     public static let browserEngineEnvironmentKey = "LOOM_BROWSER_ENGINE"
+    /// The session's part in a workflow run (ADR-0018), when it has one:
+    /// `orchestrator` or `step`. `loom mcp` lists the workflow tools for it.
+    public static let workflowRoleEnvironmentKey = "LOOM_WORKFLOW_ROLE"
 
     /// Where the app writes the agent browser's screenshots (ADR-0014), beside
     /// its socket: the one place the app and `loom mcp` agree on. The MCP
@@ -36,6 +39,27 @@ public enum APIProtocol {
         URL(fileURLWithPath: socketPath).deletingLastPathComponent()
             .appendingPathComponent("agent-browser", isDirectory: true)
             .appendingPathComponent("screenshots", isDirectory: true)
+    }
+}
+
+/// A session's part in a workflow run (ADR-0018): what it may call.
+public enum APIWorkflowRole: String, Codable, Sendable, CaseIterable {
+    /// Follows the run, questions and steers its steps.
+    case orchestrator
+    /// A visible step: may write to its orchestrator.
+    case step
+
+    public init?(environment: [String: String]) {
+        guard let raw = environment[APIProtocol.workflowRoleEnvironmentKey] else { return nil }
+        self.init(rawValue: raw)
+    }
+
+    public func allows(_ method: APIMethod) -> Bool {
+        guard method.isWorkflow else { return false }
+        switch self {
+        case .orchestrator: return method != .workflowMessage
+        case .step: return method == .workflowMessage
+        }
     }
 }
 
@@ -79,9 +103,21 @@ public enum APIMethod: String, CaseIterable, Sendable {
     case browserResize = "browser.resize"
     /// A Playwright script in one call (Chromium engine only, ADR-0016).
     case browserRunCode = "browser.runCode"
+    // A workflow run, seen from its orchestrator or one of its steps (ADR-0018).
+    case workflowGet = "workflow.get"
+    case workflowStepRead = "workflow.step.read"
+    case workflowStepAsk = "workflow.step.ask"
+    case workflowStepRerun = "workflow.step.rerun"
+    case workflowStepSkip = "workflow.step.skip"
+    case workflowStop = "workflow.stop"
+    case workflowProceed = "workflow.proceed"
+    case workflowMessage = "workflow.message"
 
     /// Drives the session's own browser.
     public var isBrowser: Bool { rawValue.hasPrefix("browser.") }
+
+    /// Reads or steers the workflow run the session belongs to.
+    public var isWorkflow: Bool { rawValue.hasPrefix("workflow.") }
 
     /// Listing every session is the orchestrator's view: a session token,
     /// scoped to itself, never sees its neighbours.
@@ -98,7 +134,9 @@ public enum APIMethod: String, CaseIterable, Sendable {
     /// their session's own token only.
     public var allowsGlobalScope: Bool {
         // The browser acts inside its project's profile — logins included.
-        !isBrowser
+        // A workflow method reaches the steps of the caller's own run: the
+        // run is found from the session, and the global token has none.
+        !isBrowser && !isWorkflow
     }
 
     /// A browser action whose answer ends with the page's new snapshot —
@@ -132,6 +170,8 @@ public enum APIMethod: String, CaseIterable, Sendable {
              .browserPressKey, .browserHandleDialog, .browserFileUpload, .browserScreenshot: return .seconds(25)
         case .browserSnapshot, .browserResize: return .seconds(15)
         case .browserConsole, .browserNetwork, .browserClose: return .seconds(10)
+        // A follow-up question: the step answers with a whole turn of claude.
+        case .workflowStepAsk: return .seconds(600)
         default: return nil
         }
     }

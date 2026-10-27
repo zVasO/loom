@@ -113,6 +113,13 @@ button.icon { background: transparent; padding: 4px 8px; color: var(--secondaryT
 .loom-node-summary { font-size: 11px; color: var(--secondaryText); margin-top: 2px; }
 .loom-node-id { font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--mutedText); margin-top: 4px; }
 .loom-node-status { margin-top: 6px; font-size: 11px; font-weight: 700; }
+.loom-node-marks { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.loom-node-mark {
+  font-size: 10px; font-weight: 700; border-radius: 999px; padding: 0 6px;
+  background: var(--surfaceRaised); color: var(--groupHeader); animation: mark-in .35s ease-out both;
+}
+@keyframes mark-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .loom-node-mark { animation: none; } }
 .branch-label { position: absolute; right: 10px; font-size: 10px; color: var(--mutedText); }
 .branch-label.yes { top: calc(35% - 8px); }
 .branch-label.no { top: calc(70% - 8px); }
@@ -164,3 +171,9 @@ button.icon { background: transparent; padding: 4px 8px; color: var(--secondaryT
 pre { white-space: pre-wrap; word-break: break-word; font-size: 11px; max-height: 320px; overflow: auto;
   background: var(--surfaceRaised); border-radius: 7px; padding: 8px; margin: 6px 0 0; }
 details summary { cursor: pointer; font-size: 12px; font-weight: 700; }
+
+/* The orchestrator (ADR-0018), in the inspector when no step is selected. */
+.orchestrator { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--cardBorder); }
+.orchestrator-toggle { font-size: 13px; }
+.orchestrator .row { display: flex; gap: 10px; }
+.orchestrator .row .field { flex: 1; }

@@ -28,7 +28,7 @@ function summary(node, expert) {
 }
 
 function NodeCardView({ data, selected }) {
-  const { node, expert, issues, status, pass, error } = data;
+  const { node, expert, issues, status, pass, error, marks = [] } = data;
   const errors = issues.filter((i) => i.severity === "error").length;
   const warnings = issues.length - errors;
   const classes = ["loom-node", `kind-${node.type}`];
@@ -52,6 +52,11 @@ function NodeCardView({ data, selected }) {
       {status && (
         <div className={`loom-node-status status-${status}`}>
           {STATUS_LABELS[status] || status}{pass && pass > 1 ? ` · pass ${pass}` : ""}
+        </div>
+      )}
+      {marks.length > 0 && (
+        <div className="loom-node-marks" title="What the orchestrator did to this step">
+          {marks.map((mark) => <span key={mark} className="loom-node-mark">{mark}</span>)}
         </div>
       )}
       {node.type === "condition" ? (

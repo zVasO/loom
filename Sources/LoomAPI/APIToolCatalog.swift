@@ -96,6 +96,77 @@ public enum APIToolCatalog {
             cliUsage: "loom sessions [--archived] (global token)", preapprovable: true),
     ]
 
+    /// A workflow run's tools (ADR-0018): listed only for a session of a run,
+    /// and answered only for one — the app finds the run from the session.
+    /// Pre-approved: each reaches its own run's steps alone, and the run's
+    /// budget bounds what the orchestrator may launch again.
+    public static let workflowTools: [APIToolSpec] = [
+        APIToolSpec(
+            method: .workflowGet, name: "loom_workflow_get",
+            description: "Where your workflow run stands: every step with its status, pass, expert, "
+                + "whether it has an answer and can be asked; your remaining interventions; whether Loom "
+                + "waits for you.",
+            inputSchema: object([:]),
+            cliUsage: "loom workflow get", preapprovable: true),
+        APIToolSpec(
+            method: .workflowStepRead, name: "loom_workflow_step_read",
+            description: "A step's answer: its fields as JSON and as text, or its error. For a visible step, "
+                + "also the last things it said in its session. An earlier pass with `pass`.",
+            inputSchema: object(["step": string("The step's id (from loom_workflow_get)."),
+                                 "pass": number("An earlier pass (1, 2…); the current one by default.")],
+                                required: ["step"]),
+            cliUsage: "loom workflow step_read <step>", preapprovable: true),
+        APIToolSpec(
+            method: .workflowStepAsk, name: "loom_workflow_step_ask",
+            description: "Ask a step a follow-up question and get its answer: it answers with everything it "
+                + "read. A visible step gets the message in its session once it is idle; a headless step's "
+                + "conversation is resumed. Up to 10 minutes. Costs one intervention.",
+            inputSchema: object(["step": string("The step's id."),
+                                 "message": string("Your question, self-contained.")],
+                                required: ["step", "message"]),
+            cliUsage: "loom workflow step_ask '{\"step\":\"php\",\"message\":\"…\"}'", preapprovable: true),
+        APIToolSpec(
+            method: .workflowStepRerun, name: "loom_workflow_step_rerun",
+            description: "Run a step again with your instructions (added to its prompt, with its previous "
+                + "answer); every step after it runs again too. Not while it or a step after it runs. "
+                + "Costs one intervention.",
+            inputSchema: object(["step": string("The step's id."),
+                                 "instructions": string("What to do differently, precisely.")],
+                                required: ["step", "instructions"]),
+            cliUsage: "loom workflow step_rerun '{\"step\":\"php\",\"instructions\":\"…\"}'", preapprovable: true),
+        APIToolSpec(
+            method: .workflowStepSkip, name: "loom_workflow_step_skip",
+            description: "Skip a step that has not run yet: it counts as done with a \"skipped\" answer, "
+                + "and the steps after it still run. Costs one intervention.",
+            inputSchema: object(["step": string("The step's id."),
+                                 "reason": string("Why, in one line.")],
+                                required: ["step"]),
+            cliUsage: "loom workflow step_skip <step>", preapprovable: true),
+        APIToolSpec(
+            method: .workflowStop, name: "loom_workflow_stop",
+            description: "Stop the run: running steps are cancelled, no report is written.",
+            inputSchema: object(["reason": string("Why, in one line.")]),
+            cliUsage: "loom workflow stop", preapprovable: true),
+        APIToolSpec(
+            method: .workflowProceed, name: "loom_workflow_proceed",
+            description: "When Loom waits for you (before the report, or before ending on a failure): let it go on.",
+            inputSchema: object(["reason": string("Optional, one line.")]),
+            cliUsage: "loom workflow proceed", preapprovable: true),
+        APIToolSpec(
+            method: .workflowMessage, name: "loom_workflow_message",
+            description: "Write to the orchestrator of the workflow run you are a step of: a question, a "
+                + "blocker, a decision you need. It reads it when its turn ends; keep working meanwhile.",
+            inputSchema: object(["text": string("Your message, short and self-contained.")],
+                                required: ["text"]),
+            cliUsage: "loom workflow message <text>", preapprovable: true),
+    ]
+
+    /// The workflow tools a role lists.
+    public static func workflowTools(for role: APIWorkflowRole?) -> [APIToolSpec] {
+        guard let role else { return [] }
+        return workflowTools.filter { role.allows($0.method) }
+    }
+
     /// The session's own browser (ADR-0014). Every tool answers Markdown in
     /// Playwright MCP's sections (### Page, ### Snapshot…); the actions also
     /// answer the page's new snapshot, so one call both acts and shows.
@@ -277,24 +348,29 @@ public enum APIToolCatalog {
 
     /// Every method's tool, whatever the engine: the Chromium catalog holds them all.
     public static func spec(for method: APIMethod) -> APIToolSpec {
-        all(engine: .chromium).first { $0.method == method }!   // every method is listed: a missing one is a programming error
+        // every method is listed: a missing one is a programming error
+        (all(engine: .chromium) + workflowTools).first { $0.method == method }!
     }
 
     /// The tools a session's MCP server lists: without the browser's when
-    /// they are turned off in Loom's Settings, worded for its engine.
-    public static func tools(browser: Bool, engine: APIBrowserEngine = .webkit) -> [APIToolSpec] {
-        browser ? all(engine: engine) : sessionTools
+    /// they are turned off in Loom's Settings, worded for its engine; with
+    /// a workflow run's when the session has a part in one.
+    public static func tools(browser: Bool, engine: APIBrowserEngine = .webkit,
+                             workflow: APIWorkflowRole? = nil) -> [APIToolSpec] {
+        (browser ? all(engine: engine) : sessionTools) + workflowTools(for: workflow)
     }
 
     /// The MCP tool names Loom may pre-approve, as Claude Code's permission
     /// rules spell them (`mcp__<server>__<tool>`).
     public static func preapprovedRules(server: String = "loom", browser: Bool,
-                                        engine: APIBrowserEngine = .webkit) -> [String] {
-        tools(browser: browser, engine: engine).filter(\.preapprovable).map { "mcp__\(server)__\($0.name)" }
+                                        engine: APIBrowserEngine = .webkit,
+                                        workflow: APIWorkflowRole? = nil) -> [String] {
+        tools(browser: browser, engine: engine, workflow: workflow).filter(\.preapprovable)
+            .map { "mcp__\(server)__\($0.name)" }
     }
 
     public static func spec(named name: String) -> APIToolSpec? {
-        all(engine: .chromium).first { $0.name == name }
+        (all(engine: .chromium) + workflowTools).first { $0.name == name }
     }
 
     /// What an agent should know before its first call — the MCP `instructions`
@@ -345,11 +421,17 @@ public enum APIToolCatalog {
         let webkitTools: [APIToolSpec] = all
         let webkitNames = Set(webkitTools.map(\.name))
         let chromiumOnly = all(engine: .chromium).filter { !webkitNames.contains($0.name) }
-        for spec in webkitTools + chromiumOnly {
+        for spec in webkitTools + chromiumOnly + workflowTools {
             lines.append("## `\(spec.method.rawValue)`")
             lines.append("")
             if chromiumOnly.contains(spec) {
                 lines.append("Chromium engine only (Settings ▸ Agents): not listed for a WebKit session.")
+                lines.append("")
+            }
+            if spec.method.isWorkflow {
+                lines.append("Workflow runs only (ADR-0018): listed for "
+                             + (spec.method == .workflowMessage ? "a visible step" : "the run's orchestrator")
+                             + ", under its own session token.")
                 lines.append("")
             }
             lines.append(spec.description)
