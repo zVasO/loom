@@ -273,7 +273,8 @@ function Editor() {
         </div>
         <Inspector workflow={workflow} node={selectedNode} state={{ ...state, issues }} readOnly={readOnly} run={run}
           onChange={changeNode} onDelete={deleteNode}
-          onOpenSession={(nodeID) => call("node.open", { nodeID })} />
+          onOpenSession={(nodeID) => call("node.open", { nodeID })}
+          onWorkflowChange={setMeta} onOpenOrchestrator={() => call("orchestrator.open", {})} />
       </div>
     </div>
   );

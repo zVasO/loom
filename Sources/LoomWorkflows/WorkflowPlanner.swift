@@ -20,10 +20,18 @@ public struct NodeRecord: Codable, Equatable, Sendable {
     public var costUSD: Double?
     /// A visible step's Loom session.
     public var sessionID: String?
+    /// A headless step's claude conversation: `claude -p --resume` asks it
+    /// a follow-up with everything it read (ADR-0018).
+    public var claudeSessionID: String?
+    /// How many times the orchestrator ran it again.
+    public var reruns: Int
+    /// The orchestrator's instructions for its next run, after the prompt.
+    public var extraInstructions: String?
 
     public init(status: NodeStatus = .pending, output: JSONValue? = nil, text: String? = nil,
                 error: String? = nil, startedAt: Date? = nil, finishedAt: Date? = nil,
-                costUSD: Double? = nil, sessionID: String? = nil) {
+                costUSD: Double? = nil, sessionID: String? = nil, claudeSessionID: String? = nil,
+                reruns: Int = 0, extraInstructions: String? = nil) {
         self.status = status
         self.output = output
         self.text = text
@@ -32,6 +40,30 @@ public struct NodeRecord: Codable, Equatable, Sendable {
         self.finishedAt = finishedAt
         self.costUSD = costUSD
         self.sessionID = sessionID
+        self.claudeSessionID = claudeSessionID
+        self.reruns = reruns
+        self.extraInstructions = extraInstructions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(status: try c.decodeIfPresent(NodeStatus.self, forKey: .status) ?? .pending,
+                  output: try c.decodeIfPresent(JSONValue.self, forKey: .output),
+                  text: try c.decodeIfPresent(String.self, forKey: .text),
+                  error: try c.decodeIfPresent(String.self, forKey: .error),
+                  startedAt: try c.decodeIfPresent(Date.self, forKey: .startedAt),
+                  finishedAt: try c.decodeIfPresent(Date.self, forKey: .finishedAt),
+                  costUSD: try c.decodeIfPresent(Double.self, forKey: .costUSD),
+                  sessionID: try c.decodeIfPresent(String.self, forKey: .sessionID),
+                  claudeSessionID: try c.decodeIfPresent(String.self, forKey: .claudeSessionID),
+                  reruns: try c.decodeIfPresent(Int.self, forKey: .reruns) ?? 0,
+                  extraInstructions: try c.decodeIfPresent(String.self, forKey: .extraInstructions))
+    }
+
+    /// A fresh record for the step's next run: what the orchestrator asked
+    /// of it stays with it.
+    func reset() -> NodeRecord {
+        NodeRecord(reruns: reruns, extraInstructions: extraInstructions)
     }
 }
 
@@ -159,7 +191,10 @@ public struct WorkflowPlanner: Sendable {
     // MARK: Steps
 
     public func markRunning(_ id: String, in state: inout RunState, at date: Date = Date()) {
-        state.nodes[id] = NodeRecord(status: .running, startedAt: date)
+        var record = (state.nodes[id] ?? NodeRecord()).reset()
+        record.status = .running
+        record.startedAt = date
+        state.nodes[id] = record
     }
 
     public func complete(_ id: String, output: JSONValue?, text: String?, costUSD: Double? = nil,
@@ -212,11 +247,88 @@ public struct WorkflowPlanner: Sendable {
             if let output = state.nodes[member]?.output {
                 state.history[member, default: []].append(output)
             }
-            state.nodes[member] = NodeRecord()
+            // A new pass starts from its prompt: earlier instructions were
+            // for an answer that is now history.
+            var fresh = (state.nodes[member] ?? NodeRecord()).reset()
+            fresh.extraInstructions = nil
+            state.nodes[member] = fresh
             state.branches[member] = nil
         }
         state.nodes[id] = NodeRecord()
         return true
+    }
+
+    // MARK: The orchestrator's moves (ADR-0018)
+
+    public enum InterventionError: Error, Equatable, CustomStringConvertible {
+        case unknownStep(String)
+        case notAllowed(String)
+        case busy(String)
+        case tooManyReruns(String, limit: Int)
+        case alreadySettled(String)
+
+        public var description: String {
+            switch self {
+            case .unknownStep(let id): return "no step \(id) in this workflow"
+            case .notAllowed(let id): return "\(id) is run by Loom itself and cannot be rerun or skipped"
+            case .busy(let id): return "\(id) is running: wait for its answer"
+            case .tooManyReruns(let id, let limit): return "\(id) was already run again \(limit) time(s), the limit"
+            case .alreadySettled(let id): return "\(id) already ran: rerun it instead"
+            }
+        }
+    }
+
+    /// Every step downstream of `id` by edges (not `id` itself).
+    public func downstream(of id: String) -> Set<String> {
+        WorkflowGraph.reachable(from: [id], next: WorkflowGraph.successors(workflow)).subtracting([id])
+    }
+
+    /// Runs a step again with the orchestrator's instructions: it waits once
+    /// more, and so does everything that read it — their answers move to
+    /// `history`, as a loop's do. Only agent and context steps; never while
+    /// one of them runs (its answer would land on a step that waits again).
+    public func rerun(_ id: String, instructions: String, limit: Int, in state: inout RunState) throws {
+        guard let node = workflow.node(id) else { throw InterventionError.unknownStep(id) }
+        guard node.kind.type == .agent || node.kind.type == .context else { throw InterventionError.notAllowed(id) }
+        let affected = downstream(of: id).union([id])
+        if let busy = affected.first(where: { [.running, .waitingOnUser].contains(state.status($0)) }) {
+            throw InterventionError.busy(busy)
+        }
+        let record = state.nodes[id] ?? NodeRecord()
+        guard record.reruns < limit else { throw InterventionError.tooManyReruns(id, limit: limit) }
+        for member in affected {
+            let current = state.nodes[member] ?? NodeRecord()
+            if let output = current.output, current.status == .done {
+                state.history[member, default: []].append(output)
+            }
+            var fresh = current.reset()
+            if member != id, workflow.node(member)?.kind.type == .loop {
+                // A loop downstream starts its count again with the new answers.
+                state.iterations[member] = nil
+            }
+            state.branches[member] = nil
+            if member == id {
+                fresh.reruns = record.reruns + 1
+                let trimmed = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+                fresh.extraInstructions = trimmed.isEmpty ? nil : trimmed
+            }
+            state.nodes[member] = fresh
+        }
+    }
+
+    /// Skips a step that has not run: it settles done with a "skipped"
+    /// answer, so what follows still runs. The start and the report are Loom's.
+    public func skip(_ id: String, reason: String, in state: inout RunState, at date: Date = Date()) throws {
+        guard let node = workflow.node(id) else { throw InterventionError.unknownStep(id) }
+        guard node.kind.type == .agent || node.kind.type == .context else { throw InterventionError.notAllowed(id) }
+        switch state.status(id) {
+        case .running, .waitingOnUser: throw InterventionError.busy(id)
+        case .done, .failed, .skipped: throw InterventionError.alreadySettled(id)
+        case .pending: break
+        }
+        let text = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        complete(id, output: .object(["skipped": .bool(true), "reason": .string(text)]),
+                 text: "Skipped by the orchestrator" + (text.isEmpty ? "." : ": \(text)"), in: &state, at: date)
     }
 
     // MARK: End

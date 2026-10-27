@@ -360,15 +360,34 @@ public final class AppModel {
     private func adapter(for session: SessionID) -> ClaudeCodeAdapter {
         let engine = resolveAgentBrowserEngine()
         agentEngines[session] = engine
-        return ClaudeCodeAdapter(executable: claudePath?.path ?? "claude",
-                                 hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
-                                              socket: socketURL,
-                                              cli: Self.companionBinaryURL(named: "loom",
-                                                                           fallback: supportDirectory)),
-                                 tools: .init(browser: agentBrowserToolsEnabled,
-                                              preapproved: preapprovesLoomTools,
-                                              engine: engine),
-                                 instructions: sessionInstructionsEnabled ? sessionInstructionsText : nil)
+        var built = ClaudeCodeAdapter(executable: claudePath?.path ?? "claude",
+                                      hooks: .init(helper: Self.helperBinaryURL(fallback: supportDirectory),
+                                                   socket: socketURL,
+                                                   cli: Self.companionBinaryURL(named: "loom",
+                                                                                fallback: supportDirectory)),
+                                      tools: .init(browser: agentBrowserToolsEnabled,
+                                                   preapproved: preapprovesLoomTools,
+                                                   engine: engine),
+                                      instructions: sessionInstructionsEnabled ? sessionInstructionsText : nil)
+        // A session of a workflow run gets its part again at every resume
+        // (ADR-0018): its tools, and the orchestrator its rules and model.
+        if let part = workflows.part(of: session), let run = workflows.run(part.runID) {
+            built.tools.workflow = part.role
+            let extra: String?
+            switch part.role {
+            case .orchestrator:
+                extra = run.orchestratorInstructions
+                built.model = run.orchestratorModel
+            case .step:
+                extra = run.workflow.orchestrator != nil ? OrchestratorPrompt.stepRules : nil
+            }
+            if let extra, !extra.isEmpty {
+                built.instructions = [built.instructions ?? "", extra]
+                    .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                    .joined(separator: "\n\n")
+            }
+        }
+        return built
     }
 
     /// Instructions appended to every claude session's system prompt
@@ -1558,7 +1577,7 @@ public final class AppModel {
     /// Pasted, not typed: a paste never opens the slash-command menu, so the
     /// Return that follows submits instead of picking a suggestion.
     /// Returns whether the line went in.
-    private func submitWhenReady(_ line: String, to id: SessionID,
+    func submitWhenReady(_ line: String, to id: SessionID,
                                  timeout: Duration = .seconds(120)) async -> Bool {
         guard let runtime = await manager?.runtime(for: id) else { return false }
         let surface = runtime.surface()
@@ -2586,14 +2605,17 @@ public final class AppModel {
     /// step's prompt as its first message. Untrusted like a review when it
     /// runs in a PR's checkout.
     func launchWorkflowSession(directory: URL, projectID: ProjectID?, title: String, badges: [String],
-                               prompt: String, instructions: String, untrusted: Bool) async -> SessionID? {
+                               prompt: String, instructions: String, untrusted: Bool,
+                               role: APIWorkflowRole? = nil, model: String? = nil,
+                               sessionID: SessionID = SessionID()) async -> SessionID? {
         guard let manager else { return nil }
         do {
-            let sessionID = SessionID()
             let token = UUID().uuidString
             var launcher = adapter(for: sessionID)
             let base = launcher.instructions?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             launcher.instructions = [base, instructions].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            if let role { launcher.tools.workflow = role }
+            if let model, !model.isEmpty { launcher.model = model }
             var spec = SessionManager.SessionSpec(
                 command: launcher.launchCommand(session: sessionID, initialPrompt: prompt, hookToken: token,
                                                userStatusLine: userStatusLine(in: directory),

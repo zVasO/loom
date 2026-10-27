@@ -63,6 +63,12 @@ extension AppModel {
                   let uuid = UUID(uuidString: raw) else { return Self.failure("That step has no session.") }
             workflows.sessionToOpen = SessionID(uuid)
             return Self.reply(NSNull())
+        case "orchestrator.open":
+            guard case .run(let runID) = workflows.detail,
+                  let raw = workflows.run(runID)?.orchestratorSessionID,
+                  let uuid = UUID(uuidString: raw) else { return Self.failure("This run has no orchestrator.") }
+            workflows.sessionToOpen = SessionID(uuid)
+            return Self.reply(NSNull())
         default:
             return Self.failure("Unknown method \(method).")
         }
@@ -129,9 +135,22 @@ extension AppModel {
             if let cost = record.costUSD { item["costUSD"] = cost }
             if let session = record.sessionID { item["sessionID"] = session }
             if let output = record.output { item["output"] = Self.any(output) }
+            // What the orchestrator did to it (ADR-0018), for its card.
+            if record.reruns > 0 { item["reruns"] = record.reruns }
+            if record.status == .done, record.output?["skipped"]?.truthy == true,
+               run.messages.contains(where: { $0.kind == .skip && $0.to == id }) {
+                item["skippedByOrchestrator"] = true
+            }
+            let asked = run.messages.filter { $0.kind == .question && $0.to == id }.count
+            if asked > 0 { item["asked"] = asked }
             nodes[id] = item
         }
-        return ["id": run.id.uuidString, "status": run.status.rawValue, "nodes": nodes]
+        var json: [String: Any] = ["id": run.id.uuidString, "status": run.status.rawValue, "nodes": nodes]
+        if let session = run.orchestratorSessionID {
+            json["orchestrator"] = ["sessionID": session, "interventions": run.interventions,
+                                    "holding": workflows.holding.contains(run.id)]
+        }
+        return json
     }
 
     /// Everything the page needs for what the sidebar has selected: a

@@ -50,6 +50,17 @@ struct ClaudeOneShotTests {
         #expect(arguments == ["-p", "--output-format", "json"])
     }
 
+    @Test("a follow-up resumes the conversation a run reported (ADR-0018)")
+    func reprise() throws {
+        let arguments = ClaudeOneShot.arguments(for: .init(prompt: "x", tools: .inherited, resume: "abc-123"))
+        #expect(arguments == ["-p", "--output-format", "json", "--resume", "abc-123"])
+        #expect(!ClaudeOneShot.arguments(for: .init(prompt: "x", tools: .inherited, resume: "  ")).contains("--resume"))
+        #expect(!ClaudeOneShot.arguments(for: .init(prompt: "x", resume: "abc")).contains("--resume"),
+                "text only: nothing persisted, nothing to resume")
+        let json = #"{"is_error":false,"result":"ok","session_id":"5f0c-xyz"}"#
+        #expect(try ClaudeOneShot.parse(stdout: Data(json.utf8)).sessionID == "5f0c-xyz")
+    }
+
     @Test("the environment loses what ties a run to a session or to Loom's socket")
     func environnement() {
         let base = ["PATH": "/usr/bin", "HOME": "/Users/me", "CLAUDECODE": "1",

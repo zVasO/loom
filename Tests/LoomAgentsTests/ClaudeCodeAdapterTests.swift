@@ -307,6 +307,28 @@ struct ClaudeCodeAdapterTests {
         #expect(try environment(.init(browser: false, engine: .chromium))["LOOM_BROWSER_ENGINE"] == nil,
                 "no browser tools, no engine to word them for")
     }
+
+    @Test("a workflow session's part reaches the MCP server and its tools are pre-approved; the model is passed")
+    func roleDeWorkflow() throws {
+        var adapter = wired(.init(workflow: .orchestrator))
+        adapter.model = "opus"
+        for command in [adapter.launchCommand(session: SessionID(), initialPrompt: "go", hookToken: "tok"),
+                        adapter.resumeCommand(session: SessionID(), hookToken: "tok")] {
+            let index = try #require(command.arguments.firstIndex(of: "--mcp-config"))
+            #expect(command.arguments[index + 1].contains(#""LOOM_WORKFLOW_ROLE":"orchestrator""#))
+            let allow = try #require((try settings(of: command)["permissions"] as? [String: Any])?["allow"] as? [String])
+            #expect(allow.contains("mcp__loom__loom_workflow_step_rerun"))
+            #expect(!allow.contains("mcp__loom__loom_workflow_message"))
+            let model = try #require(command.arguments.firstIndex(of: "--model"))
+            #expect(command.arguments[model + 1] == "opus")
+        }
+        let plain = wired().launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok")
+        #expect(!plain.arguments.contains("--model"))
+        let index = try #require(plain.arguments.firstIndex(of: "--mcp-config"))
+        #expect(!plain.arguments[index + 1].contains("LOOM_WORKFLOW_ROLE"))
+        let allow = try #require((try settings(of: plain)["permissions"] as? [String: Any])?["allow"] as? [String])
+        #expect(!allow.contains { $0.contains("loom_workflow_") })
+    }
 }
 
 // v3 — real counters: token usage parsed from claude's native .jsonl.

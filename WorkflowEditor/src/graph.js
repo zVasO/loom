@@ -63,6 +63,22 @@ export function defaultConfig(type) {
   }
 }
 
+/** A workflow's orchestrator as it starts when switched on (ADR-0018). */
+export function defaultOrchestrator() {
+  return { expertID: null, model: null, instructions: "", maxInterventions: 12, maxRerunsPerStep: 2,
+    reviewBeforeArtifact: true };
+}
+
+/** What the orchestrator did to a step, as its card says it: "rerun ×2", "skipped", "asked 1". */
+export function interventionMarks(record) {
+  if (!record) return [];
+  const marks = [];
+  if (record.reruns > 0) marks.push(record.reruns > 1 ? `rerun ×${record.reruns}` : "rerun");
+  if (record.skippedByOrchestrator) marks.push("skipped");
+  if (record.asked > 0) marks.push(record.asked > 1 ? `asked ${record.asked}×` : "asked");
+  return marks;
+}
+
 /** A new step at a position, with an id nobody uses. */
 export function newNode(type, workflow, position) {
   const ids = workflow.nodes.map((n) => n.id);
@@ -95,6 +111,7 @@ export function toFlow(workflow, { experts = [], issues = [], run = null, select
         status: record ? record.status : null,
         pass: record ? record.pass : null,
         error: record ? record.error : null,
+        marks: interventionMarks(record),
       },
     };
   });

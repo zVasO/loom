@@ -97,3 +97,18 @@ test("the estimate reads as an order of magnitude", () => {
   assert.equal(G.formatEstimate({ runs: 1, lowUSD: null, highUSD: null }), "≈ 1 claude run");
   assert.equal(G.formatEstimate(null), "");
 });
+
+test("the orchestrator's moves mark the steps they touched (ADR-0018)", () => {
+  assert.deepEqual(G.interventionMarks(null), []);
+  assert.deepEqual(G.interventionMarks({ status: "done" }), []);
+  assert.deepEqual(G.interventionMarks({ reruns: 1 }), ["rerun"]);
+  assert.deepEqual(G.interventionMarks({ reruns: 2, asked: 1 }), ["rerun ×2", "asked"]);
+  assert.deepEqual(G.interventionMarks({ skippedByOrchestrator: true, asked: 3 }), ["skipped", "asked 3×"]);
+  const run = { status: "running", nodes: { php: { status: "running", pass: 1, reruns: 1 } } };
+  const php = G.toFlow(workflow, { experts: state.experts, run }).nodes.find((n) => n.id === "php");
+  assert.deepEqual(php.data.marks, ["rerun"]);
+  const orchestrator = G.defaultOrchestrator();
+  assert.equal(orchestrator.maxInterventions, 12);
+  assert.equal(orchestrator.maxRerunsPerStep, 2);
+  assert.equal(orchestrator.reviewBeforeArtifact, true);
+});

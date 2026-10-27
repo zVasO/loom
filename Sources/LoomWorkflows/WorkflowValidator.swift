@@ -110,6 +110,14 @@ public enum WorkflowValidator {
         if !workflow.nodes.contains(where: { $0.kind.type == .artifact }) {
             issues.append(.init(.warning, "No Artifact step: the run leaves no report."))
         }
+        if let orchestrator = workflow.orchestrator {
+            if let expert = orchestrator.expertID, !expertIDs.contains(expert) {
+                issues.append(.init(.error, "The orchestrator's expert was deleted."))
+            }
+            if orchestrator.interventionLimit == 0 {
+                issues.append(.init(.warning, "The orchestrator has no intervention: it can only read and comment."))
+            }
+        }
         return issues
     }
 

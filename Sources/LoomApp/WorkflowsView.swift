@@ -47,9 +47,16 @@ struct WorkflowsView: View {
     }
 
     /// What the editor repaints when a watched run moves.
-    private var watchedRunState: RunState? {
-        if case .run(let id) = workflows.detail { return workflows.run(id)?.state }
-        return nil
+    /// What the editor paints of a run: its steps, and what the orchestrator did.
+    private struct WatchedRun: Equatable {
+        var state: RunState
+        var messages: Int
+        var holding: Bool
+    }
+
+    private var watchedRunState: WatchedRun? {
+        guard case .run(let id) = workflows.detail, let run = workflows.run(id) else { return nil }
+        return WatchedRun(state: run.state, messages: run.messages.count, holding: workflows.holding.contains(id))
     }
 
     // MARK: Sidebar
@@ -501,9 +508,19 @@ private struct RunHeader: View {
                 Text(subtitle).font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText).lineLimit(2)
             }
             Spacer()
+            if workflows.holding.contains(run.id) {
+                Text("Waiting for the orchestrator")
+                    .font(.system(size: 11, weight: .medium)).foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+            }
             if run.status.isActive {
                 ProgressView().controlSize(.small)
                 GhostButton("Stop", systemImage: "stop.fill") { model.stopWorkflowRun(run.id) }
+            }
+            if let raw = run.orchestratorSessionID, let uuid = UUID(uuidString: raw) {
+                GhostButton("Orchestrator", systemImage: "person.wave.2") {
+                    workflows.sessionToOpen = SessionID(uuid)
+                }
+                .help("Open the run's orchestrator in Sessions: talk to it there")
             }
             if run.artifactPath != nil {
                 if workflows.detail == .report(run.id) {
@@ -541,6 +558,9 @@ private struct RunHeader: View {
             parts.append("\(seconds / 60) min \(seconds % 60) s")
         }
         if run.costUSD > 0 { parts.append(String(format: "%.2f $", run.costUSD)) }
+        if run.workflow.orchestrator != nil, run.interventions > 0 {
+            parts.append("\(run.interventions) intervention(s) of the orchestrator")
+        }
         if let error = run.error { parts.append(error) }
         return parts.joined(separator: " · ")
     }

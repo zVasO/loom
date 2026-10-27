@@ -34,6 +34,20 @@ struct CLIParseTests {
         #expect(archived.archived)
     }
 
+    @Test("workflow verbs (ADR-0018): the tool by its short name, JSON or its one obvious value")
+    func verbesWorkflow() throws {
+        #expect(try CLI.parse(["workflow", "get"]).0 == .workflow(.workflowGet, .object([:])))
+        #expect(try CLI.parse(["workflow", "step_read", "php"]).0
+                == .workflow(.workflowStepRead, .object(["step": .string("php")])))
+        #expect(try CLI.parse(["workflow", "message", "blocked", "on", "the", "schema"]).0
+                == .workflow(.workflowMessage, .object(["text": .string("blocked on the schema")])))
+        #expect(try CLI.parse(["workflow", "loom_workflow_step_rerun", #"{"step":"php","instructions":"x"}"#]).0
+                == .workflow(.workflowStepRerun, .object(["step": .string("php"), "instructions": .string("x")])))
+        #expect(throws: CLI.ParseError.self) { try CLI.parse(["workflow", "step_ask", "php"]) }
+        #expect(throws: CLI.ParseError.self) { try CLI.parse(["workflow", "navigate"]) }
+        #expect(throws: CLI.ParseError.self) { try CLI.parse(["workflow"]) }
+    }
+
     @Test("browser verbs: the tool by its short name, JSON or its one obvious value")
     func verbesNavigateur() throws {
         #expect(try CLI.parse(["browser", "navigate", "localhost:5173"]).0

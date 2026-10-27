@@ -176,6 +176,14 @@ _Avoid_ : exécution (dans le code), job
 **Passe** :
 Un tour du corps d'une boucle ; « 3 passes » = la première et deux relances.
 
+**Orchestrateur** :
+La session visible qui pilote un run (ADR-0018) : elle reçoit le résultat de chaque étape, leur pose des questions, en relance, en saute, arrête le run. Une par run, rangée sous Sessions › Workflows.
+_Avoid_ : agent chef, superviseur, manager
+
+**Intervention** :
+Ce que l'orchestrateur fait à une étape, et qui entame son budget : une question, une relance, un saut.
+_Avoid_ : commande, action (seul)
+
 **Artefact** :
 Le rapport HTML qu'un run écrit, dans un thème de Loom.
 _Avoid_ : export, document (seul)

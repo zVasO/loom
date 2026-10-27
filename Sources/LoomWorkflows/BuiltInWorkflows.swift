@@ -157,8 +157,22 @@ public enum BuiltInWorkflows {
         edges += [WorkflowEdge(from: "coherence", to: "loop"), WorkflowEdge(from: "loop", to: "report")]
         return Workflow(id: prReviewID, name: "PR review — 3 passes",
                         summary: "Ticket, PR et repo lus, intentions notées, quatre experts en parallèle, cohérence vérifiée jusqu'à trois passes, rapport final.",
-                        tags: ["review", "pr"], color: "#E22C22", nodes: nodes, edges: edges)
+                        tags: ["review", "pr"], color: "#E22C22", nodes: nodes, edges: edges,
+                        orchestrator: prReviewOrchestrator)
     }
+
+    /// The lead reviewer conducts the review (ADR-0018): it watches each
+    /// expert's answer and steers before the report.
+    public static let prReviewOrchestrator = OrchestratorConfig(
+        expertID: ExpertID.lead, instructions: """
+        This run reviews PR #{{pr.number}} — {{pr.title}}.
+        - After the intentions step, check they match the PR and the ticket; ask the analyst when something is unclear.
+        - After each expert, check its findings are anchored (path and line) and in its domain. A vague or \
+        off-domain answer: ask it one precise question, or rerun it with precise instructions.
+        - Before the report, read the consolidated review: every blocking finding must hold. Rerun `coherence` \
+        if one does not, then proceed.
+        - Keep the person informed in a few lines: what you checked, what you changed.
+        """, maxInterventions: 10, maxRerunsPerStep: 1, reviewBeforeArtifact: true)
 
     public static let connectors: [Connector] = [Connector.atlassianRemote(), Connector.atlassianStdio()]
 }

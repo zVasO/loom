@@ -1814,10 +1814,22 @@ struct SessionsView: View {
     /// projects — a choice, not a rule: off, they sit with their project.
     @AppStorage("loom.sessions.groupReviews") private var groupReviews = true
     @AppStorage("loom.sessions.reviewsFolded") private var reviewsFolded = false
+    /// The sessions of workflow runs (ADR-0018) filed under WORKFLOWS, one
+    /// group per run, its orchestrator first — off, they sit with their project.
+    @AppStorage("loom.sessions.groupWorkflows") private var groupWorkflows = true
+    @AppStorage("loom.sessions.workflowsFolded") private var workflowsFolded = false
 
     /// A sidebar group's identity: its fold state and the drag confinement.
     private static func groupKey(_ projectID: ProjectID?, review: Bool = false) -> String {
         (review ? "review:" : "project:") + (projectID?.rawValue.uuidString ?? "none")
+    }
+
+    /// A run's cards, for the WORKFLOWS section.
+    private struct WorkflowGroup: Identifiable {
+        let id: UUID
+        let title: String
+        let isActive: Bool
+        let items: [AppModel.SessionItem]
     }
 
     /// The project's review cards, for the CODE REVIEW section.
@@ -2047,15 +2059,22 @@ struct SessionsView: View {
                 // Filed apart only when the user wants it; a terminal follows
                 // its parent session wherever that one is shown.
                 let reviewIDs = groupReviews ? model.codeReviewSessionIDs : []
+                let runGroups = groupWorkflows ? model.workflows.sessionGroups : []
+                let workflowIDs = Set(runGroups.flatMap { [$0.orchestrator].compactMap { $0 } + $0.steps })
+                let isWorkflow = { (item: AppModel.SessionItem) -> Bool in
+                    workflowIDs.contains(item.id) || item.parentID.map(workflowIDs.contains) == true
+                }
+                // A workflow's session is filed under WORKFLOWS, even one on a PR.
                 let isReview = { (item: AppModel.SessionItem) -> Bool in
-                    reviewIDs.contains(item.id) || item.parentID.map(reviewIDs.contains) == true
+                    !isWorkflow(item)
+                        && (reviewIDs.contains(item.id) || item.parentID.map(reviewIDs.contains) == true)
                 }
                 let createdAt = Dictionary(model.allRecords.map { ($0.id, $0.createdAt) }) { first, _ in first }
                 let byProject = Dictionary(uniqueKeysWithValues: model.projects.map {
                     ($0.id, stackItems(for: $0.id, dormant: dormant, createdAt: createdAt))
                 })
                 ForEach(model.projects, id: \.id) { project in
-                    let items = (byProject[project.id] ?? []).filter { !isReview($0) }
+                    let items = (byProject[project.id] ?? []).filter { !isReview($0) && !isWorkflow($0) }
                     if !items.isEmpty {
                         group(project.name.uppercased(), projectID: project.id,
                               key: Self.groupKey(project.id)) {
@@ -2063,7 +2082,8 @@ struct SessionsView: View {
                         }
                     }
                 }
-                let orphans = stackItems(for: nil, dormant: dormant, createdAt: createdAt)
+                let allOrphans = stackItems(for: nil, dormant: dormant, createdAt: createdAt)
+                let orphans = allOrphans.filter { !isWorkflow($0) }
                 if !orphans.isEmpty {
                     group("NO PROJECT", projectID: nil, key: Self.groupKey(nil)) {
                         projectStacks(items: orphans, group: Self.groupKey(nil))
@@ -2075,6 +2095,11 @@ struct SessionsView: View {
                 }
                 if !reviewGroups.isEmpty {
                     codeReviewSection(reviewGroups)
+                }
+                let workflowItems = (byProject.values.flatMap { $0 } + allOrphans).filter(isWorkflow)
+                let workflowGroups = Self.workflowGroups(runGroups, items: workflowItems)
+                if !workflowGroups.isEmpty {
+                    workflowsSection(workflowGroups)
                 }
             }
             .padding(12)
@@ -2421,6 +2446,73 @@ struct SessionsView: View {
             .padding(.horizontal, 2)
             if !collapsed {
                 content()
+            }
+        }
+    }
+
+    /// Each run's cards, in its order: the orchestrator, then the steps — a
+    /// terminal with the session it belongs to. Runs with nothing to show
+    /// are left out.
+    private static func workflowGroups(_ runs: [WorkflowsModel.SessionGroup],
+                                       items: [AppModel.SessionItem]) -> [WorkflowGroup] {
+        let byID = Dictionary(items.map { ($0.id, $0) }) { first, _ in first }
+        let byParent = Dictionary(grouping: items.filter { $0.parentID != nil }, by: \.parentID)
+        var placed = Set<SessionID>()
+        return runs.compactMap { run -> WorkflowGroup? in
+            var cards: [AppModel.SessionItem] = []
+            for id in [run.orchestrator].compactMap({ $0 }) + run.steps {
+                guard let item = byID[id], placed.insert(id).inserted else { continue }
+                cards.append(item)
+                cards += byParent[id] ?? []
+            }
+            return cards.isEmpty ? nil : WorkflowGroup(id: run.id, title: run.title, isActive: run.isActive,
+                                                       items: cards)
+        }
+    }
+
+    /// The sessions of workflow runs, below a separator: one fold for the
+    /// section, one group per run.
+    private func workflowsSection(_ groups: [WorkflowGroup]) -> some View {
+        let count = groups.reduce(0) { $0 + $1.items.filter { !$0.isShell }.count }
+        return VStack(alignment: .leading, spacing: 10) {
+            Divider().overlay(DefaultTheme.cardBorder)
+                .padding(.top, 4)
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { workflowsFolded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .rotationEffect(.degrees(workflowsFolded ? -90 : 0))
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("WORKFLOWS")
+                        .font(.system(size: 10, weight: .semibold))
+                        .kerning(0.8)
+                    Text("\(count)")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(DefaultTheme.surfaceRaised, in: Capsule())
+                    Spacer()
+                }
+                .foregroundStyle(DefaultTheme.groupHeader)
+                .contentShape(Rectangle())
+                .hoverBrightness(0.2)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 2)
+            .help("The orchestrators and visible steps of workflow runs")
+            .contextMenu {
+                Button("Show them with their projects") { groupWorkflows = false }
+            }
+            if !workflowsFolded {
+                ForEach(groups) { run in
+                    group((run.isActive ? "● " : "") + run.title.uppercased(), projectID: nil,
+                          key: "workflow:" + run.id.uuidString) {
+                        projectStacks(items: run.items, group: "workflow:" + run.id.uuidString)
+                    }
+                }
             }
         }
     }

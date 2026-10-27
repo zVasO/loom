@@ -115,9 +115,42 @@ struct APIProtocolTests {
             #expect(APIToolCatalog.spec(for: method).resultFormat == .content)
         }
         for method in APIMethod.allCases where !method.isBrowser {
-            #expect(method.allowsGlobalScope)
+            #expect(method.allowsGlobalScope == !method.isWorkflow)
             #expect(APIToolCatalog.spec(for: method).resultFormat == .json)
         }
+    }
+
+    @Test("a workflow run's methods: its session's token only, each for its part (ADR-0018)")
+    func methodesDeWorkflow() {
+        let workflow = APIMethod.allCases.filter(\.isWorkflow)
+        #expect(workflow.count == 8)
+        for method in workflow {
+            #expect(!method.allowsGlobalScope, "\(method.rawValue) has no run under the global token")
+            #expect(!method.requiresGlobalScope)
+            #expect(APIToolCatalog.spec(for: method).preapprovable)
+            #expect(APIWorkflowRole.orchestrator.allows(method) == (method != .workflowMessage))
+            #expect(APIWorkflowRole.step.allows(method) == (method == .workflowMessage))
+        }
+        #expect(!APIWorkflowRole.orchestrator.allows(.sessionGet), "a role only speaks of workflow methods")
+        #expect(APIMethod.workflowStepAsk.appDeadline == .seconds(600))
+        #expect(APIWorkflowRole(environment: ["LOOM_WORKFLOW_ROLE": "step"]) == .step)
+        #expect(APIWorkflowRole(environment: ["LOOM_WORKFLOW_ROLE": "boss"]) == nil)
+        #expect(APIWorkflowRole(environment: [:]) == nil)
+    }
+
+    @Test("the workflow tools are listed for a run's sessions only, each its own")
+    func catalogueDeWorkflow() {
+        #expect(!APIToolCatalog.all.contains { $0.method.isWorkflow }, "an ordinary session lists none")
+        #expect(!APIToolCatalog.tools(browser: true).contains { $0.method.isWorkflow })
+        let orchestrator = APIToolCatalog.tools(browser: false, workflow: .orchestrator).map(\.name)
+        #expect(orchestrator.contains("loom_workflow_step_ask"))
+        #expect(!orchestrator.contains("loom_workflow_message"))
+        #expect(APIToolCatalog.tools(browser: false, workflow: .step).filter { $0.method.isWorkflow }.map(\.name)
+                == ["loom_workflow_message"])
+        #expect(APIToolCatalog.preapprovedRules(browser: false, workflow: .orchestrator)
+                .contains("mcp__loom__loom_workflow_stop"))
+        #expect(APIToolCatalog.spec(named: "loom_workflow_get")?.method == .workflowGet)
+        #expect(APIToolCatalog.markdown().contains("## `workflow.step.rerun`"))
     }
 
     @Test("browser tools off: none listed, none pre-approved, nothing said about them")
@@ -219,9 +252,14 @@ struct APIProtocolTests {
 
     @Test("the tool catalog covers every method, with MCP-legal unique names")
     func catalogueDesOutils() {
-        let names = APIToolCatalog.all(engine: .chromium).map(\.name)
+        let names = (APIToolCatalog.all(engine: .chromium) + APIToolCatalog.workflowTools).map(\.name)
         #expect(Set(names).count == names.count, "one name per tool")
         for method in APIMethod.allCases {
+            if method.isWorkflow {
+                // Listed for a workflow run's sessions only (ADR-0018).
+                #expect(APIToolCatalog.workflowTools.contains { $0.method == method }, "\(method.rawValue) has a tool")
+                continue
+            }
             #expect(APIToolCatalog.all(engine: .chromium).contains { $0.method == method }, "\(method.rawValue) has a tool")
             if method != .browserRunCode {
                 #expect(APIToolCatalog.all.contains { $0.method == method }, "\(method.rawValue) is on WebKit too")
@@ -268,7 +306,9 @@ struct APIProtocolTests {
         let deadline = try #require(APIMethod.browserRunCode.appDeadline)
         #expect(deadline == .seconds(60))
         #expect(APIMethod.browserRunCode.clientTimeout == .seconds(65))
-        for method in APIMethod.allCases where method != .browserRunCode {
+        // The browser's queue is serial: no other browser method holds it longer. (A
+        // workflow's follow-up question waits on a whole claude turn, not on the browser.)
+        for method in APIMethod.allCases where method.isBrowser && method != .browserRunCode {
             #expect((method.appDeadline ?? .zero) < deadline, "\(method.rawValue)")
         }
         // loom docs: the reference names it, as Chromium's.

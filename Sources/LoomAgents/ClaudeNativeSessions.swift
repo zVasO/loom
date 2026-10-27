@@ -94,4 +94,50 @@ public enum ClaudeNativeSessions {
         }
         return usage(fromJSONL: text)
     }
+
+    // MARK: - What the agent said (workflow orchestrator, ADR-0018)
+
+    /// The text of the assistant's messages in a JSONL slice, oldest first:
+    /// one string per text block, tool calls and thinking left out.
+    public static func assistantTexts(fromJSONL text: String) -> [String] {
+        text.split(separator: "\n").compactMap { line -> String? in
+            guard let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object["type"] as? String == "assistant",
+                  let message = object["message"] as? [String: Any] else { return nil }
+            if let content = message["content"] as? String { return content }
+            let blocks = (message["content"] as? [[String: Any]]) ?? []
+            let texts = blocks.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }
+            let joined = texts.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            return joined.isEmpty ? nil : joined
+        }
+    }
+
+    /// The transcript's size now: a later `assistantTexts(for:after:)` reads
+    /// only what was written since.
+    public static func size(for id: SessionID, projectsDirectory: URL = defaultProjectsDirectory) -> UInt64 {
+        guard let file = path(for: id, projectsDirectory: projectsDirectory),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: file.path) else { return 0 }
+        return (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+    }
+
+    /// The assistant's messages written after `offset` (bytes), at most
+    /// `maxBytes` of the transcript read — the tail when it is longer.
+    public static func assistantTexts(for id: SessionID, after offset: UInt64 = 0, maxBytes: Int = 262_144,
+                                      projectsDirectory: URL = defaultProjectsDirectory) -> [String] {
+        guard let file = path(for: id, projectsDirectory: projectsDirectory),
+              let handle = try? FileHandle(forReadingFrom: file) else { return [] }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        guard size > offset else { return [] }
+        let start = max(offset, size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0)
+        try? handle.seek(toOffset: start)
+        guard let data = try? handle.readToEnd() else { return [] }
+        var text = String(decoding: data, as: UTF8.self)
+        // A tail cut mid-line: its first line is a fragment.
+        if start > offset, let newline = text.firstIndex(of: "\n") {
+            text = String(text[text.index(after: newline)...])
+        }
+        return assistantTexts(fromJSONL: text)
+    }
 }

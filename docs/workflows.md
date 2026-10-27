@@ -54,6 +54,33 @@ Un expert = des **instructions** ajoutées au prompt système de claude (`--appe
 - **Depuis l'onglet d'une PR** : le menu **Workflow** lance un workflow sur cette PR, ou rouvre un de ses runs.
 - **Planifié** : dans Réglages › Scheduled reviews, « Review with » choisit un workflow plutôt que la review intégrée ; il tourne sur chaque PR choisie.
 
+## L'orchestrateur
+
+Un workflow peut avoir un **orchestrateur** ([ADR-0018](adr/0018-orchestrateur-de-workflow.md)) : une session claude visible, lancée avec chaque run, qui le pilote. Il se règle dans l'éditeur, panneau de droite, quand aucune étape n'est sélectionnée :
+- son expert ;
+- son modèle ;
+- ce qu'il doit surveiller ;
+- son budget d'interventions ;
+- les relances permises par étape ;
+- si le rapport attend son feu vert.
+
+- **Où le trouver** : Sessions › **Workflows**, un groupe par run (« PR review — 3 passes · PR #482 »), l'orchestrateur en tête puis les étapes visibles. Ou bien le bouton **Orchestrator** en haut d'un run. On lui parle comme à toute session. Il reste ouvert après le run.
+- **Ce qu'il reçoit** : Loom lui écrit quand une étape finit (deux lignes), échoue, quand une boucle repart, quand une étape visible lui écrit, et à la fin du run. Ces messages arrivent seulement quand il est au repos, jamais au milieu de sa réponse.
+- **Ce qu'il peut faire** (outils `loom_workflow_*`) :
+  - lire l'état du run et la réponse d'une étape ;
+  - **poser une question** à une étape : une étape visible la reçoit dans sa session, une étape headless reprend sa conversation (`claude -p --resume`) avec tout ce qu'elle avait lu ;
+  - **relancer** une étape avec des consignes : elle repart avec sa réponse précédente, et les étapes après elle aussi ;
+  - **sauter** une étape qui n'a pas tourné ;
+  - **arrêter** le run.
+- **Les points d'arrêt** : avant le rapport, si c'est coché, et avant de finir sur un échec. Le run attend une relance, un saut, `loom_workflow_proceed`, ou la fin de son tour, 15 minutes au plus. L'en-tête du run affiche alors « Waiting for the orchestrator ».
+- **Les limites** :
+  - questions, relances et sauts entament le budget du run ;
+  - une étape ne se relance que tant qu'elle et la suite ne tournent pas, et dans sa limite de relances ;
+  - l'orchestrateur n'atteint que son run, et seulement avec le jeton de sa session.
+- **Sur le graphe d'un run** : chaque étape porte ce qu'il en a fait (« rerun », « asked », « skipped »).
+
+Le built-in « PR review — 3 passes » a pour orchestrateur le lead reviewer. Une bibliothèque créée avant lui le reçoit en ajoutant de nouveau le built-in (`+`).
+
 ## Le rapport
 
 Un fichier HTML autonome dans le dossier du run, animé (apparitions, compteurs, frise ; `prefers-reduced-motion` respecté). Le gabarit « Rapport de review de PR » cherche les champs par leur nom, quel que soit le nom des étapes : `intent`, `readingOrder`, `ticketCriteria`, `risks`, `questions`, et la réponse consolidée qui porte `verdict` et `findings` (avec `summary`, `stable`, `dropped`, `changes`). Les réponses avec `findings` mais sans verdict sont les experts. Le gabarit « générique » montre chaque étape.

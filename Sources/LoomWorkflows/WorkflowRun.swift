@@ -29,10 +29,29 @@ public struct WorkflowRun: Codable, Identifiable, Equatable, Sendable {
     public var artifactPath: String?
     /// Why the run stopped, when it did not succeed.
     public var error: String?
+    /// The orchestrator's Loom session (ADR-0018), once launched.
+    public var orchestratorSessionID: String?
+    /// Questions, reruns and skips the orchestrator spent.
+    public var interventions: Int
+    /// What the orchestrator and the steps said to each other, oldest first.
+    public var messages: [RunMessage]
+    /// Where the agents ran (the PR's worktree, the project): a headless
+    /// step's conversation is resumed from there.
+    public var workingDirectory: String?
+    /// The orchestrator's appended system prompt and model, as launched:
+    /// a resumed session gets them again.
+    public var orchestratorInstructions: String?
+    public var orchestratorModel: String?
+    /// Every visible step's session this run launched, every pass and rerun
+    /// included: session id (lowercased) → step id.
+    public var stepSessions: [String: String]
 
     public init(id: UUID = UUID(), workflow: Workflow, experts: [Expert], connectors: [Connector],
                 inputs: RunInputs, state: RunState, status: Status = .running, startedAt: Date = Date(),
-                finishedAt: Date? = nil, costUSD: Double = 0, artifactPath: String? = nil, error: String? = nil) {
+                finishedAt: Date? = nil, costUSD: Double = 0, artifactPath: String? = nil, error: String? = nil,
+                orchestratorSessionID: String? = nil, interventions: Int = 0, messages: [RunMessage] = [],
+                workingDirectory: String? = nil, orchestratorInstructions: String? = nil,
+                orchestratorModel: String? = nil, stepSessions: [String: String] = [:]) {
         self.id = id
         self.workflow = workflow
         self.experts = experts
@@ -45,6 +64,59 @@ public struct WorkflowRun: Codable, Identifiable, Equatable, Sendable {
         self.costUSD = costUSD
         self.artifactPath = artifactPath
         self.error = error
+        self.orchestratorSessionID = orchestratorSessionID
+        self.interventions = interventions
+        self.messages = messages
+        self.workingDirectory = workingDirectory
+        self.orchestratorInstructions = orchestratorInstructions
+        self.orchestratorModel = orchestratorModel
+        self.stepSessions = stepSessions
+    }
+
+    /// Runs saved before the orchestrator have none of its keys.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try c.decode(UUID.self, forKey: .id),
+                  workflow: try c.decode(Workflow.self, forKey: .workflow),
+                  experts: try c.decodeIfPresent([Expert].self, forKey: .experts) ?? [],
+                  connectors: try c.decodeIfPresent([Connector].self, forKey: .connectors) ?? [],
+                  inputs: try c.decodeIfPresent(RunInputs.self, forKey: .inputs) ?? RunInputs(),
+                  state: try c.decodeIfPresent(RunState.self, forKey: .state) ?? RunState(),
+                  status: try c.decodeIfPresent(Status.self, forKey: .status) ?? .interrupted,
+                  startedAt: try c.decodeIfPresent(Date.self, forKey: .startedAt) ?? Date(),
+                  finishedAt: try c.decodeIfPresent(Date.self, forKey: .finishedAt),
+                  costUSD: try c.decodeIfPresent(Double.self, forKey: .costUSD) ?? 0,
+                  artifactPath: try c.decodeIfPresent(String.self, forKey: .artifactPath),
+                  error: try c.decodeIfPresent(String.self, forKey: .error),
+                  orchestratorSessionID: try c.decodeIfPresent(String.self, forKey: .orchestratorSessionID),
+                  interventions: try c.decodeIfPresent(Int.self, forKey: .interventions) ?? 0,
+                  messages: try c.decodeIfPresent([RunMessage].self, forKey: .messages) ?? [],
+                  workingDirectory: try c.decodeIfPresent(String.self, forKey: .workingDirectory),
+                  orchestratorInstructions: try c.decodeIfPresent(String.self, forKey: .orchestratorInstructions),
+                  orchestratorModel: try c.decodeIfPresent(String.self, forKey: .orchestratorModel),
+                  stepSessions: try c.decodeIfPresent([String: String].self, forKey: .stepSessions) ?? [:])
+    }
+
+    /// The step a Loom session runs in this run, if any.
+    public func step(ofSession session: String) -> String? {
+        let wanted = session.lowercased()
+        return stepSessions[wanted] ?? state.nodes.first { $0.value.sessionID?.lowercased() == wanted }?.key
+    }
+
+    /// The steps' sessions in the workflow's order, oldest pass first.
+    public var stepSessionIDs: [String] {
+        let order = Dictionary(workflow.nodes.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var ids = Set(stepSessions.keys)
+        for record in state.nodes.values { if let id = record.sessionID?.lowercased() { ids.insert(id) } }
+        return ids.sorted { a, b in
+            let (sa, sb) = (step(ofSession: a) ?? "", step(ofSession: b) ?? "")
+            return (order[sa] ?? .max, a) < (order[sb] ?? .max, b)
+        }
+    }
+
+    /// The interventions left to the orchestrator.
+    public var interventionsLeft: Int {
+        max(0, (workflow.orchestrator?.interventionLimit ?? 0) - interventions)
     }
 
     /// One line for the runs list: "PR #42 · AB-12".
@@ -54,6 +126,40 @@ public struct WorkflowRun: Codable, Identifiable, Equatable, Sendable {
         if let key = inputs.jiraKey, !key.isEmpty { parts.append(key) }
         return parts.isEmpty ? "Manual run" : parts.joined(separator: " · ")
     }
+}
+
+/// One line of the conversation between the orchestrator and the steps.
+public struct RunMessage: Codable, Equatable, Sendable, Identifiable {
+    public enum Kind: String, Codable, Sendable {
+        /// The orchestrator asked a step; the step answered.
+        case question, answer
+        /// A step wrote to the orchestrator.
+        case fromStep
+        /// The orchestrator ran a step again, skipped one, stopped the run, let the report go.
+        case rerun, skip, stop, proceed
+        /// What Loom told the orchestrator.
+        case event
+    }
+
+    public var id: UUID
+    public var kind: Kind
+    /// A step id, "orchestrator" or "loom".
+    public var from: String
+    public var to: String
+    public var text: String
+    public var date: Date
+
+    public init(id: UUID = UUID(), kind: Kind, from: String, to: String, text: String, date: Date = Date()) {
+        self.id = id
+        self.kind = kind
+        self.from = from
+        self.to = to
+        self.text = text
+        self.date = date
+    }
+
+    public static let orchestrator = "orchestrator"
+    public static let loom = "loom"
 }
 
 /// What a run starts from.

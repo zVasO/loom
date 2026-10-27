@@ -68,7 +68,11 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   ou en session visible ; estimation de coût avant lancement ; runs suivis en direct
   et conservés. Lancés à la main, depuis l'onglet d'une PR ou par une review
   planifiée. Built-in : « PR review — 3 passes ». Le rapport, animé, porte un thème
-  de Loom (thème HomeServe prêt dans `docs/themes/`). Guide : [`docs/workflows.md`](docs/workflows.md).
+  de Loom (thème HomeServe prêt dans `docs/themes/`). Un run peut avoir un
+  **orchestrateur** (ADR-0018) : une session visible, sous Sessions › Workflows, qui
+  reçoit chaque résultat, questionne une étape (même headless, en reprenant sa
+  conversation), la relance avec des consignes, la saute ou arrête le run, dans un
+  budget. Guide : [`docs/workflows.md`](docs/workflows.md).
 - **Instructions de session** : un texte ajouté au prompt système de chaque session
   claude (`--append-system-prompt`, lancement et reprise), éditable dans les
   Réglages — par défaut, tenir le titre et les badges de la session Loom à jour

@@ -47,3 +47,42 @@ struct ClaudeNativeSessionsIndexTests {
         #expect(ClaudeNativeSessions.index(projectsDirectory: missing).isEmpty)
     }
 }
+
+// What a visible step said, read back for its workflow's orchestrator (ADR-0018).
+@Suite("ClaudeNativeSessions — what the assistant said")
+struct ClaudeNativeSessionsAssistantTests {
+
+    private static let lines = [
+        #"{"type":"user","message":{"role":"user","content":"hello"}}"#,
+        #"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"First answer."}]}}"#,
+        #"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{}}]}}"#,
+        "not json",
+        #"{"type":"assistant","message":{"content":"Plain string."}}"#,
+    ]
+
+    @Test("only the assistant's text, in order: no thinking, no tool call, no noise")
+    func textes() {
+        #expect(ClaudeNativeSessions.assistantTexts(fromJSONL: Self.lines.joined(separator: "\n"))
+                == ["First answer.", "Plain string."])
+    }
+
+    @Test("after an offset: only what was written since")
+    func depuis() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("loom-native-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let id = SessionID()
+        let dir = root.appendingPathComponent("-Users-x")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent(id.rawValue.uuidString.lowercased() + ".jsonl")
+        try (Self.lines[1] + "\n").write(to: file, atomically: true, encoding: .utf8)
+        let offset = ClaudeNativeSessions.size(for: id, projectsDirectory: root)
+        #expect(offset > 0)
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((Self.lines[4] + "\n").utf8))
+        try handle.close()
+        #expect(ClaudeNativeSessions.assistantTexts(for: id, after: offset, projectsDirectory: root) == ["Plain string."])
+        #expect(ClaudeNativeSessions.assistantTexts(for: id, projectsDirectory: root).count == 2)
+        #expect(ClaudeNativeSessions.assistantTexts(for: SessionID(), projectsDirectory: root).isEmpty)
+    }
+}

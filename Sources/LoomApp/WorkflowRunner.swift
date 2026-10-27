@@ -24,7 +24,8 @@ extension AppModel {
     }
 
     enum StepOutcome: Sendable {
-        case done(output: JSONValue?, text: String, cost: Double?, artifact: String? = nil, session: String? = nil)
+        case done(output: JSONValue?, text: String, cost: Double?, artifact: String? = nil, session: String? = nil,
+                  conversation: String? = nil)
         case failed(String)
     }
 
@@ -78,7 +79,7 @@ extension AppModel {
         workflows.runTasks[id]?.cancel()
     }
 
-    private func updateRun(_ id: UUID, _ change: (inout WorkflowRun) -> Void) {
+    func updateRun(_ id: UUID, _ change: (inout WorkflowRun) -> Void) {
         guard var run = workflows.run(id) else { return }
         change(&run)
         workflows.record(run)
@@ -86,8 +87,17 @@ extension AppModel {
 
     // MARK: The loop
 
+    /// What a run's loop reads as "the orchestrator asked something".
+    private static let wakeSignal = "\u{0}wake"
+
     private func executeWorkflowRun(_ runID: UUID) async {
-        defer { workflows.runTasks[runID] = nil }
+        defer {
+            workflows.runTasks[runID] = nil
+            workflows.holding.remove(runID)
+            workflows.wakes.remove(runID)
+            workflows.stopRequests[runID] = nil
+            workflows.proceedRequests.remove(runID)
+        }
         guard let initial = workflows.run(runID) else { return }
         let planner = WorkflowPlanner(initial.workflow)
         let prepared: PreparedRun
@@ -97,10 +107,22 @@ extension AppModel {
             finishRun(runID, status: .failed, error: Self.ghErrorText(error))
             return
         }
+        updateRun(runID) { $0.workingDirectory = prepared.workdir.path }
+        let orchestrator = initial.workflow.orchestrator
+        if orchestrator != nil { await launchOrchestrator(runID, prepared: prepared) }
         let limit = workflows.maxConcurrent
+        // How many times the orchestrator had rerun or skipped a step when
+        // the run last waited for it: it waits again only after one more.
+        var heldAt: Int?
+        var stopReason: String?
         await withTaskGroup(of: (String, StepOutcome).self) { group in
             var running = Set<String>()
+            var wakerArmed = false
             while !Task.isCancelled {
+                if let reason = workflows.stopRequests.removeValue(forKey: runID) {
+                    stopReason = reason
+                    break
+                }
                 guard var state = workflows.run(runID)?.state else { break }
                 // Start, conditions and loops decide at once, on what is known.
                 var moved = true
@@ -120,7 +142,9 @@ extension AppModel {
                             moved = true
                         case .loop:
                             if planner.resolveLoop(id, in: &state, context: context) {
-                                workflows.log("\(node.title): pass \((state.iterations[id] ?? 0) + 1)", run: runID)
+                                let pass = (state.iterations[id] ?? 0) + 1
+                                workflows.log("\(node.title): pass \(pass)", run: runID)
+                                notifyOrchestrator(runID, [.newPass(loop: id, pass: pass)])
                             }
                             moved = true
                         default:
@@ -128,8 +152,14 @@ extension AppModel {
                         }
                     }
                 }
+                let steered = workflows.run(runID)?.messages.filter { $0.kind == .rerun || $0.kind == .skip }.count ?? 0
+                let mayHold = orchestrator != nil && heldAt != steered && orchestratorIsAlive(runID)
+                // The report waits for the orchestrator's go-ahead.
+                let holdReport = mayHold && orchestrator?.reviewBeforeArtifact == true
+                    && planner.ready(state).contains { planner.workflow.node($0)?.kind.type == .artifact }
                 for id in planner.ready(state) where !running.contains(id) && running.count < limit {
                     guard let node = planner.workflow.node(id) else { continue }
+                    if holdReport, node.kind.type == .artifact { continue }
                     let context = TemplateRenderer.context(inputs: prepared.inputs, state: state,
                                                            planner: planner, for: id)
                     let pass = planner.pass(of: id, in: state)
@@ -143,15 +173,41 @@ extension AppModel {
                     }
                 }
                 updateRun(runID) { $0.state = state }
-                if running.isEmpty { break }
+                if running.isEmpty {
+                    let failed = state.nodes.first { $0.value.status == .failed }?.key
+                    if holdReport {
+                        heldAt = steered
+                        await holdForOrchestrator(runID, .beforeReport)
+                        continue
+                    }
+                    if mayHold, let failed {
+                        heldAt = steered
+                        await holdForOrchestrator(runID, .failure(step: failed))
+                        continue
+                    }
+                    break
+                }
+                if orchestrator != nil, !wakerArmed {
+                    wakerArmed = true
+                    group.addTask { [weak self] in
+                        await self?.awaitWake(runID)
+                        return (Self.wakeSignal, .failed(""))
+                    }
+                }
                 guard let next = await group.next() else { break }
                 let (id, outcome) = next
+                if id == Self.wakeSignal {
+                    wakerArmed = false
+                    continue
+                }
                 running.remove(id)
+                let pass = workflows.run(runID).map { planner.pass(of: id, in: $0.state) } ?? 1
                 updateRun(runID) { run in
                     switch outcome {
-                    case .done(let output, let text, let cost, let artifact, let session):
+                    case .done(let output, let text, let cost, let artifact, let session, let conversation):
                         planner.complete(id, output: output, text: text, costUSD: cost, in: &run.state)
                         if let session { run.state.nodes[id]?.sessionID = session }
+                        if let conversation { run.state.nodes[id]?.claudeSessionID = conversation }
                         run.costUSD += cost ?? 0
                         if let artifact { run.artifactPath = artifact }
                     case .failed(let message):
@@ -160,15 +216,25 @@ extension AppModel {
                 }
                 let title = planner.workflow.node(id)?.title ?? id
                 switch outcome {
-                case .done: workflows.log("\(title): done", run: runID)
-                case .failed(let message): workflows.log("\(title): failed — \(message)", run: runID)
+                case .done(_, let text, _, _, _, _):
+                    workflows.log("\(title): done", run: runID)
+                    if planner.workflow.node(id)?.kind.type != .artifact {
+                        notifyOrchestrator(runID, [.stepDone(id: id, title: title, pass: pass, summary: text)])
+                    }
+                case .failed(let message):
+                    workflows.log("\(title): failed — \(message)", run: runID)
+                    notifyOrchestrator(runID, [.stepFailed(id: id, title: title, error: message)])
                 }
             }
-            if Task.isCancelled { group.cancelAll() }
+            // The orchestrator's wake-up, and every step when the run stops.
+            group.cancelAll()
         }
         guard let final = workflows.run(runID) else { return }
         if Task.isCancelled {
             finishRun(runID, status: .cancelled, error: "Stopped.")
+        } else if let stopReason {
+            finishRun(runID, status: .cancelled,
+                      error: "Stopped by the orchestrator" + (stopReason.isEmpty ? "." : ": \(stopReason)"))
         } else if planner.succeeded(final.state) {
             finishRun(runID, status: .succeeded, error: nil)
         } else {
@@ -189,6 +255,7 @@ extension AppModel {
             }
         }
         workflows.log("Run \(status.rawValue)\(error.map { ": \($0)" } ?? "")", run: id)
+        notifyOrchestrator(id, [.finished(status: status.rawValue, error: error)])
         guard let run = workflows.run(id) else { return }
         let body: String
         switch status {
@@ -370,7 +437,7 @@ extension AppModel {
                                        appendSystemPrompt: "You read Jira tickets through MCP tools and report them faithfully.",
                                        wiring: wiring, allowedTools: [], model: workflows.defaultModel,
                                        workdir: nil, timeout: 300)
-        guard case .done(let output, _, let cost, _, _) = result else { return result }
+        guard case .done(let output, _, let cost, _, _, _) = result else { return result }
         var text = ""
         if let object = output?.objectValue {
             text = "# \(key) — \(object["summary"]?.plainText ?? "")\n"
@@ -385,7 +452,7 @@ extension AppModel {
     }
 
     /// The expert's instructions with the skills of the step and of the expert.
-    private func agentInstructions(expert: Expert?, skills: [String], workdir: URL) -> String {
+    func agentInstructions(expert: Expert?, skills: [String], workdir: URL) -> String {
         var parts: [String] = []
         if let prompt = expert?.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
             parts.append(prompt)
@@ -412,7 +479,13 @@ extension AppModel {
         if !wiring.missingSecrets.isEmpty {
             return .failed("Missing secret(s): " + wiring.missingSecrets.joined(separator: ", "))
         }
-        let rendered = TemplateRenderer.render(config.prompt, context: context).text
+        var rendered = TemplateRenderer.render(config.prompt, context: context).text
+        // A rerun asked by the orchestrator (ADR-0018): its instructions, and
+        // the answer they are about.
+        if let record = run.state.nodes[node.id], let extra = record.extraInstructions, !extra.isEmpty {
+            let previous = run.state.history[node.id]?.last.map(Self.readable)
+            rendered += OrchestratorPrompt.rerunAddendum(extra, previous: previous)
+        }
         let instructions = agentInstructions(expert: expert, skills: config.skills, workdir: prepared.workdir)
         let model = config.model ?? expert?.model ?? workflows.defaultModel
         let schema = OutputSchema.instructions(for: config.output)
@@ -432,11 +505,21 @@ extension AppModel {
             let title = "\(run.workflow.name) · \(node.title)" + (pass > 1 ? " · passe \(pass)" : "")
             var badges = ["workflow"]
             if let expert { badges.append("expert:" + expert.name.lowercased().replacingOccurrences(of: " ", with: "-")) }
+            let orchestrated = run.workflow.orchestrator != nil
+            let stepInstructions = orchestrated
+                ? [instructions, OrchestratorPrompt.stepRules].filter { !$0.isEmpty }.joined(separator: "\n\n")
+                : instructions
             guard let session = await launchWorkflowSession(directory: prepared.workdir, projectID: prepared.projectID,
                                                              title: title, badges: badges, prompt: prompt,
-                                                             instructions: instructions, untrusted: prepared.untrusted)
+                                                             instructions: stepInstructions,
+                                                             untrusted: prepared.untrusted,
+                                                             role: orchestrated ? .step : nil,
+                                                             model: config.model ?? expert?.model)
             else { return .failed(startupError ?? "The step's session could not start.") }
-            updateRun(run.id) { $0.state.nodes[node.id]?.sessionID = session.rawValue.uuidString }
+            updateRun(run.id) {
+                $0.state.nodes[node.id]?.sessionID = session.rawValue.uuidString
+                $0.stepSessions[session.rawValue.uuidString.lowercased()] = node.id
+            }
             let fields = config.output
             let outcome = await awaitSessionReport(session, file: file,
                                                    timeout: .seconds(max(1800, config.timeoutSeconds * 3)),
@@ -478,10 +561,10 @@ extension AppModel {
                 return .failed(String(describing: error))
             }
             cost += result.costUSD ?? 0
-            if fields.isEmpty { return .done(output: nil, text: result.text, cost: cost) }
+            if fields.isEmpty { return .done(output: nil, text: result.text, cost: cost, conversation: result.sessionID) }
             switch OutputSchema.parse(result.text, fields: fields) {
             case .success(let output):
-                return .done(output: output, text: Self.readable(output), cost: cost)
+                return .done(output: output, text: Self.readable(output), cost: cost, conversation: result.sessionID)
             case .failure(let error):
                 guard attempt == 0 else { return .failed("The answer did not fit its fields: \(error)") }
                 request.prompt = prompt + "\n\nYour previous answer could not be used: \(error) "

@@ -17,6 +17,7 @@ struct SettingsPage: View {
     @AppStorage(KeyboardPreferences.userDefaultsKey) private var optionAsMeta = false
     @AppStorage("loom.session.restoreOnLaunch") private var restoreOnLaunch = true
     @AppStorage("loom.sessions.groupReviews") private var groupReviews = true
+    @AppStorage("loom.sessions.groupWorkflows") private var groupWorkflows = true
     @AppStorage(ClaudeThemeSync.enabledKey) private var syncClaudeTheme = false
     @AppStorage("loom.shortcut.newSession") private var keyNewSession = "n"
     @AppStorage("loom.shortcut.newTab") private var keyNewTab = "t"
@@ -156,6 +157,15 @@ struct SettingsPage: View {
                 }
                 .toggleStyle(.switch)
                 Text("Sessions opened from the PRs tab, or wearing a PR badge, gather below the projects in their own foldable section, still grouped by project. Off, they stay with the rest of their project's sessions.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                Toggle(isOn: $groupWorkflows) {
+                    Text("File workflow sessions under Workflows")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                Text("A workflow run's orchestrator and its visible steps gather in their own foldable section, one group per run, the orchestrator first. Off, they stay with their project's sessions.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
             }

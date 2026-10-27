@@ -142,7 +142,73 @@ function RunRecord({ record, onOpenSession }) {
   );
 }
 
-export function Inspector({ workflow, node, state, readOnly, run, onChange, onDelete, onOpenSession }) {
+/** The run's conductor (ADR-0018): a session that follows the run, questions and steers its steps. */
+function OrchestratorPanel({ orchestrator, experts, disabled, run, onChange, onOpen }) {
+  const on = !!orchestrator;
+  const config = orchestrator || {};
+  const set = (patch) => onChange({ ...config, ...patch });
+  const whole = (value, max) => Math.max(0, Math.min(max, parseInt(value, 10) || 0));
+  return (
+    <section className="orchestrator">
+      <label className="check orchestrator-toggle">
+        <input type="checkbox" checked={on} disabled={disabled}
+          onChange={(e) => onChange(e.target.checked ? G.defaultOrchestrator() : null)} />
+        <span><b>Orchestrator</b></span>
+      </label>
+      <p className="muted small">
+        A session of its own, under Sessions › Workflows, that follows each run: it reads every answer, asks a
+        step a follow-up question, runs a step again with instructions, skips one or stops the run. You talk to it
+        there.
+      </p>
+      {run && run.orchestrator && (
+        <div className="run-record">
+          <div className="muted small">
+            {run.orchestrator.interventions} intervention(s){run.orchestrator.holding ? " · the run waits for it" : ""}
+          </div>
+          <button type="button" className="ghost" onClick={onOpen}>Open the orchestrator</button>
+        </div>
+      )}
+      {on && (
+        <>
+          <Field label="Expert" hint="Its instructions and model; the lead reviewer suits a review.">
+            <select value={config.expertID || ""} disabled={disabled}
+              onChange={(e) => set({ expertID: e.target.value || null })}>
+              <option value="">claude, as configured</option>
+              {experts.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Model" hint="Over the expert's; empty keeps it.">
+            <input value={config.model || ""} disabled={disabled} placeholder="opus, sonnet…"
+              onChange={(e) => set({ model: e.target.value.trim() || null })} />
+          </Field>
+          <Field label="What it should watch" hint="Added to Loom's rules for it. {{pr.title}} and the other run variables work.">
+            <textarea rows={6} value={config.instructions || ""} disabled={disabled}
+              placeholder="Check that the experts agree; rerun one whose answer is vague…"
+              onChange={(e) => set({ instructions: e.target.value })} />
+          </Field>
+          <div className="row">
+            <Field label="Interventions" hint="Questions, reruns and skips in a run.">
+              <input type="number" min={0} max={50} value={config.maxInterventions ?? 12} disabled={disabled}
+                onChange={(e) => set({ maxInterventions: whole(e.target.value, 50) })} />
+            </Field>
+            <Field label="Reruns per step">
+              <input type="number" min={0} max={5} value={config.maxRerunsPerStep ?? 2} disabled={disabled}
+                onChange={(e) => set({ maxRerunsPerStep: whole(e.target.value, 5) })} />
+            </Field>
+          </div>
+          <label className="check">
+            <input type="checkbox" checked={config.reviewBeforeArtifact !== false} disabled={disabled}
+              onChange={(e) => set({ reviewBeforeArtifact: e.target.checked })} />
+            <span>The report waits for its go-ahead</span>
+          </label>
+        </>
+      )}
+    </section>
+  );
+}
+
+export function Inspector({ workflow, node, state, readOnly, run, onChange, onDelete, onOpenSession,
+  onWorkflowChange, onOpenOrchestrator }) {
   if (!node) {
     return (
       <div className="inspector">
@@ -152,6 +218,9 @@ export function Inspector({ workflow, node, state, readOnly, run, onChange, onDe
           of one to the left of another: several links out run in parallel, several in wait for all.
           A Loop step runs earlier steps again, a few times at most.
         </p>
+        <OrchestratorPanel orchestrator={workflow.orchestrator || null} experts={state.experts || []}
+          disabled={!!readOnly} run={run} onOpen={onOpenOrchestrator}
+          onChange={(orchestrator) => onWorkflowChange && onWorkflowChange({ orchestrator })} />
         {state.issues && state.issues.length > 0 && (
           <div className="issues">
             {state.issues.map((issue) => (
