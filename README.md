@@ -60,6 +60,15 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   barre de verdict, commentaires sur les lignes du diff en commentaires en attente,
   verdict suggéré. L'humain relit, corrige, envoie. Une PR n'est revue à nouveau
   qu'après un push. Réglages › Scheduled reviews ; suivi dans la sidebar PR.
+- **Workflows** (ADR-0017) : des graphes d'étapes dessinés dans l'onglet Workflows
+  (éditeur React Flow embarqué) — départ, contexte (PR, ticket Jira via un connecteur
+  Atlassian, repo), agents confiés à des **experts** (instructions, modèle, skills,
+  connecteurs MCP, outils autorisés), conditions, boucles bornées, rapport final.
+  Étapes en parallèle, réponses JSON validées entre étapes, headless (`claude -p`)
+  ou en session visible ; estimation de coût avant lancement ; runs suivis en direct
+  et conservés. Lancés à la main, depuis l'onglet d'une PR ou par une review
+  planifiée. Built-in : « PR review — 3 passes ». Le rapport, animé, porte un thème
+  de Loom (thème HomeServe prêt dans `docs/themes/`). Guide : [`docs/workflows.md`](docs/workflows.md).
 - **Instructions de session** : un texte ajouté au prompt système de chaque session
   claude (`--append-system-prompt`, lancement et reprise), éditable dans les
   Réglages — par défaut, tenir le titre et les badges de la session Loom à jour

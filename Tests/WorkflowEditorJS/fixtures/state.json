@@ -1,0 +1,35 @@
+{
+  "workflow": {
+    "id": "0B1E5D3A-2C4F-4A6B-8D9E-7F1A2B3C4D01", "name": "PR review — 3 passes", "summary": "Three passes",
+    "tags": ["review"], "color": "#E22C22",
+    "nodes": [
+      {"id": "start", "title": "Démarrage", "type": "start", "position": {"x": 0, "y": 260}, "config": {"triggers": ["manual", "pullRequest"]}},
+      {"id": "pr", "title": "La PR", "type": "context", "position": {"x": 260, "y": 120}, "config": {"source": "pullRequest", "connectorIDs": []}},
+      {"id": "ticket", "title": "Le ticket Jira", "type": "context", "position": {"x": 260, "y": 400}, "config": {"source": "jiraTicket", "connectorIDs": ["C1"]}},
+      {"id": "intent", "title": "Intentions", "type": "agent", "position": {"x": 540, "y": 260}, "config": {"expertID": "E1", "prompt": "Read {{steps.pr.text}}", "output": [{"name": "intent", "type": "text", "description": "", "required": true}], "mode": "headless", "skills": [], "connectorIDs": [], "timeoutSeconds": 900}},
+      {"id": "php", "title": "Expert PHP", "type": "agent", "position": {"x": 840, "y": 160}, "config": {"expertID": "E2", "prompt": "Review", "output": [{"name": "findings", "type": "list", "description": "", "required": true}], "mode": "headless", "skills": [], "connectorIDs": [], "timeoutSeconds": 900}},
+      {"id": "check", "title": "Stable ?", "type": "condition", "position": {"x": 1140, "y": 260}, "config": {"condition": {"path": "steps.php.findings", "op": "isEmpty", "value": ""}}},
+      {"id": "loop", "title": "Nouvelle passe ?", "type": "loop", "position": {"x": 1400, "y": 360}, "config": {"targets": ["php"], "maxIterations": 2}},
+      {"id": "report", "title": "Rapport", "type": "artifact", "position": {"x": 1660, "y": 260}, "config": {"template": "pr-review", "theme": "current", "dark": false, "title": "{{pr.title}}", "importToPRTab": true}}
+    ],
+    "edges": [
+      {"id": "start->pr", "from": "start", "to": "pr"}, {"id": "start->ticket", "from": "start", "to": "ticket"},
+      {"id": "pr->intent", "from": "pr", "to": "intent"}, {"id": "ticket->intent", "from": "ticket", "to": "intent"},
+      {"id": "intent->php", "from": "intent", "to": "php"}, {"id": "php->check", "from": "php", "to": "check"},
+      {"id": "check->report:yes", "from": "check", "to": "report", "branch": "yes"},
+      {"id": "check->loop:no", "from": "check", "to": "loop", "branch": "no"}, {"id": "loop->report", "from": "loop", "to": "report"}
+    ]
+  },
+  "experts": [{"id": "E1", "name": "Analyste", "domain": "Besoin", "color": "#0D6E74"}, {"id": "E2", "name": "Expert PHP", "domain": "PHP", "color": "#4F5B93"}],
+  "connectors": [{"id": "C1", "name": "Atlassian (Claude Code)"}],
+  "skills": [{"name": "php-standards", "description": "House rules", "scope": "global"}],
+  "themes": ["Loom", "HomeServe"],
+  "templates": [{"id": "pr-review", "name": "Rapport de review de PR"}, {"id": "generic", "name": "Rapport générique"}],
+  "issues": [{"nodeID": "php", "severity": "warning", "message": "No skill."}],
+  "estimate": {"runs": 5, "lowUSD": 0.4, "highUSD": 2.1},
+  "palette": {"background": "#ffffff", "contentBackground": "#f6f6f8", "surface": "#ffffff", "surfaceRaised": "#f0f0f3",
+    "cardBorder": "#dcdce2", "accent": "#0D6E74", "accentText": "#ffffff", "primaryText": "#1e1e1e", "secondaryText": "#505050",
+    "mutedText": "#767676", "danger": "#A61A16", "groupHeader": "#E22C22", "stateWorking": "#2f6fd6", "stateNeedsInput": "#C64C00",
+    "stateIdle": "#007153", "isLight": true},
+  "readOnly": false
+}

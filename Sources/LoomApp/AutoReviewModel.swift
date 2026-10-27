@@ -2,6 +2,7 @@ import Foundation
 import LoomAgents
 import LoomCore
 import LoomGit
+import LoomWorkflows
 import UserNotifications
 
 /// One run of a review schedule: the PRs it picked and where each stands.
@@ -221,13 +222,13 @@ extension AppModel {
             var next = 0
             while next < min(width, items.count) {
                 let item = items[next]
-                group.addTask { await self.autoReview(item, run: run.id) }
+                group.addTask { await self.autoReview(item, run: run.id, workflowID: schedule.workflowID) }
                 next += 1
             }
             while await group.next() != nil {
                 guard next < items.count else { continue }
                 let item = items[next]
-                group.addTask { await self.autoReview(item, run: run.id) }
+                group.addTask { await self.autoReview(item, run: run.id, workflowID: schedule.workflowID) }
                 next += 1
             }
         }
@@ -246,7 +247,11 @@ extension AppModel {
     /// One PR: its tab opened (pinned, in the background), its review
     /// session started or reattached with `/setup-pr-review`, the full review
     /// asked for, then waited on until claude writes its report.
-    private func autoReview(_ item: AutoReviewRun.Item, run runID: UUID) async {
+    private func autoReview(_ item: AutoReviewRun.Item, run runID: UUID, workflowID: UUID?) async {
+        if let workflowID {
+            await autoReviewWithWorkflow(item, run: runID, workflowID: workflowID)
+            return
+        }
         let pr = item.pr
         let projectID = item.projectID
         updateAutoReviewItem(item.id, run: runID) { $0.status = .preparing }
@@ -291,6 +296,39 @@ extension AppModel {
         await settleAutoReview(item, run: runID, outcome: outcome)
     }
 
+    /// One PR through a workflow (ADR-0017): the run is the review; its
+    /// consolidated verdict and findings say how it ended.
+    private func autoReviewWithWorkflow(_ item: AutoReviewRun.Item, run runID: UUID, workflowID: UUID) async {
+        updateAutoReviewItem(item.id, run: runID) { $0.status = .preparing }
+        prTabs.openInBackground(item.pr, in: item.projectID)
+        savePRTabs()
+        let inputs = RunInputs(trigger: .schedule, projectID: item.projectID, prNumber: item.pr.number)
+        guard let workflowRun = startWorkflowRun(workflowID, inputs: inputs) else {
+            let reason = startupError ?? "The workflow could not start."
+            updateAutoReviewItem(item.id, run: runID) { $0.status = .failed(reason) }
+            return
+        }
+        updateAutoReviewItem(item.id, run: runID) { $0.status = .reviewing }
+        await workflows.runTasks[workflowRun]?.value
+        guard let finished = workflows.run(workflowRun) else { return }
+        guard finished.status == .succeeded else {
+            let reason = finished.error ?? "The workflow did not finish."
+            updateAutoReviewItem(item.id, run: runID) { $0.status = .failed(reason) }
+            return
+        }
+        let planner = WorkflowPlanner(finished.workflow)
+        let context = TemplateRenderer.context(inputs: .object([:]), state: finished.state, planner: planner)
+        let report = Self.reviewReport(from: context)
+        reviewSchedules.reviewedHeads[item.id] = ReviewSchedulePlanner.fingerprint(item.pr)
+        saveReviewSchedules()
+        let verdict = report?.verdict ?? .comment
+        let comments = report?.comments.count ?? 0
+        updateAutoReviewItem(item.id, run: runID) {
+            $0.status = .ready(verdict: verdict.rawValue, comments: comments, inSummary: 0)
+        }
+        notifyReviewReady(item.pr, verdict: verdict, comments: comments)
+    }
+
     enum AutoReviewOutcome {
         case report(AutoReviewReport)
         /// The session waits on the user (permission, question).
@@ -302,11 +340,37 @@ extension AppModel {
         case timedOut
     }
 
-    /// Polls the session and its report: done once the report reads and
-    /// claude stopped working on it. A session idle for minutes without one
-    /// wrote its review in the conversation, or nowhere.
     private func awaitAutoReview(_ id: SessionID, report: URL, timeout: Duration,
                                  handsOver: Bool) async -> AutoReviewOutcome {
+        let outcome = await awaitSessionReport(id, file: report, timeout: timeout, handsOver: handsOver,
+                                               parse: AutoReviewReport.parse)
+        switch outcome {
+        case .report(let parsed): return .report(parsed)
+        case .needsYou: return .needsYou
+        case .noReport: return .noReport
+        case .ended: return .ended
+        case .timedOut: return .timedOut
+        }
+    }
+
+    /// How waiting on a session's report ended.
+    enum SessionReportOutcome<Report> {
+        case report(Report)
+        /// The session waits on the user (permission, question).
+        case needsYou
+        /// Idle a while, no readable report.
+        case noReport
+        /// The session is gone.
+        case ended
+        case timedOut
+    }
+
+    /// Polls a session and the file it was asked to write: done once the
+    /// file reads and claude stopped working on it. A session idle for
+    /// minutes without one answered in the conversation, or nowhere. Shared
+    /// by scheduled reviews and the workflows' visible steps.
+    func awaitSessionReport<Report>(_ id: SessionID, file: URL, timeout: Duration, handsOver: Bool,
+                                    parse: (String) -> Report?) async -> SessionReportOutcome<Report> {
         let clock = ContinuousClock()
         let deadline = clock.now + timeout
         var idleSince: ContinuousClock.Instant?
@@ -314,8 +378,8 @@ extension AppModel {
         while clock.now < deadline, !Task.isCancelled {
             let state = sessions.first { $0.id == id }?.state
             if state != .working, state != .starting,
-               let text = try? String(contentsOf: report, encoding: .utf8),
-               let parsed = AutoReviewReport.parse(text) {
+               let text = try? String(contentsOf: file, encoding: .utf8),
+               let parsed = parse(text) {
                 return .report(parsed)
             }
             switch state {
@@ -348,7 +412,7 @@ extension AppModel {
         let status: AutoReviewRun.Status
         switch outcome {
         case .report(let report):
-            let counts = await importAutoReview(report, pr: item.pr, in: item.projectID)
+            let counts = await importReviewReport(report, pr: item.pr, in: item.projectID)
             status = .ready(verdict: report.verdict.rawValue, comments: counts.anchored,
                             inSummary: counts.unanchored)
             notifyReviewReady(item.pr, verdict: report.verdict, comments: counts.anchored)
@@ -367,7 +431,7 @@ extension AppModel {
     /// The report into the PR's tab: comments on diff lines become pending
     /// comments of the review, the others go into the summary, the verdict
     /// is shown as a suggestion. A summary the user already wrote is kept.
-    private func importAutoReview(_ report: AutoReviewReport, pr: GitHubService.PullRequest,
+    func importReviewReport(_ report: AutoReviewReport, pr: GitHubService.PullRequest,
                                   in projectID: ProjectID) async -> (anchored: Int, unanchored: Int) {
         let diff = await prDiff(pr.number, baseBranch: pr.baseBranch, in: projectID, refresh: true).diff
         let files = DiffParser.parse(diff)
@@ -422,7 +486,7 @@ extension AppModel {
         postAutoReviewNotification(title: run.scheduleName, body: body, id: "loom.autoReview.run.\(run.id)")
     }
 
-    private func postAutoReviewNotification(title: String, body: String, id: String) {
+    func postAutoReviewNotification(title: String, body: String, id: String) {
         guard Bundle.main.bundleIdentifier != nil else { return }   // swift run without a bundle
         let content = UNMutableNotificationContent()
         content.title = title

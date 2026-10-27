@@ -2,6 +2,7 @@ import LoomAgents
 import LoomCore
 import LoomGit
 import LoomUI
+import LoomWorkflows
 import SwiftUI
 
 // MARK: - Settings
@@ -140,6 +141,20 @@ private struct ReviewScheduleEditor: View {
                     Text(nextRunText(schedule))
                         .font(.system(size: 11))
                         .foregroundStyle(DefaultTheme.mutedText)
+                }
+                HStack(spacing: 8) {
+                    Text("Review with")
+                        .font(.system(size: 12))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                    Picker("", selection: field(\.workflowID, of: schedule)) {
+                        Text("Claude's full review (built-in)").tag(UUID?.none)
+                        ForEach(model.workflows.workflows.filter { $0.triggers.contains(.schedule) || $0.triggers.contains(.pullRequest) }) { workflow in
+                            Text("Workflow: \(workflow.name)").tag(Optional(workflow.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .help("A workflow from the Workflows tab runs on each PR instead — its report and findings land in the PR's tab when it says so")
                 }
                 ForEach(schedule.targets) { target in
                     targetRow(target, in: schedule)

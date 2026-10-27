@@ -6,6 +6,7 @@ import LoomPersistence
 import LoomTerminal
 import LoomUI
 import LoomWeb
+import LoomWorkflows
 import SwiftUI
 import Observation
 
@@ -108,7 +109,7 @@ struct LogoMark: View {
 }
 
 enum MainTab {
-    case projects, sessions, prs, overview, settings, extensions
+    case projects, sessions, prs, workflows, overview, settings, extensions
 }
 
 /// The Sessions view's detail: a session… or the browser, as a tab
@@ -159,6 +160,10 @@ struct ContentView: View {
                 selected = .session(id)
                 tab = .sessions
             })
+            case .workflows: WorkflowsView(model: model, onOpenSession: { id in
+                selected = .session(id)
+                tab = .sessions
+            })
             case .settings: SettingsPage(model: model)
             case .extensions: ExtensionsView(model: model, onOpenSettings: {
                 tabBeforeSettings = .extensions
@@ -193,6 +198,7 @@ struct ContentView: View {
             applyTheme()
             model.extensions.isTabVisible = tab == .extensions
         }
+        .onChange(of: model.workflows.revealRequest) { tab = .workflows }
         .modifier(ExtensionsWiring(model: model, onOpenSession: { id in
             selected = .session(id)
             tab = .sessions
@@ -309,6 +315,7 @@ struct ContentView: View {
             NavTab("Projects", isActive: tab == .projects) { tab = .projects }
             NavTab("Sessions", isActive: tab == .sessions) { tab = .sessions }
             NavTab("PRs", isActive: tab == .prs) { tab = .prs }
+            NavTab("Workflows", isActive: tab == .workflows) { tab = .workflows }
             if !model.extensions.extensions.isEmpty {
                 NavTab("Extensions", isActive: tab == .extensions) { tab = .extensions }
             }
@@ -474,6 +481,20 @@ struct ContentView: View {
                                          subtitle: "Stops claude — resumable as inactive",
                                          section: "Actions") {
                 Task { await model.stopSession(parent.id) }
+            })
+        }
+
+        // Workflows (ADR-0017): run one — the Run sheet asks what on.
+        for workflow in model.workflows.workflows {
+            actions.append(PaletteAction(id: "wf.run.\(workflow.id.uuidString)",
+                                         icon: "point.3.connected.trianglepath.dotted",
+                                         title: "Run workflow: \(workflow.name)",
+                                         subtitle: workflow.summary.isEmpty ? "Workflow" : workflow.summary,
+                                         section: "Workflows") {
+                model.workflows.selectedWorkflowID = workflow.id
+                model.workflows.detail = .workflow
+                tab = .workflows
+                model.workflows.launchRequest = .init(workflowID: workflow.id, inputs: nil)
             })
         }
 

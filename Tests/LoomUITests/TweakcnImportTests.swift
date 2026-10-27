@@ -238,5 +238,20 @@ struct TweakcnImportTests {
         #expect(family.light.isLight && !family.dark.isLight)
         #expect(!family.isBuiltIn)
         #expect(family.variantLightName == "Twitter Light")
+        #expect(family.document == nil, "no font, no radius: nothing for documents")
+    }
+
+    @Test("fonts and radius become the theme's document style, from CSS or from the registry's shared block")
+    func documentStyle() throws {
+        let css = TweakcnImport.family(named: "T", light: ["background": "#fff", "font-sans": "Nunito, sans-serif",
+                                                            "radius": "1rem"], dark: ["background": "#000"])
+        #expect(css.document == ThemeDocumentStyle(fontSans: "Nunito, sans-serif", radius: "1rem"))
+        let json = ##"{"name": "t", "cssVars": {"theme": {"font-mono": "JetBrains Mono", "radius": "0.5rem"}, "light": {"background": "#fff", "radius": "1rem"}, "dark": {"background": "#000"}}}"##
+        let parsed = try TweakcnImport.parseRegistry(Data(json.utf8))
+        let family = TweakcnImport.family(named: parsed.name, light: parsed.light, dark: parsed.dark)
+        #expect(family.document?.fontMono == "JetBrains Mono")
+        #expect(family.document?.radius == "1rem", "the variant's own value wins")
+        #expect(ThemeDocumentStyle.isAllowedFontsURL("https://fonts.googleapis.com/css2?family=Nunito"))
+        #expect(!ThemeDocumentStyle.isAllowedFontsURL("https://evil.example/fonts.css"))
     }
 }

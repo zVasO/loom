@@ -721,6 +721,9 @@ struct SettingsPage: View {
             Text("The global theme. Projects below can override it — the app follows the project you are working in.")
                 .font(.system(size: 11))
                 .foregroundStyle(DefaultTheme.secondaryText)
+            card {
+                ThemeDocumentSettings()
+            }
         }
         .sheet(isPresented: $importShown) {
             ThemeImportSheet()

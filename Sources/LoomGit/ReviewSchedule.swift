@@ -19,11 +19,14 @@ public struct ReviewSchedule: Codable, Identifiable, Equatable, Hashable, Sendab
     /// time already past at that moment is not a run it missed.
     public var armedAt: Date
     public var lastRunAt: Date?
+    /// A workflow (ADR-0017) each picked PR runs instead of the built-in
+    /// full review; nil keeps the built-in one.
+    public var workflowID: UUID?
 
     public init(id: UUID = UUID(), name: String = "Morning reviews", enabled: Bool = true,
                 hour: Int = 9, minute: Int = 0, weekdays: Set<Int> = ReviewSchedule.workdays,
                 targets: [ReviewScheduleTarget] = [], armedAt: Date = Date(),
-                lastRunAt: Date? = nil) {
+                lastRunAt: Date? = nil, workflowID: UUID? = nil) {
         self.id = id
         self.name = name
         self.enabled = enabled
@@ -33,6 +36,7 @@ public struct ReviewSchedule: Codable, Identifiable, Equatable, Hashable, Sendab
         self.targets = targets
         self.armedAt = armedAt
         self.lastRunAt = lastRunAt
+        self.workflowID = workflowID
     }
 
     /// Monday to Friday.

@@ -10,6 +10,7 @@ import LoomSessions
 import LoomTerminal
 import LoomUI
 import LoomWeb
+import LoomWorkflows
 import Foundation
 import Observation
 import SwiftUI
@@ -214,6 +215,9 @@ public final class AppModel {
 
     /// Web extensions (ADR-0011): `<support>/extensions/`.
     let extensions: ExtensionsModel
+
+    /// Multi-agent workflows (ADR-0017): the library and the runs.
+    let workflows: WorkflowsModel
 
     /// The agents API's global token (ADR-0010), read from `api-token` in the
     /// support directory; nil when the file could not be created.
@@ -425,6 +429,7 @@ public final class AppModel {
         Self.migrateLegacySupportDirectory(to: resolved)
         self.supportDirectory = resolved
         self.extensions = ExtensionsModel(directory: resolved.appendingPathComponent("extensions"))
+        self.workflows = WorkflowsModel(supportDirectory: resolved)
         self.chromiumSetup = ChromiumSetupModel()
     }
 
@@ -527,6 +532,7 @@ public final class AppModel {
             prepareAgentChromium()
             reindexAllSessions()
             startReviewSchedules()
+            workflows.load()
         } catch {
             if case IPCError.anotherInstanceRunning = error {
                 startupError = "Another Loom instance is already running (or did not fully quit). Close it and relaunch — sessions work, but state hooks are disabled in this instance."
@@ -2567,6 +2573,45 @@ public final class AppModel {
                                         state: .starting, projectID: project?.id,
                                         branch: record?.branch,
                                         badges: record?.badges ?? spec.badges))
+            reloadPersistedSessions()
+            return id
+        } catch {
+            startupError = String(describing: error)
+            return nil
+        }
+    }
+
+    /// A workflow's visible step (ADR-0017): a session in `directory` (the
+    /// run's worktree), its expert on top of the session instructions, the
+    /// step's prompt as its first message. Untrusted like a review when it
+    /// runs in a PR's checkout.
+    func launchWorkflowSession(directory: URL, projectID: ProjectID?, title: String, badges: [String],
+                               prompt: String, instructions: String, untrusted: Bool) async -> SessionID? {
+        guard let manager else { return nil }
+        do {
+            let sessionID = SessionID()
+            let token = UUID().uuidString
+            var launcher = adapter(for: sessionID)
+            let base = launcher.instructions?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            launcher.instructions = [base, instructions].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            var spec = SessionManager.SessionSpec(
+                command: launcher.launchCommand(session: sessionID, initialPrompt: prompt, hookToken: token,
+                                               userStatusLine: userStatusLine(in: directory),
+                                               theme: claudeTheme(for: projectID)),
+                workingDirectory: directory,
+                geometry: preferredGrid,
+                samplingInterval: .milliseconds(500),
+                hookToken: token)
+            spec.projectID = projectID
+            spec.sessionID = sessionID
+            spec.title = title
+            spec.badges = SessionRecord.normalizedBadges(badges)
+            if untrusted { markRunsUntrustedCode(sessionID) }
+            let id = try await manager.launch(spec)
+            await cacheSurface(for: id)
+            tokenRegistry.register(token: token, session: id)
+            sessions.append(SessionItem(id: id, title: title, state: .starting, projectID: projectID,
+                                        branch: nil, badges: spec.badges))
             reloadPersistedSessions()
             return id
         } catch {

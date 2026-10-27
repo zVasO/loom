@@ -180,15 +180,21 @@ public struct ThemeFamily: Identifiable, Codable, Equatable, Sendable, Hashable 
     public var lightName: String?
     public var darkName: String?
     public var isBuiltIn: Bool
+    /// How documents Loom writes in this theme look beyond colours — a
+    /// workflow's artifact (ADR-0017): fonts, corner radius, logo. Optional:
+    /// the app itself never reads it.
+    public var document: ThemeDocumentStyle?
 
     public init(name: String, light: ThemeTokens, dark: ThemeTokens,
-                lightName: String? = nil, darkName: String? = nil, isBuiltIn: Bool = false) {
+                lightName: String? = nil, darkName: String? = nil, isBuiltIn: Bool = false,
+                document: ThemeDocumentStyle? = nil) {
         self.name = name
         self.light = light
         self.dark = dark
         self.lightName = lightName
         self.darkName = darkName
         self.isBuiltIn = isBuiltIn
+        self.document = document
     }
 
     /// Files written by hand or by an older Loom may omit the optional keys.
@@ -201,6 +207,7 @@ public struct ThemeFamily: Identifiable, Codable, Equatable, Sendable, Hashable 
         darkName = try container.decodeIfPresent(String.self, forKey: .darkName)
         // A file on disk is the user's by definition.
         isBuiltIn = false
+        document = try container.decodeIfPresent(ThemeDocumentStyle.self, forKey: .document)
     }
 
     public var variantLightName: String { lightName ?? name + " Light" }
@@ -226,6 +233,44 @@ public struct ThemeFamily: Identifiable, Codable, Equatable, Sendable, Hashable 
         let collapsed = String(allowed).split(separator: "-", omittingEmptySubsequences: true)
             .joined(separator: "-")
         return collapsed.isEmpty ? "theme" : collapsed
+    }
+}
+
+/// A theme's look in a document (an artifact): what colours alone do not
+/// say. Every field is optional; the document falls back on its own.
+public struct ThemeDocumentStyle: Codable, Equatable, Sendable, Hashable {
+    /// CSS font stacks.
+    public var fontSans: String?
+    public var fontMono: String?
+    /// A stylesheet that loads the fonts (Google Fonts) — the one remote
+    /// resource a document may fetch.
+    public var fontsURL: String?
+    /// Cards' corner radius, CSS (`16px`).
+    public var radius: String?
+    /// The logo, inline SVG markup.
+    public var logoSVG: String?
+    /// CSS appended after the document's own.
+    public var extraCSS: String?
+
+    public init(fontSans: String? = nil, fontMono: String? = nil, fontsURL: String? = nil,
+                radius: String? = nil, logoSVG: String? = nil, extraCSS: String? = nil) {
+        self.fontSans = fontSans
+        self.fontMono = fontMono
+        self.fontsURL = fontsURL
+        self.radius = radius
+        self.logoSVG = logoSVG
+        self.extraCSS = extraCSS
+    }
+
+    public var isEmpty: Bool {
+        [fontSans, fontMono, fontsURL, radius, logoSVG, extraCSS]
+            .allSatisfy { ($0 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    /// Only Google Fonts' stylesheet host is accepted for `fontsURL`.
+    public static func isAllowedFontsURL(_ text: String) -> Bool {
+        guard let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
+        return url.scheme == "https" && url.host == "fonts.googleapis.com"
     }
 }
 
