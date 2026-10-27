@@ -252,9 +252,14 @@ struct APIProtocolTests {
 
     @Test("the tool catalog covers every method, with MCP-legal unique names")
     func catalogueDesOutils() {
-        let names = APIToolCatalog.all(engine: .chromium).map(\.name)
+        let names = (APIToolCatalog.all(engine: .chromium) + APIToolCatalog.workflowTools).map(\.name)
         #expect(Set(names).count == names.count, "one name per tool")
         for method in APIMethod.allCases {
+            if method.isWorkflow {
+                // Listed for a workflow run's sessions only (ADR-0018).
+                #expect(APIToolCatalog.workflowTools.contains { $0.method == method }, "\(method.rawValue) has a tool")
+                continue
+            }
             #expect(APIToolCatalog.all(engine: .chromium).contains { $0.method == method }, "\(method.rawValue) has a tool")
             if method != .browserRunCode {
                 #expect(APIToolCatalog.all.contains { $0.method == method }, "\(method.rawValue) is on WebKit too")
@@ -301,7 +306,9 @@ struct APIProtocolTests {
         let deadline = try #require(APIMethod.browserRunCode.appDeadline)
         #expect(deadline == .seconds(60))
         #expect(APIMethod.browserRunCode.clientTimeout == .seconds(65))
-        for method in APIMethod.allCases where method != .browserRunCode {
+        // The browser's queue is serial: no other browser method holds it longer. (A
+        // workflow's follow-up question waits on a whole claude turn, not on the browser.)
+        for method in APIMethod.allCases where method.isBrowser && method != .browserRunCode {
             #expect((method.appDeadline ?? .zero) < deadline, "\(method.rawValue)")
         }
         // loom docs: the reference names it, as Chromium's.
