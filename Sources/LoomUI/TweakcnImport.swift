@@ -145,6 +145,11 @@ public enum TweakcnImport {
         if light.isEmpty { light = dark }
         if dark.isEmpty { dark = light }
         guard !light.isEmpty else { throw ImportError.noVariables }
+        // `theme` holds what both variants share — fonts, radius — kept
+        // under each, the variant's own value winning.
+        let shared = vars("theme")
+        light = shared.merging(light) { $1 }
+        dark = shared.merging(dark) { $1 }
         let name = (object["title"] as? String) ?? (object["name"] as? String) ?? "Imported theme"
         return (name, light, dark)
     }
@@ -328,7 +333,18 @@ public enum TweakcnImport {
     public static func family(named name: String, light: Variables, dark: Variables) -> ThemeFamily {
         ThemeFamily(name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                     light: tokens(from: light, dark: false),
-                    dark: tokens(from: dark, dark: true))
+                    dark: tokens(from: dark, dark: true),
+                    document: document(from: light))
+    }
+
+    /// Fonts and radius a tweakcn theme carries, for documents (ADR-0017).
+    static func document(from vars: Variables) -> ThemeDocumentStyle? {
+        func value(_ name: String) -> String? {
+            vars[name].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
+        }
+        let style = ThemeDocumentStyle(fontSans: value("font-sans"), fontMono: value("font-mono"),
+                                       radius: value("radius"))
+        return style.isEmpty ? nil : style
     }
 
     /// Text pasted in the import field: CSS when it carries variables.

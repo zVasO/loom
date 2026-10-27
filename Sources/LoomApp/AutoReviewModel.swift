@@ -302,11 +302,37 @@ extension AppModel {
         case timedOut
     }
 
-    /// Polls the session and its report: done once the report reads and
-    /// claude stopped working on it. A session idle for minutes without one
-    /// wrote its review in the conversation, or nowhere.
     private func awaitAutoReview(_ id: SessionID, report: URL, timeout: Duration,
                                  handsOver: Bool) async -> AutoReviewOutcome {
+        let outcome = await awaitSessionReport(id, file: report, timeout: timeout, handsOver: handsOver,
+                                               parse: AutoReviewReport.parse)
+        switch outcome {
+        case .report(let parsed): return .report(parsed)
+        case .needsYou: return .needsYou
+        case .noReport: return .noReport
+        case .ended: return .ended
+        case .timedOut: return .timedOut
+        }
+    }
+
+    /// How waiting on a session's report ended.
+    enum SessionReportOutcome<Report> {
+        case report(Report)
+        /// The session waits on the user (permission, question).
+        case needsYou
+        /// Idle a while, no readable report.
+        case noReport
+        /// The session is gone.
+        case ended
+        case timedOut
+    }
+
+    /// Polls a session and the file it was asked to write: done once the
+    /// file reads and claude stopped working on it. A session idle for
+    /// minutes without one answered in the conversation, or nowhere. Shared
+    /// by scheduled reviews and the workflows' visible steps.
+    func awaitSessionReport<Report>(_ id: SessionID, file: URL, timeout: Duration, handsOver: Bool,
+                                    parse: (String) -> Report?) async -> SessionReportOutcome<Report> {
         let clock = ContinuousClock()
         let deadline = clock.now + timeout
         var idleSince: ContinuousClock.Instant?
@@ -314,8 +340,8 @@ extension AppModel {
         while clock.now < deadline, !Task.isCancelled {
             let state = sessions.first { $0.id == id }?.state
             if state != .working, state != .starting,
-               let text = try? String(contentsOf: report, encoding: .utf8),
-               let parsed = AutoReviewReport.parse(text) {
+               let text = try? String(contentsOf: file, encoding: .utf8),
+               let parsed = parse(text) {
                 return .report(parsed)
             }
             switch state {
@@ -348,7 +374,7 @@ extension AppModel {
         let status: AutoReviewRun.Status
         switch outcome {
         case .report(let report):
-            let counts = await importAutoReview(report, pr: item.pr, in: item.projectID)
+            let counts = await importReviewReport(report, pr: item.pr, in: item.projectID)
             status = .ready(verdict: report.verdict.rawValue, comments: counts.anchored,
                             inSummary: counts.unanchored)
             notifyReviewReady(item.pr, verdict: report.verdict, comments: counts.anchored)
@@ -367,7 +393,7 @@ extension AppModel {
     /// The report into the PR's tab: comments on diff lines become pending
     /// comments of the review, the others go into the summary, the verdict
     /// is shown as a suggestion. A summary the user already wrote is kept.
-    private func importAutoReview(_ report: AutoReviewReport, pr: GitHubService.PullRequest,
+    func importReviewReport(_ report: AutoReviewReport, pr: GitHubService.PullRequest,
                                   in projectID: ProjectID) async -> (anchored: Int, unanchored: Int) {
         let diff = await prDiff(pr.number, baseBranch: pr.baseBranch, in: projectID, refresh: true).diff
         let files = DiffParser.parse(diff)
@@ -422,7 +448,7 @@ extension AppModel {
         postAutoReviewNotification(title: run.scheduleName, body: body, id: "loom.autoReview.run.\(run.id)")
     }
 
-    private func postAutoReviewNotification(title: String, body: String, id: String) {
+    func postAutoReviewNotification(title: String, body: String, id: String) {
         guard Bundle.main.bundleIdentifier != nil else { return }   // swift run without a bundle
         let content = UNMutableNotificationContent()
         content.title = title
