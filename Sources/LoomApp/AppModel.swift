@@ -363,7 +363,35 @@ public final class AppModel {
                                                                            fallback: supportDirectory)),
                                  tools: .init(browser: agentBrowserToolsEnabled,
                                               preapproved: preapprovesLoomTools,
-                                              engine: engine))
+                                              engine: engine),
+                                 instructions: sessionInstructionsEnabled ? sessionInstructionsText : nil)
+    }
+
+    /// Instructions appended to every claude session's system prompt
+    /// (`SessionInstructions`): on by default — it is how a session learns
+    /// to keep its Loom title and badges current.
+    public var sessionInstructionsEnabled: Bool {
+        get { (UserDefaults.standard.object(forKey: "loom.agents.instructions.enabled") as? Bool) ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "loom.agents.instructions.enabled") }
+    }
+
+    /// The user's text, or the default. Stored only when it differs from
+    /// the default, so a default improved in a release reaches everyone
+    /// who never edited it. Read at each launch and resume.
+    public var sessionInstructionsText: String {
+        get { UserDefaults.standard.string(forKey: "loom.agents.instructions.text") ?? SessionInstructions.defaultText }
+        set {
+            if newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                == SessionInstructions.defaultText.trimmingCharacters(in: .whitespacesAndNewlines) {
+                UserDefaults.standard.removeObject(forKey: "loom.agents.instructions.text")
+            } else {
+                UserDefaults.standard.set(newValue, forKey: "loom.agents.instructions.text")
+            }
+        }
+    }
+
+    public var sessionInstructionsCustomized: Bool {
+        UserDefaults.standard.string(forKey: "loom.agents.instructions.text") != nil
     }
 
     /// In development, `loom-hook` is a sibling product of the app; packaged,
@@ -498,6 +526,7 @@ public final class AppModel {
             sweepAgentStores()
             prepareAgentChromium()
             reindexAllSessions()
+            startReviewSchedules()
         } catch {
             if case IPCError.anotherInstanceRunning = error {
                 startupError = "Another Loom instance is already running (or did not fully quit). Close it and relaunch — sessions work, but state hooks are disabled in this instance."
@@ -650,6 +679,11 @@ public final class AppModel {
                 saveReviewDrafts()
             } else {
                 try await GitHubService().submitReview(number, verdict: verdict, body: body, in: repo)
+            }
+            // A scheduled review's suggestion has been answered.
+            if prTabs.tab(PRTab.key(projectID, number))?.suggestedVerdict != nil {
+                prTabs.setSuggestedVerdict(nil, for: PRTab.key(projectID, number))
+                savePRTabs()
             }
             return nil
         } catch { return Self.ghErrorText(error) }
@@ -895,6 +929,15 @@ public final class AppModel {
     /// Drafted review comments by PR key — mirrored on disk.
     var reviewDrafts: [String: ReviewDraft] = [:]
     var reviewDraftStore: ReviewDraftStore { ReviewDraftStore(directory: supportDirectory) }
+
+    // MARK: Scheduled reviews — the logic lives in AutoReviewModel.swift
+
+    /// The schedules, the heads their runs covered, how many run at once.
+    public internal(set) var reviewSchedules = ReviewScheduleState()
+    /// The run going on, or the last one: what the PRs sidebar lists.
+    public internal(set) var autoReviewRun: AutoReviewRun?
+    /// Wakes every half minute to start the runs that are due.
+    @ObservationIgnored var reviewScheduleClock: Task<Void, Never>?
     var repoCatalogCache: RepoCatalogCache { RepoCatalogCache(directory: supportDirectory) }
 
     public struct PendingClone: Equatable {
@@ -1395,7 +1438,7 @@ public final class AppModel {
 
     /// Bumped by a manual refresh: the workspace reloads on it even when
     /// GitHub reports nothing new.
-    private var prReloadGenerations: [String: Int] = [:]
+    var prReloadGenerations: [String: Int] = [:]
     /// PRs a manual refresh is running for — the toolbar's spinner.
     public private(set) var prRefreshing: Set<String> = []
 

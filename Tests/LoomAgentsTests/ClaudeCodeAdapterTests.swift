@@ -368,3 +368,40 @@ struct PRTourParsingTests {
         #expect(PRTourParser.parse(claudeOutput: "{\"result\": \"no json here\"}") == nil)
     }
 }
+
+// The user's instructions for every session ride on the system prompt, at
+// launch and at resume alike, and never take the initial prompt's place.
+@Suite("ClaudeCodeAdapter — session instructions")
+struct ClaudeCodeAdapterInstructionsTests {
+
+    @Test("instructions are appended to the system prompt, before the initial prompt")
+    func appended() throws {
+        let adapter = ClaudeCodeAdapter(instructions: "Keep the Loom title current.")
+        let launch = adapter.launchCommand(session: SessionID(), initialPrompt: "fix the bug")
+        let flag = try #require(launch.arguments.firstIndex(of: "--append-system-prompt"))
+        #expect(launch.arguments[flag + 1] == "Keep the Loom title current.")
+        #expect(launch.arguments.last == "fix the bug", "the initial prompt stays the last argument")
+
+        let resume = adapter.resumeCommand(session: SessionID())
+        let resumed = try #require(resume.arguments.firstIndex(of: "--append-system-prompt"))
+        #expect(resume.arguments[resumed + 1] == "Keep the Loom title current.",
+                "a resumed session is told the same")
+    }
+
+    @Test("no instructions, or blank ones, add nothing")
+    func absent() {
+        #expect(!ClaudeCodeAdapter().launchCommand(session: SessionID(), initialPrompt: nil)
+            .arguments.contains("--append-system-prompt"))
+        #expect(!ClaudeCodeAdapter(instructions: " \n ").resumeCommand(session: SessionID())
+            .arguments.contains("--append-system-prompt"))
+    }
+
+    @Test("the default instructions name the Loom tools that exist")
+    func defaultNamesRealTools() {
+        for tool in ["loom_session_set_title", "loom_session_set_badges", "loom_badge_list",
+                     "loom_badge_create", "loom_session_get"] {
+            #expect(SessionInstructions.defaultText.contains(tool))
+            #expect(APIToolCatalog.spec(named: tool) != nil, "\(tool) is a real tool")
+        }
+    }
+}

@@ -153,3 +153,59 @@ struct PRTabsTests {
         #expect(tabs.activeID == PRTab.key(project, 1))
     }
 }
+
+// A scheduled review opens its PR's tab without taking the screen, and
+// leaves a suggested verdict on it; tabs saved before that field decode.
+@Suite("PRTabs — tabs a scheduled review opens")
+struct PRTabsScheduledReviewTests {
+
+    private let project = ProjectID()
+
+    private func pr(_ number: Int) -> GitHubService.PullRequest {
+        GitHubService.PullRequest(number: number, title: "t", author: "a", branch: "b",
+                                  baseBranch: "main", reviewDecision: "", checksPassing: true,
+                                  isDraft: false, updatedAt: "", url: "", headSHA: "h\(number)")
+    }
+
+    @Test("opened in the background: pinned, the active tab kept")
+    func background() {
+        var tabs = PRTabs()
+        tabs.openInBackground(pr(1), in: project)
+        #expect(tabs.activeID == PRTab.key(project, 1), "no tab was active: this one is")
+        tabs.show(pr(2), in: project)
+        tabs.openInBackground(pr(3), in: project)
+        #expect(tabs.activeID == PRTab.key(project, 2), "the tab on screen stays on screen")
+        #expect(tabs.tabs.map(\.pr.number) == [1, 2, 3])
+        #expect(tabs.tab(PRTab.key(project, 3))?.isPreview == false, "a review's tab is pinned")
+        tabs.show(pr(4), in: project)
+        #expect(tabs.contains(PRTab.key(project, 3)), "the next click in the list cannot take it away")
+        tabs.openInBackground(pr(4), in: project)
+        #expect(tabs.tab(PRTab.key(project, 4))?.isPreview == false, "an open preview is pinned in place")
+        #expect(tabs.tabs.map(\.pr.number) == [1, 4, 3], "the preview 2 was replaced by 4, then 4 pinned")
+    }
+
+    @Test("a suggested verdict is kept with the tab, and cleared")
+    func suggestion() throws {
+        var tabs = PRTabs()
+        tabs.openInBackground(pr(1), in: project)
+        let key = PRTab.key(project, 1)
+        tabs.setSuggestedVerdict("request_changes", for: key)
+        let decoded = try JSONDecoder().decode(PRTabs.self, from: JSONEncoder().encode(tabs))
+        #expect(decoded.tab(key)?.suggestedVerdict == "request_changes")
+        tabs.setSuggestedVerdict(nil, for: key)
+        #expect(tabs.tab(key)?.suggestedVerdict == nil)
+    }
+
+    @Test("a tab saved before suggestions existed decodes without one")
+    func legacyTab() throws {
+        var tabs = PRTabs()
+        tabs.openInBackground(pr(1), in: project)
+        var object = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(tabs)) as? [String: Any])
+        var rows = try #require(object["tabs"] as? [[String: Any]])
+        rows[0].removeValue(forKey: "suggestedVerdict")
+        object["tabs"] = rows
+        let decoded = try JSONDecoder().decode(PRTabs.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(decoded.tabs.count == 1)
+        #expect(decoded.tabs.first?.suggestedVerdict == nil)
+    }
+}

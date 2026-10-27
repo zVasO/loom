@@ -15,14 +15,19 @@ public struct PRTab: Codable, Equatable, Identifiable, Sendable {
     public var drawerOpen: Bool
     /// What the verdict bar holds — a review summary is written over time.
     public var reviewSummary: String
+    /// The verdict a scheduled review suggests (`approve`,
+    /// `request_changes`, `comment`) — shown, never sent: the human picks.
+    /// nil once a review is submitted, and for tabs saved before it existed.
+    public var suggestedVerdict: String?
 
     public init(projectID: ProjectID, pr: GitHubService.PullRequest, isPreview: Bool = true,
-                drawerOpen: Bool = false, reviewSummary: String = "") {
+                drawerOpen: Bool = false, reviewSummary: String = "", suggestedVerdict: String? = nil) {
         self.projectID = projectID
         self.pr = pr
         self.isPreview = isPreview
         self.drawerOpen = drawerOpen
         self.reviewSummary = reviewSummary
+        self.suggestedVerdict = suggestedVerdict
     }
 
     public static func key(_ projectID: ProjectID, _ number: Int) -> String {
@@ -78,6 +83,19 @@ public struct PRTabs: Codable, Equatable, Sendable {
         pin(PRTab.key(projectID, pr.number))
     }
 
+    /// Pinned WITHOUT taking the screen: a scheduled review opens its PR's
+    /// tab while the user may be reading another. Active only when no tab is.
+    public mutating func openInBackground(_ pr: GitHubService.PullRequest, in projectID: ProjectID) {
+        let key = PRTab.key(projectID, pr.number)
+        if let index = tabs.firstIndex(where: { $0.id == key }) {
+            tabs[index].pr = pr
+            tabs[index].isPreview = false
+        } else {
+            tabs.append(PRTab(projectID: projectID, pr: pr, isPreview: false))
+        }
+        if activeID == nil { activeID = key }
+    }
+
     public mutating func pin(_ id: String) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         tabs[index].isPreview = false
@@ -128,6 +146,11 @@ public struct PRTabs: Codable, Equatable, Sendable {
     public mutating func setSummary(_ summary: String, for id: String) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         tabs[index].reviewSummary = summary
+    }
+
+    public mutating func setSuggestedVerdict(_ verdict: String?, for id: String) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabs[index].suggestedVerdict = verdict
     }
 
     /// A list was refetched: the open tabs of that project take the fresh

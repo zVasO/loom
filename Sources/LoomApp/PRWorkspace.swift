@@ -564,6 +564,13 @@ struct PRWorkspaceView: View {
 
     private var verdictBar: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let raw = model.prTabs.tab(PRTab.key(project.id, pr.number))?.suggestedVerdict,
+               let suggested = AutoReviewReport.Verdict(rawValue: raw) {
+                Label("A scheduled review suggests: \(suggested.label) — the summary and the pending comments are claude's draft. Read, edit, then submit your verdict.",
+                      systemImage: "sparkles")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
             if let draft, !draft.isEmpty {
                 pendingStrip(draft)
             }

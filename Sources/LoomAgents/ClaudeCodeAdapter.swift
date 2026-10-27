@@ -48,11 +48,24 @@ public struct ClaudeCodeAdapter: Sendable {
     public var executable: String
     public var hooks: HookWiring?
     public var tools: ToolOptions
+    /// Appended to claude's system prompt at every launch and resume
+    /// (`SessionInstructions`); nil or blank adds nothing.
+    public var instructions: String?
 
-    public init(executable: String = "claude", hooks: HookWiring? = nil, tools: ToolOptions = ToolOptions()) {
+    public init(executable: String = "claude", hooks: HookWiring? = nil, tools: ToolOptions = ToolOptions(),
+                instructions: String? = nil) {
         self.executable = executable
         self.hooks = hooks
         self.tools = tools
+        self.instructions = instructions
+    }
+
+    /// `--append-system-prompt`: the default system prompt stays, the
+    /// instructions follow it — in an interactive session as in `-p`.
+    var instructionArguments: [String] {
+        guard let text = instructions?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else { return [] }
+        return ["--append-system-prompt", text]
     }
 
     /// The session UUID is IMPOSED on the CLI (`--session-id`): Resume becomes
@@ -78,6 +91,7 @@ public struct ClaudeCodeAdapter: Sendable {
                                         engine: tools.engine) {
             arguments.append(contentsOf: ["--mcp-config", mcp])
         }
+        arguments += instructionArguments
         if let initialPrompt {
             arguments.append(initialPrompt)
         }
@@ -172,6 +186,7 @@ public struct ClaudeCodeAdapter: Sendable {
                                         engine: tools.engine) {
             arguments.append(contentsOf: ["--mcp-config", mcp])
         }
+        arguments += instructionArguments
         return Command(executable: executable, arguments: arguments,
                        environment: Self.apiEnvironment(wiring: hooks, token: hookToken),
                        pathPrefix: Self.pathPrefix(wiring: hooks))

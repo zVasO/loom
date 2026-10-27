@@ -158,6 +158,7 @@ struct GlobalPRsView: View {
                     if let results = model.searchResults {
                         searchSection(results)
                     }
+                    ScheduledReviewsSidebarSection(model: model, activeTabID: activeTab?.id)
                     inboxSection
                     projectsSection
                     ForEach(model.visibleOwners, id: \.self) { owner in
