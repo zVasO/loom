@@ -35,6 +35,29 @@ final class WorkflowsModel {
     /// Running runs' tasks — cancelled by Stop.
     @ObservationIgnored var runTasks: [UUID: Task<Void, Never>] = [:]
 
+    /// What the Workflows tab shows beside its sidebar.
+    enum Detail: Equatable {
+        case workflow
+        case run(UUID)
+        case report(UUID)
+        case expert(UUID)
+        case connector(UUID)
+    }
+    var detail: Detail = .workflow
+
+    /// The Run sheet, when it is asked for: which workflow, with what inputs
+    /// already known (a PR's tab knows its PR).
+    struct LaunchRequest: Identifiable, Equatable {
+        let id = UUID()
+        var workflowID: UUID?
+        var inputs: RunInputs?
+    }
+    var launchRequest: LaunchRequest?
+    /// A step's session the user asked to see — the tab opens it in Sessions.
+    var sessionToOpen: SessionID?
+    /// The editor's page, kept across tab switches.
+    @ObservationIgnored var editorHost: WorkflowEditorHost?
+
     init(supportDirectory: URL, secrets: SecretStore = KeychainSecretStore()) {
         store = WorkflowLibraryStore(directory: supportDirectory.appendingPathComponent("workflows"))
         runStore = WorkflowRunStore(directory: supportDirectory.appendingPathComponent("workflow-runs"))

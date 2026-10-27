@@ -65,7 +65,7 @@ let package = Package(
                 "LoomGit", "LoomWeb", "LoomPersistence", "LoomIPC",
                 "LoomSessions", "LoomExtensions", "LoomChromium", "LoomWorkflows",
             ],
-            resources: [.process("Resources")]
+            resources: [.process("Resources"), .copy("WorkflowEditor")]
         ),
         .testTarget(name: "LoomCoreTests", dependencies: ["LoomCore"]),
         .testTarget(name: "LoomAPITests", dependencies: ["LoomAPI", "LoomCore"]),

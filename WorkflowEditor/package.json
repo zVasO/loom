@@ -1,0 +1,20 @@
+{
+  "name": "loom-workflow-editor",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Loom's workflow editor (ADR-0017): React Flow, built offline into Sources/LoomApp/WorkflowEditor.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs --check",
+    "test": "node --test ../Tests/WorkflowEditorJS/*.test.mjs"
+  },
+  "dependencies": {
+    "@xyflow/react": "12.8.2",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.9"
+  }
+}

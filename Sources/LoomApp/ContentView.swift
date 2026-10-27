@@ -108,7 +108,7 @@ struct LogoMark: View {
 }
 
 enum MainTab {
-    case projects, sessions, prs, overview, settings, extensions
+    case projects, sessions, prs, workflows, overview, settings, extensions
 }
 
 /// The Sessions view's detail: a session… or the browser, as a tab
@@ -156,6 +156,10 @@ struct ContentView: View {
                 tab = .sessions
             })
             case .prs: GlobalPRsView(model: model, onOpenSession: { id in
+                selected = .session(id)
+                tab = .sessions
+            })
+            case .workflows: WorkflowsView(model: model, onOpenSession: { id in
                 selected = .session(id)
                 tab = .sessions
             })
@@ -309,6 +313,7 @@ struct ContentView: View {
             NavTab("Projects", isActive: tab == .projects) { tab = .projects }
             NavTab("Sessions", isActive: tab == .sessions) { tab = .sessions }
             NavTab("PRs", isActive: tab == .prs) { tab = .prs }
+            NavTab("Workflows", isActive: tab == .workflows) { tab = .workflows }
             if !model.extensions.extensions.isEmpty {
                 NavTab("Extensions", isActive: tab == .extensions) { tab = .extensions }
             }

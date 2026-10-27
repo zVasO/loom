@@ -133,6 +133,14 @@ jobs:
       - name: Extension SDK and examples
         working-directory: Examples/extensions
         run: npm test
+      # The workflow editor (ADR-0017): its bundle is versioned — it must match
+      # its sources — and it runs on a real Chromium, offline.
+      - name: Workflow editor
+        working-directory: WorkflowEditor
+        run: |
+          npm ci --no-audit --no-fund
+          node build.mjs --check
+          npm test
 
   selftest:
     name: agent browser self-test (${{ matrix.engine }})
