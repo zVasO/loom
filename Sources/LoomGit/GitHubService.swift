@@ -863,9 +863,8 @@ public struct GitHubService: Sendable {
     /// worktree, or fetches the PR head and moves an existing one onto it.
     /// Cheap when nothing moved — one fetch, no working-tree write.
     public func syncPRWorktree(_ number: Int, repo: URL, readOnly: Bool = true) async throws -> PRCheckout {
-        let root = repo.deletingLastPathComponent()
-            .appendingPathComponent(repo.lastPathComponent + "-worktrees")
-        let path = root.appendingPathComponent("pr-\(number)")
+        let path = Self.reviewWorktreePath(number, repo: repo)
+        let root = path.deletingLastPathComponent()
         let previousHead: String?
         let head: String
         // Detached fetch of the PR head: never fights over branch names —
@@ -899,6 +898,14 @@ public struct GitHubService: Sendable {
             try await unprotectWorktree(path)
         }
         return PRCheckout(path: path, previousHead: previousHead, head: head)
+    }
+
+    /// Where a PR's review worktree lives: `<repo>-worktrees/pr-N`, beside
+    /// the user's checkout.
+    public static func reviewWorktreePath(_ number: Int, repo: URL) -> URL {
+        repo.deletingLastPathComponent()
+            .appendingPathComponent(repo.lastPathComponent + "-worktrees")
+            .appendingPathComponent("pr-\(number)")
     }
 
     /// Files Loom drops into a review worktree, kept out of `git status` for

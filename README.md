@@ -51,6 +51,19 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   brouillon et envoyés en une seule review avec le verdict, session claude par PR,
   un onglet par PR ouverte (aperçu réutilisé au clic, épinglé par la review),
   conservés d'un onglet de l'app à l'autre et d'un lancement à l'autre.
+- **Reviews planifiées** : des plannings (heure, jours) sur des tranches de PR —
+  un projet + une requête GitHub (« needs review », un filtre perso…) + un maximum
+  par passage. À l'heure dite (ou au réveil du Mac, jusqu'à 4 h de retard), Loom
+  ouvre un onglet épinglé par PR sans voler l'écran, lance sa session de review
+  (`/setup-pr-review` puis une review complète, quelques-unes à la fois) et importe
+  le rapport que claude écrit dans `.loom-review/auto-review.json` : résumé dans la
+  barre de verdict, commentaires sur les lignes du diff en commentaires en attente,
+  verdict suggéré. L'humain relit, corrige, envoie. Une PR n'est revue à nouveau
+  qu'après un push. Réglages › Scheduled reviews ; suivi dans la sidebar PR.
+- **Instructions de session** : un texte ajouté au prompt système de chaque session
+  claude (`--append-system-prompt`, lancement et reprise), éditable dans les
+  Réglages — par défaut, tenir le titre et les badges de la session Loom à jour
+  via les outils MCP `loom_*`.
 - **Navigateur** : WKWebView à data store persistant (cookies GitHub conservés),
   UA Safari, LRU d'onglets, historique avec suggestions. Panneau latéral (⌘⇧B) :
   un navigateur de la pile à côté du terminal de la session, sans jamais

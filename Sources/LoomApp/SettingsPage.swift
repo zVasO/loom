@@ -52,7 +52,9 @@ struct SettingsPage: View {
                 generalSection
                 sessionsSection
                 agentsSection
+                instructionsSection
                 reviewSection
+                ScheduledReviewsSettings(model: model)
                 shortcutsSection
                 badgesSection
                 themesSection
@@ -407,6 +409,57 @@ struct SettingsPage: View {
                 Text("Signs the agents out of every site they or you logged in to in their browsers — WebKit's and Chromium's — and empties their storage. Your own browser is untouched.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
+            }
+        }
+    }
+
+    // MARK: Session instructions
+
+    @State private var instructionsOn = true
+    @State private var instructionsDraft = ""
+
+    /// What every claude session is told on top of its system prompt.
+    private var instructionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("Session instructions")
+            card {
+                Toggle(isOn: $instructionsOn) {
+                    Text("Give every claude session these instructions")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                .onChange(of: instructionsOn) { _, on in model.sessionInstructionsEnabled = on }
+                Text("Appended to claude's system prompt (--append-system-prompt) in every session Loom starts or resumes, reviews included — your own rules for all projects, next to each project's CLAUDE.md. The default tells claude to keep its Loom session's title and badges current through Loom's tools. Applies to sessions started or resumed after the change.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                HStack {
+                    Text("Instructions")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                    Spacer()
+                    if instructionsDraft != SessionInstructions.defaultText {
+                        GhostButton("Reset to default", systemImage: "arrow.counterclockwise") {
+                            instructionsDraft = SessionInstructions.defaultText
+                        }
+                    }
+                }
+                TextEditor(text: $instructionsDraft)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(minHeight: 180)
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    .opacity(instructionsOn ? 1 : 0.5)
+                    .onChange(of: instructionsDraft) { _, draft in
+                        model.sessionInstructionsText = draft
+                    }
+            }
+            .onAppear {
+                instructionsOn = model.sessionInstructionsEnabled
+                instructionsDraft = model.sessionInstructionsText
             }
         }
     }
