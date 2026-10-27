@@ -204,6 +204,9 @@ struct WorkflowsView: View {
     private func commitRename(_ id: UUID) {
         workflows.rename(id, to: renameText)
         renaming = nil
+        // The editor holds the workflow it shows: it must take the new
+        // name, or its next save would write the old one back.
+        if workflows.selectedWorkflowID == id { model.emitEditorState() }
     }
 
     private var expertsSection: some View {
