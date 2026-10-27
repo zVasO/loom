@@ -506,7 +506,11 @@ extension AppModel {
     static func artifactPalette(theme name: String, dark: Bool) -> ArtifactPalette {
         let store = ThemeStore.shared
         let family = name == "current" ? store.family(named: store.globalFamilyName) : store.family(named: name)
-        let resolved = family ?? store.family(named: store.globalFamilyName) ?? ThemeFamily.loom
+        return artifactPalette(family: family ?? store.family(named: store.globalFamilyName) ?? ThemeFamily.loom,
+                               dark: dark)
+    }
+
+    static func artifactPalette(family resolved: ThemeFamily, dark: Bool) -> ArtifactPalette {
         let tokens = dark ? resolved.dark : resolved.light
         let document = resolved.document
         func nonEmpty(_ value: String?) -> String? {

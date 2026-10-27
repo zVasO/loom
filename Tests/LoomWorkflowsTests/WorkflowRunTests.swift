@@ -68,4 +68,12 @@ struct WorkflowRunTests {
         #expect(ArtifactRenderer.sanitizedSVG("<svg><script>x</script></svg>") == "")
         #expect(ArtifactRenderer.sanitizedSVG("<div></div>") == "")
     }
+
+    @Test("the sample a theme is previewed on decodes, and finds its consolidated review")
+    func sample() {
+        #expect(ArtifactRenderer.sampleData["steps"]?["coherence"]?["verdict"] == .string("request_changes"))
+        let html = ArtifactRenderer.html(template: "pr-review", title: "Aperçu", palette: ArtifactPalette(),
+                                         data: ArtifactRenderer.sampleData)
+        #expect(html.contains("Cache des contrats"))
+    }
 }
