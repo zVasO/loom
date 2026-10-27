@@ -6,6 +6,7 @@ import LoomPersistence
 import LoomTerminal
 import LoomUI
 import LoomWeb
+import LoomWorkflows
 import SwiftUI
 import Observation
 
@@ -197,6 +198,7 @@ struct ContentView: View {
             applyTheme()
             model.extensions.isTabVisible = tab == .extensions
         }
+        .onChange(of: model.workflows.revealRequest) { tab = .workflows }
         .modifier(ExtensionsWiring(model: model, onOpenSession: { id in
             selected = .session(id)
             tab = .sessions
@@ -479,6 +481,20 @@ struct ContentView: View {
                                          subtitle: "Stops claude — resumable as inactive",
                                          section: "Actions") {
                 Task { await model.stopSession(parent.id) }
+            })
+        }
+
+        // Workflows (ADR-0017): run one — the Run sheet asks what on.
+        for workflow in model.workflows.workflows {
+            actions.append(PaletteAction(id: "wf.run.\(workflow.id.uuidString)",
+                                         icon: "point.3.connected.trianglepath.dotted",
+                                         title: "Run workflow: \(workflow.name)",
+                                         subtitle: workflow.summary.isEmpty ? "Workflow" : workflow.summary,
+                                         section: "Workflows") {
+                model.workflows.selectedWorkflowID = workflow.id
+                model.workflows.detail = .workflow
+                tab = .workflows
+                model.workflows.launchRequest = .init(workflowID: workflow.id, inputs: nil)
             })
         }
 

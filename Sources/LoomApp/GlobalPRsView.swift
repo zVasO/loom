@@ -2,6 +2,7 @@ import LoomCore
 import LoomGit
 import LoomPersistence
 import LoomUI
+import LoomWorkflows
 import SwiftUI
 
 /// The global PRs tab: every project's open pull requests in one sidebar, the
@@ -650,6 +651,43 @@ struct GlobalPRsView: View {
         } while !Task.isCancelled
     }
 
+    /// The workflows a PR can start (ADR-0017): run one on this PR, the
+    /// Jira key found in it; the run opens in the Workflows tab.
+    @ViewBuilder
+    private func workflowMenu(_ pr: GitHubService.PullRequest, project: ProjectRecord) -> some View {
+        let candidates = model.workflows.workflows.filter { $0.triggers.contains(.pullRequest) }
+        if !candidates.isEmpty {
+            Menu {
+                ForEach(candidates) { workflow in
+                    Button(workflow.name) {
+                        let inputs = RunInputs(trigger: .pullRequest, projectID: project.id, prNumber: pr.number)
+                        if let run = model.startWorkflowRun(workflow.id, inputs: inputs) {
+                            model.workflows.detail = .run(run)
+                            model.workflows.revealRequest = UUID()
+                        }
+                    }
+                }
+                let runs = model.workflows.runs.filter { $0.inputs.prNumber == pr.number && $0.inputs.projectID == project.id }
+                if !runs.isEmpty {
+                    Divider()
+                    ForEach(runs.prefix(5)) { run in
+                        Button("\(run.workflow.name) — \(RunStatusLabel.text(run.status)), "
+                               + run.startedAt.formatted(.relative(presentation: .named))) {
+                            model.workflows.detail = run.artifactPath != nil ? .report(run.id) : .run(run.id)
+                            model.workflows.revealRequest = UUID()
+                        }
+                    }
+                }
+            } label: {
+                Label("Workflow", systemImage: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Run a workflow on this PR — or open one of its runs")
+        }
+    }
+
     /// `fresh`: a new session takes over the PR instead of the one it has.
     private func startReview(_ pr: GitHubService.PullRequest, project: ProjectRecord,
                              fresh: Bool = false) {
@@ -791,6 +829,7 @@ struct GlobalPRsView: View {
                     startReview(pr, project: project)
                 }
             }
+            workflowMenu(pr, project: project)
             if !model.isLaunchingReview(forPR: pr.number, in: project.id) {
                 // The poll runs every minute; this is "now": PR, diff,
                 // comments, and the review worktree fetched again.

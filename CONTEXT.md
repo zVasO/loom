@@ -150,3 +150,33 @@ _Avoid_ : grant, consentement (le consentement est le geste, l'autorisation son 
 **Hôte accordé** :
 Un hôte réseau qu'une extension a demandé à l'usage (`optionalNetwork`, ADR-0015) — le site d'un flux que l'utilisateur vient d'ajouter — et que l'utilisateur a approuvé dans une feuille de Loom. Gardé à côté de l'autorisation, jamais dedans ; retiré dans les réglages.
 _Avoid_ : permission dynamique, hôte optionnel
+
+### Workflows
+
+**Workflow** :
+Un graphe nommé d'étapes, dessiné dans l'onglet Workflows (ADR-0017) : un départ, des étapes, des chemins entre elles. Plusieurs chemins sortants s'exécutent en parallèle ; plusieurs entrants attendent tous.
+_Avoid_ : pipeline, automation, flow (seul)
+
+**Étape** (nœud) :
+Une case du graphe : départ, contexte (la PR, le ticket, le repo), agent, condition, boucle, artefact. Nommée par un identifiant court (`php`) que les gabarits citent.
+_Avoid_ : task, job
+
+**Expert** :
+Un agent d'un seul domaine (PHP, sécurité…), réutilisé d'un workflow à l'autre : ses instructions, son modèle, ses skills, ses connecteurs, les outils qu'il peut utiliser.
+_Avoid_ : persona, bot, sous-agent
+
+**Connecteur** :
+Une source de données ou d'outils pour les étapes : un serveur MCP que Loom démarre, joint en HTTP, ou déjà configuré dans Claude Code. Ses secrets sont au Trousseau.
+_Avoid_ : intégration, plugin
+
+**Run** :
+Une exécution d'un workflow, sur ses entrées (projet, PR, clé Jira), conservée avec l'état de chaque étape, ses réponses et son coût.
+_Avoid_ : exécution (dans le code), job
+
+**Passe** :
+Un tour du corps d'une boucle ; « 3 passes » = la première et deux relances.
+
+**Artefact** :
+Le rapport HTML qu'un run écrit, dans un thème de Loom.
+_Avoid_ : export, document (seul)
+

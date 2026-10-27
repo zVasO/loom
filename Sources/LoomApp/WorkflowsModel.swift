@@ -55,6 +55,8 @@ final class WorkflowsModel {
     var launchRequest: LaunchRequest?
     /// A step's session the user asked to see — the tab opens it in Sessions.
     var sessionToOpen: SessionID?
+    /// Bumped to bring the Workflows tab to the front (a PR's tab started a run).
+    var revealRequest: UUID?
     /// The editor's page, kept across tab switches.
     @ObservationIgnored var editorHost: WorkflowEditorHost?
 

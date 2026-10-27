@@ -2,6 +2,7 @@ import Foundation
 import LoomAgents
 import LoomCore
 import LoomGit
+import LoomWorkflows
 import UserNotifications
 
 /// One run of a review schedule: the PRs it picked and where each stands.
@@ -221,13 +222,13 @@ extension AppModel {
             var next = 0
             while next < min(width, items.count) {
                 let item = items[next]
-                group.addTask { await self.autoReview(item, run: run.id) }
+                group.addTask { await self.autoReview(item, run: run.id, workflowID: schedule.workflowID) }
                 next += 1
             }
             while await group.next() != nil {
                 guard next < items.count else { continue }
                 let item = items[next]
-                group.addTask { await self.autoReview(item, run: run.id) }
+                group.addTask { await self.autoReview(item, run: run.id, workflowID: schedule.workflowID) }
                 next += 1
             }
         }
@@ -246,7 +247,11 @@ extension AppModel {
     /// One PR: its tab opened (pinned, in the background), its review
     /// session started or reattached with `/setup-pr-review`, the full review
     /// asked for, then waited on until claude writes its report.
-    private func autoReview(_ item: AutoReviewRun.Item, run runID: UUID) async {
+    private func autoReview(_ item: AutoReviewRun.Item, run runID: UUID, workflowID: UUID?) async {
+        if let workflowID {
+            await autoReviewWithWorkflow(item, run: runID, workflowID: workflowID)
+            return
+        }
         let pr = item.pr
         let projectID = item.projectID
         updateAutoReviewItem(item.id, run: runID) { $0.status = .preparing }
@@ -289,6 +294,39 @@ extension AppModel {
             return
         }
         await settleAutoReview(item, run: runID, outcome: outcome)
+    }
+
+    /// One PR through a workflow (ADR-0017): the run is the review; its
+    /// consolidated verdict and findings say how it ended.
+    private func autoReviewWithWorkflow(_ item: AutoReviewRun.Item, run runID: UUID, workflowID: UUID) async {
+        updateAutoReviewItem(item.id, run: runID) { $0.status = .preparing }
+        prTabs.openInBackground(item.pr, in: item.projectID)
+        savePRTabs()
+        let inputs = RunInputs(trigger: .schedule, projectID: item.projectID, prNumber: item.pr.number)
+        guard let workflowRun = startWorkflowRun(workflowID, inputs: inputs) else {
+            let reason = startupError ?? "The workflow could not start."
+            updateAutoReviewItem(item.id, run: runID) { $0.status = .failed(reason) }
+            return
+        }
+        updateAutoReviewItem(item.id, run: runID) { $0.status = .reviewing }
+        await workflows.runTasks[workflowRun]?.value
+        guard let finished = workflows.run(workflowRun) else { return }
+        guard finished.status == .succeeded else {
+            let reason = finished.error ?? "The workflow did not finish."
+            updateAutoReviewItem(item.id, run: runID) { $0.status = .failed(reason) }
+            return
+        }
+        let planner = WorkflowPlanner(finished.workflow)
+        let context = TemplateRenderer.context(inputs: .object([:]), state: finished.state, planner: planner)
+        let report = Self.reviewReport(from: context)
+        reviewSchedules.reviewedHeads[item.id] = ReviewSchedulePlanner.fingerprint(item.pr)
+        saveReviewSchedules()
+        let verdict = report?.verdict ?? .comment
+        let comments = report?.comments.count ?? 0
+        updateAutoReviewItem(item.id, run: runID) {
+            $0.status = .ready(verdict: verdict.rawValue, comments: comments, inSummary: 0)
+        }
+        notifyReviewReady(item.pr, verdict: verdict, comments: comments)
     }
 
     enum AutoReviewOutcome {
