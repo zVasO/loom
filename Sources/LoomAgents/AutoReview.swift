@@ -1,4 +1,5 @@
 import Foundation
+import LoomCore
 
 /// The review a scheduled run asks for, once `/setup-pr-review` has loaded
 /// the PR: the whole review, written as a report Loom imports — a summary
@@ -96,7 +97,7 @@ public struct AutoReviewReport: Equatable, Sendable {
     /// decides anyway; a comment missing its path, line or body is dropped.
     /// nil when there is no object, or neither a summary nor a comment.
     public static func parse(_ text: String) -> AutoReviewReport? {
-        guard let object = jsonObject(in: text) else { return nil }
+        guard let object = LenientJSON.object(in: text) else { return nil }
         let rawVerdict = (object["verdict"] as? String ?? "")
             .lowercased()
             .replacingOccurrences(of: " ", with: "_")
@@ -115,30 +116,6 @@ public struct AutoReviewReport: Equatable, Sendable {
         }
         guard !summary.isEmpty || !comments.isEmpty else { return nil }
         return AutoReviewReport(verdict: verdict, summary: summary, comments: comments)
-    }
-
-    /// The object, tried as written first: a comment body carries its own
-    /// ```suggestion fences, which must not be mistaken for a wrapping one.
-    /// Then without a wrapping fence, then cut to the outermost braces.
-    private static func jsonObject(in text: String) -> [String: Any]? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        var candidates = [trimmed]
-        if trimmed.hasPrefix("```"), let open = trimmed.firstIndex(of: "\n") {
-            var inner = String(trimmed[trimmed.index(after: open)...])
-            if let close = inner.range(of: "```", options: .backwards) {
-                inner = String(inner[..<close.lowerBound])
-            }
-            candidates.append(inner)
-        }
-        if let first = trimmed.firstIndex(of: "{"), let last = trimmed.lastIndex(of: "}"), first < last {
-            candidates.append(String(trimmed[first...last]))
-        }
-        for candidate in candidates {
-            if let object = try? JSONSerialization.jsonObject(with: Data(candidate.utf8)) as? [String: Any] {
-                return object
-            }
-        }
-        return nil
     }
 
     /// JSON numbers arrive as Int or Double; a quoted number is taken too.

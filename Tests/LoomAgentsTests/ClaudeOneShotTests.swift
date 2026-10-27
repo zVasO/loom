@@ -140,3 +140,33 @@ struct ClaudeOneShotTests {
         }
     }
 }
+
+// A workflow step runs claude as configured, with its expert on top of the
+// system prompt, its connectors, and only the tools it may use.
+@Suite("ClaudeOneShot — a workflow step's options")
+struct ClaudeOneShotWorkflowTests {
+
+    @Test("expert, connectors and allowed tools reach the command line")
+    func workflowOptions() {
+        let arguments = ClaudeOneShot.arguments(for: .init(
+            prompt: "x", model: "opus", tools: .inherited, appendSystemPrompt: "You are a PHP expert.",
+            mcpConfig: #"{"mcpServers":{}}"#, strictMCPConfig: true,
+            allowedTools: ["Read", "Bash(git diff:*)", "mcp__atlassian__*"]))
+        #expect(arguments == ["-p", "--output-format", "json",
+                              "--append-system-prompt", "You are a PHP expert.",
+                              "--mcp-config", #"{"mcpServers":{}}"#, "--strict-mcp-config",
+                              "--allowedTools", "Read,Bash(git diff:*),mcp__atlassian__*",
+                              "--model", "opus"])
+    }
+
+    @Test("none of them in a text-only run, and nothing when left empty")
+    func textOnlyIgnoresThem() {
+        let textOnly = ClaudeOneShot.arguments(for: .init(prompt: "x", appendSystemPrompt: "e",
+                                                          mcpConfig: "{}", allowedTools: ["Read"]))
+        #expect(!textOnly.contains("--append-system-prompt"))
+        #expect(!textOnly.contains("--allowedTools"))
+        let blank = ClaudeOneShot.arguments(for: .init(prompt: "x", tools: .inherited, appendSystemPrompt: "  ",
+                                                       mcpConfig: "", strictMCPConfig: true))
+        #expect(blank == ["-p", "--output-format", "json"])
+    }
+}

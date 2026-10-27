@@ -31,10 +31,22 @@ public enum ClaudeOneShot {
         /// nil: a fresh empty temporary folder, removed afterwards.
         public var workingDirectory: URL?
         public var maxOutputBytes: Int
+        /// With inherited tools: appended to Claude Code's own system prompt
+        /// (a workflow's expert), where `systemPrompt` would replace it.
+        public var appendSystemPrompt: String?
+        /// With inherited tools: an inline `--mcp-config` (a workflow node's
+        /// connectors) and whether it is the only MCP the run sees.
+        public var mcpConfig: String?
+        public var strictMCPConfig: Bool
+        /// With inherited tools: `--allowedTools` — what runs without a
+        /// permission prompt nobody would answer. Empty passes nothing.
+        public var allowedTools: [String]
 
         public init(prompt: String, systemPrompt: String? = nil, model: String? = nil,
                     tools: ToolAccess = .none, timeout: TimeInterval = 120,
-                    workingDirectory: URL? = nil, maxOutputBytes: Int = 4 << 20) {
+                    workingDirectory: URL? = nil, maxOutputBytes: Int = 4 << 20,
+                    appendSystemPrompt: String? = nil, mcpConfig: String? = nil,
+                    strictMCPConfig: Bool = false, allowedTools: [String] = []) {
             self.prompt = prompt
             self.systemPrompt = systemPrompt
             self.model = model
@@ -42,6 +54,10 @@ public enum ClaudeOneShot {
             self.timeout = timeout
             self.workingDirectory = workingDirectory
             self.maxOutputBytes = maxOutputBytes
+            self.appendSystemPrompt = appendSystemPrompt
+            self.mcpConfig = mcpConfig
+            self.strictMCPConfig = strictMCPConfig
+            self.allowedTools = allowedTools
         }
     }
 
@@ -127,6 +143,17 @@ public enum ClaudeOneShot {
         case .inherited:
             if let systemPrompt = request.systemPrompt {
                 arguments += ["--system-prompt", systemPrompt]
+            }
+            if let append = request.appendSystemPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !append.isEmpty {
+                arguments += ["--append-system-prompt", append]
+            }
+            if let mcp = request.mcpConfig, !mcp.isEmpty {
+                arguments += ["--mcp-config", mcp]
+                if request.strictMCPConfig { arguments.append("--strict-mcp-config") }
+            }
+            if !request.allowedTools.isEmpty {
+                arguments += ["--allowedTools", request.allowedTools.joined(separator: ",")]
             }
         }
         if let model = request.model, !model.isEmpty {

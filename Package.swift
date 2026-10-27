@@ -48,6 +48,9 @@ let package = Package(
         // `loom`: the CLI and the MCP server, clients of the LoomAPI contract. The logic lives in
         // LoomCLI (testable); the executable is only an entry point.
         .target(name: "LoomCLI", dependencies: ["LoomAPI", "LoomCore"]),
+        // Multi-agent workflows (ADR-0017): the graph, its rules and its
+        // templates — pure, testable; the runner and the editor live in LoomApp.
+        .target(name: "LoomWorkflows", dependencies: ["LoomCore", "LoomAPI"]),
         .executableTarget(name: "loom", dependencies: ["LoomCLI"]),
         .target(name: "LoomSessions", dependencies: ["LoomCore", "LoomTerminal", "LoomAgents", "LoomPersistence", "LoomGit"]),
         // Test adapters for the PTY seam, shared by the test targets (never shipped in the product).
@@ -60,7 +63,7 @@ let package = Package(
             dependencies: [
                 "LoomCore", "LoomAPI", "LoomUI", "LoomTerminal", "LoomAgents",
                 "LoomGit", "LoomWeb", "LoomPersistence", "LoomIPC",
-                "LoomSessions", "LoomExtensions", "LoomChromium",
+                "LoomSessions", "LoomExtensions", "LoomChromium", "LoomWorkflows",
             ],
             resources: [.process("Resources")]
         ),
@@ -77,5 +80,6 @@ let package = Package(
         .testTarget(name: "LoomWebTests", dependencies: ["LoomWeb", "LoomAPI", "LoomChromium"]),
         .testTarget(name: "LoomExtensionsTests", dependencies: ["LoomExtensions", "LoomAPI", "LoomCore"]),
         .testTarget(name: "LoomUITests", dependencies: ["LoomUI", "LoomTerminal", "LoomGit"]),
+        .testTarget(name: "LoomWorkflowsTests", dependencies: ["LoomWorkflows", "LoomAPI", "LoomCore"]),
     ]
 )
