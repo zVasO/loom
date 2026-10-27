@@ -246,7 +246,7 @@ struct TweakcnImportTests {
         let css = TweakcnImport.family(named: "T", light: ["background": "#fff", "font-sans": "Nunito, sans-serif",
                                                             "radius": "1rem"], dark: ["background": "#000"])
         #expect(css.document == ThemeDocumentStyle(fontSans: "Nunito, sans-serif", radius: "1rem"))
-        let json = #"{"name": "t", "cssVars": {"theme": {"font-mono": "JetBrains Mono", "radius": "0.5rem"}, "light": {"background": "#fff", "radius": "1rem"}, "dark": {"background": "#000"}}}"#
+        let json = ##"{"name": "t", "cssVars": {"theme": {"font-mono": "JetBrains Mono", "radius": "0.5rem"}, "light": {"background": "#fff", "radius": "1rem"}, "dark": {"background": "#000"}}}"##
         let parsed = try TweakcnImport.parseRegistry(Data(json.utf8))
         let family = TweakcnImport.family(named: parsed.name, light: parsed.light, dark: parsed.dark)
         #expect(family.document?.fontMono == "JetBrains Mono")
