@@ -36,6 +36,10 @@ function Editor() {
   const [estimate, setEstimate] = useState(null);
   const [run, setRun] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [selectedEdge, setSelectedEdge] = useState(null);
+  const [editingBlockID, setEditingBlockID] = useState(null);
+  const [blockDraft, setBlockDraft] = useState(null);
+  const blockTimer = useRef(null);
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
   const [saving, setSaving] = useState("saved");
@@ -59,6 +63,7 @@ function Editor() {
     setEstimate(next.estimate || null);
     setRun(next.run || null);
     setSelected(null);
+    setSelectedEdge(null);
     setSaving("saved");
     history.current = new G.History();
     requestAnimationFrame(() => flow.fitView({ padding: 0.2, duration: 300 }));
@@ -78,13 +83,14 @@ function Editor() {
   // The flow follows the workflow; React Flow keeps the selection.
   useEffect(() => {
     if (!workflow || !state) return;
-    const derived = G.toFlow(workflow, { experts: state.experts, issues, run });
+    const derived = G.toFlow(workflow, { experts: state.experts, issues, run, blocks: state.blocks || [],
+      selectedEdge });
     setNodes((current) => {
       const chosen = new Set(current.filter((n) => n.selected).map((n) => n.id));
       return derived.nodes.map((n) => ({ ...n, selected: chosen.has(n.id), draggable: !readOnly }));
     });
     setEdges(derived.edges);
-  }, [workflow, issues, run, state, readOnly]);
+  }, [workflow, issues, run, state, readOnly, selectedEdge]);
 
   const save = useCallback((next) => {
     clearTimeout(saveTimer.current);
@@ -136,7 +142,11 @@ function Editor() {
   const onNodesChange = useCallback((changes) => {
     setNodes((current) => applyNodeChanges(changes, current));
     for (const change of changes) {
-      if (change.type === "select" && change.selected) setSelected(change.id);
+      if (change.type === "select" && change.selected) {
+        setSelected(change.id);
+        setSelectedEdge(null);
+        setEditingBlockID(null);
+      }
       if (change.type === "select" && !change.selected) setSelected((s) => (s === change.id ? null : s));
     }
     const removed = changes.filter((c) => c.type === "remove").map((c) => c.id);
@@ -160,9 +170,23 @@ function Editor() {
     if (workflowRef.current) update(G.fromFlow(workflowRef.current, nodesRef.current, edges));
   }, [edges, update]);
 
+  const blocks = (state && state.blocks) || [];
+  const blocksRef = useRef(blocks);
+  blocksRef.current = blocks;
+
   const onConnect = useCallback((connection) => {
     const current = workflowRef.current;
-    if (!current || !G.canConnect(current, connection)) return;
+    if (!current) return;
+    const kind = G.connectionKind(current, connection, blocksRef.current);
+    if (!kind) return;
+    if (kind === "retry") {
+      // Drawn back up from a step with a verdict: a bounded way back (ADR-0019).
+      const edge = G.newRetryEdge(current, connection.source, connection.target, blocksRef.current);
+      update({ ...current, edges: [...current.edges, edge] });
+      setSelected(null);
+      setSelectedEdge(edge.id);
+      return;
+    }
     const branch = connection.sourceHandle === "yes" || connection.sourceHandle === "no" ? connection.sourceHandle : null;
     const edge = { id: `${connection.source}->${connection.target}${branch ? ":" + branch : ""}`,
       from: connection.source, to: connection.target };
@@ -170,20 +194,99 @@ function Editor() {
     update({ ...current, edges: [...current.edges, edge] });
   }, [update]);
 
-  const isValidConnection = useCallback((connection) => !!workflowRef.current && G.canConnect(workflowRef.current, connection), []);
+  const isValidConnection = useCallback((connection) => !!workflowRef.current
+    && G.canConnect(workflowRef.current, connection, blocksRef.current), []);
+
+  const onEdgeClick = useCallback((_, edge) => {
+    if (edge.data && edge.data.loopBack) return;
+    setSelected(null);
+    setEditingBlockID(null);
+    setSelectedEdge(edge.id);
+  }, []);
+
+  const changeEdge = useCallback((edge) => {
+    const current = workflowRef.current;
+    if (!current) return;
+    update({ ...current, edges: current.edges.map((e) => (e.id === edge.id ? edge : e)) });
+  }, [update]);
+
+  const deleteEdge = useCallback((id) => {
+    const current = workflowRef.current;
+    if (!current) return;
+    update({ ...current, edges: current.edges.filter((e) => e.id !== id) });
+    setSelectedEdge(null);
+  }, [update]);
+
+  // Blocks of the palette (ADR-0019): edited in place, saved to Loom, a beat after typing.
+  useEffect(() => {
+    if (!editingBlockID) { setBlockDraft(null); return; }
+    setBlockDraft((draft) => (draft && draft.id === editingBlockID ? draft
+      : blocks.find((b) => b.id === editingBlockID) || null));
+  }, [editingBlockID, blocks]);
+
+  const changeBlock = useCallback((block) => {
+    setBlockDraft(block);
+    clearTimeout(blockTimer.current);
+    blockTimer.current = setTimeout(() => {
+      call("block.save", { block }).then((result) => {
+        if (result && result.issues) {
+          setIssues(result.issues);
+          setEstimate(result.estimate || null);
+        }
+      }).catch(() => setSaving("error"));
+    }, 400);
+  }, []);
+
+  const editBlock = useCallback((id) => {
+    setSelected(null);
+    setSelectedEdge(null);
+    setEditingBlockID(id);
+  }, []);
+
+  const createBlock = useCallback(() => {
+    call("block.create", {}).then((block) => {
+      if (!block) return;
+      setState((current) => (current ? { ...current, blocks: [...(current.blocks || []), block] } : current));
+      editBlock(block.id);
+    }).catch(() => {});
+  }, [editBlock]);
+
+  // Deleting a block placed somewhere asks twice: the steps placed from it stop working.
+  const [deleteWarning, setDeleteWarning] = useState(null);
+  const deleteBlock = useCallback((id) => {
+    const remove = () => call("block.delete", { id }).then(() => {
+      setState((current) => (current ? { ...current, blocks: (current.blocks || []).filter((b) => b.id !== id) } : current));
+      setDeleteWarning(null);
+      setEditingBlockID(null);
+    });
+    if (deleteWarning && deleteWarning.id === id) { remove().catch(() => {}); return; }
+    call("block.usage", { id }).then((count) => {
+      const used = typeof count === "number" ? count : 0;
+      if (used > 0) setDeleteWarning({ id, used }); else remove();
+    }).catch(() => {});
+  }, [deleteWarning]);
 
   const addNode = useCallback((type, position) => {
     const current = workflowRef.current;
     if (!current) return;
-    const node = G.newNode(type, current, position);
+    let node;
+    if (type.startsWith("block:")) {
+      const block = blocksRef.current.find((b) => b.id === type.slice(6));
+      if (!block) return;
+      node = G.newBlockNode(block, current, position);
+    } else {
+      node = G.newNode(type, current, position);
+    }
     update({ ...current, nodes: [...current.nodes, node] });
+    setSelectedEdge(null);
+    setEditingBlockID(null);
     setSelected(node.id);
   }, [update]);
 
   const onDrop = useCallback((event) => {
     event.preventDefault();
     const type = event.dataTransfer.getData("application/loom-node");
-    if (!G.NODE_TYPES.includes(type)) return;
+    if (!G.NODE_TYPES.includes(type) && !type.startsWith("block:")) return;
     addNode(type, flow.screenToFlowPosition({ x: event.clientX, y: event.clientY }));
   }, [addNode, flow]);
 
@@ -191,6 +294,19 @@ function Editor() {
     const box = document.querySelector(".canvas").getBoundingClientRect();
     addNode(type, flow.screenToFlowPosition({ x: box.left + box.width / 2 - 100, y: box.top + box.height / 2 - 40 }));
   };
+
+  /** A step becomes a block: the block takes its prompt, fields, verdict and rules; the step points at it. */
+  const makeBlock = useCallback((node) => {
+    call("block.create", { config: node.config, name: node.title }).then((block) => {
+      if (!block) return;
+      setState((current) => (current ? { ...current, blocks: [...(current.blocks || []), block] } : current));
+      const current = workflowRef.current;
+      if (!current) return;
+      const placed = { ...node, config: { blockID: block.id, prompt: "", output: [], mode: "headless", skills: [],
+        connectorIDs: [], timeoutSeconds: 900, rules: [], ruleSetIDs: [] } };
+      update({ ...current, nodes: current.nodes.map((n) => (n.id === node.id ? placed : n)) });
+    }).catch(() => {});
+  }, [update]);
 
   const selectedNode = useMemo(
     () => (workflow && selected ? workflow.nodes.find((n) => n.id === selected) || null : null),
@@ -255,6 +371,24 @@ function Editor() {
                 <span>{G.KIND_HINTS[type]}</span>
               </button>
             ))}
+            <div className="palette-section">
+              <span>My blocks</span>
+              <button type="button" className="icon" title="New block" onClick={createBlock}>+</button>
+            </div>
+            {blocks.length === 0 && (
+              <p className="muted small palette-empty">Your own boxes: a prompt, rules, a verdict — placed as often as you like.</p>
+            )}
+            {blocks.map((block) => (
+              <div key={block.id} className="palette-item palette-block" draggable role="button" tabIndex={0}
+                style={{ "--kind": block.color || "var(--accent)" }} title={block.summary || block.name}
+                onDragStart={(e) => { e.dataTransfer.setData("application/loom-node", `block:${block.id}`); e.dataTransfer.effectAllowed = "move"; }}
+                onClick={() => addAtCenter(`block:${block.id}`)}>
+                <b>{block.name}</b>
+                <span>{block.summary || "Your block"}</span>
+                <button type="button" className="icon block-edit" title="Edit the block"
+                  onClick={(e) => { e.stopPropagation(); editBlock(block.id); }}>✎</button>
+              </div>
+            ))}
           </aside>
         )}
         <div className="canvas" onDrop={onDrop} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}>
@@ -262,7 +396,8 @@ function Editor() {
             nodes={nodes} edges={edges} nodeTypes={nodeTypes} defaultEdgeOptions={defaultEdgeOptions}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
             onNodeDragStop={onNodeDragStop} isValidConnection={isValidConnection}
-            onPaneClick={() => setSelected(null)}
+            onPaneClick={() => { setSelected(null); setSelectedEdge(null); }}
+            onEdgeClick={onEdgeClick}
             nodesConnectable={!readOnly} nodesDraggable={!readOnly} elementsSelectable
             deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
             snapToGrid snapGrid={[20, 20]} minZoom={0.2} maxZoom={1.6} proOptions={{ hideAttribution: true }}>
@@ -272,6 +407,11 @@ function Editor() {
           </ReactFlow>
         </div>
         <Inspector workflow={workflow} node={selectedNode} state={{ ...state, issues }} readOnly={readOnly} run={run}
+          edge={selectedEdge ? workflow.edges.find((e) => e.id === selectedEdge) || null : null}
+          onEdgeChange={changeEdge} onDeleteEdge={deleteEdge}
+          editingBlock={blockDraft} onBlockChange={changeBlock} onCloseBlock={() => setEditingBlockID(null)}
+          onDeleteBlock={deleteBlock} onEditBlock={editBlock} onMakeBlock={makeBlock}
+          deleteWarning={deleteWarning && blockDraft && deleteWarning.id === blockDraft.id ? deleteWarning.used : 0}
           onChange={changeNode} onDelete={deleteNode}
           onOpenSession={(nodeID) => call("node.open", { nodeID })}
           onWorkflowChange={setMeta} onOpenOrchestrator={() => call("orchestrator.open", {})} />

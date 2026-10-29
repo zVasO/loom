@@ -112,3 +112,68 @@ test("the orchestrator's moves mark the steps they touched (ADR-0018)", () => {
   assert.equal(orchestrator.maxRerunsPerStep, 2);
   assert.equal(orchestrator.reviewBeforeArtifact, true);
 });
+
+// Blocks, verdicts, conditional links and ways back (ADR-0019).
+const block = { id: "b1", name: "Revue PHP", color: "#123456", rules: ["Cite path:line."], ruleSetIDs: [],
+  template: { prompt: "Review {{in.text}}", output: [{ name: "findings", type: "list" }],
+    verdict: { options: ["ok", "à revoir", "OK "], guidance: "" } } };
+
+test("a step placed from a block runs the block, with its own instructions on top", () => {
+  const node = G.newBlockNode(block, workflow, { x: 10.4, y: 20.6 });
+  assert.equal(node.type, "agent");
+  assert.equal(node.config.blockID, "b1");
+  assert.equal(node.title, "Revue PHP");
+  assert.equal(node.id, "revue-php");
+  const effective = G.effectiveAgent({ ...node.config, prompt: "Controllers only." }, [block]);
+  assert.equal(effective.prompt, "Review {{in.text}}\n\n## For this step\nControllers only.");
+  assert.deepEqual(G.verdictOptions(node, [block]), ["ok", "à revoir"]);
+  assert.deepEqual(G.verdictOptions(node, []), [], "a deleted block gives no verdict");
+  assert.deepEqual(G.answerFields(node, [block]), ["findings", "verdict", "verdictReason"]);
+  assert.deepEqual(G.verdictOptions({ type: "command", config: {} }), ["pass", "fail"]);
+  assert.deepEqual(G.verdictOptions({ type: "approval", config: { options: ["go", " ", "stop"] } }), ["go", "stop"]);
+});
+
+test("drawn back up from a step with a verdict, a link becomes a bounded way back", () => {
+  const withVerdict = { ...workflow, nodes: workflow.nodes.map((n) => (n.id === "php"
+    ? { ...n, config: { ...n.config, verdict: { options: ["ok", "à revoir"] } } } : n)) };
+  assert.equal(G.connectionKind(workflow, { source: "php", target: "intent" }), null, "no verdict: a circle");
+  assert.equal(G.connectionKind(withVerdict, { source: "php", target: "intent" }), "retry");
+  assert.equal(G.connectionKind(withVerdict, { source: "php", target: "php" }), "retry", "itself, too");
+  assert.equal(G.connectionKind(withVerdict, { source: "php", target: "report" }), "forward");
+  const back = G.newRetryEdge(withVerdict, "php", "intent");
+  assert.deepEqual(back, { id: "php->intent:retry", from: "php", to: "intent", when: "à revoir", retry: { max: 2 } });
+  const looped = { ...withVerdict, edges: [...withVerdict.edges, back] };
+  assert.equal(G.createsCycle(looped, "intent", "php"), false, "a way back is no circle");
+  assert.equal(G.connectionKind(looped, { source: "php", target: "intent" }), null, "one way back per pair");
+  assert.ok(!G.upstream(looped, "intent").some((n) => n.id === "php"), "nor an input");
+  const flow = G.toFlow(looped, { experts: state.experts });
+  const drawn = flow.edges.find((e) => e.id === "php->intent:retry");
+  assert.equal(drawn.label, "↺ à revoir ≤2×");
+  assert.equal(drawn.sourceHandle, "retry");
+  assert.match(drawn.className, /retry-edge/);
+  assert.deepEqual(flow.nodes.find((n) => n.id === "php").data.verdicts, ["ok", "à revoir"]);
+});
+
+test("a link's verdict, rules and way back survive a trip through React Flow", () => {
+  const edges = [...workflow.edges, { id: "php->report:x", from: "php", to: "report", when: "ok", rules: ["Be brief."] },
+    { id: "php->intent:retry", from: "php", to: "intent", when: "à revoir", retry: { max: 3 } }];
+  const rich = { ...workflow, edges };
+  const flow = G.toFlow(rich, { experts: state.experts });
+  const back = G.fromFlow(rich, flow.nodes, flow.edges);
+  assert.deepEqual(back.edges.find((e) => e.id === "php->report:x"), edges[edges.length - 2]);
+  assert.deepEqual(back.edges.find((e) => e.id === "php->intent:retry"), edges[edges.length - 1]);
+  assert.equal(G.edgeLabel(edges[edges.length - 2]), "if ok · 1 rule");
+  assert.equal(G.edgeLabel({ otherwise: true, ruleSetIDs: ["a", "b"] }), "otherwise · 2 rules");
+  assert.equal(G.edgeLabel({}), undefined);
+});
+
+test("a prompt may name what came right before (in.*), and an item in a for-each", () => {
+  const items = G.variablesFor(workflow, "php").find((g) => g.label === "Right before (in)").items;
+  assert.ok(items.includes("in.text"));
+  const each = { ...workflow, nodes: [...workflow.nodes, { id: "each", type: "forEach", title: "Each",
+    config: G.defaultConfig("forEach") }], edges: [...workflow.edges, { id: "php->each", from: "php", to: "each" }] };
+  assert.deepEqual(G.variablesFor(each, "each").find((g) => g.label === "This item").items, ["item", "index"]);
+  for (const type of ["approval", "forEach", "command"]) {
+    assert.ok(G.NODE_TYPES.includes(type) && G.KIND_LABELS[type] && G.defaultConfig(type), type);
+  }
+});

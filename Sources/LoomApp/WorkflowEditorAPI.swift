@@ -63,6 +63,37 @@ extension AppModel {
                   let uuid = UUID(uuidString: raw) else { return Self.failure("That step has no session.") }
             workflows.sessionToOpen = SessionID(uuid)
             return Self.reply(NSNull())
+        case "block.create":
+            // A new block, or one made from a step of the open workflow.
+            var config: AgentConfig?
+            if let raw = params["config"], let data = try? JSONSerialization.data(withJSONObject: raw) {
+                config = try? WorkflowJSON.decoder.decode(AgentConfig.self, from: data)
+            }
+            let name = (params["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let block = workflows.createBlock(from: config, name: name.flatMap { $0.isEmpty ? nil : $0 } ?? "Nouveau bloc")
+            emitEditorLibrary()
+            return Self.reply(Self.any(block))
+        case "block.save":
+            guard let raw = params["block"], let data = try? JSONSerialization.data(withJSONObject: raw),
+                  let block = try? WorkflowJSON.decoder.decode(WorkflowBlock.self, from: data)
+            else { return Self.failure("The block could not be read.") }
+            guard workflows.block(block.id) != nil else { return Self.failure("This block was deleted.") }
+            workflows.save(block)
+            emitEditorLibrary()
+            let current = workflows.workflow(workflows.selectedWorkflowID)
+            return Self.reply(current.map { validationJSON($0) as Any } ?? NSNull())
+        case "block.delete":
+            guard let raw = params["id"] as? String, let id = UUID(uuidString: raw) else {
+                return Self.failure("Which block?")
+            }
+            workflows.deleteBlock(id)
+            emitEditorLibrary()
+            return Self.reply(NSNull())
+        case "block.usage":
+            guard let raw = params["id"] as? String, let id = UUID(uuidString: raw) else {
+                return Self.failure("Which block?")
+            }
+            return Self.reply(workflows.usage(ofBlock: id))
         case "orchestrator.open":
             guard case .run(let runID) = workflows.detail,
                   let raw = workflows.run(runID)?.orchestratorSessionID,
@@ -83,8 +114,10 @@ extension AppModel {
     }
 
     func validationJSON(_ workflow: Workflow) -> [String: Any] {
-        let issues = WorkflowValidator.validate(workflow, experts: workflows.experts, connectors: workflows.connectors)
-        let estimate = CostEstimate.estimate(workflow, experts: workflows.experts, defaultModel: workflows.defaultModel)
+        let issues = WorkflowValidator.validate(workflow, experts: workflows.experts, connectors: workflows.connectors,
+                                                blocks: workflows.blocks, ruleSets: workflows.ruleSets)
+        let estimate = CostEstimate.estimate(workflow, experts: workflows.experts, defaultModel: workflows.defaultModel,
+                                             blocks: workflows.blocks)
         return ["issues": issues.map { issue -> [String: Any] in
                     var item: [String: Any] = ["severity": issue.severity.rawValue, "message": issue.message]
                     if let node = issue.nodeID { item["nodeID"] = node }
@@ -104,6 +137,9 @@ extension AppModel {
             "experts": workflows.experts.map { ["id": $0.id.uuidString, "name": $0.name, "domain": $0.domain,
                                                 "color": $0.color] },
             "connectors": workflows.connectors.map { ["id": $0.id.uuidString, "name": $0.name] },
+            // The palette's own boxes, whole (the inspector edits them), and the rule sets.
+            "blocks": workflows.blocks.map { Self.any($0) },
+            "ruleSets": workflows.ruleSets.map { ["id": $0.id.uuidString, "name": $0.name, "rules": $0.rules] },
             "skills": catalog.map { ["name": $0.name, "description": $0.description,
                                     "scope": $0.scope == .project ? "project" : "global"] },
             "themes": ThemeStore.shared.families.map(\.name),
@@ -135,6 +171,7 @@ extension AppModel {
             if let cost = record.costUSD { item["costUSD"] = cost }
             if let session = record.sessionID { item["sessionID"] = session }
             if let output = record.output { item["output"] = Self.any(output) }
+            if let verdict = record.output?["verdict"]?.plainText, record.status == .done { item["verdict"] = verdict }
             // What the orchestrator did to it (ADR-0018), for its card.
             if record.reruns > 0 { item["reruns"] = record.reruns }
             if record.status == .done, record.output?["skipped"]?.truthy == true,
@@ -163,6 +200,8 @@ extension AppModel {
             state["workflow"] = Self.any(run.workflow)
             state["readOnly"] = true
             state["run"] = editorRunJSON(run)
+            // The blocks as the run froze them.
+            if !run.blocks.isEmpty { state["blocks"] = run.blocks.map { Self.any($0) } }
             state.merge(validationJSON(run.workflow)) { $1 }
         default:
             guard let workflow = workflows.workflow(workflows.selectedWorkflowID) else { return nil }

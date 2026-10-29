@@ -142,6 +142,279 @@ function RunRecord({ record, onOpenSession }) {
   );
 }
 
+
+/** Lines to edit one by one: rules, verdict options, answers. */
+function ListEditor({ items, onChange, disabled, placeholder, addLabel }) {
+  const list = items || [];
+  return (
+    <div className="list-editor">
+      {list.map((item, index) => (
+        <div key={index} className="list-line">
+          <input value={item} disabled={disabled} placeholder={placeholder}
+            onChange={(e) => onChange(list.map((v, i) => (i === index ? e.target.value : v)))} />
+          {!disabled && (
+            <button type="button" className="icon" title="Remove"
+              onClick={() => onChange(list.filter((_, i) => i !== index))}>×</button>
+          )}
+        </div>
+      ))}
+      {!disabled && (
+        <button type="button" className="ghost" onClick={() => onChange([...list, ""])}>{addLabel || "+ Add"}</button>
+      )}
+    </div>
+  );
+}
+
+/** Rules of their own, and rule sets to tick (ADR-0019). */
+function RulesFields({ label, hint, rules, ruleSetIDs, ruleSets, disabled, onChange }) {
+  return (
+    <>
+      <Field label={label || "Rules"} hint={hint || "Each rule joins the step's system prompt, under where it comes from."}>
+        <ListEditor items={rules} disabled={disabled} placeholder="Cite path:line for every finding."
+          addLabel="+ Add a rule" onChange={(next) => onChange({ rules: next })} />
+      </Field>
+      <Field label="Rule sets" hint="Written once in the sidebar, under Rules.">
+        <Checks disabled={disabled} selected={ruleSetIDs}
+          items={(ruleSets || []).map((r) => ({ value: r.id, label: r.name, hint: (r.rules || []).join("\n") }))}
+          empty="No rule set yet: add one in the sidebar, under Rules."
+          onChange={(next) => onChange({ ruleSetIDs: next })} />
+      </Field>
+    </>
+  );
+}
+
+/** The step answers a verdict: its links may follow it, a link back up may retry on it. */
+function VerdictEditor({ verdict, disabled, onChange }) {
+  return (
+    <div className="verdict-editor">
+      <label className="check">
+        <input type="checkbox" disabled={disabled} checked={!!verdict}
+          onChange={(e) => onChange(e.target.checked ? { options: ["ok", "à revoir"], guidance: "" } : null)} />
+        <span><b>Gives a verdict</b> — its links can follow it (“if ok”, “otherwise”, a way back up)</span>
+      </label>
+      {verdict && (
+        <>
+          <Field label="Options, the best first">
+            <ListEditor items={verdict.options} disabled={disabled} placeholder="ok"
+              addLabel="+ Add an option" onChange={(options) => onChange({ ...verdict, options })} />
+          </Field>
+          <Field label="How to decide" hint="For claude: what makes it ok, what does not.">
+            <textarea rows={3} value={verdict.guidance || ""} disabled={disabled}
+              placeholder="ok when every finding is anchored and holds; à revoir otherwise."
+              onChange={(e) => onChange({ ...verdict, guidance: e.target.value })} />
+          </Field>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** What an agent step is: expert, mode, model, prompt, fields, verdict, skills, connectors, time. */
+function AgentFields({ config, setConfig, disabled, groups, state, headlessOnly }) {
+  const experts = state.experts || [];
+  const connectors = state.connectors || [];
+  const skills = state.skills || [];
+  return (
+    <>
+      <Field label="Expert" hint="Its instructions, skills, connectors and tools come along.">
+        <select value={config.expertID || ""} disabled={disabled}
+          onChange={(e) => setConfig({ expertID: e.target.value || null })}>
+          <option value="">None — claude as configured</option>
+          {experts.map((e) => <option key={e.id} value={e.id}>{e.name}{e.domain ? ` — ${e.domain}` : ""}</option>)}
+        </select>
+      </Field>
+      <div className="row2">
+        {!headlessOnly && (
+          <Field label="Runs">
+            <select value={config.mode || "headless"} disabled={disabled} onChange={(e) => setConfig({ mode: e.target.value })}>
+              <option value="headless">Headless (claude -p)</option>
+              <option value="visible">In a visible session</option>
+            </select>
+          </Field>
+        )}
+        <Field label="Model">
+          <input list="models" value={config.model || ""} disabled={disabled}
+            placeholder="expert's or default"
+            onChange={(e) => setConfig({ model: e.target.value.trim() ? e.target.value.trim() : null })} />
+          <datalist id="models"><option value="opus" /><option value="sonnet" /><option value="haiku" /></datalist>
+        </Field>
+      </div>
+      <Field label="Prompt">
+        <PromptEditor value={config.prompt || ""} disabled={disabled} groups={groups}
+          onChange={(prompt) => setConfig({ prompt })} />
+      </Field>
+      <Field label="Answer fields" hint="What the next steps can name — claude answers one JSON object.">
+        <OutputEditor fields={config.output || []} disabled={disabled} onChange={(output) => setConfig({ output })} />
+      </Field>
+      <VerdictEditor verdict={config.verdict || null} disabled={disabled} onChange={(verdict) => setConfig({ verdict })} />
+      <Field label="Skills" hint="Injected into this step, on top of the expert's.">
+        <Checks disabled={disabled} selected={config.skills}
+          items={skills.map((s) => ({ value: s.name, label: s.name, hint: s.description }))}
+          empty="No skill found in ~/.claude/skills or the project."
+          onChange={(next) => setConfig({ skills: next })} />
+      </Field>
+      <Field label="Connectors">
+        <Checks disabled={disabled} selected={config.connectorIDs}
+          items={connectors.map((c) => ({ value: c.id, label: c.name }))}
+          empty="No connector yet."
+          onChange={(connectorIDs) => setConfig({ connectorIDs })} />
+      </Field>
+      <Field label="Time limit (minutes)">
+        <input type="number" min="1" max="240" disabled={disabled}
+          value={Math.round((config.timeoutSeconds || 900) / 60)}
+          onChange={(e) => setConfig({ timeoutSeconds: Math.max(1, Number(e.target.value) || 15) * 60 })} />
+      </Field>
+    </>
+  );
+}
+
+/** A step placed from a block: the block runs; this use adds its own (ADR-0019). */
+function BlockUse({ config, block, setConfig, disabled, groups, state, onEditBlock }) {
+  const experts = state.experts || [];
+  if (!block) {
+    return <div className="issue error">Its block was deleted: pick another step, or rebuild the block.</div>;
+  }
+  const template = block.template || {};
+  const options = ((template.verdict || {}).options || []).filter((o) => String(o).trim());
+  return (
+    <>
+      <div className="block-banner" style={{ borderColor: block.color }}>
+        <div><span className="block-dot" style={{ background: block.color }} /><b>Block «{block.name}»</b></div>
+        {block.summary && <div className="muted small">{block.summary}</div>}
+        <div className="muted small">
+          {(template.output || []).length} field(s){options.length ? ` · verdict: ${options.join(" / ")}` : ""}
+          {(block.rules || []).length ? ` · ${(block.rules || []).length} rule(s)` : ""}
+        </div>
+        <button type="button" className="ghost" onClick={() => onEditBlock(block.id)}>Edit the block — every step placed from it follows</button>
+      </div>
+      <Field label="Instructions for this step" hint="Added after the block's prompt, here only.">
+        <PromptEditor value={config.prompt || ""} disabled={disabled} groups={groups}
+          onChange={(prompt) => setConfig({ prompt })} />
+      </Field>
+      <RulesFields label="Rules for this step" hint="On top of the block's, here only."
+        rules={config.rules} ruleSetIDs={config.ruleSetIDs} ruleSets={state.ruleSets} disabled={disabled}
+        onChange={setConfig} />
+      <div className="row2">
+        <Field label="Expert, here">
+          <select value={config.expertID || ""} disabled={disabled}
+            onChange={(e) => setConfig({ expertID: e.target.value || null })}>
+            <option value="">The block's</option>
+            {experts.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Model, here">
+          <input list="models" value={config.model || ""} disabled={disabled} placeholder="the block's"
+            onChange={(e) => setConfig({ model: e.target.value.trim() ? e.target.value.trim() : null })} />
+        </Field>
+      </div>
+    </>
+  );
+}
+
+/** A block of the palette, edited in place: every step placed from it follows. */
+function BlockEditor({ block, state, readOnly, onChange, onClose, onDelete, deleteWarning }) {
+  const disabled = !!readOnly;
+  const template = block.template || {};
+  const setTemplate = (patch) => onChange({ ...block, template: { ...template, ...patch } });
+  const groups = [{ label: "Right before (in)", items: ["in.text"] },
+    { label: "PR", items: ["pr.number", "pr.title", "pr.url", "pr.body"] },
+    { label: "Run", items: ["ticket.key", "repo.path", "run.note", "iteration"] }];
+  return (
+    <div className="inspector block-editor">
+      <div className="inspector-head">
+        <span className="kind kind-block" style={{ background: block.color }}>Block</span>
+        <button type="button" className="ghost" onClick={onClose}>Done</button>
+      </div>
+      <p className="muted small">
+        A box of your palette. Every step placed from it runs what you write here — each placement adds its own
+        instructions and rules. A run keeps the block as it was when it started.
+      </p>
+      <div className="row2">
+        <Field label="Name">
+          <input value={block.name} disabled={disabled} onChange={(e) => onChange({ ...block, name: e.target.value })} />
+        </Field>
+        <Field label="Color">
+          <input type="color" value={block.color || "#6E56CF"} disabled={disabled}
+            onChange={(e) => onChange({ ...block, color: e.target.value })} />
+        </Field>
+      </div>
+      <Field label="What it is for" hint="Shown in the palette.">
+        <input value={block.summary || ""} disabled={disabled} onChange={(e) => onChange({ ...block, summary: e.target.value })} />
+      </Field>
+      <AgentFields config={template} setConfig={setTemplate} disabled={disabled} groups={groups} state={state} />
+      <RulesFields label="The block's rules" rules={block.rules} ruleSetIDs={block.ruleSetIDs}
+        ruleSets={state.ruleSets} disabled={disabled} onChange={(patch) => onChange({ ...block, ...patch })} />
+      {!disabled && deleteWarning > 0 && (
+        <div className="issue warning">
+          {deleteWarning} step(s) are placed from this block: deleted, they stop working.
+        </div>
+      )}
+      {!disabled && (
+        <button type="button" className="danger" onClick={() => onDelete(block.id)}>
+          {deleteWarning > 0 ? "Delete it anyway" : "Delete this block"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** A link: when it is taken, its way back up, the rules it brings to its step (ADR-0019). */
+function EdgeInspector({ workflow, edge, state, readOnly, onChange, onDelete }) {
+  const disabled = !!readOnly;
+  const blocks = state.blocks || [];
+  const source = workflow.nodes.find((n) => n.id === edge.from);
+  const target = workflow.nodes.find((n) => n.id === edge.to);
+  const options = G.verdictOptions(source, blocks);
+  const when = edge.otherwise ? "__otherwise" : edge.when || "";
+  return (
+    <div className="inspector">
+      <div className="inspector-head">
+        <span className={`kind ${edge.retry ? "kind-loop" : "kind-link"}`}>{edge.retry ? "Way back" : "Link"}</span>
+        <span className="mono muted small">{edge.from} → {edge.to}</span>
+      </div>
+      <p className="muted small">
+        {edge.retry
+          ? `When ${source ? source.title : edge.from} answers this verdict, the run goes back to ${target ? target.title : edge.to}: every step from there runs again, with your rules — a few times at most. Spent, it follows its links forward.`
+          : `From ${source ? source.title : edge.from} to ${target ? target.title : edge.to}.`}
+      </p>
+      {edge.branch ? (
+        <p className="muted small">Out of a condition: its {edge.branch === "yes" ? "Yes" : "No"} path.</p>
+      ) : edge.retry ? (
+        <>
+          <Field label="Goes back when it answers">
+            <select value={edge.when || ""} disabled={disabled} onChange={(e) => onChange({ ...edge, when: e.target.value })}>
+              {options.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </Field>
+          <Field label="Times at most" hint="0 to 5 more rounds.">
+            <input type="number" min="0" max="5" disabled={disabled} value={(edge.retry || {}).max ?? 2}
+              onChange={(e) => onChange({ ...edge, retry: { max: Math.max(0, Math.min(5, Number(e.target.value) || 0)) } })} />
+          </Field>
+        </>
+      ) : (
+        <Field label="Taken" hint={options.length ? "On the source's verdict, or always." : "The source gives no verdict: give it one to choose."}>
+          <select value={when} disabled={disabled} onChange={(e) => {
+            const value = e.target.value;
+            const next = { ...edge };
+            delete next.when;
+            next.otherwise = value === "__otherwise";
+            if (value && value !== "__otherwise") next.when = value;
+            onChange(next);
+          }}>
+            <option value="">Always</option>
+            {options.map((o) => <option key={o} value={o}>If {o}</option>)}
+            {options.length > 0 && <option value="__otherwise">Otherwise</option>}
+          </select>
+        </Field>
+      )}
+      <RulesFields label="Rules it brings" hint={`Given to ${target ? target.title : edge.to} when the run takes this link.`}
+        rules={edge.rules} ruleSetIDs={edge.ruleSetIDs} ruleSets={state.ruleSets} disabled={disabled}
+        onChange={(patch) => onChange({ ...edge, ...patch })} />
+      {!disabled && <button type="button" className="danger" onClick={() => onDelete(edge.id)}>Delete this link</button>}
+    </div>
+  );
+}
+
 /** The run's conductor (ADR-0018): a session that follows the run, questions and steers its steps. */
 function OrchestratorPanel({ orchestrator, experts, disabled, run, onChange, onOpen }) {
   const on = !!orchestrator;
@@ -208,7 +481,16 @@ function OrchestratorPanel({ orchestrator, experts, disabled, run, onChange, onO
 }
 
 export function Inspector({ workflow, node, state, readOnly, run, onChange, onDelete, onOpenSession,
-  onWorkflowChange, onOpenOrchestrator }) {
+  onWorkflowChange, onOpenOrchestrator, edge, onEdgeChange, onDeleteEdge, editingBlock, onBlockChange, onCloseBlock,
+  onDeleteBlock, onEditBlock, onMakeBlock, deleteWarning }) {
+  if (editingBlock) {
+    return <BlockEditor block={editingBlock} state={state} readOnly={readOnly} onChange={onBlockChange}
+      onClose={onCloseBlock} onDelete={onDeleteBlock} deleteWarning={deleteWarning} />;
+  }
+  if (edge) {
+    return <EdgeInspector workflow={workflow} edge={edge} state={state} readOnly={readOnly} onChange={onEdgeChange}
+      onDelete={onDeleteEdge} />;
+  }
   if (!node) {
     return (
       <div className="inspector">
@@ -237,10 +519,9 @@ export function Inspector({ workflow, node, state, readOnly, run, onChange, onDe
   const config = node.config || {};
   const set = (patch) => onChange({ ...node, ...patch });
   const setConfig = (patch) => onChange({ ...node, config: { ...config, ...patch } });
-  const groups = G.variablesFor(workflow, node.id);
-  const experts = state.experts || [];
+  const blocks = state.blocks || [];
+  const groups = G.variablesFor(workflow, node.id, blocks);
   const connectors = state.connectors || [];
-  const skills = state.skills || [];
   const record = run && run.nodes ? run.nodes[node.id] : null;
   const nodeIssues = (state.issues || []).filter((i) => i.nodeID === node.id);
 
@@ -293,53 +574,108 @@ export function Inspector({ workflow, node, state, readOnly, run, onChange, onDe
         </>
       )}
 
-      {node.type === "agent" && (
+      {node.type === "agent" && config.blockID && (
+        <BlockUse config={config} block={blocks.find((b) => b.id === config.blockID)} setConfig={setConfig}
+          disabled={disabled} groups={groups} state={state} onEditBlock={onEditBlock} />
+      )}
+
+      {node.type === "agent" && !config.blockID && (
         <>
-          <Field label="Expert" hint="Its instructions, skills, connectors and tools come along.">
-            <select value={config.expertID || ""} disabled={disabled}
-              onChange={(e) => setConfig({ expertID: e.target.value || null })}>
-              <option value="">None — claude as configured</option>
-              {experts.map((e) => <option key={e.id} value={e.id}>{e.name}{e.domain ? ` — ${e.domain}` : ""}</option>)}
-            </select>
+          <AgentFields config={config} setConfig={setConfig} disabled={disabled} groups={groups} state={state} />
+          <RulesFields label="Rules for this step" rules={config.rules} ruleSetIDs={config.ruleSetIDs}
+            ruleSets={state.ruleSets} disabled={disabled} onChange={setConfig} />
+          {!disabled && (
+            <button type="button" className="ghost" onClick={() => onMakeBlock(node)}>
+              Make a block of this step — reuse it from the palette
+            </button>
+          )}
+        </>
+      )}
+
+      {node.type === "approval" && (
+        <>
+          <Field label="The question" hint="Shown to you with the run; a notification tells you it waits.">
+            <PromptEditor value={config.question || ""} disabled={disabled} groups={groups}
+              onChange={(question) => setConfig({ question })} />
+          </Field>
+          <Field label="Your answers, the yes first" hint="Each is a verdict its links can follow.">
+            <ListEditor items={config.options} disabled={disabled} placeholder="approuver"
+              addLabel="+ Add an answer" onChange={(options) => setConfig({ options })} />
+          </Field>
+          <Field label="Wait at most (hours)" hint="Empty: as long as the run. Past it, the last answer counts.">
+            <input type="number" min="0" step="0.5" disabled={disabled} value={config.timeoutHours ?? ""}
+              onChange={(e) => setConfig({ timeoutHours: e.target.value === "" ? null : Math.max(0, Number(e.target.value)) })} />
+          </Field>
+        </>
+      )}
+
+      {node.type === "forEach" && (
+        <>
+          <Field label="For each item of" hint="A list a step before gives, e.g. steps.repo.touched.">
+            <input className="mono" list="foreach-lists" value={config.items || ""} disabled={disabled}
+              onChange={(e) => setConfig({ items: e.target.value.trim() })} />
+            <datalist id="foreach-lists">
+              {groups.flatMap((g) => g.items).filter((p) => p.startsWith("steps.") || p.startsWith("in."))
+                .map((p) => <option key={p} value={p} />)}
+            </datalist>
           </Field>
           <div className="row2">
-            <Field label="Runs">
-              <select value={config.mode || "headless"} disabled={disabled} onChange={(e) => setConfig({ mode: e.target.value })}>
-                <option value="headless">Headless (claude -p)</option>
-                <option value="visible">In a visible session</option>
-              </select>
+            <Field label="Items at most">
+              <input type="number" min="1" max="30" disabled={disabled} value={config.maxItems ?? 10}
+                onChange={(e) => setConfig({ maxItems: Math.max(1, Math.min(30, Number(e.target.value) || 1)) })} />
             </Field>
-            <Field label="Model">
-              <input list="models" value={config.model || ""} disabled={disabled}
-                placeholder="expert's or default"
-                onChange={(e) => setConfig({ model: e.target.value.trim() ? e.target.value.trim() : null })} />
-              <datalist id="models"><option value="opus" /><option value="sonnet" /><option value="haiku" /></datalist>
+            <Field label="At once">
+              <input type="number" min="1" max="6" disabled={disabled} value={config.concurrency ?? 3}
+                onChange={(e) => setConfig({ concurrency: Math.max(1, Math.min(6, Number(e.target.value) || 1)) })} />
             </Field>
           </div>
-          <Field label="Prompt">
-            <PromptEditor value={config.prompt || ""} disabled={disabled} groups={groups}
-              onChange={(prompt) => setConfig({ prompt })} />
+          <Field label="Run for each" hint="A block of your palette, or a step written here. {{item}} and {{index}} name the item.">
+            <select value={(config.agent || {}).blockID || ""} disabled={disabled}
+              onChange={(e) => setConfig({ agent: { ...(config.agent || {}), blockID: e.target.value || null } })}>
+              <option value="">A step written here</option>
+              {blocks.map((b) => <option key={b.id} value={b.id}>Block «{b.name}»</option>)}
+            </select>
           </Field>
-          <Field label="Answer fields" hint="What the next steps can name — claude answers one JSON object.">
-            <OutputEditor fields={config.output || []} disabled={disabled} onChange={(output) => setConfig({ output })} />
+          {(config.agent || {}).blockID ? (
+            <BlockUse config={config.agent} block={blocks.find((b) => b.id === config.agent.blockID)} disabled={disabled}
+              groups={groups} state={state} onEditBlock={onEditBlock}
+              setConfig={(patch) => setConfig({ agent: { ...config.agent, ...patch } })} />
+          ) : (
+            <>
+              <AgentFields config={config.agent || {}} headlessOnly disabled={disabled} groups={groups} state={state}
+                setConfig={(patch) => setConfig({ agent: { ...(config.agent || {}), ...patch } })} />
+              <RulesFields label="Rules for each item" rules={(config.agent || {}).rules}
+                ruleSetIDs={(config.agent || {}).ruleSetIDs} ruleSets={state.ruleSets} disabled={disabled}
+                onChange={(patch) => setConfig({ agent: { ...(config.agent || {}), ...patch } })} />
+            </>
+          )}
+        </>
+      )}
+
+      {node.type === "command" && (
+        <>
+          <Field label="Command" hint="Runs with your shell in the run's folder. No {{…}} here: read $LOOM_PR_NUMBER, $LOOM_PR_BASE, $LOOM_PR_HEAD, $LOOM_REPO_PATH, $LOOM_RUN_FOLDER.">
+            <textarea className="mono" rows={4} value={config.command || ""} disabled={disabled}
+              placeholder="vendor/bin/phpunit --testsuite unit"
+              onChange={(e) => setConfig({ command: e.target.value })} />
           </Field>
-          <Field label="Skills for this step" hint="Injected into this step only, on top of the expert's.">
-            <Checks disabled={disabled} selected={config.skills}
-              items={skills.map((s) => ({ value: s.name, label: s.name, hint: s.description }))}
-              empty="No skill found in ~/.claude/skills or the project."
-              onChange={(next) => setConfig({ skills: next })} />
-          </Field>
-          <Field label="Connectors for this step">
-            <Checks disabled={disabled} selected={config.connectorIDs}
-              items={connectors.map((c) => ({ value: c.id, label: c.name }))}
-              empty="No connector yet."
-              onChange={(connectorIDs) => setConfig({ connectorIDs })} />
-          </Field>
-          <Field label="Time limit (minutes)">
-            <input type="number" min="1" max="240" disabled={disabled}
-              value={Math.round((config.timeoutSeconds || 900) / 60)}
-              onChange={(e) => setConfig({ timeoutSeconds: Math.max(1, Number(e.target.value) || 15) * 60 })} />
-          </Field>
+          <div className="row2">
+            <Field label="Time limit (minutes)">
+              <input type="number" min="1" max="60" disabled={disabled}
+                value={Math.round((config.timeoutSeconds || 600) / 60)}
+                onChange={(e) => setConfig({ timeoutSeconds: Math.max(1, Math.min(60, Number(e.target.value) || 10)) * 60 })} />
+            </Field>
+            <Field label="Exit codes that pass">
+              <input className="mono" disabled={disabled} value={(config.passCodes || [0]).join(", ")}
+                onChange={(e) => setConfig({ passCodes: e.target.value.split(",").map((v) => parseInt(v, 10))
+                  .filter((v) => !Number.isNaN(v)) })} />
+            </Field>
+          </div>
+          <label className="check warning-check">
+            <input type="checkbox" disabled={disabled} checked={!!config.allowOnPullRequests}
+              onChange={(e) => setConfig({ allowOnPullRequests: e.target.checked })} />
+            <span>Run it on pull requests — <b>it executes the PR's code on this Mac</b>. Off, a run on a PR refuses to start.</span>
+          </label>
         </>
       )}
 

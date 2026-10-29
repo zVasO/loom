@@ -34,7 +34,8 @@ extension AppModel {
     /// Why a workflow cannot start with these inputs, or nil.
     func workflowLaunchProblem(_ workflow: Workflow, inputs: RunInputs) -> String? {
         let issues = WorkflowValidator.validate(workflow, experts: workflows.experts,
-                                                connectors: workflows.connectors)
+                                                connectors: workflows.connectors, blocks: workflows.blocks,
+                                                ruleSets: workflows.ruleSets)
         if let error = issues.first(where: { $0.severity == .error }) {
             return "\(workflow.name): \(error.message)"
         }
@@ -52,6 +53,13 @@ extension AppModel {
         if needsPR, inputs.prNumber == nil, inputs.trigger != .jiraTicket {
             return "This workflow reads a pull request: give its number."
         }
+        // A command on a PR runs the PR's code: only where the step says so (ADR-0019).
+        if inputs.prNumber != nil, let step = workflow.nodes.first(where: {
+            if case .command(let config) = $0.kind { return !config.allowOnPullRequests }
+            return false
+        }) {
+            return "\(step.title) runs a command in the PR's code: allow it on pull requests in that step first."
+        }
         return nil
     }
 
@@ -65,7 +73,8 @@ extension AppModel {
         }
         let planner = WorkflowPlanner(workflow)
         let run = WorkflowRun(workflow: workflow, experts: workflows.experts, connectors: workflows.connectors,
-                              inputs: inputs, state: planner.initialState())
+                              inputs: inputs, state: planner.initialState(), blocks: workflows.blocks,
+                              ruleSets: workflows.ruleSets)
         workflows.record(run)
         workflows.selectedRunID = run.id
         workflows.log("Run of \(workflow.name) started (\(inputs.trigger.rawValue)).", run: run.id)
@@ -202,10 +211,16 @@ extension AppModel {
                 }
                 running.remove(id)
                 let pass = workflows.run(runID).map { planner.pass(of: id, in: $0.state) } ?? 1
+                var wentBack: WorkflowEdge?
                 updateRun(runID) { run in
                     switch outcome {
                     case .done(let output, let text, let cost, let artifact, let session, let conversation):
+                        let before = run.state.iterations
                         planner.complete(id, output: output, text: text, costUSD: cost, in: &run.state)
+                        wentBack = planner.workflow.retryEdges.first {
+                            let key = WorkflowPlanner.retryKey($0)
+                            return run.state.iterations[key] != before[key]
+                        }
                         if let session { run.state.nodes[id]?.sessionID = session }
                         if let conversation { run.state.nodes[id]?.claudeSessionID = conversation }
                         run.costUSD += cost ?? 0
@@ -218,6 +233,12 @@ extension AppModel {
                 switch outcome {
                 case .done(_, let text, _, _, _, _):
                     workflows.log("\(title): done", run: runID)
+                    if let edge = wentBack {
+                        let round = (workflows.run(runID)?.state.iterations[WorkflowPlanner.retryKey(edge)] ?? 0) + 1
+                        let target = planner.workflow.node(edge.to)?.title ?? edge.to
+                        workflows.log("\(title): «\(edge.when ?? "")» — back to \(target), round \(round)", run: runID)
+                        notifyOrchestrator(runID, [.newPass(loop: edge.from + " → " + edge.to, pass: round)])
+                    }
                     if planner.workflow.node(id)?.kind.type != .artifact {
                         notifyOrchestrator(runID, [.stepDone(id: id, title: title, pass: pass, summary: text)])
                     }
@@ -331,6 +352,12 @@ extension AppModel {
             return await performAgent(node, config: config, pass: pass, context: context, run: run, prepared: prepared)
         case .artifact(let config):
             return await writeArtifact(config, run: run, context: context, prepared: prepared)
+        case .approval(let config):
+            return await awaitApproval(node, config: config, context: context, run: run)
+        case .forEach(let config):
+            return await performForEach(node, config: config, pass: pass, context: context, run: run, prepared: prepared)
+        case .command(let config):
+            return await runCommand(config, run: run, prepared: prepared)
         case .start, .condition, .loop:
             return .done(output: nil, text: "", cost: nil)
         }
@@ -470,8 +497,11 @@ extension AppModel {
         return parts.joined(separator: "\n\n")
     }
 
-    private func performAgent(_ node: WorkflowNode, config: AgentConfig, pass: Int, context: JSONValue,
-                              run: WorkflowRun, prepared: PreparedRun) async -> StepOutcome {
+    func performAgent(_ node: WorkflowNode, config raw: AgentConfig, pass: Int, context: JSONValue,
+                              run: WorkflowRun, prepared: PreparedRun, headlessOnly: Bool = false) async -> StepOutcome {
+        // A placed block runs as the block says, with this use's own on top (ADR-0019).
+        var config = BlockResolver.effective(raw, blocks: run.blocks)
+        if headlessOnly { config.mode = .headless }
         let expert = config.expertID.flatMap { id in run.experts.first { $0.id == id } }
         let connectorIDs = (expert?.connectorIDs ?? []) + config.connectorIDs
         let connectors = connectorIDs.compactMap { id in run.connectors.first { $0.id == id } }
@@ -486,13 +516,25 @@ extension AppModel {
             let previous = run.state.history[node.id]?.last.map(Self.readable)
             rendered += OrchestratorPrompt.rerunAddendum(extra, previous: previous)
         }
-        let instructions = agentInstructions(expert: expert, skills: config.skills, workdir: prepared.workdir)
+        // Sent back up by a later step's verdict: why, and what it answered last.
+        let notes = RuleComposer.retryNotes(for: node.id, in: run.workflow, state: run.state)
+        if !notes.isEmpty {
+            rendered += "\n\n" + notes
+            if let previous = run.state.history[node.id]?.last {
+                rendered += "\n\nYour previous answer:\n" + String(Self.readable(previous).prefix(6000))
+            }
+        }
+        let rules = RuleComposer.instructions(RuleComposer.groups(for: node, in: run.workflow, blocks: run.blocks,
+                                                                  ruleSets: run.ruleSets, state: run.state))
+        let instructions = [agentInstructions(expert: expert, skills: config.skills, workdir: prepared.workdir), rules]
+            .filter { !$0.isEmpty }.joined(separator: "\n\n")
         let model = config.model ?? expert?.model ?? workflows.defaultModel
-        let schema = OutputSchema.instructions(for: config.output)
+        let fields = config.answerFields
+        let schema = OutputSchema.instructions(for: fields)
         switch config.mode {
         case .headless:
             let prompt = schema.isEmpty ? rendered : rendered + "\n\n" + schema
-            return await runHeadless(prompt: prompt, fields: config.output, appendSystemPrompt: instructions,
+            return await runHeadless(prompt: prompt, fields: fields, appendSystemPrompt: instructions,
                                      wiring: wiring, allowedTools: expert?.allowedTools ?? Expert.readOnlyTools,
                                      model: model, workdir: prepared.workdir,
                                      timeout: TimeInterval(max(60, config.timeoutSeconds)))
@@ -520,7 +562,6 @@ extension AppModel {
                 $0.state.nodes[node.id]?.sessionID = session.rawValue.uuidString
                 $0.stepSessions[session.rawValue.uuidString.lowercased()] = node.id
             }
-            let fields = config.output
             let outcome = await awaitSessionReport(session, file: file,
                                                    timeout: .seconds(max(1800, config.timeoutSeconds * 3)),
                                                    handsOver: false) { text -> JSONValue? in

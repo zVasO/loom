@@ -436,10 +436,11 @@ extension AppModel {
 
     /// `claude -p --resume` in the step's conversation, as the step ran:
     /// its expert, its tools, its connectors, its folder.
-    private func askHeadlessStep(_ node: WorkflowNode, config: AgentConfig, conversation: String, message: String,
+    private func askHeadlessStep(_ node: WorkflowNode, config raw: AgentConfig, conversation: String, message: String,
                                  run runID: UUID) async throws -> String {
         guard let claude = claudePath else { throw APIError(code: .unavailable, message: "claude was not found") }
         guard let run = workflows.run(runID) else { throw APIError(code: .notFound, message: "the run is gone") }
+        let config = BlockResolver.effective(raw, blocks: run.blocks)
         let expert = config.expertID.flatMap { id in run.experts.first { $0.id == id } }
         let connectors = ((expert?.connectorIDs ?? []) + config.connectorIDs)
             .compactMap { id in run.connectors.first { $0.id == id } }

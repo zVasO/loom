@@ -13,18 +13,26 @@ public struct WorkflowLibraryStore: Sendable {
     private var workflowsURL: URL { root.appendingPathComponent("workflows") }
     private var expertsURL: URL { root.appendingPathComponent("experts") }
     private var connectorsURL: URL { root.appendingPathComponent("connectors") }
+    private var blocksURL: URL { root.appendingPathComponent("blocks") }
+    private var rulesURL: URL { root.appendingPathComponent("rules") }
 
     public func loadWorkflows() -> [Workflow] { load(from: workflowsURL) }
     public func loadExperts() -> [Expert] { load(from: expertsURL) }
     public func loadConnectors() -> [Connector] { load(from: connectorsURL) }
+    public func loadBlocks() -> [WorkflowBlock] { load(from: blocksURL) }
+    public func loadRuleSets() -> [RuleSet] { load(from: rulesURL) }
 
     public func save(_ workflow: Workflow) throws { try write(workflow, id: workflow.id, to: workflowsURL) }
     public func save(_ expert: Expert) throws { try write(expert, id: expert.id, to: expertsURL) }
     public func save(_ connector: Connector) throws { try write(connector, id: connector.id, to: connectorsURL) }
+    public func save(_ block: WorkflowBlock) throws { try write(block, id: block.id, to: blocksURL) }
+    public func save(_ ruleSet: RuleSet) throws { try write(ruleSet, id: ruleSet.id, to: rulesURL) }
 
     public func deleteWorkflow(_ id: UUID) { remove(id, from: workflowsURL) }
     public func deleteExpert(_ id: UUID) { remove(id, from: expertsURL) }
     public func deleteConnector(_ id: UUID) { remove(id, from: connectorsURL) }
+    public func deleteBlock(_ id: UUID) { remove(id, from: blocksURL) }
+    public func deleteRuleSet(_ id: UUID) { remove(id, from: rulesURL) }
 
     /// Whether the library was ever written — the built-ins are copied in once.
     public var exists: Bool { FileManager.default.fileExists(atPath: workflowsURL.path) }
@@ -47,38 +55,69 @@ public struct WorkflowLibraryStore: Sendable {
     }
 }
 
-/// A workflow with what it needs, in one file to share: its experts and its
-/// connectors — never a secret, those stay in the Keychain of whoever set them.
+/// A workflow with what it needs, in one file to share: its experts, its
+/// connectors, its blocks and rule sets — never a secret, those stay in the
+/// Keychain of whoever set them.
 public struct WorkflowBundle: Codable, Equatable, Sendable {
     public var workflow: Workflow
     public var experts: [Expert]
     public var connectors: [Connector]
+    public var blocks: [WorkflowBlock]
+    public var ruleSets: [RuleSet]
 
-    public init(workflow: Workflow, experts: [Expert], connectors: [Connector]) {
+    public init(workflow: Workflow, experts: [Expert], connectors: [Connector],
+                blocks: [WorkflowBlock] = [], ruleSets: [RuleSet] = []) {
         self.workflow = workflow
         self.experts = experts
         self.connectors = connectors
+        self.blocks = blocks
+        self.ruleSets = ruleSets
     }
 
-    /// The workflow and exactly the experts and connectors its steps name.
-    public static func make(_ workflow: Workflow, experts: [Expert], connectors: [Connector]) -> WorkflowBundle {
+    /// Bundles written before blocks have none.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(workflow: try c.decode(Workflow.self, forKey: .workflow),
+                  experts: try c.decodeIfPresent([Expert].self, forKey: .experts) ?? [],
+                  connectors: try c.decodeIfPresent([Connector].self, forKey: .connectors) ?? [],
+                  blocks: try c.decodeIfPresent([WorkflowBlock].self, forKey: .blocks) ?? [],
+                  ruleSets: try c.decodeIfPresent([RuleSet].self, forKey: .ruleSets) ?? [])
+    }
+
+    /// The workflow and exactly the experts, connectors, blocks and rule
+    /// sets its steps, links and orchestrator name.
+    public static func make(_ workflow: Workflow, experts: [Expert], connectors: [Connector],
+                            blocks: [WorkflowBlock] = [], ruleSets: [RuleSet] = []) -> WorkflowBundle {
         var expertIDs = Set<UUID>()
         var connectorIDs = Set<UUID>()
+        var blockIDs = Set<UUID>()
+        var ruleSetIDs = Set<UUID>()
+        func agent(_ config: AgentConfig) {
+            if let id = config.expertID { expertIDs.insert(id) }
+            if let id = config.blockID { blockIDs.insert(id) }
+            connectorIDs.formUnion(config.connectorIDs)
+            ruleSetIDs.formUnion(config.ruleSetIDs)
+        }
         for node in workflow.nodes {
             switch node.kind {
-            case .agent(let config):
-                if let id = config.expertID { expertIDs.insert(id) }
-                connectorIDs.formUnion(config.connectorIDs)
-            case .context(let config):
-                connectorIDs.formUnion(config.connectorIDs)
-            default:
-                break
+            case .agent(let config): agent(config)
+            case .forEach(let config): agent(config.agent)
+            case .context(let config): connectorIDs.formUnion(config.connectorIDs)
+            default: break
             }
+        }
+        for edge in workflow.edges { ruleSetIDs.formUnion(edge.ruleSetIDs) }
+        if let id = workflow.orchestrator?.expertID { expertIDs.insert(id) }
+        let usedBlocks = blocks.filter { blockIDs.contains($0.id) }
+        for block in usedBlocks {
+            agent(block.template)
+            ruleSetIDs.formUnion(block.ruleSetIDs)
         }
         let used = experts.filter { expertIDs.contains($0.id) }
         for expert in used { connectorIDs.formUnion(expert.connectorIDs) }
         return WorkflowBundle(workflow: workflow, experts: used,
-                              connectors: connectors.filter { connectorIDs.contains($0.id) })
+                              connectors: connectors.filter { connectorIDs.contains($0.id) },
+                              blocks: usedBlocks, ruleSets: ruleSets.filter { ruleSetIDs.contains($0.id) })
     }
 
     public func encoded() throws -> Data { try WorkflowJSON.encoder.encode(self) }

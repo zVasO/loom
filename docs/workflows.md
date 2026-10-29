@@ -21,6 +21,18 @@ Glisser une étape depuis la palette (ou cliquer dessus), relier le point de dro
 | **Condition** | Prend le chemin Oui ou Non selon une valeur (`steps.coherence.stable` est vrai…). |
 | **Loop** | Relance des étapes plus haut — toutes celles entre elles et la boucle — **au plus** N fois de plus (0 à 5), et s'arrête plus tôt quand une condition tient. |
 | **Artifact** | Écrit le rapport, dans un thème de Loom ; peut remplir l'onglet de la PR (résumé, commentaires en attente, verdict suggéré). |
+| **Approval** | Tu décides : le run attend, une notification part, un bandeau sur le run propose tes réponses et un commentaire. Ta réponse est un verdict. |
+| **For each** | Un agent (écrit sur place ou un bloc) lancé pour chaque élément d'une liste (`steps.repo.touched`…), 30 au plus, quelques-uns à la fois ; les réponses sont rassemblées, le verdict est le pire des leurs. |
+| **Command** | Une commande (tests, lint) dans le dossier du run ; son code de sortie donne `pass` ou `fail`. |
+
+## Blocs, règles, verdicts ([ADR-0019](adr/0019-blocs-regles-verdicts.md))
+
+- **Mes blocs** : sous la palette, tes propres cases. Le `+` en crée un ; ✎ l'édite (prompt, champs, verdict, expert, règles) ; « Make a block of this step » en fait un d'une case Agent. Glisser ou cliquer un bloc le pose. Une case posée est **liée** à son bloc : le modifier change toutes ses utilisations. Chaque case posée ajoute ses **consignes** et ses **règles propres**, et peut changer d'expert ou de modèle. Un run garde les blocs tels qu'au lancement.
+- **Règles** : une liste de phrases sur un bloc, une case, un lien (elles valent pour la case d'arrivée quand le run prend ce lien) ou une reprise. Les **jeux de règles** (section Rules de la barre latérale) se cochent partout. Elles vont dans le prompt système de l'étape, rangées par provenance.
+- **Verdict** : une case Agent peut « donner un verdict » : des options, la meilleure d'abord (`ok`, `à revoir`, `bloquant`). Une validation humaine, une commande et un « pour chaque » en donnent un aussi.
+- **Liens conditionnels** : cliquer un lien → « Taken » : toujours, « If ok », … ou « Otherwise » (ce qu'aucun autre lien ne prend).
+- **Reprises** : tracer un lien d'une case à verdict **vers une case plus haut** (ou vers elle-même) crée une reprise : « ↺ à revoir ≤2× ». Sur ce verdict, toutes les étapes de la cible jusqu'à la case repassent, avec les règles de la reprise et la raison du verdict ; au plus N fois, puis la case suit ses liens vers l'avant (prévois un « Otherwise »).
+- **Commandes** : jamais de `{{…}}` dans la ligne ; elle lit `$LOOM_PR_NUMBER`, `$LOOM_PR_BASE`, `$LOOM_PR_HEAD`, `$LOOM_PR_HEAD_SHA`, `$LOOM_REPO_PATH`, `$LOOM_RUN_FOLDER` (le seul dossier où écrire : le worktree d'une PR est en lecture seule). Sur une PR, elle **exécute le code de la PR** : coche « Run it on pull requests » dans la case, sinon le run refuse de démarrer.
 
 ### Ce qu'un prompt peut citer
 
@@ -28,6 +40,7 @@ Cliquer une variable sous le prompt l'insère :
 
 - `{{steps.<étape>.<champ>}}` : un champ de la réponse d'une étape d'avant ; `{{steps.<étape>.text}}` sa réponse en texte.
 - `{{previous.<étape>}}` : sa réponse à la passe précédente (vide à la première) — c'est ainsi qu'une relance tient compte des retours ; `{{history.<étape>}}` toutes les passes d'avant.
+- `{{in.text}}` : les réponses des étapes juste avant, en texte ; `{{in.<champ>}}` leurs champs — ce qu'un bloc utilise, puisqu'il ne connaît pas le workflow où il est posé. `{{item}}`, `{{index}}` dans un « pour chaque ». `{{steps.<étape>.verdict}}` le verdict d'une étape.
 - `{{pr.number}}`, `{{pr.title}}`, `{{pr.url}}`, `{{pr.author}}`, `{{pr.base}}`, `{{pr.head}}`, `{{pr.body}}` ; `{{ticket.key}}` ; `{{repo.name}}`, `{{repo.path}}` ; `{{run.note}}` (la note saisie au lancement) ; `{{iteration}}` (le numéro de passe).
 
 ## Experts
