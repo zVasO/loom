@@ -98,6 +98,9 @@ extension AppModel {
             case .workflowGet, .workflowStepRead, .workflowStepAsk, .workflowStepRerun, .workflowStepSkip,
                  .workflowStop, .workflowProceed, .workflowMessage:
                 return try await handleWorkflowRequest(method, request, scope: scope)
+            case .libraryReference, .libraryGet, .libraryWorkflowGet, .libraryValidate, .libraryWorkflowSave,
+                 .libraryBlockSave, .libraryRuleSetSave, .libraryExpertSave, .libraryScheduleSave, .libraryRunRequest:
+                return try await handleLibraryRequest(method, request, scope: scope)
             case .badgeList:
                 return .ok(request.id, APIBadgeListResult(badges: apiBadges))
             case .badgeCreate:

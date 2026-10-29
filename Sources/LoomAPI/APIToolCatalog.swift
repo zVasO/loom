@@ -41,8 +41,8 @@ public enum APIToolCatalog {
         }
     }
 
-    private static let webkitCatalog = sessionTools + browserTools(engine: .webkit)
-    private static let chromiumCatalog = sessionTools + browserTools(engine: .chromium)
+    private static let webkitCatalog = sessionTools + libraryTools + browserTools(engine: .webkit)
+    private static let chromiumCatalog = sessionTools + libraryTools + browserTools(engine: .chromium)
 
     static let sessionTools: [APIToolSpec] = [
         APIToolSpec(
@@ -94,6 +94,78 @@ public enum APIToolCatalog {
             inputSchema: object(["includeArchived": .object(["type": .string("boolean"),
                                                              "description": .string("Archived sessions too.")])]),
             cliUsage: "loom sessions [--archived] (global token)", preapprovable: true),
+    ]
+
+    /// The workflow library and the review schedules (ADR-0020). Reading is
+    /// free; every save is a proposal — inert until the person validates it
+    /// in Loom — so they are pre-approved. Connectors stay read only.
+    public static let libraryTools: [APIToolSpec] = [
+        APIToolSpec(
+            method: .libraryReference, name: "loom_library_reference",
+            description: "The format of Loom workflows: every step type with its configuration, links, verdicts, "
+                + "ways back, rules, blocks, experts, review schedules, and an example. Read it before building.",
+            inputSchema: object([:]),
+            cliUsage: "loom library reference", resultFormat: .content, preapprovable: true),
+        APIToolSpec(
+            method: .libraryGet, name: "loom_library_get",
+            description: "What exists: workflows (summaries), experts, blocks, rule sets, connectors (read only), "
+                + "review schedules, projects, skills, report themes, and the proposals waiting on the person.",
+            inputSchema: object([:]),
+            cliUsage: "loom library get", preapprovable: true),
+        APIToolSpec(
+            method: .libraryWorkflowGet, name: "loom_library_workflow_get",
+            description: "A workflow's full JSON: nodes, edges, orchestrator.",
+            inputSchema: object(["id": string("The workflow's id (from loom_library_get).")], required: ["id"]),
+            cliUsage: "loom library workflow_get <id>", preapprovable: true),
+        APIToolSpec(
+            method: .libraryValidate, name: "loom_library_validate",
+            description: "Checks a workflow without saving it: its problems (errors block a run) and its cost estimate.",
+            inputSchema: object(["workflow": jsonObject("The workflow, as loom_library_reference describes it.")],
+                                required: ["workflow"]),
+            cliUsage: "loom library validate '{\"workflow\":{…}}'", preapprovable: true),
+        APIToolSpec(
+            method: .libraryWorkflowSave, name: "loom_library_workflow_save",
+            description: "Creates a workflow (no id, or a new one) or changes one (its id), as a PROPOSAL: it does not "
+                + "run until the person validates it in Loom. Answers its id, its problems and what changed.",
+            inputSchema: object(["workflow": jsonObject("The whole workflow.")], required: ["workflow"]),
+            cliUsage: "loom library workflow_save '{\"workflow\":{…}}'", preapprovable: true),
+        APIToolSpec(
+            method: .libraryBlockSave, name: "loom_library_block_save",
+            description: "Creates or changes a block of the palette, as a proposal. Steps placed from it follow it "
+                + "once validated.",
+            inputSchema: object(["block": jsonObject("{name, summary, color, template, rules, ruleSetIDs}; id to change one.")],
+                                required: ["block"]),
+            cliUsage: "loom library block_save '{\"block\":{…}}'", preapprovable: true),
+        APIToolSpec(
+            method: .libraryRuleSetSave, name: "loom_library_ruleset_save",
+            description: "Creates or changes a named rule set, as a proposal.",
+            inputSchema: object(["ruleSet": jsonObject("{name, rules: [strings]}; id to change one.")],
+                                required: ["ruleSet"]),
+            cliUsage: "loom library ruleset_save '{\"ruleSet\":{…}}'", preapprovable: true),
+        APIToolSpec(
+            method: .libraryExpertSave, name: "loom_library_expert_save",
+            description: "Creates or changes an expert, as a proposal. Keep allowedTools read only unless the person "
+                + "asked otherwise.",
+            inputSchema: object(["expert": jsonObject("{name, domain, systemPrompt, model, skills, connectorIDs, allowedTools}; id to change one.")],
+                                required: ["expert"]),
+            cliUsage: "loom library expert_save '{\"expert\":{…}}'", preapprovable: true),
+        APIToolSpec(
+            method: .libraryScheduleSave, name: "loom_library_schedule_save",
+            description: "Creates or changes a review schedule (a time, days, slices of PRs, a workflow), as a "
+                + "proposal: it does not run until the person validates it.",
+            inputSchema: object(["schedule": jsonObject("{name, enabled, hour, minute, weekdays, targets, workflowID}; id to change one.")],
+                                required: ["schedule"]),
+            cliUsage: "loom library schedule_save '{\"schedule\":{…}}'", preapprovable: true),
+        APIToolSpec(
+            method: .libraryRunRequest, name: "loom_library_run_request",
+            description: "Opens Loom's Run sheet for a workflow, filled in. Nothing runs until the person clicks Run.",
+            inputSchema: object(["workflowId": string("The workflow's id."),
+                                 "projectId": string("The project it runs in (from loom_library_get)."),
+                                 "prNumber": number("A pull request of that project."),
+                                 "jiraKey": string("A Jira key, e.g. ABC-123."),
+                                 "note": string("A note for the steps ({{run.note}}).")],
+                                required: ["workflowId"]),
+            cliUsage: "loom library run_request <workflowId>", preapprovable: true),
     ]
 
     /// A workflow run's tools (ADR-0018): listed only for a session of a run,
@@ -356,16 +428,17 @@ public enum APIToolCatalog {
     /// they are turned off in Loom's Settings, worded for its engine; with
     /// a workflow run's when the session has a part in one.
     public static func tools(browser: Bool, engine: APIBrowserEngine = .webkit,
-                             workflow: APIWorkflowRole? = nil) -> [APIToolSpec] {
-        (browser ? all(engine: engine) : sessionTools) + workflowTools(for: workflow)
+                             workflow: APIWorkflowRole? = nil, library: Bool = true) -> [APIToolSpec] {
+        let base = browser ? all(engine: engine) : sessionTools + libraryTools
+        return (library ? base : base.filter { !$0.method.isLibrary }) + workflowTools(for: workflow)
     }
 
     /// The MCP tool names Loom may pre-approve, as Claude Code's permission
     /// rules spell them (`mcp__<server>__<tool>`).
     public static func preapprovedRules(server: String = "loom", browser: Bool,
                                         engine: APIBrowserEngine = .webkit,
-                                        workflow: APIWorkflowRole? = nil) -> [String] {
-        tools(browser: browser, engine: engine, workflow: workflow).filter(\.preapprovable)
+                                        workflow: APIWorkflowRole? = nil, library: Bool = true) -> [String] {
+        tools(browser: browser, engine: engine, workflow: workflow, library: library).filter(\.preapprovable)
             .map { "mcp__\(server)__\($0.name)" }
     }
 
@@ -407,9 +480,17 @@ public enum APIToolCatalog {
     person's own browser.
     """
 
-    public static func agentInstructions(browser: Bool, engine: APIBrowserEngine = .webkit) -> String {
-        browser ? sessionInstructions + "\n\n" + browserInstructions(engine: engine) : sessionInstructions
+    public static func agentInstructions(browser: Bool, engine: APIBrowserEngine = .webkit,
+                                         library: Bool = true) -> String {
+        var text = sessionInstructions
+        if library { text += "\n\n" + libraryInstructions }
+        if browser { text += "\n\n" + browserInstructions(engine: engine) }
+        return text
     }
+
+    static let libraryInstructions = """
+    When the person asks for a Loom workflow or a scheduled review, build it with the     loom_library_* tools: read loom_library_reference first. What you save is a proposal     the person validates in Loom before it runs.
+    """
 
     /// The reference, as Markdown — what `loom docs` prints.
     public static func markdown() -> String {
@@ -486,6 +567,10 @@ public enum APIToolCatalog {
 
     private static func array(_ items: JSONValue, _ description: String) -> JSONValue {
         .object(["type": .string("array"), "items": items, "description": .string(description)])
+    }
+
+    private static func jsonObject(_ description: String) -> JSONValue {
+        .object(["type": .string("object"), "description": .string(description)])
     }
 
     private static func targetProperty(optional: Bool) -> JSONValue {

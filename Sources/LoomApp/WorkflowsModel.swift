@@ -62,6 +62,8 @@ final class WorkflowsModel {
     var sessionToOpen: SessionID?
     /// Bumped to bring the Workflows tab to the front (a PR's tab started a run).
     var revealRequest: UUID?
+    /// Bumped to open Settings (a proposed schedule to review).
+    var settingsRequest: UUID?
     /// The editor's page, kept across tab switches.
     @ObservationIgnored var editorHost: WorkflowEditorHost?
 
@@ -96,6 +98,7 @@ final class WorkflowsModel {
         }
         reload()
         runs = runStore.load()
+        loadBuilders()
         // A run cut short by a quit is saved as such, once.
         for run in runs where run.status == .interrupted { try? runStore.save(run) }
         if selectedWorkflowID == nil { selectedWorkflowID = workflows.first?.id }
@@ -403,6 +406,11 @@ final class WorkflowsModel {
             guard orchestrator != nil || !steps.isEmpty else { return nil }
             return SessionGroup(id: run.id, title: "\(run.workflow.name) · \(run.subject)",
                                 isActive: run.status.isActive, orchestrator: orchestrator, steps: steps)
+        } + builders.reversed().compactMap { builder -> SessionGroup? in
+            guard let uuid = UUID(uuidString: builder.sessionID) else { return nil }
+            let name = builder.workflowID.flatMap { workflow($0)?.name }
+            return SessionGroup(id: builder.id, title: "Workflow builder" + (name.map { " · \($0)" } ?? ""),
+                                isActive: false, orchestrator: SessionID(uuid), steps: [])
         }
     }
 
@@ -431,5 +439,128 @@ final class WorkflowsModel {
     func decide(_ approval: PendingApproval, option: String, comment: String) {
         approvalDecisions[approval.id] = ApprovalDecision(option: option, comment: comment)
         pendingApprovals.removeAll { $0.id == approval.id }
+    }
+
+    // MARK: Agents' proposals (ADR-0020)
+
+    enum ProposalRef: Hashable {
+        case workflow(UUID), block(UUID), ruleSet(UUID), expert(UUID), schedule(UUID)
+    }
+
+    /// The sessions told once that their proposals wait on the person.
+    @ObservationIgnored var notifiedProposers: Set<String> = []
+
+    /// Proposals in the library, every kind (the schedules are AppModel's).
+    var libraryProposalCount: Int {
+        workflows.filter(\.isProposed).count + blocks.filter(\.isProposed).count
+            + ruleSets.filter(\.isProposed).count + experts.filter(\.isProposed).count
+    }
+
+    @discardableResult
+    func propose(_ workflow: Workflow, by: String, session: String?) -> Workflow {
+        var new = workflow
+        new.proposal = nil
+        if let existing = self.workflow(workflow.id) { new.createdAt = existing.createdAt }
+        let proposed = Workflow.proposing(new, over: self.workflow(workflow.id), by: by, sessionID: session)
+        save(proposed)
+        return proposed
+    }
+
+    @discardableResult
+    func propose(_ block: WorkflowBlock, by: String, session: String?) -> WorkflowBlock {
+        var new = block
+        new.proposal = nil
+        let proposed = WorkflowBlock.proposing(new, over: self.block(block.id), by: by, sessionID: session)
+        save(proposed)
+        return proposed
+    }
+
+    @discardableResult
+    func propose(_ ruleSet: RuleSet, by: String, session: String?) -> RuleSet {
+        var new = ruleSet
+        new.proposal = nil
+        let proposed = RuleSet.proposing(new, over: self.ruleSet(ruleSet.id), by: by, sessionID: session)
+        save(proposed)
+        return proposed
+    }
+
+    @discardableResult
+    func propose(_ expert: Expert, by: String, session: String?) -> Expert {
+        var new = expert
+        new.proposal = nil
+        let proposed = Expert.proposing(new, over: self.expert(expert.id), by: by, sessionID: session)
+        save(proposed)
+        return proposed
+    }
+
+    /// The person validates a library proposal: it counts from now on.
+    func validate(_ ref: ProposalRef) {
+        switch ref {
+        case .workflow(let id): if let item = workflow(id) { save(item.validated()) }
+        case .block(let id): if let item = block(id) { save(item.validated()) }
+        case .ruleSet(let id): if let item = ruleSet(id) { save(item.validated()) }
+        case .expert(let id): if let item = expert(id) { save(item.validated()) }
+        case .schedule: break
+        }
+    }
+
+    /// The person turns it down: the version before, or nothing.
+    func revert(_ ref: ProposalRef) {
+        switch ref {
+        case .workflow(let id):
+            guard let item = workflow(id) else { return }
+            if let previous = item.reverted() { save(previous) } else { deleteWorkflow(id) }
+        case .block(let id):
+            guard let item = block(id) else { return }
+            if let previous = item.reverted() { save(previous) } else { deleteBlock(id) }
+        case .ruleSet(let id):
+            guard let item = ruleSet(id) else { return }
+            if let previous = item.reverted() { save(previous) } else { deleteRuleSet(id) }
+        case .expert(let id):
+            guard let item = expert(id) else { return }
+            if let previous = item.reverted() { save(previous) } else { deleteExpert(id) }
+        case .schedule: break
+        }
+    }
+
+    // MARK: Workflow builders (ADR-0020)
+
+    /// A session building workflows with the person.
+    struct Builder: Codable, Equatable, Identifiable {
+        var id: UUID
+        var sessionID: String
+        /// The workflow it improves, or the last one it created.
+        var workflowID: UUID?
+        var startedAt: Date
+    }
+
+    private(set) var builders: [Builder] = []
+
+    private var buildersURL: URL { store.root.appendingPathComponent("builders.json") }
+
+    func loadBuilders() {
+        guard let data = try? Data(contentsOf: buildersURL),
+              let list = try? WorkflowJSON.decoder.decode([Builder].self, from: data) else { return }
+        builders = list
+    }
+
+    func addBuilder(session: String, workflowID: UUID?) {
+        builders.append(Builder(id: UUID(), sessionID: session.lowercased(), workflowID: workflowID, startedAt: Date()))
+        saveBuilders()
+    }
+
+    func builder(ofSession session: String) -> Builder? {
+        builders.last { $0.sessionID == session.lowercased() }
+    }
+
+    func setBuilderWorkflow(session: String, _ workflowID: UUID) {
+        guard let index = builders.lastIndex(where: { $0.sessionID == session.lowercased() }) else { return }
+        builders[index].workflowID = workflowID
+        saveBuilders()
+    }
+
+    private func saveBuilders() {
+        try? FileManager.default.createDirectory(at: store.root, withIntermediateDirectories: true)
+        if let data = try? WorkflowJSON.encoder.encode(builders) { try? data.write(to: buildersURL, options: .atomic) }
     }
 }

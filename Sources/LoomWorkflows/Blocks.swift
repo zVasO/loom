@@ -1,31 +1,36 @@
 import Foundation
+import LoomCore
 import LoomAPI
 
 /// Named rules to tick on a block, a step or a link (ADR-0019): "Cite
 /// path:line", "Write in French" — written once, used everywhere.
-public struct RuleSet: Codable, Identifiable, Equatable, Sendable {
+public struct RuleSet: Codable, Identifiable, Equatable, Sendable, Proposable {
     public var id: UUID
     public var name: String
     public var rules: [String]
+    /// An agent's change awaiting the person's validation (ADR-0020).
+    public var proposal: AgentProposal<RuleSet>?
 
-    public init(id: UUID = UUID(), name: String, rules: [String] = []) {
+    public init(id: UUID = UUID(), name: String, rules: [String] = [], proposal: AgentProposal<RuleSet>? = nil) {
         self.id = id
         self.name = name
         self.rules = rules
+        self.proposal = proposal
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(id: try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID(),
                   name: try c.decodeIfPresent(String.self, forKey: .name) ?? "Rules",
-                  rules: try c.decodeIfPresent([String].self, forKey: .rules) ?? [])
+                  rules: try c.decodeIfPresent([String].self, forKey: .rules) ?? [],
+                  proposal: try c.decodeIfPresent(AgentProposal<RuleSet>.self, forKey: .proposal))
     }
 }
 
 /// A box of the palette the user made (ADR-0019): an agent step with its
 /// prompt, fields, verdict, rules and settings, placed in any workflow as
 /// often as wanted. Placed steps follow it: they name it, never copy it.
-public struct WorkflowBlock: Codable, Identifiable, Equatable, Sendable {
+public struct WorkflowBlock: Codable, Identifiable, Equatable, Sendable, Proposable {
     public var id: UUID
     public var name: String
     public var summary: String
@@ -36,10 +41,13 @@ public struct WorkflowBlock: Codable, Identifiable, Equatable, Sendable {
     public var rules: [String]
     public var ruleSetIDs: [UUID]
     public var updatedAt: Date
+    /// An agent's change awaiting the person's validation (ADR-0020).
+    public var proposal: AgentProposal<WorkflowBlock>?
 
     public init(id: UUID = UUID(), name: String, summary: String = "", color: String = "#6E56CF",
                 template: AgentConfig = AgentConfig(prompt: "", output: [OutputField("summary", .text)]),
-                rules: [String] = [], ruleSetIDs: [UUID] = [], updatedAt: Date = Date()) {
+                rules: [String] = [], ruleSetIDs: [UUID] = [], updatedAt: Date = Date(),
+                proposal: AgentProposal<WorkflowBlock>? = nil) {
         self.id = id
         self.name = name
         self.summary = summary
@@ -48,6 +56,7 @@ public struct WorkflowBlock: Codable, Identifiable, Equatable, Sendable {
         self.rules = rules
         self.ruleSetIDs = ruleSetIDs
         self.updatedAt = updatedAt
+        self.proposal = proposal
     }
 
     public init(from decoder: Decoder) throws {
@@ -60,7 +69,8 @@ public struct WorkflowBlock: Codable, Identifiable, Equatable, Sendable {
                     ?? AgentConfig(prompt: "", output: [OutputField("summary", .text)]),
                   rules: try c.decodeIfPresent([String].self, forKey: .rules) ?? [],
                   ruleSetIDs: try c.decodeIfPresent([UUID].self, forKey: .ruleSetIDs) ?? [],
-                  updatedAt: try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date())
+                  updatedAt: try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date(),
+                  proposal: try c.decodeIfPresent(AgentProposal<WorkflowBlock>.self, forKey: .proposal))
     }
 
     /// A block from a step: its prompt, fields, verdict and settings; the

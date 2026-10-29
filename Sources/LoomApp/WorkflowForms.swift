@@ -76,7 +76,11 @@ struct ExpertEditor: View {
             toolsText = (draft?.allowedTools ?? []).joined(separator: "\n")
         }
         .onChange(of: draft) {
-            if let draft { workflows.save(draft) }
+            // Validating is a button of its own: an edit keeps a proposal a proposal.
+            if var draft {
+                draft.proposal = workflows.expert(expertID)?.proposal
+                workflows.save(draft)
+            }
         }
     }
 
@@ -439,6 +443,7 @@ struct WorkflowLaunchSheet: View {
             projectID = request.inputs?.projectID ?? model.selectedProject ?? model.projects.first?.id
             if let number = request.inputs?.prNumber { prText = "\(number)" }
             jiraKey = request.inputs?.jiraKey ?? ""
+            note = request.inputs?.note ?? ""
         }
     }
 
@@ -495,7 +500,10 @@ struct RuleSetEditor: View {
         }
         .onAppear { draft = workflows.ruleSet(ruleSetID) }
         .onChange(of: draft) {
-            if let draft { workflows.save(draft) }
+            if var draft {
+                draft.proposal = workflows.ruleSet(ruleSetID)?.proposal
+                workflows.save(draft)
+            }
         }
     }
 }

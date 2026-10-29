@@ -199,6 +199,14 @@ struct ContentView: View {
             model.extensions.isTabVisible = tab == .extensions
         }
         .onChange(of: model.workflows.revealRequest) { tab = .workflows }
+        .onChange(of: model.workflows.settingsRequest) { tab = .settings }
+        // A session a workflow, a run or the PRs sidebar asked to show — from any tab.
+        .onChange(of: model.workflows.sessionToOpen) {
+            guard let id = model.workflows.sessionToOpen else { return }
+            model.workflows.sessionToOpen = nil
+            selected = .session(id)
+            tab = .sessions
+        }
         .modifier(ExtensionsWiring(model: model, onOpenSession: { id in
             selected = .session(id)
             tab = .sessions

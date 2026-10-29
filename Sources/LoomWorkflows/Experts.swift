@@ -1,10 +1,11 @@
 import Foundation
+import LoomCore
 
 /// An agent with one domain (PHP, Symfony, security…), reused from workflow
 /// to workflow: its instructions go on top of claude's system prompt, its
 /// skills and connectors come along, and it may only use the tools it lists
 /// — a headless run has nobody to answer a permission prompt.
-public struct Expert: Codable, Identifiable, Equatable, Sendable {
+public struct Expert: Codable, Identifiable, Equatable, Sendable, Proposable {
     public var id: UUID
     public var name: String
     public var domain: String
@@ -16,6 +17,8 @@ public struct Expert: Codable, Identifiable, Equatable, Sendable {
     public var connectorIDs: [UUID]
     public var allowedTools: [String]
     public var color: String
+    /// An agent's change awaiting the person's validation (ADR-0020).
+    public var proposal: AgentProposal<Expert>?
 
     /// Reading, searching, and the read-only git and gh commands a review uses.
     public static let readOnlyTools = [
@@ -28,7 +31,8 @@ public struct Expert: Codable, Identifiable, Equatable, Sendable {
 
     public init(id: UUID = UUID(), name: String, domain: String = "", systemPrompt: String = "",
                 model: String? = nil, skills: [String] = [], connectorIDs: [UUID] = [],
-                allowedTools: [String] = Expert.readOnlyTools, color: String = "#0D6E74") {
+                allowedTools: [String] = Expert.readOnlyTools, color: String = "#0D6E74",
+                proposal: AgentProposal<Expert>? = nil) {
         self.id = id
         self.name = name
         self.domain = domain
@@ -38,6 +42,7 @@ public struct Expert: Codable, Identifiable, Equatable, Sendable {
         self.connectorIDs = connectorIDs
         self.allowedTools = allowedTools
         self.color = color
+        self.proposal = proposal
     }
 
     public init(from decoder: Decoder) throws {
@@ -50,7 +55,8 @@ public struct Expert: Codable, Identifiable, Equatable, Sendable {
                   skills: try c.decodeIfPresent([String].self, forKey: .skills) ?? [],
                   connectorIDs: try c.decodeIfPresent([UUID].self, forKey: .connectorIDs) ?? [],
                   allowedTools: try c.decodeIfPresent([String].self, forKey: .allowedTools) ?? Expert.readOnlyTools,
-                  color: try c.decodeIfPresent(String.self, forKey: .color) ?? "#0D6E74")
+                  color: try c.decodeIfPresent(String.self, forKey: .color) ?? "#0D6E74",
+                  proposal: try c.decodeIfPresent(AgentProposal<Expert>.self, forKey: .proposal))
     }
 }
 

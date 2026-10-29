@@ -31,6 +31,9 @@ public enum APIProtocol {
     /// The session's part in a workflow run (ADR-0018), when it has one:
     /// `orchestrator` or `step`. `loom mcp` lists the workflow tools for it.
     public static let workflowRoleEnvironmentKey = "LOOM_WORKFLOW_ROLE"
+    /// "0": the workflow library tools are turned off in Loom's Settings
+    /// (ADR-0020), and `loom mcp` does not list them.
+    public static let libraryToolsEnvironmentKey = "LOOM_LIBRARY_TOOLS"
 
     /// Where the app writes the agent browser's screenshots (ADR-0014), beside
     /// its socket: the one place the app and `loom mcp` agree on. The MCP
@@ -112,12 +115,27 @@ public enum APIMethod: String, CaseIterable, Sendable {
     case workflowStop = "workflow.stop"
     case workflowProceed = "workflow.proceed"
     case workflowMessage = "workflow.message"
+    // The workflow library and the review schedules, for an agent that builds
+    // them (ADR-0020): what it saves is a proposal the person validates.
+    case libraryReference = "library.reference"
+    case libraryGet = "library.get"
+    case libraryWorkflowGet = "library.workflow.get"
+    case libraryValidate = "library.validate"
+    case libraryWorkflowSave = "library.workflow.save"
+    case libraryBlockSave = "library.block.save"
+    case libraryRuleSetSave = "library.ruleSet.save"
+    case libraryExpertSave = "library.expert.save"
+    case libraryScheduleSave = "library.schedule.save"
+    case libraryRunRequest = "library.run.request"
 
     /// Drives the session's own browser.
     public var isBrowser: Bool { rawValue.hasPrefix("browser.") }
 
     /// Reads or steers the workflow run the session belongs to.
     public var isWorkflow: Bool { rawValue.hasPrefix("workflow.") }
+
+    /// Reads the workflow library, or proposes a change to it.
+    public var isLibrary: Bool { rawValue.hasPrefix("library.") }
 
     /// Listing every session is the orchestrator's view: a session token,
     /// scoped to itself, never sees its neighbours.

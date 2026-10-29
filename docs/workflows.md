@@ -94,6 +94,12 @@ Un workflow peut avoir un **orchestrateur** ([ADR-0018](adr/0018-orchestrateur-d
 
 Le built-in « PR review — 3 passes » a pour orchestrateur le lead reviewer. Une bibliothèque créée avant lui le reçoit en ajoutant de nouveau le built-in (`+`).
 
+## Construire avec un agent ([ADR-0020](adr/0020-propositions-d-agent.md))
+
+- **✦ Create with AI** (le `+` des Workflows, ou l'écran vide), **✦ Improve with AI** (menu d'un workflow, en-tête de l'éditeur) : une session « Workflow builder » s'ouvre, rangée sous Sessions › Workflows. Elle te pose ses questions, lit la référence du format, construit — l'éditeur montre le workflow à mesure.
+- **N'importe quelle session** peut aussi lire et proposer : outils `loom_library_*` (et `loom library …` en CLI) — la référence, ce qui existe, valider un workflow, enregistrer workflow / bloc / jeu de règles / expert / review planifiée, ouvrir la feuille Run préremplie. Les connecteurs restent en lecture seule. Réglages › Agents › « Workflow tools in every session » les coupe.
+- **Tout ce qu'un agent enregistre est une proposition** : rien ne tourne, aucune planification ne part, tant que tu n'as pas validé. Section **To review** en tête de l'onglet Workflows : qui, quand, ce qui change (les commandes et les outils d'expert ajoutés en rouge), **Validate**, **Revert** (la version d'avant, ou supprimer une création), **Open**. Le bandeau de l'éditeur et les Réglages › Scheduled reviews font de même. Modifier une proposition ne la valide pas.
+
 ## Le rapport
 
 Un fichier HTML autonome dans le dossier du run, animé (apparitions, compteurs, frise ; `prefers-reduced-motion` respecté). Le gabarit « Rapport de review de PR » cherche les champs par leur nom, quel que soit le nom des étapes : `intent`, `readingOrder`, `ticketCriteria`, `risks`, `questions`, et la réponse consolidée qui porte `verdict` et `findings` (avec `summary`, `stable`, `dropped`, `changes`). Les réponses avec `findings` mais sans verdict sont les experts. Le gabarit « générique » montre chaque étape.

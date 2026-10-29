@@ -38,11 +38,6 @@ struct WorkflowsView: View {
         .onChange(of: workflows.detail) { model.emitEditorState() }
         .onChange(of: workflows.libraryGeneration) { model.emitEditorLibrary() }
         .onChange(of: watchedRunState) { model.emitEditorRun() }
-        .onChange(of: workflows.sessionToOpen) {
-            guard let id = workflows.sessionToOpen else { return }
-            workflows.sessionToOpen = nil
-            onOpenSession(id)
-        }
         .onReceive(NotificationCenter.default.publisher(for: .loomThemeChanged)) { _ in model.emitEditorLibrary() }
     }
 
@@ -75,6 +70,7 @@ struct WorkflowsView: View {
             Divider().overlay(DefaultTheme.cardBorder)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
+                    proposalsSection
                     workflowsSection
                     expertsSection
                     rulesSection
@@ -105,10 +101,62 @@ struct WorkflowsView: View {
         return q.isEmpty || text.contains { $0.localizedCaseInsensitiveContains(q) }
     }
 
+    /// What agents proposed (ADR-0020): nothing of it runs before you validate.
+    @ViewBuilder
+    private var proposalsSection: some View {
+        let items = model.pendingProposals
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                header("TO REVIEW · \(items.count)", systemImage: "checkmark.seal") { EmptyView() }
+                Text("Proposed by agents: none of it runs or fires before you validate it.")
+                    .font(.system(size: 10)).foregroundStyle(DefaultTheme.mutedText)
+                ForEach(items) { item in
+                    proposalRow(item)
+                }
+            }
+        }
+    }
+
+    private func proposalRow(_ item: AppModel.ProposalItem) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(item.kind.uppercased())
+                    .font(.system(size: 9, weight: .bold)).kerning(0.6)
+                    .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                Text(item.title).font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.primaryText).lineLimit(1)
+            }
+            Text("by \(item.by) · " + item.at.formatted(.relative(presentation: .named)))
+                .font(.system(size: 10)).foregroundStyle(DefaultTheme.mutedText).lineLimit(1)
+            ForEach(Array(item.changes.prefix(5).enumerated()), id: \.offset) { _, change in
+                Text((change.flagged ? "⚠︎ " : "· ") + change.text)
+                    .font(.system(size: 10))
+                    .foregroundStyle(change.flagged ? DefaultTheme.danger : DefaultTheme.secondaryText)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
+            if item.changes.count > 5 {
+                Text("… \(item.changes.count - 5) more").font(.system(size: 10)).foregroundStyle(DefaultTheme.mutedText)
+            }
+            HStack(spacing: 6) {
+                AccentButton("Validate", systemImage: "checkmark") { model.validateProposal(item.ref) }
+                GhostButton("Revert", systemImage: "arrow.uturn.backward") { model.revertProposal(item.ref) }
+                    .help("Back to the version you validated — or delete what the agent created")
+                GhostButton("Open", systemImage: "eye") { model.openProposal(item.ref) }
+            }
+            .controlSize(.small)
+        }
+        .padding(9)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.badgeColor(for: .needsInput).opacity(0.5), lineWidth: 1))
+    }
+
     private var workflowsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             header("WORKFLOWS", systemImage: "point.3.connected.trianglepath.dotted") {
                 Menu {
+                    Button("✦ Create with AI…") { Task { await model.startWorkflowBuilder() } }
+                    Divider()
                     Button("New workflow") {
                         workflows.createWorkflow()
                         workflows.detail = .workflow
@@ -161,10 +209,13 @@ struct WorkflowsView: View {
                         .onSubmit { commitRename(workflow.id) }
                         .onExitCommand { renaming = nil }
                 } else {
-                    Text(workflow.name)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(workflow.name)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(DefaultTheme.primaryText)
+                            .lineLimit(1)
+                        if workflow.isProposed { ProposedTag() }
+                    }
                 }
                 if !workflow.summary.isEmpty {
                     Text(workflow.summary).font(.system(size: 10)).foregroundStyle(DefaultTheme.secondaryText).lineLimit(2)
@@ -193,6 +244,7 @@ struct WorkflowsView: View {
         }
         .contextMenu {
             Button("Run…") { workflows.launchRequest = .init(workflowID: workflow.id, inputs: nil) }
+            Button("✦ Improve with AI…") { Task { await model.startWorkflowBuilder(improving: workflow.id) } }
             Button("Rename") { startRename(workflow) }
             Button("Duplicate") {
                 workflows.duplicate(workflow.id)
@@ -453,7 +505,12 @@ struct WorkflowsView: View {
                     Text("Workflows").font(.system(size: 15, weight: .semibold)).foregroundStyle(DefaultTheme.primaryText)
                     Text("A start, steps for experts, paths between them — and a report at the end.")
                         .font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
-                    AccentButton("New workflow", systemImage: "plus") { workflows.createWorkflow() }
+                    HStack(spacing: 10) {
+                        AccentButton("✦ Create with AI", systemImage: nil) { Task { await model.startWorkflowBuilder() } }
+                        GhostButton("New workflow", systemImage: "plus") { workflows.createWorkflow() }
+                    }
+                    Text("The AI asks what the workflow is for, then builds it: you validate what it proposes.")
+                        .font(.system(size: 11)).foregroundStyle(DefaultTheme.mutedText)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -618,5 +675,17 @@ struct ArtifactWebView: NSViewRepresentable {
         if view.url?.standardizedFileURL != url.standardizedFileURL {
             view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         }
+    }
+}
+
+/// "proposed": an agent's change awaiting your validation (ADR-0020).
+struct ProposedTag: View {
+    var body: some View {
+        Text("proposed")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .overlay(Capsule().stroke(DefaultTheme.badgeColor(for: .needsInput).opacity(0.6), lineWidth: 1))
+            .help("Proposed by an agent: validate it in To review before it can run")
     }
 }

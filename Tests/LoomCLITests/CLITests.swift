@@ -34,6 +34,19 @@ struct CLIParseTests {
         #expect(archived.archived)
     }
 
+    @Test("library verbs (ADR-0020): the tool by its short name, JSON or its one obvious value")
+    func verbesBibliotheque() throws {
+        #expect(try CLI.parse(["library", "reference"]).0 == .library(.libraryReference, .object([:])))
+        #expect(try CLI.parse(["library", "workflow_get", "abc"]).0
+                == .library(.libraryWorkflowGet, .object(["id": .string("abc")])))
+        #expect(try CLI.parse(["library", "run_request", "abc"]).0
+                == .library(.libraryRunRequest, .object(["workflowId": .string("abc")])))
+        #expect(try CLI.parse(["library", "workflow_save", #"{"workflow":{"name":"x"}}"#]).0
+                == .library(.libraryWorkflowSave, .object(["workflow": .object(["name": .string("x")])])))
+        #expect(throws: CLI.ParseError.self) { try CLI.parse(["library", "workflow_save", "x"]) }
+        #expect(throws: CLI.ParseError.self) { try CLI.parse(["library", "connector_save"]) }
+    }
+
     @Test("workflow verbs (ADR-0018): the tool by its short name, JSON or its one obvious value")
     func verbesWorkflow() throws {
         #expect(try CLI.parse(["workflow", "get"]).0 == .workflow(.workflowGet, .object([:])))
