@@ -246,6 +246,8 @@ struct BlocksTests {
         let unused = RuleSet(name: "Unused")
         var block = review
         block.ruleSetIDs = [style.id]
+        // ISO 8601 on disk: whole seconds survive the trip.
+        block.updatedAt = Date(timeIntervalSince1970: 1_800_000_000)
         let workflow = Workflow(name: "w", nodes: [start(), agent("b", AgentConfig(blockID: block.id))],
                                 edges: [WorkflowEdge(from: "start", to: "b")])
         let bundle = WorkflowBundle.make(workflow, experts: [], connectors: [], blocks: [block, WorkflowBlock(name: "X")],
