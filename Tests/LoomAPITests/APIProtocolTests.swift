@@ -116,7 +116,7 @@ struct APIProtocolTests {
         }
         for method in APIMethod.allCases where !method.isBrowser {
             #expect(method.allowsGlobalScope == !method.isWorkflow)
-            #expect(APIToolCatalog.spec(for: method).resultFormat == .json)
+            #expect(APIToolCatalog.spec(for: method).resultFormat == (method == .libraryReference ? .content : .json))
         }
     }
 
@@ -136,6 +136,24 @@ struct APIProtocolTests {
         #expect(APIWorkflowRole(environment: ["LOOM_WORKFLOW_ROLE": "step"]) == .step)
         #expect(APIWorkflowRole(environment: ["LOOM_WORKFLOW_ROLE": "boss"]) == nil)
         #expect(APIWorkflowRole(environment: [:]) == nil)
+    }
+
+    @Test("the library tools (ADR-0020): every session lists them unless turned off; all pre-approved, all inert")
+    func outilsBibliotheque() {
+        let library = APIMethod.allCases.filter(\.isLibrary)
+        #expect(library.count == 10)
+        for method in library {
+            #expect(method.allowsGlobalScope && !method.requiresGlobalScope, "\(method.rawValue)")
+            #expect(APIToolCatalog.spec(for: method).preapprovable)
+            #expect(APIToolCatalog.spec(for: method).name.hasPrefix("loom_library_"))
+        }
+        #expect(APIToolCatalog.all.filter { $0.method.isLibrary }.count == 10)
+        #expect(APIToolCatalog.tools(browser: false).contains { $0.method == .libraryWorkflowSave })
+        #expect(!APIToolCatalog.tools(browser: true, library: false).contains { $0.method.isLibrary })
+        #expect(!APIToolCatalog.preapprovedRules(browser: true, library: false).contains { $0.contains("library") })
+        #expect(APIToolCatalog.agentInstructions(browser: false).contains("loom_library_reference"))
+        #expect(!APIToolCatalog.agentInstructions(browser: false, library: false).contains("loom_library"))
+        #expect(!library.contains { $0.rawValue.contains("connector") }, "connectors stay the person's")
     }
 
     @Test("the workflow tools are listed for a run's sessions only, each its own")

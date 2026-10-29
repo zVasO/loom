@@ -132,3 +132,22 @@ test("a block of the palette is placed, its link given a verdict, a way back dra
   assert.deepEqual(errors, []);
   await tab.close();
 });
+
+test("an agent's proposal shows a banner with its changes, Validate and Revert", { skip }, async () => {
+  const tab = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  const errors = [];
+  tab.on("pageerror", (e) => errors.push(e.message));
+  const proposal = { by: "Workflow builder", isNew: false,
+    changes: [{ text: "Step added: `tests`", flagged: false }, { text: "Command `tests`: phpunit", flagged: true }] };
+  await tab.addInitScript((s) => { window.__loomWorkflowsStandIn = s; }, { ...state, proposal });
+  await tab.goto(page);
+  await tab.waitForSelector(".proposal-banner");
+  const text = await tab.textContent(".proposal-banner");
+  assert.match(text, /Changed by Workflow builder/);
+  assert.match(text, /Validate/);
+  assert.match(text, /Revert/);
+  assert.equal(await tab.$$eval(".proposal-banner li.flagged", (n) => n.length), 1);
+  assert.match(await tab.textContent(".bar"), /Improve with AI/);
+  assert.deepEqual(errors, []);
+  await tab.close();
+});

@@ -40,6 +40,12 @@ extension AppModel {
             return "\(workflow.name): \(error.message)"
         }
         if claudePath == nil { return "claude was not found on this Mac." }
+        // An agent's proposal never runs before the person validates it (ADR-0020).
+        let pending = WorkflowBundle.make(workflow, experts: workflows.experts, connectors: workflows.connectors,
+                                          blocks: workflows.blocks, ruleSets: workflows.ruleSets).pendingProposals
+        if !pending.isEmpty {
+            return "Validate first (Workflows › To review): " + pending.joined(separator: ", ") + "."
+        }
         let needsPR = workflow.nodes.contains {
             if case .context(let config) = $0.kind { return config.source == .pullRequest }
             return false

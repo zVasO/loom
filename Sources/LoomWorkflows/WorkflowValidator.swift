@@ -127,6 +127,9 @@ public enum WorkflowValidator {
             }
         }
         issues += edgeIssues(workflow, blocks: blocks, ruleSets: ruleSets)
+        if let proposal = workflow.proposal {
+            issues.append(.init(.warning, "Proposed by \(proposal.by): validate it (Workflows › To review) before it can run."))
+        }
         if !workflow.nodes.contains(where: { $0.kind.type == .artifact }) {
             issues.append(.init(.warning, "No Artifact step: the run leaves no report."))
         }

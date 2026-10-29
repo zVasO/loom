@@ -367,8 +367,16 @@ public final class AppModel {
                                                                                 fallback: supportDirectory)),
                                       tools: .init(browser: agentBrowserToolsEnabled,
                                                    preapproved: preapprovesLoomTools,
-                                                   engine: engine),
+                                                   engine: engine,
+                                                   library: (UserDefaults.standard.object(forKey: "loom.agents.libraryTools")
+                                                       as? Bool) ?? true),
                                       instructions: sessionInstructionsEnabled ? sessionInstructionsText : nil)
+        // A workflow builder (ADR-0020) gets its instructions again at every resume.
+        if workflows.builder(ofSession: session.rawValue.uuidString) != nil {
+            built.instructions = [built.instructions ?? "", BuilderPrompt.instructions]
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .joined(separator: "\n\n")
+        }
         // A session of a workflow run gets its part again at every resume
         // (ADR-0018): its tools, and the orchestrator its rules and model.
         if let part = workflows.part(of: session), let run = workflows.run(part.runID) {

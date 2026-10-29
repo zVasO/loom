@@ -274,6 +274,41 @@ public enum APIWorkflowLimits {
     public static let messageMaxLength = 8_000
 }
 
+// MARK: - The workflow library (ADR-0020)
+
+/// `library.workflow.get`: which workflow.
+public struct APILibraryRef: Codable, Equatable, Sendable {
+    public var id: String
+    public init(id: String) { self.id = id }
+}
+
+/// `library.run.request`: the Run sheet, filled in — the person starts it.
+public struct APILibraryRunParams: Codable, Equatable, Sendable {
+    public var workflowId: String
+    public var projectId: String?
+    public var prNumber: Int?
+    public var jiraKey: String?
+    public var note: String?
+
+    public init(workflowId: String, projectId: String? = nil, prNumber: Int? = nil, jiraKey: String? = nil,
+                note: String? = nil) {
+        self.workflowId = workflowId
+        self.projectId = projectId
+        self.prNumber = prNumber
+        self.jiraKey = jiraKey
+        self.note = note
+    }
+}
+
+/// What the library takes from an agent.
+public enum APILibraryLimits {
+    /// Proposals waiting on the person, all kinds together.
+    public static let pendingProposals = 50
+    public static let stepsPerWorkflow = 200
+    /// A prompt, a rule, an instruction.
+    public static let textMaxLength = 40_000
+}
+
 /// What an agent may write through the API. Loom's own tools run without a
 /// permission prompt (pre-approved), so what they write is bounded here: a
 /// session title also becomes a system notification's title, and a prompt-

@@ -210,3 +210,13 @@ details summary { cursor: pointer; font-size: 12px; font-weight: 700; }
 .warning-check span { color: var(--secondaryText); }
 .warning-check b { color: var(--danger); }
 @media (prefers-reduced-motion: reduce) { .verdict-chip.given { animation: none; } }
+
+/* An agent's proposal (ADR-0020): it waits for you. */
+.proposal-banner { display: flex; gap: 14px; align-items: flex-start; justify-content: space-between;
+  padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--stateNeedsInput); font-size: 12px; }
+.proposal-banner ul { margin: 4px 0 0; padding-left: 18px; color: var(--secondaryText); }
+.proposal-banner li.flagged { color: var(--danger); font-weight: 600; }
+.proposal-actions { display: flex; gap: 6px; flex: none; }
+.proposed-tag { margin-left: 6px; font-style: normal; font-size: 9px; font-weight: 700; color: var(--stateNeedsInput);
+  border: 1px solid var(--stateNeedsInput); border-radius: 999px; padding: 0 5px; }
+.ai-button { white-space: nowrap; }

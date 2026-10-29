@@ -308,6 +308,18 @@ struct ClaudeCodeAdapterTests {
                 "no browser tools, no engine to word them for")
     }
 
+    @Test("library tools off: the MCP server is told, and they are not pre-approved")
+    func outilsBibliothequeDesactives() throws {
+        let command = wired(.init(library: false)).launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok")
+        let index = try #require(command.arguments.firstIndex(of: "--mcp-config"))
+        #expect(command.arguments[index + 1].contains(#""LOOM_LIBRARY_TOOLS":"0""#))
+        let allow = try #require((try settings(of: command)["permissions"] as? [String: Any])?["allow"] as? [String])
+        #expect(!allow.contains { $0.contains("loom_library_") })
+        let on = wired().launchCommand(session: SessionID(), initialPrompt: nil, hookToken: "tok")
+        let allowOn = try #require((try settings(of: on)["permissions"] as? [String: Any])?["allow"] as? [String])
+        #expect(allowOn.contains("mcp__loom__loom_library_workflow_save"))
+    }
+
     @Test("a workflow session's part reaches the MCP server and its tools are pre-approved; the model is passed")
     func roleDeWorkflow() throws {
         var adapter = wired(.init(workflow: .orchestrator))

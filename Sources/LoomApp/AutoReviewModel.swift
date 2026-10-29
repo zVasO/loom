@@ -24,6 +24,8 @@ public struct AutoReviewRun: Equatable, Sendable {
         /// conversation, in the drawer, is the review.
         case noReport
         case failed(String)
+        /// The person stopped it from the PRs sidebar; its session stays.
+        case stopped
 
         public var isReady: Bool {
             if case .ready = self { return true }
@@ -33,7 +35,7 @@ public struct AutoReviewRun: Equatable, Sendable {
         public var isSettled: Bool {
             switch self {
             case .queued, .preparing, .reviewing, .waitingOnYou: false
-            case .ready, .noReport, .failed: true
+            case .ready, .noReport, .failed, .stopped: true
             }
         }
     }
@@ -45,6 +47,8 @@ public struct AutoReviewRun: Equatable, Sendable {
         public let pr: GitHubService.PullRequest
         public var status: Status = .queued
         public var sessionID: SessionID?
+        /// The workflow run reviewing it, when the schedule names a workflow.
+        public var workflowRunID: UUID?
     }
 
     public let id = UUID()
@@ -126,6 +130,32 @@ extension AppModel {
         saveReviewSchedules()
     }
 
+    // MARK: Agents' proposals (ADR-0020)
+
+    /// The schedules an agent proposed, waiting on the person.
+    var proposedReviewSchedules: [ReviewSchedule] { reviewSchedules.schedules.filter(\.isProposed) }
+
+    /// The person validates an agent's schedule: it runs as proposed from now on.
+    func validateReviewSchedule(_ id: UUID) {
+        guard let index = reviewSchedules.schedules.firstIndex(where: { $0.id == id }) else { return }
+        var schedule = reviewSchedules.schedules[index].validated()
+        // A time already past today is tomorrow's, not a run owed now.
+        schedule.armedAt = Date()
+        reviewSchedules.schedules[index] = schedule
+        saveReviewSchedules()
+    }
+
+    /// The person turns it down: the schedule as it was, or gone.
+    func revertReviewSchedule(_ id: UUID) {
+        guard let index = reviewSchedules.schedules.firstIndex(where: { $0.id == id }) else { return }
+        if let previous = reviewSchedules.schedules[index].reverted() {
+            reviewSchedules.schedules[index] = previous
+        } else {
+            reviewSchedules.schedules.remove(at: index)
+        }
+        saveReviewSchedules()
+    }
+
     public func setAutoReviewConcurrency(_ count: Int) {
         reviewSchedules.maxConcurrent = min(max(count, 1), ReviewScheduleState.maxConcurrency)
         saveReviewSchedules()
@@ -154,7 +184,7 @@ extension AppModel {
 
     /// When the next scheduled run starts, across the enabled schedules.
     public func nextAutoReviewDate(after now: Date = Date()) -> Date? {
-        reviewSchedules.schedules
+        reviewSchedules.runnable
             .filter { $0.enabled && !$0.targets.isEmpty }
             .compactMap { $0.nextOccurrence(after: now) }
             .min()
@@ -166,7 +196,7 @@ extension AppModel {
     /// at a time; another one due waits for this one to end.
     func runDueReviewSchedules(now: Date = Date()) async {
         guard manager != nil, autoReviewRun?.isRunning != true, GitHubService.isAvailable,
-              let schedule = reviewSchedules.schedules.first(where: { $0.dueOccurrence(at: now) != nil })
+              let schedule = reviewSchedules.runnable.first(where: { $0.dueOccurrence(at: now) != nil })
         else { return }
         markReviewScheduleRan(schedule.id, at: now)
         await runReviewSchedule(schedule)
@@ -175,15 +205,14 @@ extension AppModel {
     /// "Run now", from Settings or the PRs sidebar.
     public func runReviewScheduleNow(_ id: UUID) {
         guard autoReviewRun?.isRunning != true,
-              let schedule = reviewSchedules.schedules.first(where: { $0.id == id }) else { return }
+              let schedule = reviewSchedules.runnable.first(where: { $0.id == id }) else { return }
         markReviewScheduleRan(id, at: Date())
         Task { await runReviewSchedule(schedule) }
     }
 
     /// Stamped BEFORE the run: a tick during it must not start it twice.
     private func markReviewScheduleRan(_ id: UUID, at date: Date) {
-        guard let index = reviewSchedules.schedules.firstIndex(where: { $0.id == id }) else { return }
-        reviewSchedules.schedules[index].lastRunAt = date
+        reviewSchedules.markRan(id, at: date)
         saveReviewSchedules()
     }
 
@@ -240,8 +269,37 @@ extension AppModel {
     private func updateAutoReviewItem(_ itemID: String, run runID: UUID,
                                       _ change: (inout AutoReviewRun.Item) -> Void) {
         guard autoReviewRun?.id == runID,
-              let index = autoReviewRun?.items.firstIndex(where: { $0.id == itemID }) else { return }
+              let index = autoReviewRun?.items.firstIndex(where: { $0.id == itemID }),
+              // Stopped by the person: what the review does afterwards is not news.
+              autoReviewRun?.items[index].status != .stopped else { return }
         change(&autoReviewRun!.items[index])
+    }
+
+    private func isAutoReviewStopped(_ itemID: String) -> Bool {
+        autoReviewRun?.items.first { $0.id == itemID }?.status == .stopped
+    }
+
+    // MARK: The PRs sidebar's menus
+
+    /// Stops waiting on one PR's review: its workflow run stops; a review
+    /// session stays open, the person may still read or go on with it.
+    func stopAutoReview(_ itemID: String) {
+        guard let index = autoReviewRun?.items.firstIndex(where: { $0.id == itemID }),
+              let item = autoReviewRun?.items[index], !item.status.isSettled else { return }
+        if let run = item.workflowRunID { stopWorkflowRun(run) }
+        autoReviewRun?.items[index].status = .stopped
+    }
+
+    /// A settled PR leaves the list; its tab and its review stay.
+    func removeAutoReviewItem(_ itemID: String) {
+        guard autoReviewRun?.items.first(where: { $0.id == itemID })?.status.isSettled == true else { return }
+        autoReviewRun?.items.removeAll { $0.id == itemID }
+    }
+
+    /// The last run, gone from the sidebar — not while it runs.
+    func clearAutoReviewRun() {
+        guard autoReviewRun?.isRunning != true else { return }
+        autoReviewRun = nil
     }
 
     /// One PR: its tab opened (pinned, in the background), its review
@@ -280,7 +338,7 @@ extension AppModel {
             $0.sessionID = sessionID
         }
         let outcome = await awaitAutoReview(sessionID, report: report, timeout: Self.autoReviewTimeout,
-                                            handsOver: true)
+                                            handsOver: true, item: item.id)
         if case .needsYou = outcome {
             updateAutoReviewItem(item.id, run: runID) { $0.status = .waitingOnYou }
             // The slot goes to the next PR; this one is still watched.
@@ -288,7 +346,7 @@ extension AppModel {
                 guard let self else { return }
                 let late = await self.awaitAutoReview(sessionID, report: report,
                                                       timeout: Self.autoReviewHandOverTimeout,
-                                                      handsOver: false)
+                                                      handsOver: false, item: item.id)
                 await self.settleAutoReview(item, run: runID, outcome: late)
             }
             return
@@ -308,7 +366,10 @@ extension AppModel {
             updateAutoReviewItem(item.id, run: runID) { $0.status = .failed(reason) }
             return
         }
-        updateAutoReviewItem(item.id, run: runID) { $0.status = .reviewing }
+        updateAutoReviewItem(item.id, run: runID) {
+            $0.status = .reviewing
+            $0.workflowRunID = workflowRun
+        }
         await workflows.runTasks[workflowRun]?.value
         guard let finished = workflows.run(workflowRun) else { return }
         guard finished.status == .succeeded else {
@@ -341,8 +402,9 @@ extension AppModel {
     }
 
     private func awaitAutoReview(_ id: SessionID, report: URL, timeout: Duration,
-                                 handsOver: Bool) async -> AutoReviewOutcome {
+                                 handsOver: Bool, item itemID: String) async -> AutoReviewOutcome {
         let outcome = await awaitSessionReport(id, file: report, timeout: timeout, handsOver: handsOver,
+                                               stop: { [weak self] in self?.isAutoReviewStopped(itemID) ?? true },
                                                parse: AutoReviewReport.parse)
         switch outcome {
         case .report(let parsed): return .report(parsed)
@@ -370,12 +432,13 @@ extension AppModel {
     /// minutes without one answered in the conversation, or nowhere. Shared
     /// by scheduled reviews and the workflows' visible steps.
     func awaitSessionReport<Report>(_ id: SessionID, file: URL, timeout: Duration, handsOver: Bool,
+                                    stop: () -> Bool = { false },
                                     parse: (String) -> Report?) async -> SessionReportOutcome<Report> {
         let clock = ContinuousClock()
         let deadline = clock.now + timeout
         var idleSince: ContinuousClock.Instant?
         var askingSince: ContinuousClock.Instant?
-        while clock.now < deadline, !Task.isCancelled {
+        while clock.now < deadline, !Task.isCancelled, !stop() {
             let state = sessions.first { $0.id == id }?.state
             if state != .working, state != .starting,
                let text = try? String(contentsOf: file, encoding: .utf8),

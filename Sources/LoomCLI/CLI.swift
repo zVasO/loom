@@ -24,6 +24,8 @@ public enum CLI {
         case browser(APIMethod, JSONValue)
         /// A workflow run's tool (ADR-0018), its parameters as JSON.
         case workflow(APIMethod, JSONValue)
+        /// A workflow library tool (ADR-0020), its parameters as JSON.
+        case library(APIMethod, JSONValue)
     }
 
     public struct Options: Equatable {
@@ -75,6 +77,9 @@ public enum CLI {
       loom workflow <tool> [json|value]     your workflow run (orchestrator: get, step_read php,
                                             step_ask, step_rerun, step_skip, stop, proceed;
                                             a visible step: message <text>)
+      loom library <tool> [json|value]      the workflow library: reference, get, workflow_get <id>,
+                                            validate, workflow_save, block_save, ruleset_save,
+                                            expert_save, schedule_save, run_request <id> (proposals)
       loom docs                             the API reference, as Markdown
       loom mcp                              serve the API as MCP tools on stdio
 
@@ -146,6 +151,15 @@ public enum CLI {
             }
             let params = try browserParams(name: name, argument: rest.dropFirst().joined(separator: " "))
             return (.browser(spec.method, params), options)
+        case ("library", _):
+            guard let tool = rest.first else { throw ParseError.missingArgument("library tool (see loom docs)") }
+            let name = tool.hasPrefix("loom_library_") ? tool : "loom_library_" + tool
+            guard let spec = APIToolCatalog.spec(named: name), spec.method.isLibrary else {
+                throw ParseError.unknownCommand("library \(tool)")
+            }
+            return (.library(spec.method, try libraryParams(name: name,
+                                                            argument: rest.dropFirst().joined(separator: " "))),
+                    options)
         case ("workflow", _):
             guard let tool = rest.first else { throw ParseError.missingArgument("workflow tool (see loom docs)") }
             let name = tool.hasPrefix("loom_workflow_") ? tool : "loom_workflow_" + tool
@@ -166,6 +180,27 @@ public enum CLI {
         "loom_workflow_stop": "reason", "loom_workflow_proceed": "reason",
         "loom_workflow_message": "text",
     ]
+
+    /// `loom library workflow_get <id>`, `loom library run_request <id>`.
+    static let libraryPrimaryParameter: [String: String] = [
+        "loom_library_workflow_get": "id", "loom_library_run_request": "workflowId",
+    ]
+
+    static func libraryParams(name: String, argument: String) throws -> JSONValue {
+        let text = argument.trimmingCharacters(in: .whitespaces)
+        if text.isEmpty { return .object([:]) }
+        if text.hasPrefix("{") {
+            guard let value = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)),
+                  case .object = value else {
+                throw ParseError.invalidArgument("the parameters of \(name) are not a JSON object: \(text)")
+            }
+            return value
+        }
+        guard let key = libraryPrimaryParameter[name] else {
+            throw ParseError.invalidArgument("\(name) takes a JSON object (see loom docs)")
+        }
+        return .object([key: .string(text)])
+    }
 
     static func workflowParams(name: String, argument: String) throws -> JSONValue {
         let text = argument.trimmingCharacters(in: .whitespaces)
@@ -320,17 +355,24 @@ public enum CLI {
             let browser = environment[APIProtocol.browserToolsEnvironmentKey] != "0"
             let engine = APIBrowserEngine(environment: environment)
             let role = APIWorkflowRole(environment: environment)
+            let library = environment[APIProtocol.libraryToolsEnvironmentKey] != "0"
             let server = MCPServer(call: { method, params in
                                        try connection.client.call(method, params: params, as: JSONValue.self)
                                    },
-                                   tools: APIToolCatalog.tools(browser: browser, engine: engine, workflow: role),
-                                   instructions: APIToolCatalog.agentInstructions(browser: browser, engine: engine),
+                                   tools: APIToolCatalog.tools(browser: browser, engine: engine, workflow: role,
+                                                               library: library),
+                                   instructions: APIToolCatalog.agentInstructions(browser: browser, engine: engine,
+                                                                                  library: library),
                                    imageRoot: screenshots)
             server.serve()
             return 0
         }
         do {
             let result = try execute(command, options: options, client: connection.client)
+            if case .library(.libraryReference, _) = command, let content = try? result.decode(APIToolContent.self) {
+                output(content.text + "\n")
+                return 0
+            }
             if case .browser = command, let content = try? result.decode(APIToolContent.self) {
                 // Markdown for a reader, not JSON — what the agent would see.
                 output(content.text + "\n")
@@ -411,6 +453,8 @@ public enum CLI {
                 fields["sessionId"] = .string(session)
                 params = .object(fields)
             }
+            return try client.call(method, params: params, as: JSONValue.self)
+        case .library(let method, let params):
             return try client.call(method, params: params, as: JSONValue.self)
         case .workflow(let method, let params):
             // Always the session's own token: a workflow method has no other scope.

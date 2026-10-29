@@ -1,4 +1,5 @@
 import Foundation
+import LoomCore
 import LoomAPI
 
 /// A workflow (ADR-0017): a named graph of steps — a start, context loaders,
@@ -6,7 +7,7 @@ import LoomAPI
 /// a run ends with. Edges say what waits for what: several leaving a node
 /// dispatch in parallel, several entering one wait for all of them. Loops
 /// are not edges: a loop node names the steps it runs again.
-public struct Workflow: Codable, Identifiable, Equatable, Sendable {
+public struct Workflow: Codable, Identifiable, Equatable, Sendable, Proposable {
     public static let currentFormatVersion = 1
 
     public var id: UUID
@@ -20,13 +21,16 @@ public struct Workflow: Codable, Identifiable, Equatable, Sendable {
     /// The run's conductor (ADR-0018): a Loom session that follows the run,
     /// talks to its steps and steers it. nil: none.
     public var orchestrator: OrchestratorConfig?
+    /// An agent's change awaiting the person's validation (ADR-0020).
+    public var proposal: AgentProposal<Workflow>?
     public var createdAt: Date
     public var updatedAt: Date
     public var formatVersion: Int
 
     public init(id: UUID = UUID(), name: String, summary: String = "", tags: [String] = [],
                 color: String = "#0D6E74", nodes: [WorkflowNode] = [], edges: [WorkflowEdge] = [],
-                orchestrator: OrchestratorConfig? = nil, createdAt: Date = Date(), updatedAt: Date = Date(),
+                orchestrator: OrchestratorConfig? = nil, proposal: AgentProposal<Workflow>? = nil,
+                createdAt: Date = Date(), updatedAt: Date = Date(),
                 formatVersion: Int = Workflow.currentFormatVersion) {
         self.id = id
         self.name = name
@@ -36,6 +40,7 @@ public struct Workflow: Codable, Identifiable, Equatable, Sendable {
         self.nodes = nodes
         self.edges = edges
         self.orchestrator = orchestrator
+        self.proposal = proposal
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.formatVersion = formatVersion
@@ -52,6 +57,7 @@ public struct Workflow: Codable, Identifiable, Equatable, Sendable {
                   nodes: try c.decodeIfPresent([WorkflowNode].self, forKey: .nodes) ?? [],
                   edges: try c.decodeIfPresent([WorkflowEdge].self, forKey: .edges) ?? [],
                   orchestrator: try c.decodeIfPresent(OrchestratorConfig.self, forKey: .orchestrator),
+                  proposal: try c.decodeIfPresent(AgentProposal<Workflow>.self, forKey: .proposal),
                   createdAt: try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date(),
                   updatedAt: try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date(),
                   formatVersion: try c.decodeIfPresent(Int.self, forKey: .formatVersion)

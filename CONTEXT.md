@@ -191,6 +191,10 @@ La réponse courte d'une étape parmi des options, la meilleure d'abord (`ok`, `
 Un lien qui remonte : sur un verdict, les étapes de sa cible jusqu'à sa source repassent, quelques fois au plus.
 _Avoid_ : boucle (c'est la case Loop), retry (dans l'UI)
 
+**Proposition** :
+Ce qu'un agent a créé ou modifié par l'API (ADR-0020) : un workflow, un bloc, un jeu de règles, un expert, une review planifiée. Inerte jusqu'à ce que la personne la valide ; entre-temps, la version validée avant fait foi.
+_Avoid_ : brouillon, draft
+
 **Orchestrateur** :
 La session visible qui pilote un run (ADR-0018) : elle reçoit le résultat de chaque étape, leur pose des questions, en relance, en saute, arrête le run. Une par run, rangée sous Sessions › Workflows.
 _Avoid_ : agent chef, superviseur, manager

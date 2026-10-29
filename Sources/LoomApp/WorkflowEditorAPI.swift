@@ -51,6 +51,8 @@ extension AppModel {
             else { return Self.failure("The workflow could not be read.") }
             guard workflow.id == current.id else { return Self.failure("Another workflow is open.") }
             workflow.createdAt = current.createdAt
+            // Validating is a button of its own: an edit keeps a proposal a proposal.
+            workflow.proposal = current.proposal
             workflows.save(workflow)
             return Self.reply(validationJSON(workflow))
         case "run.request":
@@ -75,9 +77,10 @@ extension AppModel {
             return Self.reply(Self.any(block))
         case "block.save":
             guard let raw = params["block"], let data = try? JSONSerialization.data(withJSONObject: raw),
-                  let block = try? WorkflowJSON.decoder.decode(WorkflowBlock.self, from: data)
+                  var block = try? WorkflowJSON.decoder.decode(WorkflowBlock.self, from: data)
             else { return Self.failure("The block could not be read.") }
-            guard workflows.block(block.id) != nil else { return Self.failure("This block was deleted.") }
+            guard let stored = workflows.block(block.id) else { return Self.failure("This block was deleted.") }
+            block.proposal = stored.proposal
             workflows.save(block)
             emitEditorLibrary()
             let current = workflows.workflow(workflows.selectedWorkflowID)
@@ -94,6 +97,17 @@ extension AppModel {
                 return Self.failure("Which block?")
             }
             return Self.reply(workflows.usage(ofBlock: id))
+        case "proposal.validate", "proposal.revert":
+            // The open workflow, proposed by an agent (ADR-0020).
+            guard case .workflow = workflows.detail, let id = workflows.selectedWorkflowID else {
+                return Self.failure("No workflow open.")
+            }
+            if method == "proposal.validate" { validateProposal(.workflow(id)) } else { revertProposal(.workflow(id)) }
+            return Self.reply(NSNull())
+        case "builder.start":
+            let id = (params["workflowID"] as? String).flatMap(UUID.init(uuidString:))
+            Task { await startWorkflowBuilder(improving: id) }
+            return Self.reply(NSNull())
         case "orchestrator.open":
             guard case .run(let runID) = workflows.detail,
                   let raw = workflows.run(runID)?.orchestratorSessionID,
@@ -207,6 +221,11 @@ extension AppModel {
             guard let workflow = workflows.workflow(workflows.selectedWorkflowID) else { return nil }
             state["workflow"] = Self.any(workflow)
             state["readOnly"] = false
+            if let proposal = workflow.proposal {
+                state["proposal"] = ["by": proposal.by, "isNew": proposal.previous == nil,
+                                     "changes": ProposalDiff.workflow(workflow, previous: proposal.previous)
+                                        .map { ["text": $0.text, "flagged": $0.flagged] }]
+            }
             state.merge(validationJSON(workflow)) { $1 }
         }
         return state

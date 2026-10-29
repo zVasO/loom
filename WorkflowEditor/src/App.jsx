@@ -77,6 +77,11 @@ function Editor() {
       if (event.type === "library") {
         setState((current) => (current ? { ...current, ...event.library } : current));
       }
+      if (event.type === "editBlock" && event.id) {
+        setSelected(null);
+        setSelectedEdge(null);
+        setEditingBlockID(event.id);
+      }
     });
   }, [apply]);
 
@@ -353,12 +358,35 @@ function Editor() {
         )}
         {estimate && <span className="estimate" title="An order of magnitude, before the run">{G.formatEstimate(estimate)}</span>}
         {errors > 0 && <span className="errors" title={issues.filter((i) => i.severity === "error").map((i) => i.message).join("\n")}>{errors} to fix</span>}
+        {!readOnly && (
+          <button type="button" className="ghost ai-button" title="A session that improves this workflow with you"
+            onClick={() => call("builder.start", { workflowID: workflow.id })}>✦ Improve with AI</button>
+        )}
         {readOnly ? (
           <span className="run-banner">Run {run ? run.status : ""} — read only</span>
         ) : (
           <button type="button" className="primary" disabled={errors > 0} onClick={() => call("run.request", {})}>Run…</button>
         )}
       </header>
+      {!readOnly && state.proposal && (
+        <div className="proposal-banner">
+          <div>
+            <b>{state.proposal.isNew ? "Created" : "Changed"} by {state.proposal.by}</b> — a proposal: it does not run
+            until you validate it. You can edit it first.
+            <ul>
+              {(state.proposal.changes || []).slice(0, 6).map((change, index) => (
+                <li key={index} className={change.flagged ? "flagged" : undefined}>{change.text}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="proposal-actions">
+            <button type="button" className="primary" onClick={() => call("proposal.validate", {})}>Validate</button>
+            <button type="button" className="ghost" onClick={() => call("proposal.revert", {})}>
+              {state.proposal.isNew ? "Delete" : "Revert"}
+            </button>
+          </div>
+        </div>
+      )}
       <div className="body">
         {!readOnly && (
           <aside className="palette">
@@ -383,7 +411,7 @@ function Editor() {
                 style={{ "--kind": block.color || "var(--accent)" }} title={block.summary || block.name}
                 onDragStart={(e) => { e.dataTransfer.setData("application/loom-node", `block:${block.id}`); e.dataTransfer.effectAllowed = "move"; }}
                 onClick={() => addAtCenter(`block:${block.id}`)}>
-                <b>{block.name}</b>
+                <b>{block.name}{block.proposal ? <em className="proposed-tag">proposed</em> : null}</b>
                 <span>{block.summary || "Your block"}</span>
                 <button type="button" className="icon block-edit" title="Edit the block"
                   onClick={(e) => { e.stopPropagation(); editBlock(block.id); }}>✎</button>

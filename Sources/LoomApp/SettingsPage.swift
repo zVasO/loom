@@ -28,6 +28,7 @@ struct SettingsPage: View {
     /// The model reads the same keys (AgentBrowserAPI.swift); AppStorage keeps
     /// the switches showing what was just set.
     @AppStorage("loom.agents.browserTools") private var browserToolsOn = true
+    @AppStorage("loom.agents.libraryTools") private var libraryToolsOn = true
     @AppStorage("loom.agents.preapproveLoomTools") private var preapproveOn = true
     @AppStorage("loom.agents.localOnly") private var localOnlyOn = false
     /// Edited here, applied on Return or when the field goes: never a
@@ -340,6 +341,16 @@ struct SettingsPage: View {
                 // Through the model: turning them off also cancels what is queued.
                 .onChange(of: browserToolsOn) { _, on in model.agentBrowserToolsEnabled = on }
                 Text("Each session's agent gets its own browser — shown beside its terminal, on a profile kept per project and never your own cookies (reviews get a private one) — and browser_* tools to open your dev server, click, type, read the console and take screenshots. Off: calls are refused at once, and the agents' Chromium stops; sessions started or resumed afterwards no longer list the tools.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                Divider().overlay(DefaultTheme.cardBorder)
+                Toggle(isOn: $libraryToolsOn) {
+                    Text("Workflow tools in every session")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                Text("Agents can read your workflows, blocks, experts and scheduled reviews, and propose new ones (loom_library_*). What they save is a proposal: it never runs nor fires until you validate it in Workflows › To review. Off: sessions started or resumed afterwards no longer list these tools.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
                 Divider().overlay(DefaultTheme.cardBorder)

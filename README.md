@@ -76,6 +76,10 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   utilisations), des **règles** sur un bloc, une case ou un lien, des **verdicts** que
   les liens suivent (« si ok », « sinon », reprise bornée « ↺ à revoir ≤2× »), une
   validation humaine, un « pour chaque » et des commandes (tests, lint) — ADR-0019.
+  Un agent peut construire avec toi : « ✦ Create with AI » ouvre un Workflow builder,
+  et toute session a les outils `loom_library_*` (workflows, blocs, règles, experts,
+  reviews planifiées) — ce qu'elle enregistre est une **proposition** que tu valides
+  (Workflows › To review) avant que ça tourne — ADR-0020.
   Guide : [`docs/workflows.md`](docs/workflows.md).
 - **Instructions de session** : un texte ajouté au prompt système de chaque session
   claude (`--append-system-prompt`, lancement et reprise), éditable dans les

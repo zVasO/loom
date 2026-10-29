@@ -128,6 +128,26 @@ private struct ReviewScheduleEditor: View {
                         model.removeReviewSchedule(schedule.id)
                     }
                 }
+                if let proposal = schedule.proposal {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Proposed by \(proposal.by) — it does not run until you validate it"
+                             + (proposal.previous != nil ? "; the version before runs meanwhile." : "."))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                        ForEach(Array(model.scheduleChanges(schedule, previous: proposal.previous).enumerated()),
+                                id: \.offset) { _, change in
+                            Text("· " + change.text).font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                        }
+                        HStack(spacing: 8) {
+                            AccentButton("Validate", systemImage: "checkmark") { model.validateReviewSchedule(schedule.id) }
+                            GhostButton(proposal.previous == nil ? "Delete" : "Revert", systemImage: "arrow.uturn.backward") {
+                                model.revertReviewSchedule(schedule.id)
+                            }
+                        }
+                    }
+                    .padding(10)
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+                }
                 HStack(spacing: 10) {
                     DatePicker("", selection: time(of: schedule), displayedComponents: .hourAndMinute)
                         .labelsHidden()
@@ -324,12 +344,17 @@ struct ScheduledReviewsSidebarSection: View {
                     }
                     .buttonStyle(.plain)
                     .help(folded ? "Unfold" : "Fold")
+                    .contextMenu {
+                        Button("Clear the last run") { model.clearAutoReviewRun() }
+                            .disabled(model.autoReviewRun == nil || model.autoReviewRun?.isRunning == true)
+                        Button("Settings…") { model.workflows.settingsRequest = UUID() }
+                    }
                     Spacer()
                     if model.autoReviewRun?.isRunning == true {
                         ProgressView().controlSize(.mini)
                     } else if !model.reviewSchedules.schedules.isEmpty {
                         Menu {
-                            ForEach(model.reviewSchedules.schedules) { schedule in
+                            ForEach(model.reviewSchedules.runnable) { schedule in
                                 Button(schedule.name) { model.runReviewScheduleNow(schedule.id) }
                                     .disabled(schedule.targets.isEmpty)
                             }
@@ -356,14 +381,33 @@ struct ScheduledReviewsSidebarSection: View {
                                 .textSelection(.enabled)
                         }
                         ForEach(run.items) { item in
-                            AutoReviewRow(item: item, isSelected: item.id == activeTabID) {
-                                if model.prTabs.contains(item.id) {
-                                    model.activatePRTab(item.id)
-                                } else {
-                                    model.openPRTab(item.pr, in: item.projectID)
+                            AutoReviewRow(item: item, isSelected: item.id == activeTabID) { open(item) }
+                                .contextMenu {
+                                    Button("Open") { open(item) }
+                                    if let session = item.sessionID {
+                                        Button("Open its session") { model.workflows.sessionToOpen = session }
+                                    }
+                                    Divider()
+                                    if !item.status.isSettled {
+                                        Button("Stop its review") { model.stopAutoReview(item.id) }
+                                    } else {
+                                        Button("Remove from the list") { model.removeAutoReviewItem(item.id) }
+                                    }
                                 }
-                            }
                         }
+                    }
+                    let proposed = model.proposedReviewSchedules.count
+                    if proposed > 0 {
+                        Button {
+                            model.workflows.settingsRequest = UUID()
+                        } label: {
+                            Text(proposed == 1 ? "1 schedule to review" : "\(proposed) schedules to review")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.leading, 2)
+                        .help("Proposed by an agent: they do not run until you validate them in Settings")
                     }
                     if let next = model.nextAutoReviewDate() {
                         Text("Next run " + next.formatted(.dateTime.weekday(.abbreviated).hour().minute()))
@@ -373,6 +417,14 @@ struct ScheduledReviewsSidebarSection: View {
                     }
                 }
             }
+        }
+    }
+
+    private func open(_ item: AutoReviewRun.Item) {
+        if model.prTabs.contains(item.id) {
+            model.activatePRTab(item.id)
+        } else {
+            model.openPRTab(item.pr, in: item.projectID)
         }
     }
 
@@ -454,6 +506,8 @@ private struct AutoReviewRow: View {
             return ("text.bubble", DefaultTheme.secondaryText, "Done — its review is in the conversation")
         case .failed(let reason):
             return ("xmark.octagon", DefaultTheme.danger, reason)
+        case .stopped:
+            return ("stop.circle", DefaultTheme.mutedText, "Stopped — its session stays open")
         }
     }
 }

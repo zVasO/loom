@@ -6,7 +6,7 @@ import LoomCore
 /// in one repository, the three most recent waiting on me in another. Each PR
 /// it picks gets the same review a click on "Start review" gives, and a full
 /// review prompt after the brief; the human reads the result and decides.
-public struct ReviewSchedule: Codable, Identifiable, Equatable, Hashable, Sendable {
+public struct ReviewSchedule: Codable, Identifiable, Equatable, Hashable, Sendable, Proposable {
     public let id: UUID
     public var name: String
     public var enabled: Bool
@@ -22,11 +22,14 @@ public struct ReviewSchedule: Codable, Identifiable, Equatable, Hashable, Sendab
     /// A workflow (ADR-0017) each picked PR runs instead of the built-in
     /// full review; nil keeps the built-in one.
     public var workflowID: UUID?
+    /// An agent's change awaiting the person's validation (ADR-0020): until
+    /// then the schedule runs as validated before, or not at all.
+    public var proposal: AgentProposal<ReviewSchedule>?
 
     public init(id: UUID = UUID(), name: String = "Morning reviews", enabled: Bool = true,
                 hour: Int = 9, minute: Int = 0, weekdays: Set<Int> = ReviewSchedule.workdays,
                 targets: [ReviewScheduleTarget] = [], armedAt: Date = Date(),
-                lastRunAt: Date? = nil, workflowID: UUID? = nil) {
+                lastRunAt: Date? = nil, workflowID: UUID? = nil, proposal: AgentProposal<ReviewSchedule>? = nil) {
         self.id = id
         self.name = name
         self.enabled = enabled
@@ -37,6 +40,7 @@ public struct ReviewSchedule: Codable, Identifiable, Equatable, Hashable, Sendab
         self.armedAt = armedAt
         self.lastRunAt = lastRunAt
         self.workflowID = workflowID
+        self.proposal = proposal
     }
 
     /// Monday to Friday.
@@ -165,6 +169,21 @@ public struct ReviewScheduleState: Codable, Equatable, Sendable {
 
     public static let defaultConcurrency = 2
     public static let maxConcurrency = 6
+
+    /// The schedules as they run (ADR-0020): an agent's proposal waits for
+    /// the person — the version validated before runs meanwhile, a new one
+    /// not at all.
+    public var runnable: [ReviewSchedule] { schedules.compactMap(\.accepted) }
+
+    /// A run started: the schedule, and the validated version it ran as,
+    /// remember it — a proposal must not make it run twice.
+    public mutating func markRan(_ id: UUID, at date: Date) {
+        guard let index = schedules.firstIndex(where: { $0.id == id }) else { return }
+        schedules[index].lastRunAt = date
+        if schedules[index].proposal?.previous != nil {
+            schedules[index].proposal?.previous?.lastRunAt = date
+        }
+    }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
