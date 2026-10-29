@@ -72,7 +72,11 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   **orchestrateur** (ADR-0018) : une session visible, sous Sessions › Workflows, qui
   reçoit chaque résultat, questionne une étape (même headless, en reprenant sa
   conversation), la relance avec des consignes, la saute ou arrête le run, dans un
-  budget. Guide : [`docs/workflows.md`](docs/workflows.md).
+  budget. Des **blocs** à soi dans la palette (liés : les modifier met à jour leurs
+  utilisations), des **règles** sur un bloc, une case ou un lien, des **verdicts** que
+  les liens suivent (« si ok », « sinon », reprise bornée « ↺ à revoir ≤2× »), une
+  validation humaine, un « pour chaque » et des commandes (tests, lint) — ADR-0019.
+  Guide : [`docs/workflows.md`](docs/workflows.md).
 - **Instructions de session** : un texte ajouté au prompt système de chaque session
   claude (`--append-system-prompt`, lancement et reprise), éditable dans les
   Réglages — par défaut, tenir le titre et les badges de la session Loom à jour

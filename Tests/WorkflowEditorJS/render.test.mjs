@@ -105,3 +105,30 @@ test("a run shows what the orchestrator did on each step", { skip }, async () =>
   assert.match(await tab.textContent(".orchestrator"), /2 intervention\(s\) · the run waits for it/);
   await tab.close();
 });
+
+test("a block of the palette is placed, its link given a verdict, a way back drawn", { skip }, async () => {
+  const tab = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  const errors = [];
+  tab.on("pageerror", (e) => errors.push(e.message));
+  const block = { id: "b1", name: "Revue PHP", color: "#123456", summary: "PHP review", rules: [], ruleSetIDs: [],
+    template: { prompt: "Review {{in.text}}", output: [], verdict: { options: ["ok", "à revoir"], guidance: "" } } };
+  const workflow = { ...state.workflow,
+    edges: [...state.workflow.edges, { id: "php->php:retry", from: "php", to: "php", when: "à revoir", retry: { max: 2 } }],
+    nodes: state.workflow.nodes.map((n) => (n.id === "php" ? { ...n, config: { ...n.config, blockID: "b1" } } : n)) };
+  await tab.addInitScript((s) => { window.__loomWorkflowsStandIn = s; }, { ...state, workflow, blocks: [block] });
+  await tab.goto(page);
+  await tab.waitForSelector(".loom-node");
+  assert.match(await tab.textContent(".palette"), /Revue PHP/);
+  assert.match(await tab.textContent('.react-flow__node[data-id="php"]'), /Block «Revue PHP»/);
+  assert.ok(await tab.$(".react-flow__edge.retry-edge"), "the way back is drawn");
+  await tab.click(".palette-block");
+  await tab.waitForTimeout(500);
+  const placed = await tab.evaluate(() => window.__loomWorkflowsStandIn.workflow.nodes.find((n) => n.id === "revue-php"));
+  assert.equal(placed.config.blockID, "b1");
+  await tab.click('.react-flow__node[data-id="php"]');
+  assert.match(await tab.textContent(".inspector"), /Instructions for this step/);
+  await tab.click(".block-edit", { force: true });
+  assert.match(await tab.textContent(".inspector"), /Every step placed from it/);
+  assert.deepEqual(errors, []);
+  await tab.close();
+});

@@ -45,13 +45,17 @@ public struct WorkflowRun: Codable, Identifiable, Equatable, Sendable {
     /// Every visible step's session this run launched, every pass and rerun
     /// included: session id (lowercased) → step id.
     public var stepSessions: [String: String]
+    /// The palette's blocks and the rule sets, frozen at launch (ADR-0019).
+    public var blocks: [WorkflowBlock]
+    public var ruleSets: [RuleSet]
 
     public init(id: UUID = UUID(), workflow: Workflow, experts: [Expert], connectors: [Connector],
                 inputs: RunInputs, state: RunState, status: Status = .running, startedAt: Date = Date(),
                 finishedAt: Date? = nil, costUSD: Double = 0, artifactPath: String? = nil, error: String? = nil,
                 orchestratorSessionID: String? = nil, interventions: Int = 0, messages: [RunMessage] = [],
                 workingDirectory: String? = nil, orchestratorInstructions: String? = nil,
-                orchestratorModel: String? = nil, stepSessions: [String: String] = [:]) {
+                orchestratorModel: String? = nil, stepSessions: [String: String] = [:],
+                blocks: [WorkflowBlock] = [], ruleSets: [RuleSet] = []) {
         self.id = id
         self.workflow = workflow
         self.experts = experts
@@ -71,6 +75,8 @@ public struct WorkflowRun: Codable, Identifiable, Equatable, Sendable {
         self.orchestratorInstructions = orchestratorInstructions
         self.orchestratorModel = orchestratorModel
         self.stepSessions = stepSessions
+        self.blocks = blocks
+        self.ruleSets = ruleSets
     }
 
     /// Runs saved before the orchestrator have none of its keys.
@@ -94,7 +100,9 @@ public struct WorkflowRun: Codable, Identifiable, Equatable, Sendable {
                   workingDirectory: try c.decodeIfPresent(String.self, forKey: .workingDirectory),
                   orchestratorInstructions: try c.decodeIfPresent(String.self, forKey: .orchestratorInstructions),
                   orchestratorModel: try c.decodeIfPresent(String.self, forKey: .orchestratorModel),
-                  stepSessions: try c.decodeIfPresent([String: String].self, forKey: .stepSessions) ?? [:])
+                  stepSessions: try c.decodeIfPresent([String: String].self, forKey: .stepSessions) ?? [:],
+                  blocks: try c.decodeIfPresent([WorkflowBlock].self, forKey: .blocks) ?? [],
+                  ruleSets: try c.decodeIfPresent([RuleSet].self, forKey: .ruleSets) ?? [])
     }
 
     /// The step a Loom session runs in this run, if any.

@@ -167,6 +167,21 @@ public enum TemplateRenderer {
             if let last = state.history[node.id]?.last { previous[node.id] = last }
         }
         var root = inputs.objectValue ?? [:]
+        // `in`: what the steps right before this one answered (ADR-0019) — a
+        // block names its inputs without knowing the workflow it is in.
+        if let nodeID {
+            var merged: [String: JSONValue] = [:]
+            var texts: [String] = []
+            for edge in planner.workflow.forwardEdges where edge.to == nodeID && planner.isTaken(edge, in: state) {
+                guard let record = state.nodes[edge.from] else { continue }
+                for (key, value) in record.output?.objectValue ?? [:] { merged[key] = value }
+                let title = planner.workflow.node(edge.from)?.title ?? edge.from
+                let text = record.text ?? record.output?.plainText ?? ""
+                if !text.isEmpty { texts.append("## \(title)\n\(text)") }
+            }
+            merged["text"] = .string(texts.joined(separator: "\n\n"))
+            root["in"] = .object(merged)
+        }
         root["steps"] = .object(steps)
         root["previous"] = .object(previous)
         root["history"] = .object(state.history.mapValues { .array($0) })
@@ -184,6 +199,8 @@ public enum OutputSchema {
         let lines = fields.map { field -> String in
             let shape: String
             switch field.type {
+            case .text where !field.options.isEmpty:
+                shape = "one of " + field.options.map { "\"\($0)\"" }.joined(separator: ", ")
             case .text: shape = "string"
             case .list: shape = "array"
             case .boolean: shape = "true or false"
@@ -238,6 +255,10 @@ public enum OutputSchema {
                 matches = false
             }
             if !matches { problems.append("\"\(field.name)\" should be \(field.type.rawValue).") }
+            if matches, !field.options.isEmpty, case .string(let text) = item,
+               !field.options.contains(where: { VerdictConfig.same($0, text) }) {
+                problems.append("\"\(field.name)\" must be one of: \(field.options.joined(separator: ", ")).")
+            }
         }
         return problems
     }

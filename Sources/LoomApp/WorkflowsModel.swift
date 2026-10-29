@@ -21,6 +21,9 @@ final class WorkflowsModel {
     private(set) var workflows: [Workflow] = []
     private(set) var experts: [Expert] = []
     private(set) var connectors: [Connector] = []
+    /// The palette's own boxes and the rule sets (ADR-0019).
+    private(set) var blocks: [WorkflowBlock] = []
+    private(set) var ruleSets: [RuleSet] = []
     /// Newest first.
     private(set) var runs: [WorkflowRun] = []
     /// The workflow open in the editor.
@@ -43,6 +46,7 @@ final class WorkflowsModel {
         case report(UUID)
         case expert(UUID)
         case connector(UUID)
+        case ruleSet(UUID)
     }
     var detail: Detail = .workflow
 
@@ -101,12 +105,16 @@ final class WorkflowsModel {
         workflows = store.loadWorkflows().sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         experts = store.loadExperts().sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         connectors = store.loadConnectors().sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        blocks = store.loadBlocks().sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        ruleSets = store.loadRuleSets().sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         libraryGeneration += 1
     }
 
     func workflow(_ id: UUID?) -> Workflow? { workflows.first { $0.id == id } }
     func expert(_ id: UUID?) -> Expert? { experts.first { $0.id == id } }
     func connector(_ id: UUID?) -> Connector? { connectors.first { $0.id == id } }
+    func block(_ id: UUID?) -> WorkflowBlock? { blocks.first { $0.id == id } }
+    func ruleSet(_ id: UUID?) -> RuleSet? { ruleSets.first { $0.id == id } }
     func run(_ id: UUID?) -> WorkflowRun? { runs.first { $0.id == id } }
 
     /// The last run of a workflow, for the library's row.
@@ -170,7 +178,8 @@ final class WorkflowsModel {
 
     func exportBundle(_ id: UUID) throws -> Data {
         guard let workflow = workflow(id) else { throw CocoaError(.fileNoSuchFile) }
-        return try WorkflowBundle.make(workflow, experts: experts, connectors: connectors).encoded()
+        return try WorkflowBundle.make(workflow, experts: experts, connectors: connectors,
+                                       blocks: blocks, ruleSets: ruleSets).encoded()
     }
 
     /// A bundle (or a bare workflow) becomes a new workflow; its experts and
@@ -180,6 +189,8 @@ final class WorkflowsModel {
         let bundle = try WorkflowBundle.decode(data)
         for expert in bundle.experts where self.expert(expert.id) == nil { try? store.save(expert) }
         for connector in bundle.connectors where self.connector(connector.id) == nil { try? store.save(connector) }
+        for block in bundle.blocks where self.block(block.id) == nil { try? store.save(block) }
+        for ruleSet in bundle.ruleSets where self.ruleSet(ruleSet.id) == nil { try? store.save(ruleSet) }
         var workflow = bundle.workflow
         if self.workflow(workflow.id) != nil { workflow.id = UUID() }
         workflow.name = uniqueName(workflow.name)
@@ -205,6 +216,63 @@ final class WorkflowsModel {
 
     func deleteExpert(_ id: UUID) {
         store.deleteExpert(id)
+        reload()
+    }
+
+    // MARK: Blocks and rule sets (ADR-0019)
+
+    func save(_ block: WorkflowBlock) {
+        var block = block
+        block.updatedAt = Date()
+        try? store.save(block)
+        reload()
+    }
+
+    @discardableResult
+    func createBlock(from config: AgentConfig? = nil, name: String = "Nouveau bloc") -> WorkflowBlock {
+        let names = Set(blocks.map(\.name))
+        var unique = name
+        var index = 2
+        while names.contains(unique) { unique = "\(name) \(index)"; index += 1 }
+        let block = config.map { WorkflowBlock.from($0, name: unique) }
+            ?? WorkflowBlock(name: unique, template: AgentConfig(prompt: "", output: [OutputField("summary", .text)],
+                                                                 verdict: VerdictConfig()))
+        save(block)
+        return block
+    }
+
+    /// The steps placed from a block, over every workflow.
+    func usage(ofBlock id: UUID) -> Int {
+        workflows.reduce(0) { total, workflow in
+            total + workflow.nodes.filter { node in
+                switch node.kind {
+                case .agent(let config): return config.blockID == id
+                case .forEach(let config): return config.agent.blockID == id
+                default: return false
+                }
+            }.count
+        }
+    }
+
+    func deleteBlock(_ id: UUID) {
+        store.deleteBlock(id)
+        reload()
+    }
+
+    func save(_ ruleSet: RuleSet) {
+        try? store.save(ruleSet)
+        reload()
+    }
+
+    @discardableResult
+    func createRuleSet() -> RuleSet {
+        let ruleSet = RuleSet(name: "Nouvelles règles", rules: [""])
+        save(ruleSet)
+        return ruleSet
+    }
+
+    func deleteRuleSet(_ id: UUID) {
+        store.deleteRuleSet(id)
         reload()
     }
 
@@ -336,5 +404,32 @@ final class WorkflowsModel {
             return SessionGroup(id: run.id, title: "\(run.workflow.name) · \(run.subject)",
                                 isActive: run.status.isActive, orchestrator: orchestrator, steps: steps)
         }
+    }
+
+    // MARK: Approvals (ADR-0019)
+
+    /// A person's decision a run waits on.
+    struct PendingApproval: Identifiable, Equatable {
+        var runID: UUID
+        var step: String
+        var title: String
+        var question: String
+        var options: [String]
+        var id: String { runID.uuidString + "/" + step }
+    }
+
+    struct ApprovalDecision: Equatable {
+        var option: String
+        var comment: String
+    }
+
+    var pendingApprovals: [PendingApproval] = []
+    @ObservationIgnored var approvalDecisions: [String: ApprovalDecision] = [:]
+
+    func approvals(of run: UUID) -> [PendingApproval] { pendingApprovals.filter { $0.runID == run } }
+
+    func decide(_ approval: PendingApproval, option: String, comment: String) {
+        approvalDecisions[approval.id] = ApprovalDecision(option: option, comment: comment)
+        pendingApprovals.removeAll { $0.id == approval.id }
     }
 }

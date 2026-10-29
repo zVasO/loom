@@ -77,6 +77,7 @@ struct WorkflowsView: View {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     workflowsSection
                     expertsSection
+                    rulesSection
                     connectorsSection
                     runsSection
                 }
@@ -239,6 +240,32 @@ struct WorkflowsView: View {
         }
     }
 
+    /// Rule sets to tick on blocks, steps and links (ADR-0019).
+    private var rulesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            header("RULES", systemImage: "list.bullet.rectangle") {
+                HoverIconButton(systemImage: "plus", help: "New rule set") {
+                    let ruleSet = workflows.createRuleSet()
+                    workflows.detail = .ruleSet(ruleSet.id)
+                    model.emitEditorLibrary()
+                }
+            }
+            ForEach(workflows.ruleSets.filter { matches($0.name, $0.rules.joined(separator: " ")) }) { ruleSet in
+                simpleRow(title: ruleSet.name, subtitle: "\(ruleSet.rules.filter { !$0.isEmpty }.count) rule(s)",
+                          color: nil, selected: workflows.detail == .ruleSet(ruleSet.id)) {
+                    workflows.detail = .ruleSet(ruleSet.id)
+                }
+                .contextMenu {
+                    Button("Delete", role: .destructive) {
+                        workflows.deleteRuleSet(ruleSet.id)
+                        model.emitEditorLibrary()
+                        if workflows.detail == .ruleSet(ruleSet.id) { workflows.detail = .workflow }
+                    }
+                }
+            }
+        }
+    }
+
     private var connectorsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             header("CONNECTORS", systemImage: "cable.connector") {
@@ -315,6 +342,9 @@ struct WorkflowsView: View {
                 HStack(spacing: 6) {
                     Text(run.startedAt.formatted(.relative(presentation: .named)))
                     if run.costUSD > 0 { Text(String(format: "%.2f $", run.costUSD)) }
+                    if !workflows.approvals(of: run.id).isEmpty {
+                        Text("· your decision").foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                    }
                 }
                 .font(.system(size: 10))
                 .foregroundStyle(DefaultTheme.mutedText)
@@ -433,6 +463,9 @@ struct WorkflowsView: View {
             if let run = workflows.run(id) {
                 VStack(spacing: 0) {
                     RunHeader(model: model, run: run)
+                    ForEach(workflows.approvals(of: run.id)) { approval in
+                        ApprovalBanner(model: model, approval: approval).id(approval.id)
+                    }
                     Divider().overlay(DefaultTheme.cardBorder)
                     editor
                 }
@@ -449,6 +482,9 @@ struct WorkflowsView: View {
             ExpertEditor(model: model, expertID: id).id(id)
         case .connector(let id):
             ConnectorEditor(model: model, connectorID: id).id(id)
+        case .ruleSet(let id):
+            RuleSetEditor(model: model, ruleSetID: id).id(id)
+                .onDisappear { model.emitEditorLibrary() }
         }
     }
 

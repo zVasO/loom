@@ -94,19 +94,32 @@ public struct RunState: Codable, Equatable, Sendable {
 public struct WorkflowPlanner: Sendable {
     public let workflow: Workflow
     private let incoming: [String: [WorkflowEdge]]
-    /// Loop id → the steps it runs again.
+    private let outgoing: [String: [WorkflowEdge]]
+    /// Loop id, or `edge:<id>` for a way back up → the steps it runs again.
     public let loopBodies: [String: Set<String>]
 
     public init(_ workflow: Workflow) {
         self.workflow = workflow
-        incoming = Dictionary(grouping: workflow.edges, by: \.to)
+        incoming = Dictionary(grouping: workflow.forwardEdges, by: \.to)
+        outgoing = Dictionary(grouping: workflow.forwardEdges, by: \.from)
         var bodies: [String: Set<String>] = [:]
         for node in workflow.nodes {
             if case .loop(let config) = node.kind {
                 bodies[node.id] = WorkflowGraph.body(of: node.id, targets: config.targets, in: workflow)
             }
         }
+        for edge in workflow.retryEdges {
+            bodies[Self.retryKey(edge)] = WorkflowGraph.retryBody(edge, in: workflow)
+        }
         loopBodies = bodies
+    }
+
+    /// Where a way back up counts its rounds, in `RunState.iterations`.
+    public static func retryKey(_ edge: WorkflowEdge) -> String { "edge:" + edge.id }
+
+    /// The verdict a settled step answered, if any.
+    public func verdict(of id: String, in state: RunState) -> String? {
+        state.nodes[id]?.output?["verdict"]?.plainText
     }
 
     public func initialState() -> RunState {
@@ -131,11 +144,30 @@ public struct WorkflowPlanner: Sendable {
         switch state.status(edge.from) {
         case .done:
             if let branch = edge.branch, state.branches[edge.from] != branch { return .dead }
-            return .live
+            return followsVerdict(edge, in: state) ? .live : .dead
         case .skipped: return .dead
         case .failed: return .blocked
         case .pending, .running, .waitingOnUser: return .waiting
         }
+    }
+
+    /// A link out of a settled step follows its verdict: `when` matches it,
+    /// `otherwise` takes what no other link forward does.
+    private func followsVerdict(_ edge: WorkflowEdge, in state: RunState) -> Bool {
+        let given = self.verdict(of: edge.from, in: state)
+        if let when = edge.when {
+            return given.map { VerdictConfig.same($0, when) } ?? false
+        }
+        if edge.otherwise {
+            let siblings = (outgoing[edge.from] ?? []).filter { $0.id != edge.id && $0.when != nil }
+            return !siblings.contains { sibling in given.map { VerdictConfig.same($0, sibling.when!) } ?? false }
+        }
+        return true
+    }
+
+    /// The run took this link: its source settled and it is live.
+    public func isTaken(_ edge: WorkflowEdge, in state: RunState) -> Bool {
+        !edge.isRetry && self.state(of: edge, in: state) == .live
     }
 
     /// Pending steps whose every input settled with at least one live: they
@@ -206,7 +238,40 @@ public struct WorkflowPlanner: Sendable {
         record.costUSD = costUSD
         record.finishedAt = date
         state.nodes[id] = record
+        goBackIfAsked(id, in: &state)
         propagate(&state)
+    }
+
+    /// A way back up whose verdict the step just answered, with rounds left:
+    /// the steps from its target to the step run again (ADR-0019). Spent,
+    /// the step follows its links forward. Returns the link taken back.
+    @discardableResult
+    func goBackIfAsked(_ id: String, in state: inout RunState) -> WorkflowEdge? {
+        guard let given = self.verdict(of: id, in: state) else { return nil }
+        for edge in workflow.retryEdges where edge.from == id {
+            guard let when = edge.when, VerdictConfig.same(given, when) else { continue }
+            let key = Self.retryKey(edge)
+            let done = state.iterations[key] ?? 0
+            guard done < (edge.retry?.limit ?? 0), let body = loopBodies[key], !body.isEmpty else { continue }
+            state.iterations[key] = done + 1
+            sendAround(body, in: &state)
+            return edge
+        }
+        return nil
+    }
+
+    /// The body of a loop or a way back starts over: answers to history,
+    /// records fresh, conditions undecided, the ways back inside reset.
+    private func sendAround(_ body: Set<String>, in state: inout RunState) {
+        for member in body {
+            if let output = state.nodes[member]?.output {
+                state.history[member, default: []].append(output)
+            }
+            var fresh = (state.nodes[member] ?? NodeRecord()).reset()
+            fresh.extraInstructions = nil
+            state.nodes[member] = fresh
+            state.branches[member] = nil
+        }
     }
 
     public func fail(_ id: String, error: String, in state: inout RunState, at date: Date = Date()) {
@@ -243,16 +308,11 @@ public struct WorkflowPlanner: Sendable {
             return false
         }
         state.iterations[id] = done + 1
-        for member in body {
-            if let output = state.nodes[member]?.output {
-                state.history[member, default: []].append(output)
-            }
-            // A new pass starts from its prompt: earlier instructions were
-            // for an answer that is now history.
-            var fresh = (state.nodes[member] ?? NodeRecord()).reset()
-            fresh.extraInstructions = nil
-            state.nodes[member] = fresh
-            state.branches[member] = nil
+        // A new pass starts from its prompt: earlier instructions were for an
+        // answer that is now history. The ways back inside count afresh.
+        sendAround(body, in: &state)
+        for edge in workflow.retryEdges where body.contains(edge.from) {
+            state.iterations[Self.retryKey(edge)] = nil
         }
         state.nodes[id] = NodeRecord()
         return true
@@ -289,7 +349,7 @@ public struct WorkflowPlanner: Sendable {
     /// one of them runs (its answer would land on a step that waits again).
     public func rerun(_ id: String, instructions: String, limit: Int, in state: inout RunState) throws {
         guard let node = workflow.node(id) else { throw InterventionError.unknownStep(id) }
-        guard node.kind.type == .agent || node.kind.type == .context else { throw InterventionError.notAllowed(id) }
+        guard node.kind.type.isSteerable else { throw InterventionError.notAllowed(id) }
         let affected = downstream(of: id).union([id])
         if let busy = affected.first(where: { [.running, .waitingOnUser].contains(state.status($0)) }) {
             throw InterventionError.busy(busy)
@@ -306,6 +366,9 @@ public struct WorkflowPlanner: Sendable {
                 // A loop downstream starts its count again with the new answers.
                 state.iterations[member] = nil
             }
+            for edge in workflow.retryEdges where edge.from == member {
+                state.iterations[Self.retryKey(edge)] = nil
+            }
             state.branches[member] = nil
             if member == id {
                 fresh.reruns = record.reruns + 1
@@ -320,7 +383,7 @@ public struct WorkflowPlanner: Sendable {
     /// answer, so what follows still runs. The start and the report are Loom's.
     public func skip(_ id: String, reason: String, in state: inout RunState, at date: Date = Date()) throws {
         guard let node = workflow.node(id) else { throw InterventionError.unknownStep(id) }
-        guard node.kind.type == .agent || node.kind.type == .context else { throw InterventionError.notAllowed(id) }
+        guard node.kind.type.isSteerable else { throw InterventionError.notAllowed(id) }
         switch state.status(id) {
         case .running, .waitingOnUser: throw InterventionError.busy(id)
         case .done, .failed, .skipped: throw InterventionError.alreadySettled(id)
@@ -348,12 +411,23 @@ public struct WorkflowPlanner: Sendable {
 /// Graph questions the planner and the validator share.
 public enum WorkflowGraph {
 
+    /// By the links forward: a way back up is no dependency.
     public static func successors(_ workflow: Workflow) -> [String: [String]] {
-        Dictionary(grouping: workflow.edges, by: \.from).mapValues { $0.map(\.to) }
+        Dictionary(grouping: workflow.forwardEdges, by: \.from).mapValues { $0.map(\.to) }
     }
 
     public static func predecessors(_ workflow: Workflow) -> [String: [String]] {
-        Dictionary(grouping: workflow.edges, by: \.to).mapValues { $0.map(\.from) }
+        Dictionary(grouping: workflow.forwardEdges, by: \.to).mapValues { $0.map(\.from) }
+    }
+
+    /// What a way back up runs again: the steps on a path from its target to
+    /// its source, both included — the source alone when it points at itself.
+    public static func retryBody(_ edge: WorkflowEdge, in workflow: Workflow) -> Set<String> {
+        if edge.from == edge.to { return [edge.from] }
+        let forward = reachable(from: [edge.to], next: successors(workflow))
+        let backward = reachable(from: [edge.from], next: predecessors(workflow))
+        let body = forward.intersection(backward)
+        return body.contains(edge.to) ? body : []
     }
 
     /// Every step reachable from `start`, `start` included.

@@ -176,6 +176,21 @@ _Avoid_ : exécution (dans le code), job
 **Passe** :
 Un tour du corps d'une boucle ; « 3 passes » = la première et deux relances.
 
+**Bloc** :
+Une case de la palette faite par l'utilisateur (ADR-0019) : un agent avec son prompt, ses champs, son verdict, ses règles. Les cases posées depuis lui le suivent ; chacune ajoute ses consignes et règles propres.
+_Avoid_ : template, modèle de case
+
+**Règle** :
+Une phrase que l'étape doit suivre, posée sur un bloc, une case, un lien ou une reprise, ou rangée dans un jeu de règles ; ajoutée au prompt système, avec sa provenance.
+_Avoid_ : contrainte, policy
+
+**Verdict** :
+La réponse courte d'une étape parmi des options, la meilleure d'abord (`ok`, `à revoir`) ; les liens la suivent.
+
+**Reprise** :
+Un lien qui remonte : sur un verdict, les étapes de sa cible jusqu'à sa source repassent, quelques fois au plus.
+_Avoid_ : boucle (c'est la case Loop), retry (dans l'UI)
+
 **Orchestrateur** :
 La session visible qui pilote un run (ADR-0018) : elle reçoit le résultat de chaque étape, leur pose des questions, en relance, en saute, arrête le run. Une par run, rangée sous Sessions › Workflows.
 _Avoid_ : agent chef, superviseur, manager

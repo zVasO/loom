@@ -177,3 +177,36 @@ details summary { cursor: pointer; font-size: 12px; font-weight: 700; }
 .orchestrator-toggle { font-size: 13px; }
 .orchestrator .row { display: flex; gap: 10px; }
 .orchestrator .row .field { flex: 1; }
+
+/* Blocks, verdicts, conditional links and ways back (ADR-0019). */
+.palette-section { display: flex; align-items: center; justify-content: space-between; margin: 14px 2px 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--groupHeader); }
+.palette-empty { margin: 4px 2px; }
+.palette-block { position: relative; cursor: grab; }
+.palette-block .block-edit { position: absolute; top: 6px; right: 6px; opacity: 0; transition: opacity .15s; }
+.palette-block:hover .block-edit { opacity: 1; }
+.loom-node-verdicts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.verdict-chip, .rule-chip { font-size: 10px; border-radius: 999px; padding: 0 6px; background: var(--surfaceRaised);
+  color: var(--secondaryText); border: 1px solid var(--cardBorder); }
+.verdict-chip.given { background: var(--accent); color: var(--accentText); border-color: var(--accent);
+  animation: mark-in .35s ease-out both; }
+.rule-chip { color: var(--groupHeader); }
+.handle-retry { opacity: 0; left: 70% !important; }
+.loom-node:hover .handle-retry.connectable { opacity: 1; background: var(--stateNeedsInput); }
+.react-flow__edge.retry-edge .react-flow__edge-path { stroke: var(--stateNeedsInput); stroke-dasharray: 6 4; }
+.react-flow__edge.conditional-edge .react-flow__edge-path { stroke: var(--accent); }
+.react-flow__edge.edge-selected .react-flow__edge-path { stroke-width: 3; }
+.react-flow__edge-textbg { fill: var(--surface); }
+.react-flow__edge-text { fill: var(--primaryText); font-size: 11px; }
+.list-editor { display: flex; flex-direction: column; gap: 4px; }
+.list-line { display: flex; gap: 4px; align-items: center; }
+.list-line input { flex: 1; }
+.verdict-editor { margin: 8px 0; padding: 8px; border-radius: 8px; background: var(--surface); }
+.block-banner { border-left: 3px solid var(--accent); padding: 8px 10px; border-radius: 8px; background: var(--surface);
+  display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.block-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.kind-block, .kind-link { color: #fff; }
+.kind-link { background: var(--accent); }
+.warning-check span { color: var(--secondaryText); }
+.warning-check b { color: var(--danger); }
+@media (prefers-reduced-motion: reduce) { .verdict-chip.given { animation: none; } }

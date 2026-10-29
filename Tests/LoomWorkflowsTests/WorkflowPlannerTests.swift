@@ -253,7 +253,7 @@ struct WorkflowValidatorTests {
                    WorkflowEdge(from: "x", to: "a")])
         let messages = WorkflowValidator.validate(workflow).map(\.message)
         #expect(messages.contains("Add a Start step: it is where a run begins."))
-        #expect(messages.contains("The links make a circle: go around with a Loop step instead."))
+        #expect(messages.contains("The links make a circle: go back up with a link that retries, or a Loop step."))
         #expect(messages.contains("A link points to a step that no longer exists."))
         #expect(messages.contains("Write what this step asks."))
         #expect(messages.contains("Its expert was deleted."))

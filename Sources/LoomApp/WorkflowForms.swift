@@ -450,3 +450,96 @@ struct WorkflowLaunchSheet: View {
         return text + " — an order of magnitude."
     }
 }
+
+// MARK: - Rule sets (ADR-0019)
+
+/// Named rules to tick on a block, a step or a link: one per line.
+struct RuleSetEditor: View {
+    let model: AppModel
+    let ruleSetID: UUID
+    @State private var draft: RuleSet?
+
+    private var workflows: WorkflowsModel { model.workflows }
+
+    var body: some View {
+        ScrollView {
+            if let draft {
+                VStack(alignment: .leading, spacing: 18) {
+                    TextField("Name", text: Binding(get: { draft.name }, set: { self.draft?.name = $0 }))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 21, weight: .bold))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                    FormCard {
+                        formTitle("Rules")
+                        formHint("One rule per line. Tick this set on a block, a step or a link in the editor: its rules join that step's system prompt, under where they come from.")
+                        ForEach(Array(draft.rules.enumerated()), id: \.offset) { index, _ in
+                            HStack(spacing: 8) {
+                                Text("\(index + 1).").font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(DefaultTheme.mutedText)
+                                TextField("Cite path:line for every finding.", text: Binding(
+                                    get: { self.draft?.rules[safe: index] ?? "" },
+                                    set: { if self.draft?.rules.indices.contains(index) == true { self.draft?.rules[index] = $0 } }))
+                                    .textFieldStyle(.roundedBorder)
+                                HoverIconButton(systemImage: "minus.circle", help: "Remove this rule") {
+                                    if self.draft?.rules.indices.contains(index) == true { self.draft?.rules.remove(at: index) }
+                                }
+                            }
+                        }
+                        GhostButton("Add a rule", systemImage: "plus") { self.draft?.rules.append("") }
+                    }
+                }
+                .frame(maxWidth: 760, alignment: .leading)
+                .padding(28)
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .onAppear { draft = workflows.ruleSet(ruleSetID) }
+        .onChange(of: draft) {
+            if let draft { workflows.save(draft) }
+        }
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
+}
+
+// MARK: - A person decides (ADR-0019)
+
+/// The question a run waits on, with a comment and one button per answer.
+struct ApprovalBanner: View {
+    let model: AppModel
+    let approval: WorkflowsModel.PendingApproval
+    @State private var comment = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "hand.raised.fill").foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                Text("\(approval.title) — your decision").font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+            }
+            Text(approval.question).font(.system(size: 12)).foregroundStyle(DefaultTheme.primaryText)
+                .textSelection(.enabled)
+            HStack(spacing: 8) {
+                TextField("A comment for the next steps (optional)", text: $comment)
+                    .textFieldStyle(.roundedBorder)
+                ForEach(Array(approval.options.enumerated()), id: \.offset) { index, option in
+                    if index == 0 {
+                        AccentButton(option, systemImage: "checkmark") {
+                            model.workflows.decide(approval, option: option, comment: comment)
+                        }
+                    } else {
+                        GhostButton(option, systemImage: "arrow.uturn.backward") {
+                            model.workflows.decide(approval, option: option, comment: comment)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.badgeColor(for: .needsInput).opacity(0.6)))
+        .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+}
