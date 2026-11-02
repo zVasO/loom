@@ -37,12 +37,17 @@ public final class AgentBrowser: NSObject {
         /// "Local sites only" (Settings ▸ Agents).
         public var networkAccess: AgentNetworkAccess
         public var limits: AgentBrowserLimits
+        /// The screen's backing scale before the panel ever shows (2 on
+        /// Retina): Chromium pages render at it, so the first picture is
+        /// sharp. 1 in tests.
+        public var initialScale: CGFloat
 
         public init(screenshotsDirectory: URL, initialViewport: CGSize, uploadRoots: [URL] = [],
                     viewportWidth: ViewportWidth = .fit, networkAccess: AgentNetworkAccess = .open,
-                    limits: AgentBrowserLimits = AgentBrowserLimits()) {
+                    limits: AgentBrowserLimits = AgentBrowserLimits(), initialScale: CGFloat = 1) {
             self.screenshotsDirectory = screenshotsDirectory
             self.initialViewport = initialViewport
+            self.initialScale = initialScale
             self.uploadRoots = uploadRoots
             self.viewportWidth = viewportWidth
             self.networkAccess = networkAccess

@@ -227,4 +227,19 @@ struct ScreencastGeometryTests {
         #expect(ScreencastFrameMetadata(CDPObject(["deviceWidth": 1_280])) == nil)
         #expect(ScreencastFrameMetadata(CDPObject(["deviceWidth": -1, "deviceHeight": 720])) == nil)
     }
+
+    @Test("the page renders at the screen's density: sharp on Retina, sharper when a set width is scaled up")
+    func deviceScale() {
+        let panel = CGSize(width: 640, height: 900)
+        #expect(ScreencastGeometry.deviceScale(backingScale: 1, cssWidth: nil, pageArea: panel) == 1)
+        #expect(ScreencastGeometry.deviceScale(backingScale: 2, cssWidth: nil, pageArea: panel) == 2, "Fit on Retina")
+        #expect(ScreencastGeometry.deviceScale(backingScale: 2, cssWidth: 1_280, pageArea: panel) == 2,
+                "scaled down: the screencast shrinks it into the view's pixels")
+        #expect(ScreencastGeometry.deviceScale(backingScale: 2, cssWidth: 512, pageArea: panel) == 2.5,
+                "640 / 512 = 1.25, times 2, rounded up to a half")
+        #expect(ScreencastGeometry.deviceScale(backingScale: 2, cssWidth: 375, pageArea: CGSize(width: 1_400, height: 900))
+                == ScreencastGeometry.maxDeviceScale, "capped")
+        #expect(ScreencastGeometry.deviceScale(backingScale: 0, cssWidth: nil, pageArea: .zero) == 1, "unknown screen")
+        #expect(ScreencastGeometry.deviceScale(backingScale: 2, cssWidth: 800, pageArea: .zero) == 2, "never measured")
+    }
 }

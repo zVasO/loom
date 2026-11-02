@@ -47,9 +47,11 @@ public struct ScreencastPicture: @unchecked Sendable {
 /// Thread-safe; its picture is delivered on the main actor.
 public final class ScreencastStream: @unchecked Sendable {
 
-    /// JPEG quality asked of `Page.startScreencast`: about 7 KB a frame at
-    /// 1280 × 800 (step-0 probe), 60 frames a second while the page animates.
-    public static let quality = 60
+    /// JPEG quality asked of `Page.startScreencast`: 80, text keeps clean
+    /// edges (60 left halos around letters). About 7 KB a frame at 60 and
+    /// 1280 × 800 (step-0 probe); a Retina tab's frames are a few times that,
+    /// 60 frames a second at most while the page animates, the latest decoded.
+    public static let quality = 80
     /// How many tabs' last frames are kept (compressed) for an instant
     /// picture when the panel comes back or switches tab.
     static let cachedTabs = 4

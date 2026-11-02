@@ -231,6 +231,8 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
     /// The main document's answer, kept until its commit (it comes before).
     private var pendingDocument: (url: String, status: Int)?
     private var viewportSize: CGSize
+    /// Image pixels per CSS pixel (`deviceScaleFactor`): the screen's.
+    private var viewportScale: CGFloat
     private var channelCut = false
     private var fileChooser: (chooser: PageFileChooser, session: CDPSessionID, host: String)?
     /// A child session's `fileChooserOpened` being forwarded: its chooser
@@ -250,11 +252,13 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
     private var closed = false
     private var observer: (@Sendable (PageFact) -> Void)?
 
-    /// `viewport`: the CSS size the page lays out at (device scale 1).
+    /// `viewport`: the CSS size the page lays out at; `deviceScale`: the
+    /// image pixels per CSS pixel it renders at (the screen's, so the live
+    /// picture is sharp — screenshots for the agent stay at CSS size).
     /// `reloadsAfterCrash`: a renderer that dies is reloaded at once, twice
     /// a minute at most (the WebKit engine's rule).
-    public init(browser: ChromiumBrowser, target: ChromiumTarget, viewport: CGSize, userAgent: ChromiumUserAgent,
-                policy: SettlePolicy = SettlePolicy(), reloadsAfterCrash: Bool = true,
+    public init(browser: ChromiumBrowser, target: ChromiumTarget, viewport: CGSize, deviceScale: CGFloat = 1,
+                userAgent: ChromiumUserAgent, policy: SettlePolicy = SettlePolicy(), reloadsAfterCrash: Bool = true,
                 log: @escaping @Sendable (String) -> Void = { _ in }) {
         self.browser = browser
         self.target = target
@@ -263,6 +267,7 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
         self.reloadsAfterCrash = reloadsAfterCrash
         self.log = log
         self.viewportSize = ChromiumTabRuntime.normalized(viewport)
+        self.viewportScale = ChromiumTabRuntime.normalizedScale(deviceScale)
         let pageSignals = PageSignals(session: target.sessionId, mainFrameId: target.targetId,
                                       link: PageSignalsLink.connection(browser.connection, session: target.sessionId),
                                       pollWindow: policy.pollWindow)
@@ -290,7 +295,7 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
             self?.apply(fact)
         }
         connection.setSink(sessionSink, for: session)
-        let commands = Self.startCommands(viewport: viewport, userAgent: userAgent)
+        let commands = Self.startCommands(viewport: viewport, deviceScale: deviceScale, userAgent: userAgent)
         let replies = connection.post(batch: commands, session: session,
                                       options: CDPCallOptions(deadline: ContinuousClock.now + .seconds(10)))
         lock.withLock { initReplies = replies }
@@ -382,6 +387,11 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
     /// The CSS size the page lays out at.
     public var viewport: CGSize {
         lock.withLock { viewportSize }
+    }
+
+    /// The image pixels per CSS pixel the page renders at.
+    public var deviceScale: CGFloat {
+        lock.withLock { viewportScale }
     }
 
     public var isCrashed: Bool { signals.state.crashed }
@@ -716,8 +726,9 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
     // MARK: - Screenshots
 
     /// `Page.captureScreenshot` at CSS size, the longest edge at most
-    /// `maxEdge` (`clip.scale`, device scale 1): Chromium encodes at the
-    /// size asked, so nothing is decoded here.
+    /// `maxEdge` (`clip.scale`, divided by the device scale: the page renders
+    /// at the screen's for the panel, the agent's image stays at CSS size).
+    /// Chromium encodes at the size asked, so nothing is decoded here.
     /// - `clip` nil, not `fullPage`: the viewport as it shows;
     /// - `clip`, not `fullPage`: that box, in DOCUMENT coordinates (a
     ///   top-viewport rect plus scrollX/scrollY — step-0 probe);
@@ -736,8 +747,9 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
             params["captureBeyondViewport"] = true
         } else if clip == nil {
             let size = viewport
-            if max(size.width, size.height) > maxEdge {
-                // Scaled down: the clip needs where the viewport is in the page.
+            if max(size.width, size.height) > maxEdge || deviceScale != 1 {
+                // Scaled down, or rendered above CSS size (a Retina panel):
+                // the clip needs where the viewport is in the page.
                 let metrics = try await call("Page.getLayoutMetrics", deadline: deadline,
                                              interruptible: [.dialogOpened, .crashed, .detached])
                 let visual = metrics.object("cssVisualViewport")
@@ -755,7 +767,8 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
             let scale = min(1, Double(maxEdge) / Double(max(region.width, region.height)))
             let box: [String: Any] = [
                 "x": Double(region.minX), "y": Double(region.minY),
-                "width": Double(region.width), "height": Double(region.height), "scale": scale,
+                "width": Double(region.width), "height": Double(region.height),
+                "scale": Self.clipScale(scale, deviceScale: deviceScale),
             ]
             params["clip"] = box
             expected = CGSize(width: region.width * CGFloat(scale), height: region.height * CGFloat(scale))
@@ -772,13 +785,18 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
 
     // MARK: - Viewport
 
-    /// The CSS size the page lays out at (device scale 1, `browser_resize`,
-    /// the panel's width). ResizeObserver and media queries follow at once.
-    public func setViewport(cssSize: CGSize, deadline: ContinuousClock.Instant) async throws {
+    /// The CSS size the page lays out at (`browser_resize`, the panel's
+    /// width) and the scale it renders at (the screen's). ResizeObserver and
+    /// media queries follow at once.
+    public func setViewport(cssSize: CGSize, deviceScale: CGFloat = 1, deadline: ContinuousClock.Instant) async throws {
         let size = Self.normalized(cssSize)
-        lock.withLock { viewportSize = size }
-        _ = try await call("Emulation.setDeviceMetricsOverride", Self.deviceMetrics(size), deadline: deadline,
-                           interruptible: [.crashed, .detached])
+        let scale = Self.normalizedScale(deviceScale)
+        lock.withLock {
+            viewportSize = size
+            viewportScale = scale
+        }
+        _ = try await call("Emulation.setDeviceMetricsOverride", Self.deviceMetrics(size, scale: scale),
+                           deadline: deadline, interruptible: [.crashed, .detached])
     }
 
     // MARK: - Navigation
@@ -1166,7 +1184,7 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
     /// `Runtime.enable`: the binding is re-added at every commit instead.
     /// The child auto-attach has no filter: a target paused and left
     /// unattached never starts (workers would hang).
-    public static func initCommands(viewport: CGSize, userAgent: ChromiumUserAgent,
+    public static func initCommands(viewport: CGSize, deviceScale: CGFloat = 1, userAgent: ChromiumUserAgent,
                                     relay: String = AgentScripts.relay, pageHook: String = AgentScripts.pageHook,
                                     helperTopFrame: String = ChromiumTabRuntime.helperTopFrame) -> [(String, [String: Any])] {
         let empty: [String: Any] = [:]
@@ -1186,7 +1204,7 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
         commands.append(("Page.addScriptToEvaluateOnNewDocument", helperScript))
         commands.append(("Runtime.addBinding", PageSignals.addBindingParams))
         commands.append(("Page.setInterceptFileChooserDialog", enabled))
-        commands.append(("Emulation.setDeviceMetricsOverride", deviceMetrics(normalized(viewport))))
+        commands.append(("Emulation.setDeviceMetricsOverride", deviceMetrics(normalized(viewport), scale: deviceScale)))
         commands.append(("Emulation.setFocusEmulationEnabled", enabled))
         commands.append(("Emulation.setUserAgentOverride", userAgent.overrideParams))
         commands.append(("Page.setWebLifecycleState", lifecycle))
@@ -1215,8 +1233,9 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
     /// fixtures/init.json), with the panel script right after the helper —
     /// before the target runs, so its first document has it. The harness
     /// installs the panel script on its own (panel-input.test.mjs).
-    static func startCommands(viewport: CGSize, userAgent: ChromiumUserAgent) -> [(String, [String: Any])] {
-        var commands = initCommands(viewport: viewport, userAgent: userAgent)
+    static func startCommands(viewport: CGSize, deviceScale: CGFloat = 1,
+                              userAgent: ChromiumUserAgent) -> [(String, [String: Any])] {
+        var commands = initCommands(viewport: viewport, deviceScale: deviceScale, userAgent: userAgent)
         let helper = commands.lastIndex { $0.0 == "Page.addScriptToEvaluateOnNewDocument" } ?? (commands.count - 1)
         commands.insert(panelScriptCommand, at: helper + 1)
         return commands
@@ -1263,12 +1282,15 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
         ["autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true]
     }
 
-    /// `Emulation.setDeviceMetricsOverride` at device scale 1: CSS pixels are
-    /// image pixels, `devicePixelRatio` never moves under a test.
-    public static func deviceMetrics(_ size: CGSize) -> [String: Any] {
+    /// `Emulation.setDeviceMetricsOverride`: `scale` image pixels per CSS
+    /// pixel — 1 in tests (CSS pixels are image pixels), the screen's in the
+    /// app, so the screencast is as sharp as the panel draws it.
+    public static func deviceMetrics(_ size: CGSize, scale: CGFloat = 1) -> [String: Any] {
         let width = side(size.width)
         let height = side(size.height)
-        return ["width": width, "height": height, "deviceScaleFactor": 1, "mobile": false,
+        let factor = normalizedScale(scale)
+        let deviceScaleFactor: Any = factor == factor.rounded() ? Int(factor) : Double(factor)
+        return ["width": width, "height": height, "deviceScaleFactor": deviceScaleFactor, "mobile": false,
                 "screenWidth": width, "screenHeight": height]
     }
 
@@ -1386,6 +1408,18 @@ public final class ChromiumTabRuntime: @unchecked Sendable {
 
     static func normalized(_ size: CGSize) -> CGSize {
         CGSize(width: side(size.width), height: side(size.height))
+    }
+
+    /// `clip.scale` for an image `scale` times the CSS size: Chromium
+    /// multiplies it by the device scale.
+    public static func clipScale(_ scale: Double, deviceScale: CGFloat) -> Double {
+        scale / Double(normalizedScale(deviceScale))
+    }
+
+    /// A device scale, 1 to 4; 1 for anything unreadable.
+    static func normalizedScale(_ scale: CGFloat) -> CGFloat {
+        guard scale.isFinite, scale > 0 else { return 1 }
+        return min(max(scale, 1), 4)
     }
 
     /// A viewport side in whole CSS px, 1 to 16 384.

@@ -87,6 +87,12 @@ navigateurs « Web n » (qui, eux, restent toujours WebKit).
   768, 1024, 1280 px) et `browser_resize` changent la largeur de la session
   seulement ; le menu propose aussi d'en faire le défaut du projet (jamais dans
   une revue).
+- **Sous Chromium, la page est rendue à la densité de l'écran** (2 sur un écran
+  Retina, davantage quand une largeur fixe est agrandie dans un grand onglet,
+  jusqu'à 3) : l'image du panneau et de l'onglet ✦ Agent est nette. La page voit
+  `devicePixelRatio` en conséquence, comme dans un navigateur du Mac ; la mise en
+  page en pixels CSS ne change pas, et les captures pour l'agent restent à la
+  taille CSS.
 
 ## Le profil
 
