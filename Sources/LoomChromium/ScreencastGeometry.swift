@@ -260,6 +260,26 @@ public struct ScreencastGeometry: Equatable, Sendable {
         abs(old.width - new.width) >= restartThreshold || abs(old.height - new.height) >= restartThreshold
     }
 
+    /// The highest device scale a page is rendered at.
+    public static let maxDeviceScale: CGFloat = 3
+
+    /// `deviceScaleFactor` for a page shown in `pageArea` (points) on a
+    /// screen of `backingScale`: as many image pixels per CSS pixel as the
+    /// screen draws, so the frames are sharp. Fit (`cssWidth` nil): the
+    /// backing scale (2 on Retina). A set width scaled up into a wider
+    /// panel: times that magnification. Rounded up to a half (a divider
+    /// dragged does not re-render at every step), 1 to `maxDeviceScale`.
+    public static func deviceScale(backingScale: CGFloat, cssWidth: Int?, pageArea: CGSize) -> CGFloat {
+        let screen = backingScale.isFinite && backingScale > 0 ? backingScale : 1
+        var magnification: CGFloat = 1
+        if let cssWidth, cssWidth > 0, pageArea.width >= 1, pageArea.width.isFinite {
+            magnification = max(1, pageArea.width / CGFloat(cssWidth))
+        }
+        let raw = screen * magnification
+        let halves = (raw * 2 - 0.001).rounded(.up) / 2
+        return min(maxDeviceScale, max(1, halves))
+    }
+
     /// The aspect a page area that was never measured stands for (1280 × 720).
     public static let fallbackAspect: CGFloat = 720.0 / 1_280.0
 

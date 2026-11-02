@@ -52,6 +52,17 @@ struct ChromiumEngineRulesTests {
                 == CGSize(width: 1_280, height: 1_800))
     }
 
+    @Test("pages render at the panel's screen scale, more when a set width is scaled up")
+    func echelle() {
+        let initial = CGSize(width: 900, height: 900)
+        #expect(ChromiumAgentCore.deviceScale(width: .fit, panel: CGSize(width: 600, height: 800), initial: initial,
+                                              backingScale: 2) == 2)
+        #expect(ChromiumAgentCore.deviceScale(width: .fit, panel: nil, initial: initial, backingScale: 1) == 1)
+        #expect(ChromiumAgentCore.deviceScale(width: .css(375), panel: CGSize(width: 750, height: 800), initial: initial,
+                                              backingScale: 1) == 2)
+        #expect(ChromiumAgentCore.deviceScale(width: .css(1_280), panel: nil, initial: initial, backingScale: 2) == 2)
+    }
+
     @Test("At most three live tabs: the least recently used go first, never a kept one")
     func ongletsVivants() {
         let ids = (0..<4).map { _ in BrowserTabsModel.TabID(rawValue: UUID()) }

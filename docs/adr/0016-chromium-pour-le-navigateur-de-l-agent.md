@@ -59,6 +59,7 @@ L'ADR-0014 donne à chaque agent un navigateur WebKit, piloté par des scripts i
   - NFR-S : rien n'est téléchargé sans un clic. La version téléchargée est épinglée, avec son SHA-256, dans chaque release.
 - **Option `snapshot: "none"` :** les actions peuvent omettre l'instantané de leur réponse (opt-in). La réponse par défaut reste celle de Playwright MCP.
 - **Largeur de page :** chaque projet a une largeur par défaut. `browser_resize` ne change que la session.
+- **Netteté :** la page est rendue à l'échelle de l'écran qui montre le panneau (`deviceScaleFactor` 2 sur Retina, multiplié quand une largeur fixe est agrandie, plafonné à 3) et le screencast est en JPEG qualité 80. À l'échelle 1, chaque pixel d'image couvrait 2 × 2 pixels de l'écran. Les captures de l'agent restent à la taille CSS (`clip.scale` divisé par l'échelle) ; les tests gardent l'échelle 1.
 - **`browser_run_code` :** il n'existe que sous Chromium.
   - Le script de l'agent tourne dans une cible « runner » hors ligne, dans un contexte de navigation séparé, et non dans Loom.
   - Ses appels `page.*` passent par les primitives du moteur, avec les mêmes politiques.

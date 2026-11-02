@@ -167,6 +167,7 @@ final class ChromiumCoreRouter: ChromiumTargetOwner, @unchecked Sendable {
     private var browser: ChromiumBrowser?
     private var userAgent: ChromiumUserAgent?
     private var viewport: CGSize
+    private var deviceScale: CGFloat
     private var access: AgentNetworkAccess
     private var tabCount = 0
     private var runtimes: [String: ChromiumTabRuntime] = [:]
@@ -176,8 +177,10 @@ final class ChromiumCoreRouter: ChromiumTargetOwner, @unchecked Sendable {
     private var refreshPending = false
     private var onChange: (@Sendable () -> Void)?
 
-    init(viewport: CGSize, access: AgentNetworkAccess, log: @escaping @Sendable (String) -> Void) {
+    init(viewport: CGSize, deviceScale: CGFloat = 1, access: AgentNetworkAccess,
+         log: @escaping @Sendable (String) -> Void) {
         self.viewport = viewport
+        self.deviceScale = deviceScale
         self.access = access
         self.log = log
     }
@@ -205,8 +208,11 @@ final class ChromiumCoreRouter: ChromiumTargetOwner, @unchecked Sendable {
         }
     }
 
-    func update(viewport size: CGSize) {
-        lock.withLock { viewport = size }
+    func update(viewport size: CGSize, deviceScale scale: CGFloat) {
+        lock.withLock {
+            viewport = size
+            deviceScale = scale
+        }
     }
 
     func update(access value: AgentNetworkAccess) {
@@ -268,8 +274,8 @@ final class ChromiumCoreRouter: ChromiumTargetOwner, @unchecked Sendable {
             scheduleRefresh()
             return
         }
-        let runtime = ChromiumTabRuntime(browser: browser, target: target, viewport: viewport, userAgent: agent,
-                                         log: log)
+        let runtime = ChromiumTabRuntime(browser: browser, target: target, viewport: viewport,
+                                         deviceScale: deviceScale, userAgent: agent, log: log)
         runtimes[target.targetId] = runtime
         popups[target.targetId] = openerTargetId ?? ""
         tabCount += 1
@@ -507,6 +513,8 @@ actor ChromiumAgentCore {
     private var viewportWidth: ViewportWidth
     /// The panel's page area in points, once it was shown.
     private var panelSize: CGSize?
+    /// The backing scale of the screen showing the panel (2 on Retina).
+    private var panelScale: CGFloat
     private var viewportQueued = false
     private var screenshotSequence = 0
     private var launching = false
@@ -527,10 +535,14 @@ actor ChromiumAgentCore {
         self.updates = updates
         self.log = log
         self.viewportWidth = environment.viewportWidth
+        self.panelScale = environment.initialScale
         self.control = ChromiumCoreControl(networkAccess: environment.networkAccess)
         self.router = ChromiumCoreRouter(
             viewport: ChromiumAgentCore.cssViewport(width: environment.viewportWidth, panel: nil,
                                                     initial: environment.initialViewport),
+            deviceScale: ChromiumAgentCore.deviceScale(width: environment.viewportWidth, panel: nil,
+                                                       initial: environment.initialViewport,
+                                                       backingScale: environment.initialScale),
             access: environment.networkAccess, log: log)
     }
 
@@ -1539,6 +1551,7 @@ actor ChromiumAgentCore {
                 let target = try await browser.createTarget(url: "about:blank", browserContextId: lease.browserContextId,
                                                             owner: router, timeout: left)
                 let runtime = ChromiumTabRuntime(browser: browser, target: target, viewport: currentViewport(),
+                                                 deviceScale: currentDeviceScale(),
                                                  userAgent: Self.userAgent(for: browser), log: log)
                 router.register(runtime)
                 runtime.start()
@@ -1987,14 +2000,17 @@ actor ChromiumAgentCore {
         await enqueue(.user(operation))
     }
 
-    /// The panel's page area (points) and whether it is on screen: Fit's
-    /// size, and a set width's height. Applied between commands.
-    func panelChanged(pageArea: CGSize, onScreen: Bool) async {
+    /// The panel's page area (points), its screen's backing scale and
+    /// whether it is on screen: Fit's size, a set width's height, the scale
+    /// pages render at. Applied between commands.
+    func panelChanged(pageArea: CGSize, backingScale: CGFloat = 0, onScreen: Bool) async {
         guard onScreen, pageArea.width >= 1, pageArea.height >= 1 else { return }
-        let changed = panelSize.map { abs($0.width - pageArea.width) >= 1 || abs($0.height - pageArea.height) >= 1 } ?? true
+        let resized = panelSize.map { abs($0.width - pageArea.width) >= 1 || abs($0.height - pageArea.height) >= 1 } ?? true
+        let rescaled = backingScale > 0 && backingScale != panelScale
         panelSize = pageArea
-        guard changed else { return }
-        router.update(viewport: currentViewport())
+        if backingScale > 0 { panelScale = backingScale }
+        guard resized || rescaled else { return }
+        updateRouterViewport()
         emitState()
         await scheduleViewport()
     }
@@ -2002,7 +2018,7 @@ actor ChromiumAgentCore {
     /// The panel's width menu: every live page, between commands.
     func setViewportWidth(_ width: ViewportWidth) async {
         viewportWidth = width
-        router.update(viewport: currentViewport())
+        updateRouterViewport()
         emitState()
         await scheduleViewport()
     }
@@ -2172,18 +2188,31 @@ actor ChromiumAgentCore {
     /// Every live page at the size in force; popups to come too.
     private func applyViewport() async {
         let size = currentViewport()
-        router.update(viewport: size)
+        let scale = currentDeviceScale()
+        router.update(viewport: size, deviceScale: scale)
         for tab in tabs {
-            guard let runtime = tab.runtime, !runtime.isDetached, !runtime.isCrashed, runtime.viewport != size else {
+            guard let runtime = tab.runtime, !runtime.isDetached, !runtime.isCrashed,
+                  runtime.viewport != size || runtime.deviceScale != scale else {
                 continue
             }
-            try? await runtime.setViewport(cssSize: size, deadline: ContinuousClock.now + .seconds(2))
+            try? await runtime.setViewport(cssSize: size, deviceScale: scale, deadline: ContinuousClock.now + .seconds(2))
         }
         emitState()
     }
 
     private func currentViewport() -> CGSize {
         Self.cssViewport(width: viewportWidth, panel: panelSize, initial: environment.initialViewport)
+    }
+
+    /// The image pixels per CSS pixel pages render at: the screen's, so the
+    /// panel's picture is sharp.
+    private func currentDeviceScale() -> CGFloat {
+        Self.deviceScale(width: viewportWidth, panel: panelSize, initial: environment.initialViewport,
+                         backingScale: panelScale)
+    }
+
+    private func updateRouterViewport() {
+        router.update(viewport: currentViewport(), deviceScale: currentDeviceScale())
     }
 
     // MARK: - Lifecycle
@@ -2348,6 +2377,16 @@ actor ChromiumAgentCore {
         if case .css(let pixels) = width { cssWidth = pixels }
         let size = ScreencastGeometry.emulatedViewport(cssWidth: cssWidth, pageArea: area)
         return CGSize(width: max(1, size.width), height: max(1, size.height))
+    }
+
+    /// The device scale for the panel's area and a width: see
+    /// `ScreencastGeometry.deviceScale`.
+    static func deviceScale(width: ViewportWidth, panel: CGSize?, initial: CGSize, backingScale: CGFloat) -> CGFloat {
+        var area = initial
+        if let panel, panel.width >= 1, panel.height >= 1 { area = panel }
+        var cssWidth: Int?
+        if case .css(let pixels) = width { cssWidth = pixels }
+        return ScreencastGeometry.deviceScale(backingScale: backingScale, cssWidth: cssWidth, pageArea: area)
     }
 
     /// The live tabs to release so at most `limit` stay, least recently used

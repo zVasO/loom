@@ -291,6 +291,24 @@ struct ChromiumTabInitTests {
                       ["width": 1024, "height": 700, "deviceScaleFactor": 1, "mobile": false,
                        "screenWidth": 1024, "screenHeight": 700])
     }
+
+    @Test("the page renders at the screen's scale; the agent's screenshots stay at CSS size")
+    func echelleDeRendu() {
+        expectCommand(("Emulation.setDeviceMetricsOverride",
+                       ChromiumTabRuntime.deviceMetrics(CGSize(width: 640, height: 900), scale: 2)),
+                      "Emulation.setDeviceMetricsOverride",
+                      ["width": 640, "height": 900, "deviceScaleFactor": 2, "mobile": false,
+                       "screenWidth": 640, "screenHeight": 900])
+        let half = ChromiumTabRuntime.deviceMetrics(CGSize(width: 640, height: 900), scale: 2.5)
+        #expect(half["deviceScaleFactor"] as? Double == 2.5)
+        #expect(ChromiumTabRuntime.deviceMetrics(CGSize(width: 1, height: 1), scale: .nan)["deviceScaleFactor"] as? Int == 1)
+        #expect(ChromiumTabRuntime.clipScale(1, deviceScale: 2) == 0.5, "Chromium multiplies clip.scale by the device scale")
+        #expect(ChromiumTabRuntime.clipScale(0.5, deviceScale: 1) == 0.5)
+        let commands = ChromiumTabRuntime.initCommands(viewport: CGSize(width: 800, height: 600), deviceScale: 2,
+                                                       userAgent: agent)
+        let metrics = commands.first { $0.0 == "Emulation.setDeviceMetricsOverride" }
+        #expect(metrics?.1["deviceScaleFactor"] as? Int == 2)
+    }
 }
 
 @Suite("Chromium tab — what the page may post")

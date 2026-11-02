@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import LoomAPI
 import LoomChromium
@@ -130,7 +131,8 @@ extension AppModel {
             initialViewport: viewport,
             uploadRoots: agentUploadRoots(for: item),
             viewportWidth: agentViewportDefaults.width(for: project?.rawValue),
-            networkAccess: agentNetworkAccess)
+            networkAccess: agentNetworkAccess,
+            initialScale: NSScreen.main?.backingScaleFactor ?? 2)
         let browser: any AgentBrowserEngine
         switch engine {
         case .webkit:

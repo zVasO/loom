@@ -72,10 +72,12 @@ public final class ChromiumAgentSurface: ChromiumPanelSurface {
     }
 
     /// The page view's area in points: Fit's size, and the height a set
-    /// width scales into. Applied to the pages between the agent's commands.
-    public func reportPanelSize(_ points: CGSize) {
+    /// width scales into; and its screen's backing scale, which pages render
+    /// at so the picture is sharp (0: unknown, the last one stays). Applied
+    /// to the pages between the agent's commands.
+    public func reportPanelSize(_ points: CGSize, backingScale: CGFloat = 0) {
         let core = self.core
-        Task { await core.panelChanged(pageArea: points, onScreen: true) }
+        Task { await core.panelChanged(pageArea: points, backingScale: backingScale, onScreen: true) }
     }
 
     /// The page view came on screen (or left it): shown, a released current
@@ -101,7 +103,7 @@ public final class ChromiumAgentSurface: ChromiumPanelSurface {
             }
             return
         }
-        reportPanelSize(pageArea)
+        reportPanelSize(pageArea, backingScale: backingScale)
         if appeared {
             setVisible(true)
         }
