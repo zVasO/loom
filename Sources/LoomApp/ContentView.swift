@@ -128,6 +128,8 @@ struct ContentView: View {
     /// Where Mission Control was toggled FROM — a second ⌘G returns there.
     @State private var tabBeforeOverview: MainTab = .projects
     @State private var tabBeforeSettings: MainTab = .projects
+    /// A Settings section to scroll to when the page shows.
+    @State private var settingsFocus: SettingsAnchor?
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
     @State private var selected: DetailSelection?
@@ -167,7 +169,7 @@ struct ContentView: View {
                 selected = .session(id)
                 tab = .sessions
             })
-            case .settings: SettingsPage(model: model)
+            case .settings: SettingsPage(model: model, focus: $settingsFocus)
             case .extensions: ExtensionsView(model: model, onOpenSettings: {
                 tabBeforeSettings = .extensions
                 tab = .settings
@@ -202,7 +204,11 @@ struct ContentView: View {
             model.extensions.isTabVisible = tab == .extensions
         }
         .onChange(of: model.workflows.revealRequest) { tab = .workflows }
-        .onChange(of: model.workflows.settingsRequest) { tab = .settings }
+        // Every such request is about a schedule: Settings opens on them.
+        .onChange(of: model.workflows.settingsRequest) {
+            settingsFocus = .scheduledReviews
+            tab = .settings
+        }
         // A session a workflow, a run or the PRs sidebar asked to show — from any tab.
         .onChange(of: model.workflows.sessionToOpen) {
             guard let id = model.workflows.sessionToOpen else { return }
@@ -264,6 +270,11 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .loomNewSession)) { _ in
             createSession(in: model.selectedProject)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loomNewSessionInProject)) { _ in
+            // Not over the palette or another sheet: one at a time.
+            guard !paletteShown, !usageShown else { return }
+            newSessionSheetShown = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .loomFrameRateChanged)) { _ in
             model.applyFrameRate()
@@ -344,7 +355,7 @@ struct ContentView: View {
                     .hoverBrightness()
             }
             .buttonStyle(.plain)
-            .help("New session — choose the project or a folder, and where it works")
+            .help("New session — choose the project or a folder, and where it works (⌘⇧N)")
             .sheet(isPresented: $newSessionSheetShown) {
                 NewSessionSheet(model: model) { projectID, placement in
                     createSession(in: projectID, placement: placement)
@@ -459,6 +470,14 @@ struct ContentView: View {
                                      subtitle: "In the current project",
                                      section: "Actions", shortcut: "⌘N") {
             createSession(in: model.selectedProject)
+        })
+        actions.append(PaletteAction(id: "act.newSessionIn", icon: "plus.rectangle.on.folder",
+                                     title: "New claude session in…",
+                                     subtitle: "Choose the project first",
+                                     section: "Actions", shortcut: "⌘⇧N") {
+            // Once the palette's own sheet is gone: a sheet asked for while
+            // another one closes is dropped.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { newSessionSheetShown = true }
         })
         if case .session(let id) = selected,
            let item = model.sessions.first(where: { $0.id == id }) {
