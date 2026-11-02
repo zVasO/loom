@@ -39,4 +39,31 @@ struct CommandPaletteTests {
     func requeteVide() {
         #expect(CommandPalette.rank(query: "", in: candidates) == candidates)
     }
+
+    // ⌘⇧N's project picker: a name and its path.
+
+    let names = ["loom", "api-gateway", "Site vitrine", "lab"]
+    let paths = ["/Users/me/dev/loom", "/Users/me/work/api-gateway",
+                 "/Users/me/clients/acme/site", "/Users/me/dev/loom-lab"]
+
+    @Test("picker: the name matches fuzzily, best first")
+    func pickerName() {
+        #expect(CommandPalette.rankIndices(query: "sv", names: names, details: paths) == [2])
+        #expect(CommandPalette.rankIndices(query: "la", names: names, details: paths).first == 3,
+                "\"lab\" starts with it")
+    }
+
+    @Test("picker: the path matches as a substring only, after the names")
+    func pickerPath() {
+        #expect(CommandPalette.rankIndices(query: "acme", names: names, details: paths) == [2])
+        #expect(CommandPalette.rankIndices(query: "loom", names: names, details: paths) == [0, 3],
+                "the name first, then the path that holds it")
+        #expect(CommandPalette.rankIndices(query: "umd", names: names, details: paths).isEmpty,
+                "no fuzzy threading through a path")
+    }
+
+    @Test("picker: an empty query keeps every item, in order")
+    func pickerEmpty() {
+        #expect(CommandPalette.rankIndices(query: "  ", names: names, details: paths) == [0, 1, 2, 3])
+    }
 }
