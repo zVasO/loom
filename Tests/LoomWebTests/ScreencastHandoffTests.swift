@@ -24,8 +24,8 @@ struct ScreencastHandoffTests {
             ends.forEach { close($0) }
         }
         let session = CDPSessionID("tab-1")
-        let panel = ScreencastStream(label: "panel")
-        let tab = ScreencastStream(label: "tab")
+        let panel = ScreencastStream(label: "panel", onPicture: { _ in })
+        let tab = ScreencastStream(label: "tab", onPicture: { _ in })
         let router = ScreencastRouter.shared
         router.register(panel, connection: connection, session: session)
         router.register(tab, connection: connection, session: session)
