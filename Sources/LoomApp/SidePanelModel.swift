@@ -142,6 +142,15 @@ extension AppModel {
         agentBrowsers[parent] != nil
     }
 
+    /// The pages the agent's browser holds — its sidebar row says so.
+    func agentBrowserPageCount(_ parent: SessionID) -> Int {
+        switch agentBrowsers[parent]?.panelContent {
+        case .webKit(let controller)?: return controller.tabs.count
+        case .chromium(let surface)?: return surface.tabs.count
+        case nil: return 0
+        }
+    }
+
     /// The agent drives (or just drove) its browser and the panel does not
     /// show it: the Browser button says so, and its click shows it.
     func isAgentBrowserActiveOffscreen(_ parent: SessionID) -> Bool {

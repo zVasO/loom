@@ -274,6 +274,9 @@ public final class ChromiumPageView: NSView, NSTextInputClient {
 
     private func send(size: CGSize, scale: CGFloat, onScreen: Bool) {
         reported = (size, scale, onScreen)
+        // Another view took the page (the stack's Agent tab, the side panel):
+        // this one leaving is not the panel leaving.
+        if !onScreen, let input, let viewer = input.viewer, viewer !== self { return }
         onPageArea?(size, scale, onScreen)
     }
 

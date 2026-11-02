@@ -56,7 +56,9 @@ test("a click on the palette adds a step; the inspector edits it; undo takes it 
   assert.equal(await tab.$$eval(".loom-node", (n) => n.length), state.workflow.nodes.length + 1);
   await tab.click('.react-flow__node[data-id="agent"]');
   await tab.fill(".inspector input", "Expert Symfony");
-  await tab.waitForTimeout(500);
+  // The editor saves 400 ms after the last edit: wait for the save, not a guess.
+  await tab.waitForFunction(() => (window.__loomWorkflowsStandIn.workflow.nodes.find((n) => n.id === "agent") || {})
+    .title === "Expert Symfony", null, { timeout: 5000 });
   const saved = await tab.evaluate(() => window.__loomWorkflowsStandIn.workflow.nodes.find((n) => n.id === "agent"));
   assert.equal(saved.title, "Expert Symfony", "saved through the bridge");
   await tab.click(".react-flow__pane", { position: { x: 20, y: 20 } });
@@ -85,7 +87,8 @@ test("the orchestrator is switched on from the inspector and saved with the work
   await tab.click(".orchestrator-toggle input");
   await tab.waitForSelector(".orchestrator textarea");
   await tab.fill(".orchestrator textarea", "Rerun a vague expert.");
-  await tab.waitForTimeout(500);
+  await tab.waitForFunction(() => (window.__loomWorkflowsStandIn.workflow.orchestrator || {}).instructions
+    === "Rerun a vague expert.", null, { timeout: 5000 });
   const saved = await tab.evaluate(() => window.__loomWorkflowsStandIn.workflow.orchestrator);
   assert.equal(saved.instructions, "Rerun a vague expert.");
   assert.equal(saved.maxInterventions, 12);
@@ -122,7 +125,8 @@ test("a block of the palette is placed, its link given a verdict, a way back dra
   assert.match(await tab.textContent('.react-flow__node[data-id="php"]'), /Block «Revue PHP»/);
   assert.ok(await tab.$(".react-flow__edge.retry-edge"), "the way back is drawn");
   await tab.click(".palette-block");
-  await tab.waitForTimeout(500);
+  await tab.waitForFunction(() => window.__loomWorkflowsStandIn.workflow.nodes.some((n) => n.id === "revue-php"),
+    null, { timeout: 5000 });
   const placed = await tab.evaluate(() => window.__loomWorkflowsStandIn.workflow.nodes.find((n) => n.id === "revue-php"));
   assert.equal(placed.config.blockID, "b1");
   await tab.click('.react-flow__node[data-id="php"]');
