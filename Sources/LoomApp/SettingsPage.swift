@@ -7,10 +7,135 @@ import LoomUI
 import LoomWeb
 import SwiftUI
 
-/// The in-app Settings page (gear icon): general, remappable shortcuts,
-/// themes (the famous ones), and per-project theme overrides.
+/// A place on the Settings page: a group (General, Sessions…) or one of its
+/// sub-sections. The sidebar lists them and scrolls to one on a click; the
+/// page reports which one is at the top so the sidebar follows the scroll.
+/// Declared in page order — `allCases` is what "the last one scrolled past"
+/// is read against.
+enum SettingsAnchor: String, CaseIterable, Identifiable {
+    case general, terminal, shortcuts
+    case sessions, sessionLaunch, instructions, badges
+    case agents, agentTools, agentEngine, agentNetwork, agentPage
+    case review, reviewWorktrees, reviewCommand, scheduledReviews
+    case appearance, appearanceMode, themes, documents
+    case projects
+    case extensions
+
+    var id: String { rawValue }
+
+    /// A group of the page and its sub-sections, as the sidebar lists them.
+    struct Entry: Identifiable {
+        let id: SettingsAnchor
+        let items: [SettingsAnchor]
+    }
+
+    /// The groups in page order, each with its sub-sections.
+    static let groups: [Entry] = [
+        Entry(id: .general, items: [.terminal, .shortcuts]),
+        Entry(id: .sessions, items: [.sessionLaunch, .instructions, .badges]),
+        Entry(id: .agents, items: [.agentTools, .agentEngine, .agentNetwork, .agentPage]),
+        Entry(id: .review, items: [.reviewWorktrees, .reviewCommand, .scheduledReviews]),
+        Entry(id: .appearance, items: [.appearanceMode, .themes, .documents]),
+        Entry(id: .projects, items: []),
+        Entry(id: .extensions, items: []),
+    ]
+
+    /// The group a sub-section belongs to (a group is its own).
+    var group: SettingsAnchor {
+        Self.groups.first { $0.id == self || $0.items.contains(self) }?.id ?? self
+    }
+
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .terminal: "Terminal"
+        case .shortcuts: "Shortcuts"
+        case .sessions: "Sessions"
+        case .sessionLaunch: "Launch & sidebar"
+        case .instructions: "Instructions"
+        case .badges: "Badges"
+        case .agents: "Agents"
+        case .agentTools: "Tools"
+        case .agentEngine: "Browser engine"
+        case .agentNetwork: "Network"
+        case .agentPage: "Page & data"
+        case .review: "Code review"
+        case .reviewWorktrees: "Worktrees & clones"
+        case .reviewCommand: "Setup command"
+        case .scheduledReviews: "Scheduled reviews"
+        case .appearance: "Appearance"
+        case .appearanceMode: "Light & dark"
+        case .themes: "Themes"
+        case .documents: "Reports"
+        case .projects: "Projects"
+        case .extensions: "Extensions"
+        }
+    }
+
+    /// A group's icon, in the sidebar and above its sections.
+    var icon: String {
+        switch group {
+        case .general: "gearshape"
+        case .sessions: "square.stack"
+        case .agents: "sparkles"
+        case .review: "arrow.triangle.pull"
+        case .appearance: "paintpalette"
+        case .projects: "folder"
+        default: "puzzlepiece.extension"
+        }
+    }
+
+    /// One line under a group's title: what is in it.
+    var blurb: String {
+        switch group {
+        case .general: "The terminal, the keyboard and Loom's shortcuts."
+        case .sessions: "How sessions start, what claude is told, and how they are filed."
+        case .agents: "What the agents may use, and the browser they drive."
+        case .review: "Pull request reviews — by hand or on a schedule."
+        case .appearance: "Themes for Loom, for Claude Code and for workflow reports."
+        case .projects: "Each project's own theme and agent page width."
+        default: "Web pages that plug into Loom."
+        }
+    }
+}
+
+/// Each anchor's top edge in the page's scroll view.
+private struct SettingsAnchorOffsets: PreferenceKey {
+    static let defaultValue: [SettingsAnchor: CGFloat] = [:]
+    static func reduce(value: inout [SettingsAnchor: CGFloat], nextValue: () -> [SettingsAnchor: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+private extension View {
+    /// Makes the view a target of the sidebar and reports where it sits.
+    func settingsAnchor(_ anchor: SettingsAnchor) -> some View {
+        id(anchor)
+            .background(GeometryReader { geometry in
+                Color.clear.preference(
+                    key: SettingsAnchorOffsets.self,
+                    value: [anchor: geometry.frame(in: .named(SettingsPage.scrollSpace)).minY])
+            })
+    }
+}
+
+/// The in-app Settings page (gear icon): a sidebar of groups and their
+/// sections on the left — a click scrolls there, and it follows the scroll —
+/// and the settings themselves on the right.
 struct SettingsPage: View {
     let model: AppModel
+    /// A section to bring into view, asked from elsewhere (a proposed
+    /// schedule to review); cleared once shown.
+    @Binding var focus: SettingsAnchor?
+
+    static let scrollSpace = "loom.settings.scroll"
+
+    /// The section at the top of the page, highlighted in the sidebar.
+    @State private var active: SettingsAnchor = .general
+    /// Until then the scroll does not move the highlight: a click's own
+    /// animated scroll passes over the sections in between, and the last one
+    /// may never reach the top.
+    @State private var followScrollAfter = Date.distantPast
 
     @AppStorage("loom.terminal.fps") private var fps = 60
     @AppStorage("loom.terminal.copyOnSelect") private var copyOnSelect = false
@@ -45,29 +170,158 @@ struct SettingsPage: View {
     @State private var removalCandidate: InstalledExtension?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Settings")
-                    .font(.system(size: 21, weight: .bold))
-                    .foregroundStyle(DefaultTheme.primaryText)
-
-                generalSection
-                sessionsSection
-                agentsSection
-                instructionsSection
-                reviewSection
-                ScheduledReviewsSettings(model: model)
-                shortcutsSection
-                badgesSection
-                themesSection
-                projectsSection
-                extensionsSection
+        ScrollViewReader { proxy in
+            HStack(spacing: 0) {
+                sidebar(proxy)
+                    .frame(width: 220)
+                    .background(DefaultTheme.background)
+                Divider().overlay(DefaultTheme.cardBorder)
+                GeometryReader { viewport in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 44) {
+                            generalGroup
+                            sessionsGroup
+                            agentsGroup
+                            reviewGroup
+                            appearanceGroup
+                            projectsGroup
+                            extensionsGroup
+                        }
+                        .frame(maxWidth: 760, alignment: .leading)
+                        .padding(.horizontal, 36).padding(.top, 28)
+                        // Room for the last sections to reach the top when
+                        // the sidebar scrolls to them.
+                        .padding(.bottom, max(44, viewport.size.height * 0.5))
+                        .frame(maxWidth: .infinity)
+                    }
+                    .coordinateSpace(name: Self.scrollSpace)
+                    .onPreferenceChange(SettingsAnchorOffsets.self) { offsets in
+                        follow(offsets)
+                    }
+                }
             }
-            .frame(maxWidth: 760, alignment: .leading)
-            .padding(.horizontal, 36).padding(.top, 32).padding(.bottom, 44)
-            .frame(maxWidth: .infinity)
+            .onChange(of: focus, initial: true) {
+                guard let focus else { return }
+                // Once the page is laid out: a scroll asked for before it is
+                // does nothing.
+                DispatchQueue.main.async {
+                    jump(to: focus, with: proxy, animated: false)
+                    self.focus = nil
+                }
+            }
         }
         .background(DefaultTheme.background)
+    }
+
+    // MARK: Navigation
+
+    private func jump(to anchor: SettingsAnchor, with proxy: ScrollViewProxy, animated: Bool = true) {
+        active = anchor
+        followScrollAfter = Date().addingTimeInterval(0.6)
+        if animated {
+            withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(anchor, anchor: .top) }
+        } else {
+            proxy.scrollTo(anchor, anchor: .top)
+        }
+    }
+
+    /// The last section whose top went past the top of the page.
+    private func follow(_ offsets: [SettingsAnchor: CGFloat]) {
+        guard Date() >= followScrollAfter else { return }
+        let reached = SettingsAnchor.allCases.last(where: { (offsets[$0] ?? .infinity) <= 48 }) ?? .general
+        if reached != active { active = reached }
+    }
+
+    private func sidebar(_ proxy: ScrollViewProxy) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Settings")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 2)
+                ForEach(SettingsAnchor.groups) { entry in
+                    VStack(alignment: .leading, spacing: 1) {
+                        sidebarRow(entry.id, proxy: proxy)
+                        ForEach(entry.items) { item in
+                            sidebarRow(item, proxy: proxy)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 22)
+        }
+    }
+
+    private func sidebarRow(_ anchor: SettingsAnchor, proxy: ScrollViewProxy) -> some View {
+        let isGroup = anchor.group == anchor
+        let isActive = active == anchor
+        let inActiveGroup = active.group == anchor.group
+        return Button {
+            jump(to: anchor, with: proxy)
+        } label: {
+            HStack(spacing: 8) {
+                if isGroup {
+                    Image(systemName: anchor.icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(inActiveGroup ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                        .frame(width: 16)
+                }
+                Text(anchor.title)
+                    .font(.system(size: isGroup ? 12.5 : 12, weight: isGroup ? .semibold : .regular))
+                    .foregroundStyle(isActive ? DefaultTheme.accent
+                                     : (isGroup ? DefaultTheme.primaryText : DefaultTheme.secondaryText))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, isGroup ? 8 : 32).padding(.trailing, 8)
+            .padding(.vertical, isGroup ? 6 : 4)
+            .background(isActive ? DefaultTheme.accent.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverSurface()
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    // MARK: Building blocks
+
+    /// A group's heading: its icon, its title, what is in it.
+    private func groupHeader(_ anchor: SettingsAnchor) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: anchor.icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(DefaultTheme.accent)
+                .frame(width: 32, height: 32)
+                .background(DefaultTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(anchor.title)
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                Text(anchor.blurb)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
+        }
+        .settingsAnchor(anchor)
+    }
+
+    /// A group: its heading, then its sections.
+    private func group(_ anchor: SettingsAnchor, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 22) {
+            groupHeader(anchor)
+            content()
+        }
+    }
+
+    /// A section of a group: its title, then what it holds.
+    private func section(_ anchor: SettingsAnchor, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle(anchor.title)
+            content()
+        }
+        .settingsAnchor(anchor)
     }
 
     private func sectionTitle(_ title: String) -> some View {
@@ -86,90 +340,125 @@ struct SettingsPage: View {
                 .stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
+    private var cardDivider: some View {
+        Divider().overlay(DefaultTheme.cardBorder)
+    }
+
+    /// The explanation under a setting.
+    private func detail(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(DefaultTheme.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13))
+            .foregroundStyle(DefaultTheme.primaryText)
+    }
+
+    /// A switch, and what it does underneath.
+    private func toggleRow(_ title: String, isOn: Binding<Bool>, detail text: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Toggle(isOn: isOn) { label(title) }
+                .toggleStyle(.switch)
+            detail(text)
+        }
+    }
+
     // MARK: General
 
-    private var generalSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("General")
-            card {
-                HStack(spacing: 12) {
-                    Text("Terminal refresh rate")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                    Spacer()
-                    Picker("", selection: $fps) {
-                        Text("30 fps").tag(30)
-                        Text("60 fps").tag(60)
-                        Text("120 fps").tag(120)
+    private var generalGroup: some View {
+        group(.general) {
+            section(.terminal) {
+                card {
+                    HStack(spacing: 12) {
+                        label("Terminal refresh rate")
+                        Spacer()
+                        Picker("", selection: $fps) {
+                            Text("30 fps").tag(30)
+                            Text("60 fps").tag(60)
+                            Text("120 fps").tag(120)
+                        }
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                        .onChange(of: fps) {
+                            NotificationCenter.default.post(name: .loomFrameRateChanged, object: nil)
+                        }
                     }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                    .onChange(of: fps) {
-                        NotificationCenter.default.post(name: .loomFrameRateChanged, object: nil)
-                    }
+                    detail("Caps how often terminal frames are produced during streaming. 60 fps is the default; 30 spares the battery or an older Mac; 120 is for a ProMotion display. The first frame of any burst is always immediate.")
+                    cardDivider
+                    toggleRow("Copy terminal selection on release", isOn: $copyOnSelect,
+                              detail: "Releasing a drag in a session terminal puts the text on the clipboard right away, the way iTerm does. Off, the selection waits for ⌘C. Select everything the pane holds with ⌘⇧A — ⌘A keeps typing into the agent's own field.")
+                    cardDivider
+                    toggleRow("Use Option as Meta key", isOn: $optionAsMeta,
+                              detail: "⌥ + a letter sends ESC + the letter (Emacs-style bindings). Off, ⌥ stays the compose layer of your keyboard — braces and brackets on AZERTY, dead keys everywhere. ⌥←, ⌥→, ⌥⌫ and ⌥↩ work either way, and ⇧Tab, ⇧↩, Esc, ⌃ shortcuts always reach claude.")
                 }
-                Text("Caps how often terminal frames are produced during streaming. 60 fps is the default; 30 spares the battery or an older Mac; 120 is for a ProMotion display. The first frame of any burst is always immediate.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Divider().overlay(DefaultTheme.cardBorder)
-                Toggle(isOn: $copyOnSelect) {
-                    Text("Copy terminal selection on release")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                }
-                .toggleStyle(.switch)
-                Text("Releasing a drag in a session terminal puts the text on the clipboard right away, the way iTerm does. Off, the selection waits for ⌘C. Select everything the pane holds with ⌘⇧A — ⌘A keeps typing into the agent's own field.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Divider().overlay(DefaultTheme.cardBorder)
-                Toggle(isOn: $optionAsMeta) {
-                    Text("Use Option as Meta key")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                }
-                .toggleStyle(.switch)
-                Text("⌥ + a letter sends ESC + the letter (Emacs-style bindings). Off, ⌥ stays the compose layer of your keyboard — braces and brackets on AZERTY, dead keys everywhere. ⌥←, ⌥→, ⌥⌫ and ⌥↩ work either way, and ⇧Tab, ⇧↩, Esc, ⌃ shortcuts always reach claude.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
             }
+            section(.shortcuts) {
+                card {
+                    shortcutRow("New claude session", key: $keyNewSession)
+                    cardDivider
+                    shortcutRow("New session in a project of your choice", key: $keyNewSession, shift: true)
+                    cardDivider
+                    shortcutRow("New tab in the stack (terminal / browser)", key: $keyNewTab)
+                    cardDivider
+                    shortcutRow("Mission Control", key: $keyMissionControl)
+                    cardDivider
+                    shortcutRow("Go to session (palette)", key: $keyPalette)
+                    detail("One letter or digit, always combined with ⌘. ⌘N starts a session in the current project at once; with ⇧ the same letter asks which project first. Menu shortcuts update immediately.")
+                }
+            }
+        }
+    }
+
+    private func shortcutRow(_ title: String, key: Binding<String>, shift: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            label(title)
+            Spacer()
+            Text(shift ? "⌘⇧" : "⌘")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(DefaultTheme.secondaryText)
+            TextField("", text: Binding(
+                get: { key.wrappedValue.uppercased() },
+                set: { raw in
+                    // Keep the LAST typed character, letters/digits only.
+                    if let char = raw.lowercased().last(where: { $0.isLetter || $0.isNumber }) {
+                        key.wrappedValue = String(char)
+                    }
+                }))
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .multilineTextAlignment(.center)
+                .frame(width: 36, height: 28)
+                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7)
+                    .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                // The ⇧ row follows ⌘N's letter: shown, not edited apart.
+                .disabled(shift)
+                .opacity(shift ? 0.6 : 1)
         }
     }
 
     // MARK: Sessions
 
-    private var sessionsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Sessions")
-            card {
-                Toggle(isOn: $restoreOnLaunch) {
-                    Text("Reopen the last session on launch")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
+    private var sessionsGroup: some View {
+        group(.sessions) {
+            section(.sessionLaunch) {
+                card {
+                    toggleRow("Reopen the last session on launch", isOn: $restoreOnLaunch,
+                              detail: "Loom comes back to the project you left and restarts the session you had open. Your other closed sessions keep showing in the sidebar as they always do, and stay asleep until you click one — waking them all would reload every plugin and MCP server at once.")
+                    cardDivider
+                    toggleRow("File PR review sessions under Code Review", isOn: $groupReviews,
+                              detail: "Sessions opened from the PRs tab, or wearing a PR badge, gather below the projects in their own foldable section, still grouped by project. Off, they stay with the rest of their project's sessions.")
+                    cardDivider
+                    toggleRow("File workflow sessions under Workflows", isOn: $groupWorkflows,
+                              detail: "A workflow run's orchestrator and its visible steps gather in their own foldable section, one group per run, the orchestrator first. Off, they stay with their project's sessions.")
                 }
-                .toggleStyle(.switch)
-                Text("Loom comes back to the project you left and restarts the session you had open. Your other closed sessions keep showing in the sidebar as they always do, and stay asleep until you click one — waking them all would reload every plugin and MCP server at once.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Divider().overlay(DefaultTheme.cardBorder)
-                Toggle(isOn: $groupReviews) {
-                    Text("File PR review sessions under Code Review")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                }
-                .toggleStyle(.switch)
-                Text("Sessions opened from the PRs tab, or wearing a PR badge, gather below the projects in their own foldable section, still grouped by project. Off, they stay with the rest of their project's sessions.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Toggle(isOn: $groupWorkflows) {
-                    Text("File workflow sessions under Workflows")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                }
-                .toggleStyle(.switch)
-                Text("A workflow run's orchestrator and its visible steps gather in their own foldable section, one group per run, the orchestrator first. Off, they stay with their project's sessions.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
             }
+            section(.instructions) { instructionsCard }
+            section(.badges) { badgesCard }
         }
     }
 
@@ -180,13 +469,91 @@ struct SettingsPage: View {
         model.agentBrowsersAllowedHosts = hostsDraft
     }
 
+    private var agentsGroup: some View {
+        group(.agents) {
+            section(.agentTools) {
+                card {
+                    toggleRow("Browser tools for agents", isOn: $browserToolsOn,
+                              detail: "Each session's agent gets its own browser — shown beside its terminal, on a profile kept per project and never your own cookies (reviews get a private one) — and browser_* tools to open your dev server, click, type, read the console and take screenshots. Off: calls are refused at once, and the agents' Chromium stops; sessions started or resumed afterwards no longer list the tools.")
+                    // Through the model: turning them off also cancels what is queued.
+                    .onChange(of: browserToolsOn) { _, on in model.agentBrowserToolsEnabled = on }
+                    cardDivider
+                    toggleRow("Workflow tools in every session", isOn: $libraryToolsOn,
+                              detail: "Agents can read your workflows, blocks, experts and scheduled reviews, and propose new ones (loom_library_*). What they save is a proposal: it never runs nor fires until you validate it in Workflows › To review. Off: sessions started or resumed afterwards no longer list these tools.")
+                    cardDivider
+                    toggleRow("Run Loom's tools without asking", isOn: $preapproveOn,
+                              detail: "Claude Code runs Loom's own tools (mcp__loom__…: your session's title, badges and browser) without a permission prompt, so a browser test does not stop at every click. Your own deny rules still apply. Off: Claude Code asks, as for any MCP tool. Applies to sessions started or resumed after the change.")
+                }
+            }
+            section(.agentEngine) {
+                card { agentEngineRows }
+            }
+            section(.agentNetwork) {
+                card {
+                    toggleRow("Agent browser: local sites only", isOn: $localOnlyOn,
+                              detail: "The agents' browsers load from your machine's own addresses (localhost, 127.0.0.1) and the hosts below, nothing else: pages, scripts, images, requests and web sockets — under both engines. WebKit filters every load, with WebRTC and DNS prefetching off where it allows; Chromium sends everything else to a proxy Loom holds that refuses it, with QUIC, WebRTC and DNS prefetching off, and stays closed if that proxy cannot start. Open pages start again under the mode when it is turned on (under Chromium, on any change). The agent's other tools stay under Claude Code's own permissions.")
+                    .onChange(of: localOnlyOn) { _, on in model.agentBrowsersLocalOnly = on }
+                    if localOnlyOn {
+                        TextField("api.example.com, *.staging.example.com", text: $hostsDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12))
+                            .onAppear { hostsDraft = model.agentBrowsersAllowedHosts }
+                            .onSubmit { commitHosts() }
+                            .onDisappear { commitHosts() }
+                        let invalid = AgentNetworkRules.parse(hostsDraft).invalid
+                        Text(invalid.isEmpty
+                             ? "Hosts the app under test needs (its API, its login), comma-separated; Return applies them."
+                             : "Not a host name, ignored: " + invalid.joined(separator: ", "))
+                            .font(.system(size: 11))
+                            .foregroundStyle(invalid.isEmpty ? DefaultTheme.secondaryText : DefaultTheme.danger)
+                    }
+                }
+            }
+            section(.agentPage) {
+                card {
+                    HStack(spacing: 12) {
+                        label("Agent browser page width")
+                        Spacer()
+                        Picker("", selection: Binding<Int>(
+                            get: { Self.widthTag(model.agentViewportDefaults.global) },
+                            set: { model.setAgentGlobalViewportWidth(Self.width(tag: $0) ?? AgentViewportDefaults.factoryDefault) })) {
+                            ForEach(ViewportWidth.presets, id: \.label) { width in
+                                Text(width.label).tag(Self.widthTag(width))
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    detail("The width an agent's page opens at in new sessions, unless its project sets its own (Projects, below). A width wider than the panel is scaled into it. The agent's browser_resize and the panel's menu change one session only.")
+                    cardDivider
+                    HStack(spacing: 10) {
+                        GhostButton("Clear agent browser data", systemImage: "trash") {
+                            clearingAgentData = true
+                            Task {
+                                await model.clearAgentBrowserData()
+                                clearingAgentData = false
+                                agentDataCleared = true
+                            }
+                        }
+                        .disabled(clearingAgentData)
+                        if clearingAgentData { ProgressView().controlSize(.small) }
+                        if agentDataCleared {
+                            Text("Cleared ✓")
+                                .font(.system(size: 11))
+                                .foregroundStyle(DefaultTheme.secondaryText)
+                        }
+                    }
+                    detail("Signs the agents out of every site they or you logged in to in their browsers — WebKit's and Chromium's — and empties their storage. Your own browser is untouched.")
+                }
+            }
+        }
+    }
+
     /// ADR-0016: which engine drives the agents' pages, and the Chromium found.
     @ViewBuilder
     private var agentEngineRows: some View {
         HStack(spacing: 12) {
-            Text("Agent browser engine")
-                .font(.system(size: 13))
-                .foregroundStyle(DefaultTheme.primaryText)
+            label("Agent browser engine")
             Spacer()
             Picker("", selection: $engineChoice) {
                 Text("Automatic").tag(AgentBrowserEnginePreference.automatic)
@@ -328,422 +695,233 @@ struct SettingsPage: View {
         refreshChromiumStatus()
     }
 
-    private var agentsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Agents")
-            card {
-                Toggle(isOn: $browserToolsOn) {
-                    Text("Browser tools for agents")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                }
-                .toggleStyle(.switch)
-                // Through the model: turning them off also cancels what is queued.
-                .onChange(of: browserToolsOn) { _, on in model.agentBrowserToolsEnabled = on }
-                Text("Each session's agent gets its own browser — shown beside its terminal, on a profile kept per project and never your own cookies (reviews get a private one) — and browser_* tools to open your dev server, click, type, read the console and take screenshots. Off: calls are refused at once, and the agents' Chromium stops; sessions started or resumed afterwards no longer list the tools.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Divider().overlay(DefaultTheme.cardBorder)
-                Toggle(isOn: $libraryToolsOn) {
-                    Text("Workflow tools in every session")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                }
-                .toggleStyle(.switch)
-                Text("Agents can read your workflows, blocks, experts and scheduled reviews, and propose new ones (loom_library_*). What they save is a proposal: it never runs nor fires until you validate it in Workflows › To review. Off: sessions started or resumed afterwards no longer list these tools.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Divider().overlay(DefaultTheme.cardBorder)
-                agentEngineRows
-                Divider().overlay(DefaultTheme.cardBorder)
-                Toggle(isOn: $preapproveOn) {
-                    Text("Run Loom's tools without asking")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                }
-                .toggleStyle(.switch)
-                Text("Claude Code runs Loom's own tools (mcp__loom__…: your session's title, badges and browser) without a permission prompt, so a browser test does not stop at every click. Your own deny rules still apply. Off: Claude Code asks, as for any MCP tool. Applies to sessions started or resumed after the change.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Divider().overlay(DefaultTheme.cardBorder)
-                Toggle(isOn: $localOnlyOn) {
-                    Text("Agent browser: local sites only")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                }
-                .toggleStyle(.switch)
-                .onChange(of: localOnlyOn) { _, on in model.agentBrowsersLocalOnly = on }
-                Text("The agents' browsers load from your machine's own addresses (localhost, 127.0.0.1) and the hosts below, nothing else: pages, scripts, images, requests and web sockets — under both engines. WebKit filters every load, with WebRTC and DNS prefetching off where it allows; Chromium sends everything else to a proxy Loom holds that refuses it, with QUIC, WebRTC and DNS prefetching off, and stays closed if that proxy cannot start. Open pages start again under the mode when it is turned on (under Chromium, on any change). The agent's other tools stay under Claude Code's own permissions.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                if localOnlyOn {
-                    TextField("api.example.com, *.staging.example.com", text: $hostsDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 12))
-                        .onAppear { hostsDraft = model.agentBrowsersAllowedHosts }
-                        .onSubmit { commitHosts() }
-                        .onDisappear { commitHosts() }
-                    let invalid = AgentNetworkRules.parse(hostsDraft).invalid
-                    Text(invalid.isEmpty
-                         ? "Hosts the app under test needs (its API, its login), comma-separated; Return applies them."
-                         : "Not a host name, ignored: " + invalid.joined(separator: ", "))
-                        .font(.system(size: 11))
-                        .foregroundStyle(invalid.isEmpty ? DefaultTheme.secondaryText : DefaultTheme.danger)
-                }
-                Divider().overlay(DefaultTheme.cardBorder)
-                HStack(spacing: 12) {
-                    Text("Agent browser page width")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                    Spacer()
-                    Picker("", selection: Binding<Int>(
-                        get: { Self.widthTag(model.agentViewportDefaults.global) },
-                        set: { model.setAgentGlobalViewportWidth(Self.width(tag: $0) ?? AgentViewportDefaults.factoryDefault) })) {
-                        ForEach(ViewportWidth.presets, id: \.label) { width in
-                            Text(width.label).tag(Self.widthTag(width))
-                        }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                }
-                Text("The width an agent's page opens at in new sessions, unless its project sets its own (Projects, below). A width wider than the panel is scaled into it. The agent's browser_resize and the panel's menu change one session only.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Divider().overlay(DefaultTheme.cardBorder)
-                HStack(spacing: 10) {
-                    GhostButton("Clear agent browser data", systemImage: "trash") {
-                        clearingAgentData = true
-                        Task {
-                            await model.clearAgentBrowserData()
-                            clearingAgentData = false
-                            agentDataCleared = true
-                        }
-                    }
-                    .disabled(clearingAgentData)
-                    if clearingAgentData { ProgressView().controlSize(.small) }
-                    if agentDataCleared {
-                        Text("Cleared ✓")
-                            .font(.system(size: 11))
-                            .foregroundStyle(DefaultTheme.secondaryText)
-                    }
-                }
-                Text("Signs the agents out of every site they or you logged in to in their browsers — WebKit's and Chromium's — and empties their storage. Your own browser is untouched.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-            }
-        }
-    }
-
     // MARK: Session instructions
 
     @State private var instructionsOn = true
     @State private var instructionsDraft = ""
 
     /// What every claude session is told on top of its system prompt.
-    private var instructionsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Session instructions")
-            card {
-                Toggle(isOn: $instructionsOn) {
-                    Text("Give every claude session these instructions")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                }
-                .toggleStyle(.switch)
-                .onChange(of: instructionsOn) { _, on in model.sessionInstructionsEnabled = on }
-                Text("Appended to claude's system prompt (--append-system-prompt) in every session Loom starts or resumes, reviews included — your own rules for all projects, next to each project's CLAUDE.md. The default tells claude to keep its Loom session's title and badges current through Loom's tools. Applies to sessions started or resumed after the change.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                HStack {
-                    Text("Instructions")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                    Spacer()
-                    if instructionsDraft != SessionInstructions.defaultText {
-                        GhostButton("Reset to default", systemImage: "arrow.counterclockwise") {
-                            instructionsDraft = SessionInstructions.defaultText
-                        }
-                    }
-                }
-                TextEditor(text: $instructionsDraft)
-                    .font(.system(size: 11, design: .monospaced))
+    private var instructionsCard: some View {
+        card {
+            toggleRow("Give every claude session these instructions", isOn: $instructionsOn,
+                      detail: "Appended to claude's system prompt (--append-system-prompt) in every session Loom starts or resumes, reviews included — your own rules for all projects, next to each project's CLAUDE.md. The default tells claude to keep its Loom session's title and badges current through Loom's tools. Applies to sessions started or resumed after the change.")
+            .onChange(of: instructionsOn) { _, on in model.sessionInstructionsEnabled = on }
+            HStack {
+                Text("Instructions")
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DefaultTheme.primaryText)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .frame(minHeight: 180)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
-                    .opacity(instructionsOn ? 1 : 0.5)
-                    .onChange(of: instructionsDraft) { _, draft in
-                        model.sessionInstructionsText = draft
+                Spacer()
+                if instructionsDraft != SessionInstructions.defaultText {
+                    GhostButton("Reset to default", systemImage: "arrow.counterclockwise") {
+                        instructionsDraft = SessionInstructions.defaultText
                     }
+                }
             }
-            .onAppear {
-                instructionsOn = model.sessionInstructionsEnabled
-                instructionsDraft = model.sessionInstructionsText
-            }
-        }
-    }
-
-    // MARK: Shortcuts
-
-    private var shortcutsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Shortcuts")
-            card {
-                shortcutRow("New claude session", key: $keyNewSession)
-                Divider().overlay(DefaultTheme.cardBorder)
-                shortcutRow("New tab in the stack (terminal / browser)", key: $keyNewTab)
-                Divider().overlay(DefaultTheme.cardBorder)
-                shortcutRow("Mission Control", key: $keyMissionControl)
-                Divider().overlay(DefaultTheme.cardBorder)
-                shortcutRow("Go to session (palette)", key: $keyPalette)
-                Text("One letter or digit, always combined with ⌘. Menu shortcuts update immediately.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-            }
-        }
-    }
-
-    private func shortcutRow(_ label: String, key: Binding<String>) -> some View {
-        HStack(spacing: 12) {
-            Text(label)
-                .font(.system(size: 13))
+            TextEditor(text: $instructionsDraft)
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(DefaultTheme.primaryText)
-            Spacer()
-            Text("⌘")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(DefaultTheme.secondaryText)
-            TextField("", text: Binding(
-                get: { key.wrappedValue.uppercased() },
-                set: { raw in
-                    // Keep the LAST typed character, letters/digits only.
-                    if let char = raw.lowercased().last(where: { $0.isLetter || $0.isNumber }) {
-                        key.wrappedValue = String(char)
-                    }
-                }))
-                .textFieldStyle(.plain)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .multilineTextAlignment(.center)
-                .frame(width: 36, height: 28)
-                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7)
-                    .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .frame(minHeight: 180)
+                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .opacity(instructionsOn ? 1 : 0.5)
+                .onChange(of: instructionsDraft) { _, draft in
+                    model.sessionInstructionsText = draft
+                }
+        }
+        .onAppear {
+            instructionsOn = model.sessionInstructionsEnabled
+            instructionsDraft = model.sessionInstructionsText
         }
     }
 
-    // MARK: Review
-
-    private var reviewSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Review")
-            card {
-                Toggle(isOn: Binding(
-                    get: { model.reviewWorktreesReadOnly },
-                    set: { model.reviewWorktreesReadOnly = $0 })) {
-                    Text("Read-only review worktrees")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                }
-                .toggleStyle(.switch)
-                Text("Guard hooks block commit/push in PR review worktrees — the session can build and test but never lands work on someone else's branch. Applies at the next checkout of each PR.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Divider().overlay(DefaultTheme.cardBorder)
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Clone repositories into")
-                            .font(.system(size: 13))
-                            .foregroundStyle(DefaultTheme.primaryText)
-                        Text(model.cloneDirectory?.path ?? "Not chosen yet — asked at the first clone")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(DefaultTheme.secondaryText)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    Spacer()
-                    GhostButton("Change…", systemImage: "folder") {
-                        if let folder = AppModel.pickFolder(title: "Clone repositories into…") {
-                            model.cloneDirectory = folder
-                        }
-                    }
-                }
-                Text("Where a repository added from the PRs tab is cloned (as <folder>/<name>) before it becomes a project.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                if model.hiddenCount > 0 {
-                    HStack {
-                        Text(model.hiddenCount == 1
-                             ? "1 organization or repository hidden in the PRs tab"
-                             : "\(model.hiddenCount) organizations or repositories hidden in the PRs tab")
-                            .font(.system(size: 12))
-                            .foregroundStyle(DefaultTheme.primaryText)
-                        Spacer()
-                        GhostButton("Show all", systemImage: "eye") { model.unhideAll() }
-                    }
-                }
-                Divider().overlay(DefaultTheme.cardBorder)
-                Toggle(isOn: Binding(
-                    get: { model.reviewSetupCommandEnabled },
-                    set: { model.reviewSetupCommandEnabled = $0 })) {
-                    Text("Run /\(PRReviewCommand.name) when a review starts")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                }
-                .toggleStyle(.switch)
-                Text("The command is installed in every review worktree either way; on, it is typed into a fresh review session so claude loads the PR — body, diff, threads, linked issues — and keeps a brief in memory before you point it at lines.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                HStack {
-                    Text("/\(PRReviewCommand.name) command")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                    Spacer()
-                    if model.reviewSetupCommandTemplate != nil {
-                        GhostButton("Reset to default", systemImage: "arrow.counterclockwise") {
-                            model.reviewSetupCommandTemplate = nil
-                            setupCommandDraft = PRReviewCommand.defaultTemplate
-                        }
-                    }
-                }
-                TextEditor(text: $setupCommandDraft)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.primaryText)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .frame(minHeight: 220)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
-                    .onAppear {
-                        setupCommandDraft = model.reviewSetupCommandTemplate ?? PRReviewCommand.defaultTemplate
-                    }
-                    .onChange(of: setupCommandDraft) { _, draft in
-                        model.reviewSetupCommandTemplate = draft
-                    }
-                Text("Claude Code slash-command markdown: a frontmatter, then the prompt. Placeholders filled at launch: \(PRReviewCommand.placeholders.joined(separator: ", ")). $ARGUMENTS is claude's own — the PR number typed after the command.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-            }
-        }
-    }
+    // MARK: Code review
 
     @State private var setupCommandDraft = ""
+
+    private var reviewGroup: some View {
+        group(.review) {
+            section(.reviewWorktrees) {
+                card {
+                    toggleRow("Read-only review worktrees", isOn: Binding(
+                        get: { model.reviewWorktreesReadOnly },
+                        set: { model.reviewWorktreesReadOnly = $0 }),
+                              detail: "Guard hooks block commit/push in PR review worktrees — the session can build and test but never lands work on someone else's branch. Applies at the next checkout of each PR.")
+                    cardDivider
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            label("Clone repositories into")
+                            Text(model.cloneDirectory?.path ?? "Not chosen yet — asked at the first clone")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(DefaultTheme.secondaryText)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        Spacer()
+                        GhostButton("Change…", systemImage: "folder") {
+                            if let folder = AppModel.pickFolder(title: "Clone repositories into…") {
+                                model.cloneDirectory = folder
+                            }
+                        }
+                    }
+                    detail("Where a repository added from the PRs tab is cloned (as <folder>/<name>) before it becomes a project.")
+                    if model.hiddenCount > 0 {
+                        cardDivider
+                        HStack {
+                            Text(model.hiddenCount == 1
+                                 ? "1 organization or repository hidden in the PRs tab"
+                                 : "\(model.hiddenCount) organizations or repositories hidden in the PRs tab")
+                                .font(.system(size: 12))
+                                .foregroundStyle(DefaultTheme.primaryText)
+                            Spacer()
+                            GhostButton("Show all", systemImage: "eye") { model.unhideAll() }
+                        }
+                    }
+                }
+            }
+            section(.reviewCommand) {
+                card {
+                    toggleRow("Run /\(PRReviewCommand.name) when a review starts", isOn: Binding(
+                        get: { model.reviewSetupCommandEnabled },
+                        set: { model.reviewSetupCommandEnabled = $0 }),
+                              detail: "The command is installed in every review worktree either way; on, it is typed into a fresh review session so claude loads the PR — body, diff, threads, linked issues — and keeps a brief in memory before you point it at lines.")
+                    HStack {
+                        Text("/\(PRReviewCommand.name) command")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(DefaultTheme.primaryText)
+                        Spacer()
+                        if model.reviewSetupCommandTemplate != nil {
+                            GhostButton("Reset to default", systemImage: "arrow.counterclockwise") {
+                                model.reviewSetupCommandTemplate = nil
+                                setupCommandDraft = PRReviewCommand.defaultTemplate
+                            }
+                        }
+                    }
+                    TextEditor(text: $setupCommandDraft)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.primaryText)
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .frame(minHeight: 220)
+                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                        .onAppear {
+                            setupCommandDraft = model.reviewSetupCommandTemplate ?? PRReviewCommand.defaultTemplate
+                        }
+                        .onChange(of: setupCommandDraft) { _, draft in
+                            model.reviewSetupCommandTemplate = draft
+                        }
+                    detail("Claude Code slash-command markdown: a frontmatter, then the prompt. Placeholders filled at launch: \(PRReviewCommand.placeholders.joined(separator: ", ")). $ARGUMENTS is claude's own — the PR number typed after the command.")
+                }
+            }
+            section(.scheduledReviews) {
+                ScheduledReviewsSettings(model: model)
+            }
+        }
+    }
 
     // MARK: Badges
 
     @State private var newBadgeName = ""
     @State private var newBadgeColor = Color(red: 0.65, green: 0.55, blue: 0.95)
 
-    private var badgesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Badges")
-            card {
-                Text("Right-click a session card (sidebar or Mission Control) to assign badges — a session wears as many as you like.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                ForEach(model.badgeDefinitions) { definition in
-                    HStack(spacing: 10) {
-                        BadgeChip(label: definition.name,
-                                  color: AppModel.color(hex: definition.colorHex))
-                        Spacer()
-                        Text(definition.colorHex)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(DefaultTheme.mutedText)
-                        HoverIconButton(systemImage: "xmark", help: "Delete this badge") {
-                            model.saveBadgeDefinitions(
-                                model.badgeDefinitions.filter { $0.name != definition.name })
-                        }
+    private var badgesCard: some View {
+        card {
+            detail("Right-click a session card (sidebar or Mission Control) to assign badges — a session wears as many as you like.")
+            ForEach(model.badgeDefinitions) { definition in
+                HStack(spacing: 10) {
+                    BadgeChip(label: definition.name,
+                              color: AppModel.color(hex: definition.colorHex))
+                    Spacer()
+                    Text(definition.colorHex)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                    HoverIconButton(systemImage: "xmark", help: "Delete this badge") {
+                        model.saveBadgeDefinitions(
+                            model.badgeDefinitions.filter { $0.name != definition.name })
                     }
                 }
-                Divider().overlay(DefaultTheme.cardBorder)
-                HStack(spacing: 10) {
-                    TextField("New badge name…", text: $newBadgeName)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .padding(.horizontal, 8).padding(.vertical, 6)
-                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
-                        .frame(maxWidth: 220)
-                    ColorPicker("", selection: $newBadgeColor, supportsOpacity: false)
-                        .labelsHidden()
-                    AccentButton("Add") {
-                        let name = newBadgeName.trimmingCharacters(in: .whitespaces).lowercased()
-                        guard !name.isEmpty,
-                              !model.badgeDefinitions.contains(where: { $0.name == name })
-                        else { return }
-                        let resolved = NSColor(newBadgeColor).usingColorSpace(.deviceRGB) ?? .gray
-                        let hex = String(format: "#%02X%02X%02X",
-                                         Int(resolved.redComponent * 255),
-                                         Int(resolved.greenComponent * 255),
-                                         Int(resolved.blueComponent * 255))
-                        model.saveBadgeDefinitions(
-                            model.badgeDefinitions
-                                + [AppModel.BadgeDefinition(name: name, colorHex: hex)])
-                        newBadgeName = ""
-                    }
+            }
+            cardDivider
+            HStack(spacing: 10) {
+                TextField("New badge name…", text: $newBadgeName)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 8).padding(.vertical, 6)
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
+                    .frame(maxWidth: 220)
+                ColorPicker("", selection: $newBadgeColor, supportsOpacity: false)
+                    .labelsHidden()
+                AccentButton("Add") {
+                    let name = newBadgeName.trimmingCharacters(in: .whitespaces).lowercased()
+                    guard !name.isEmpty,
+                          !model.badgeDefinitions.contains(where: { $0.name == name })
+                    else { return }
+                    let resolved = NSColor(newBadgeColor).usingColorSpace(.deviceRGB) ?? .gray
+                    let hex = String(format: "#%02X%02X%02X",
+                                     Int(resolved.redComponent * 255),
+                                     Int(resolved.greenComponent * 255),
+                                     Int(resolved.blueComponent * 255))
+                    model.saveBadgeDefinitions(
+                        model.badgeDefinitions
+                            + [AppModel.BadgeDefinition(name: name, colorHex: hex)])
+                    newBadgeName = ""
                 }
             }
         }
     }
 
-    // MARK: Themes
+    // MARK: Appearance
 
     /// Appearance, the families, and a preview of whichever family the
     /// pointer is on (else the chosen one) — in either variant.
-    private var themesSection: some View {
+    private var appearanceGroup: some View {
         let store = ThemeStore.shared
-        return VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Theme")
-            card {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Appearance")
-                            .font(.system(size: 13))
-                            .foregroundStyle(DefaultTheme.primaryText)
-                        Text(store.appearanceMode == .system
-                             ? "Following macOS — \(store.systemIsDark ? "dark" : "light") right now."
-                             : "Forced \(store.appearanceMode.label.lowercased()), whatever macOS says.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(DefaultTheme.secondaryText)
-                    }
-                    Spacer()
-                    Picker("", selection: Binding(
-                        get: { store.appearanceMode },
-                        set: { store.setAppearanceMode($0) })) {
-                        ForEach(AppearanceMode.allCases) { mode in
-                            Text(mode.label).tag(mode)
+        return group(.appearance) {
+            section(.appearanceMode) {
+                card {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            label("Appearance")
+                            Text(store.appearanceMode == .system
+                                 ? "Following macOS — \(store.systemIsDark ? "dark" : "light") right now."
+                                 : "Forced \(store.appearanceMode.label.lowercased()), whatever macOS says.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(DefaultTheme.secondaryText)
                         }
+                        Spacer()
+                        Picker("", selection: Binding(
+                            get: { store.appearanceMode },
+                            set: { store.setAppearanceMode($0) })) {
+                            ForEach(AppearanceMode.allCases) { mode in
+                                Text(mode.label).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
-                }
-                Divider().overlay(DefaultTheme.cardBorder)
-                Toggle(isOn: $syncClaudeTheme) {
-                    Text("Apply the theme to Claude Code")
-                        .font(.system(size: 13))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                }
-                .toggleStyle(.switch)
-                .onChange(of: syncClaudeTheme) { model.syncClaudeThemes() }
-                Text("Claude Code draws its own colours over the terminal. On, Loom writes its themes to ~/.claude/themes (loom-*.json, also listed in /theme) and every session it starts follows the project's theme and appearance — live, even while it runs. Needs Claude Code 2.1.118 or later. Off, the files are removed; sessions restarted after that go back to your own Claude theme.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-            }
-            HStack {
-                Text("Every theme comes in light and dark; the appearance picks the variant.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Spacer()
-                GhostButton("Import from tweakcn…", systemImage: "square.and.arrow.down") {
-                    importShown = true
+                    cardDivider
+                    toggleRow("Apply the theme to Claude Code", isOn: $syncClaudeTheme,
+                              detail: "Claude Code draws its own colours over the terminal. On, Loom writes its themes to ~/.claude/themes (loom-*.json, also listed in /theme) and every session it starts follows the project's theme and appearance — live, even while it runs. Needs Claude Code 2.1.118 or later. Off, the files are removed; sessions restarted after that go back to your own Claude theme.")
+                    .onChange(of: syncClaudeTheme) { model.syncClaudeThemes() }
                 }
             }
-            ThemeGallery()
-            Text("The global theme. Projects below can override it — the app follows the project you are working in.")
-                .font(.system(size: 11))
-                .foregroundStyle(DefaultTheme.secondaryText)
-            card {
-                ThemeDocumentSettings()
+            section(.themes) {
+                HStack {
+                    detail("Every theme comes in light and dark; the appearance picks the variant. This is the global theme — a project can override it (Projects, below), and the app follows the project you are working in.")
+                    Spacer()
+                    GhostButton("Import from tweakcn…", systemImage: "square.and.arrow.down") {
+                        importShown = true
+                    }
+                }
+                ThemeGallery()
+            }
+            section(.documents) {
+                card {
+                    ThemeDocumentSettings()
+                }
             }
         }
         .sheet(isPresented: $importShown) {
@@ -751,7 +929,7 @@ struct SettingsPage: View {
         }
     }
 
-    // MARK: Per-project themes
+    // MARK: Projects
 
     /// A width as a picker's tag: 0 is Fit, -1 the default.
     private static func widthTag(_ width: ViewportWidth?) -> Int {
@@ -788,9 +966,8 @@ struct SettingsPage: View {
         .help("The page width this project's agent browsers open at")
     }
 
-    private var projectsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Projects")
+    private var projectsGroup: some View {
+        group(.projects) {
             card {
                 if model.projects.isEmpty {
                     Text("No project yet.")
@@ -798,7 +975,7 @@ struct SettingsPage: View {
                         .foregroundStyle(DefaultTheme.secondaryText)
                 }
                 ForEach(Array(model.projects.enumerated()), id: \.element.id) { index, project in
-                    if index > 0 { Divider().overlay(DefaultTheme.cardBorder) }
+                    if index > 0 { cardDivider }
                     HStack(spacing: 12) {
                         Image(systemName: "folder.fill")
                             .font(.system(size: 11))
@@ -835,14 +1012,11 @@ struct SettingsPage: View {
 
     // MARK: Extensions (ADR-0011)
 
-    private var extensionsSection: some View {
+    private var extensionsGroup: some View {
         let extensions = model.extensions
-        return VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Extensions")
+        return group(.extensions) {
             card {
-                Text("Web pages that plug into Loom — a Jira board, an inbox, your own tools. Each runs in its own sandboxed web view and reaches only what you approve. See docs/extensions.md to write one.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
+                detail("Web pages that plug into Loom — a Jira board, an inbox, your own tools. Each runs in its own sandboxed web view and reaches only what you approve. See docs/extensions.md to write one.")
                 HStack(spacing: 8) {
                     GhostButton("Install from folder…", systemImage: "square.and.arrow.down") {
                         guard let url = AppModel.pickFolder(title: "Choose an extension folder") else { return }
@@ -867,11 +1041,11 @@ struct SettingsPage: View {
                     .foregroundStyle(DefaultTheme.danger)
                 }
                 ForEach(extensions.extensions) { installed in
-                    Divider().overlay(DefaultTheme.cardBorder)
+                    cardDivider
                     extensionRow(installed)
                 }
                 ForEach(extensions.problems) { problem in
-                    Divider().overlay(DefaultTheme.cardBorder)
+                    cardDivider
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "exclamationmark.triangle")
                             .foregroundStyle(DefaultTheme.danger)

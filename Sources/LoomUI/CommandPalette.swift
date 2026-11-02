@@ -14,6 +14,30 @@ public enum CommandPalette {
             .map(\.0)
     }
 
+    /// The indices of the items `query` finds, best first — for a picker
+    /// whose items have a name and a detail (a project and its path). The
+    /// name matches fuzzily, as in `rank`; the detail only as a plain
+    /// substring, since nearly any query threads through a long path, and
+    /// below every name match. Ties keep the items' order; an empty query
+    /// keeps them all.
+    public static func rankIndices(query: String, names: [String], details: [String] = []) -> [Int] {
+        let normalizedQuery = normalize(query.trimmingCharacters(in: .whitespaces))
+        guard !normalizedQuery.isEmpty else { return Array(names.indices) }
+        let needle = String(normalizedQuery)
+        return names.indices
+            .compactMap { index -> (index: Int, score: Int)? in
+                if let score = score(normalizedQuery, in: names[index]) {
+                    return (index, score + 1_000)
+                }
+                if index < details.count, String(normalize(details[index])).contains(needle) {
+                    return (index, 0)
+                }
+                return nil
+            }
+            .sorted { $0.score != $1.score ? $0.score > $1.score : $0.index < $1.index }
+            .map(\.index)
+    }
+
     /// `nil` if `query` is not a subsequence of `candidate`.
     static func score(_ query: [Character], in candidate: String) -> Int? {
         let normalized = normalize(candidate)

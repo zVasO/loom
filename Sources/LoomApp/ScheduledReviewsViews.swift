@@ -7,18 +7,15 @@ import SwiftUI
 
 // MARK: - Settings
 
-/// Settings › Scheduled reviews: when the app reviews on its own, which
+/// Settings › Code review › Scheduled reviews: when the app reviews on its own, which
 /// PRs, how many at once, and what it asks claude.
 struct ScheduledReviewsSettings: View {
     let model: AppModel
     @State private var promptDraft = ""
 
     var body: some View {
+        // Its title is the Settings page's: the sidebar scrolls to it.
         VStack(alignment: .leading, spacing: 8) {
-            Text("SCHEDULED REVIEWS")
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
-                .foregroundStyle(DefaultTheme.secondaryText)
             VStack(alignment: .leading, spacing: 12) {
                 Text("At the time you choose, Loom opens a tab for each pull request a schedule picks, starts its review session (/\(PRReviewCommand.name) first, when it is on), then asks claude for the full review. Claude's summary lands in the verdict bar and its line comments in the pending review: you read, edit, and submit. A PR is reviewed again only once someone pushed to it. Loom has to be open — a run slept through starts on wake, up to four hours late.")
                     .font(.system(size: 11))

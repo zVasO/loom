@@ -59,6 +59,11 @@ struct LoomApp: App {
                     NotificationCenter.default.post(name: .loomNewSession, object: nil)
                 }
                 .keyboardShortcut(KeyEquivalent(keyNewSession.first ?? "n"), modifiers: .command)
+                // The same letter with ⇧: ask which project first.
+                Button("New claude session in…") {
+                    NotificationCenter.default.post(name: .loomNewSessionInProject, object: nil)
+                }
+                .keyboardShortcut(KeyEquivalent(keyNewSession.first ?? "n"), modifiers: [.command, .shift])
                 Button("New tab in the stack") {
                     NotificationCenter.default.post(name: .loomNewTab, object: nil)
                 }
@@ -95,6 +100,8 @@ extension Notification.Name {
     static let loomRenameSession = Notification.Name("loom.renameSession")
     /// ⌘N — a claude session in the current project.
     static let loomNewSession = Notification.Name("loom.newSession")
+    /// ⌘⇧N — the project picker first (searchable), then the session.
+    static let loomNewSessionInProject = Notification.Name("loom.newSessionInProject")
     /// ⌘T — contextual: web tab in the browser, terminal in a session.
     static let loomNewTab = Notification.Name("loom.newTab")
     /// ⌘⇧A — select everything the terminal pane holds.
