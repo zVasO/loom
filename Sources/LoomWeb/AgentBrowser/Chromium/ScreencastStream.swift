@@ -88,9 +88,9 @@ public final class ScreencastStream: @unchecked Sendable {
     }
 
     deinit {
-        // The view went without detaching: Chromium stops sending to nobody.
-        if let source {
-            ScreencastRouter.shared.unregister(self, connection: source.connection, session: source.session)
+        // The view went without detaching: Chromium stops sending to nobody —
+        // unless another view shows that tab now (a tab of the stack took it).
+        if let source, ScreencastRouter.shared.unregister(self, connection: source.connection, session: source.session) {
             source.connection.post("Page.stopScreencast", [:], session: source.session)
         }
     }
@@ -135,8 +135,8 @@ public final class ScreencastStream: @unchecked Sendable {
         // The new route first: on the same connection the raw subscription
         // then stays up across a tab switch.
         ScreencastRouter.shared.register(self, connection: next.connection, session: next.session)
-        if let previous, previous != next {
-            ScreencastRouter.shared.unregister(self, connection: previous.connection, session: previous.session)
+        if let previous, previous != next,
+           ScreencastRouter.shared.unregister(self, connection: previous.connection, session: previous.session) {
             previous.connection.post("Page.stopScreencast", [:], session: previous.session)
         }
         let start: (String, [String: Any]) = ("Page.startScreencast", [
@@ -166,7 +166,10 @@ public final class ScreencastStream: @unchecked Sendable {
         ready = nil
         lock.unlock()
         guard let previous else { return }
-        ScreencastRouter.shared.unregister(self, connection: previous.connection, session: previous.session)
+        // Another view may show the tab now (the stack's tab took it from the
+        // side panel): its frames must keep coming.
+        guard ScreencastRouter.shared.unregister(self, connection: previous.connection, session: previous.session)
+        else { return }
         previous.connection.post("Page.stopScreencast", [:], session: previous.session)
     }
 
@@ -329,19 +332,28 @@ final class ScreencastRouter: @unchecked Sendable {
         }
     }
 
-    /// Only the stream registered: another view may have taken the session since.
-    func unregister(_ stream: ScreencastStream, connection: CDPConnection, session: CDPSessionID) {
+    /// Only the stream registered: another view may have taken the session
+    /// since. Returns whether no other stream shows the session now — then,
+    /// and only then, its screencast may stop.
+    @discardableResult
+    func unregister(_ stream: ScreencastStream, connection: CDPConnection, session: CDPSessionID) -> Bool {
         let key = ObjectIdentifier(connection)
         lock.lock()
         defer { lock.unlock() }
-        guard let route = routes[key], route.connection === connection else { return }
-        if let registered = route.streams[session], registered.stream === stream || registered.stream == nil {
-            route.streams[session] = nil
+        guard let route = routes[key], route.connection === connection else { return true }
+        var free = true
+        if let registered = route.streams[session] {
+            if registered.stream === stream || registered.stream == nil {
+                route.streams[session] = nil
+            } else {
+                free = false
+            }
         }
         route.streams = route.streams.filter { $0.value.stream != nil }
-        guard route.streams.isEmpty else { return }
+        guard route.streams.isEmpty else { return free }
         routes[key] = nil
         connection.unsubscribeRaw(method: ScreencastFrame.method)
+        return free
     }
 
     private func dispatch(_ raw: Data, from connection: CDPConnection) {

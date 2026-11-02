@@ -117,6 +117,9 @@ enum MainTab {
 enum DetailSelection: Hashable {
     case session(SessionID)
     case webPane(UUID)
+    /// The agent's own browser (ADR-0014), shown as a tab of its stack:
+    /// a view onto its pages, never a "Web n" of yours.
+    case agentBrowser(SessionID)
 }
 
 struct ContentView: View {
@@ -1272,6 +1275,50 @@ struct StackTab: View {
     }
 }
 
+/// The stack's "✦ Agent" tab (ADR-0014): the agent's browser beside the
+/// "Web n" — no close cross, it lives as long as its session.
+struct AgentBrowserStackTab: View {
+    let isActive: Bool
+    let isRunning: Bool
+    let onSelect: () -> Void
+    let onShowBesideTerminal: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 9))
+                .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
+            Text("Agent")
+                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
+                .lineLimit(1)
+                .fixedSize()
+            if isRunning {
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 6))
+                    .foregroundStyle(DefaultTheme.badgeColor(for: .working))
+                    .symbolEffect(.pulse)
+                    .help("claude is using its browser")
+            }
+        }
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(isActive ? DefaultTheme.surfaceRaised
+                    : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
+                    in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7)
+            .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
+        .help("The agent's own browser — its profile, never your cookies")
+        .contextMenu {
+            Button("Show beside the terminal", action: onShowBesideTerminal)
+        }
+    }
+}
+
 /// The reference's skill card: sparkle in a tinted square, name, two
 /// lines of description, scope chip.
 struct SkillCard: View {
@@ -1874,6 +1921,15 @@ struct SessionsView: View {
                     } else {
                         placeholder
                     }
+                case .agentBrowser(let parentID):
+                    if let browser = model.agentBrowsers[parentID] {
+                        AgentBrowserPanelView(browser: browser, caption: model.agentBrowserCaption(for: parentID),
+                                              defaultWidth: model.agentDefaultWidth(for: parentID))
+                            .id(ObjectIdentifier(browser))
+                            .background(DefaultTheme.contentBackground)
+                    } else {
+                        placeholder
+                    }
                 case nil:
                     placeholder
                 }
@@ -1928,6 +1984,12 @@ struct SessionsView: View {
                 selected = nil
             }
         }
+        // The agent's browser gone (its session archived): back to the session.
+        .onChange(of: model.agentBrowsers.keys.count) {
+            if case .agentBrowser(let id) = selected, !model.hasAgentBrowser(id) {
+                selected = model.sessions.contains { $0.id == id } ? .session(id) : nil
+            }
+        }
     }
 
     /// The horizontal bar's context: it exists ONLY if the open tab is a
@@ -1954,6 +2016,8 @@ struct SessionsView: View {
         case .webPane(let paneID):
             guard let pane = model.browserPane(paneID) else { return nil }
             return (pane.parentID.flatMap(stackParentItem), .web)
+        case .agentBrowser(let parentID):
+            return (stackParentItem(parentID), .web)
         case nil:
             return nil
         }
@@ -2002,6 +2066,16 @@ struct SessionsView: View {
                             }
                         }
                     case .web:
+                        if let parent = context.parent, model.hasAgentBrowser(parent.id) {
+                            AgentBrowserStackTab(
+                                isActive: selected == .agentBrowser(parent.id),
+                                isRunning: model.agentBrowsers[parent.id]?.activity?.isRunning == true,
+                                onSelect: { selected = .agentBrowser(parent.id) },
+                                onShowBesideTerminal: {
+                                    model.showInSidePanel(.agent, for: parent.id)
+                                    selected = .session(parent.id)
+                                })
+                        }
                         let panes = model.browserPanes.filter { $0.parentID == context.parent?.id }
                         ForEach(panes) { pane in
                             StackTab(icon: "globe", title: pane.title,
@@ -2250,6 +2324,11 @@ struct SessionsView: View {
                 webGroupRow(parent: item, panes: panes)
                     .stackChrome(isSelected: panes.contains { selected == .webPane($0.id) })
             }
+            if !item.isShell, model.hasAgentBrowser(item.id) {
+                Divider().overlay(DefaultTheme.cardBorder)
+                agentBrowserRow(parent: item)
+                    .stackChrome(isSelected: selected == .agentBrowser(item.id))
+            }
         }
         .background(DefaultTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -2362,6 +2441,52 @@ struct SessionsView: View {
         .onTapGesture {
             if let first = panes.first { selected = .webPane(first.id) }
         }
+    }
+
+    /// The agent's own browser (ADR-0014) in its stack: its pages, what it
+    /// is doing; a click shows it as a tab of the stack.
+    private func agentBrowserRow(parent: AppModel.SessionItem) -> some View {
+        let browser = model.agentBrowsers[parent.id]
+        let running = browser?.activity?.isRunning == true
+        let pages = model.agentBrowserPageCount(parent.id)
+        return HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 11))
+                .foregroundStyle(DefaultTheme.accent)
+                .symbolEffect(.pulse, isActive: running)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Agent browser")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                Label(parent.title, systemImage: "link")
+                    .font(.system(size: 10))
+                    .foregroundStyle(DefaultTheme.mutedText)
+                    .lineLimit(1)
+                if running, let summary = browser?.activity?.summary, !summary.isEmpty {
+                    Text(summary)
+                        .font(.system(size: 10))
+                        .foregroundStyle(DefaultTheme.badgeColor(for: .working))
+                        .lineLimit(1)
+                } else if pages > 0 {
+                    Text("\(pages) page\(pages > 1 ? "s" : "")")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                }
+            }
+            Spacer()
+        }
+        .padding(10)
+        .contentShape(Rectangle())
+        .hoverSurface(0.6)
+        .onTapGesture { selected = .agentBrowser(parent.id) }
+        .contextMenu {
+            Button("Open as a tab") { selected = .agentBrowser(parent.id) }
+            Button("Show beside the terminal") {
+                model.showInSidePanel(.agent, for: parent.id)
+                selected = .session(parent.id)
+            }
+        }
+        .help("The agent's own browser — its profile, never your cookies")
     }
 
     /// WEB-03: the dedicated browser in the stack ("🌐 Web n · parent").

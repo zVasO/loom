@@ -50,6 +50,15 @@ navigateurs « Web n » (qui, eux, restent toujours WebKit).
 - **Le panneau latéral** (bouton à droite du titre de la session, ou ⌘⇧B) affiche un
   navigateur à côté du terminal. Son en-tête choisit lequel : le navigateur de
   l'agent, ou un des navigateurs « Web n » de la pile, qui restent les vôtres.
+- **En grand, comme un onglet** : dès que la session a un navigateur d'agent, la
+  barre d'onglets de ses navigateurs (« Web 1 × + ») commence par un onglet
+  **✦ Agent**, avec un point qui pulse quand claude navigue. Une ligne
+  **✦ Agent browser** apparaît aussi sous la carte de la session dans la barre
+  latérale, avec le nombre de pages et ce que fait l'agent. Le clic montre son
+  navigateur en grand : mêmes onglets de pages, même barre d'adresse, même profil
+  — jamais vos cookies. L'agent n'y bascule jamais de lui-même. La page ne
+  s'affiche qu'à un endroit à la fois : revenir à la session la rend au panneau
+  latéral.
 - La première fois que l'agent touche une page, le panneau s'ouvre sur son
   navigateur — une seule fois, et seulement si le terminal garde ses 80 colonnes.
   Refermé par vous, il ne se rouvre plus de lui-même : un **point qui pulse** sur le
