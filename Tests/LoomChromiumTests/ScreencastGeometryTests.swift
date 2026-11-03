@@ -242,4 +242,28 @@ struct ScreencastGeometryTests {
         #expect(ScreencastGeometry.deviceScale(backingScale: 0, cssWidth: nil, pageArea: .zero) == 1, "unknown screen")
         #expect(ScreencastGeometry.deviceScale(backingScale: 2, cssWidth: 800, pageArea: .zero) == 2, "never measured")
     }
+
+    @Test("a frame of the view's own pixels, or a few short, is drawn one to one from the top-left")
+    func pixelExact() {
+        // Fit at 2×: a 1628.5-point panel lays the page out 1628 CSS px wide.
+        let fit = geometry(view: CGSize(width: 1_628.5, height: 900), device: CGSize(width: 1_628, height: 900),
+                           image: CGSize(width: 3_256, height: 1_800), scale: 2)
+        #expect(fit.isPixelExact)
+        #expect(fit.contentRect == CGRect(x: 0, y: 0, width: 1_628, height: 900))
+        #expect(fit.pointsPerCSSPixel == 1)
+        #expect(fit.cssPoint(fromView: CGPoint(x: 100, y: 50)) == CGPoint(x: 100, y: 50))
+        #expect(fit.pixelExactContentsRect == CGRect(x: 0, y: 0, width: 3_257.0 / 3_256.0, height: 1))
+        let exact = geometry(view: CGSize(width: 640, height: 400), device: CGSize(width: 640, height: 400),
+                             image: CGSize(width: 1_280, height: 800), scale: 2)
+        #expect(exact.pixelExactContentsRect == CGRect(x: 0, y: 0, width: 1, height: 1))
+        let short = geometry(view: CGSize(width: 640, height: 400), device: CGSize(width: 1_280, height: 800),
+                             image: CGSize(width: 1_276, height: 800), scale: 2)
+        #expect(!short.isPixelExact, "4 px short: scaled to fit")
+        let larger = geometry(view: CGSize(width: 640, height: 400), device: CGSize(width: 1_280, height: 800),
+                              image: CGSize(width: 2_560, height: 1_600), scale: 2)
+        #expect(!larger.isPixelExact && larger.pixelExactContentsRect == nil)
+        #expect(larger.contentRect == CGRect(x: 0, y: 0, width: 640, height: 400))
+        #expect(!geometry(view: CGSize(width: 640, height: 400), device: CGSize(width: 640, height: 400)).isPixelExact,
+                "no frame yet")
+    }
 }

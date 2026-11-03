@@ -175,8 +175,38 @@ public struct ScreencastGeometry: Equatable, Sendable {
         self.init(viewSize: viewSize, backingScale: backingScale, device: metadata.deviceSize, image: image)
     }
 
+    /// How many pixels short of the view's a frame may be and still be drawn
+    /// one to one: Fit lays the page out at the panel's width rounded down.
+    public static let pixelExactSlack: CGFloat = 3
+
+    /// The frame is the view's own pixels (or a few short): drawn one image
+    /// pixel per screen pixel from the top-left, never resampled — a scale
+    /// of 1.0003 would soften every letter.
+    public var isPixelExact: Bool {
+        guard image.width > 0, image.height > 0, backingScale > 0,
+              viewSize.width > 0, viewSize.height > 0 else { return false }
+        let width = viewSize.width * backingScale
+        let height = viewSize.height * backingScale
+        return image.width <= width + 0.5 && image.height <= height + 0.5
+            && width - image.width <= Self.pixelExactSlack && height - image.height <= Self.pixelExactSlack
+    }
+
+    /// The layer's `contentsRect` that draws a pixel-exact frame one to one
+    /// over the whole view (`.resize`): a hair past the unit square, the
+    /// frame's edge pixels fill the few missing ones. nil otherwise.
+    public var pixelExactContentsRect: CGRect? {
+        guard isPixelExact else { return nil }
+        return CGRect(x: 0, y: 0, width: viewSize.width * backingScale / image.width,
+                      height: viewSize.height * backingScale / image.height)
+    }
+
     /// The picture's rectangle in the view; empty without a frame or a size.
+    /// One to one from the top-left when pixel exact, else scaled to fit,
+    /// centred (resizeAspect).
     public var contentRect: CGRect {
+        if isPixelExact {
+            return CGRect(x: 0, y: 0, width: image.width / backingScale, height: image.height / backingScale)
+        }
         let drawn = image.width > 0 && image.height > 0 ? image : device
         guard drawn.width > 0, drawn.height > 0, viewSize.width > 0, viewSize.height > 0 else { return .zero }
         let scale = min(viewSize.width / drawn.width, viewSize.height / drawn.height)
