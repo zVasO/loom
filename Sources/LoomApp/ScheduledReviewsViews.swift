@@ -58,14 +58,7 @@ struct ScheduledReviewsSettings: View {
                         }
                     }
                 }
-                TextEditor(text: $promptDraft)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.primaryText)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .frame(minHeight: 200)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                PromptEditor(text: $promptDraft, minHeight: 120)
                     .onAppear { promptDraft = model.autoReviewPromptTemplate ?? AutoReviewPrompt.defaultTemplate }
                     .onChange(of: promptDraft) { _, draft in model.autoReviewPromptTemplate = draft }
                 Text("Typed into the review session once the PR is loaded. Placeholders: \(AutoReviewPrompt.placeholders.joined(separator: ", ")). Keep the report part: it is what Loom imports — {{report}} is where claude writes it.")

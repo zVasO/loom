@@ -717,14 +717,7 @@ struct SettingsPage: View {
                     }
                 }
             }
-            TextEditor(text: $instructionsDraft)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(DefaultTheme.primaryText)
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .frame(minHeight: 180)
-                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            PromptEditor(text: $instructionsDraft, minHeight: 120)
                 .opacity(instructionsOn ? 1 : 0.5)
                 .onChange(of: instructionsDraft) { _, draft in
                     model.sessionInstructionsText = draft
@@ -798,14 +791,7 @@ struct SettingsPage: View {
                             }
                         }
                     }
-                    TextEditor(text: $setupCommandDraft)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                        .scrollContentBackground(.hidden)
-                        .padding(8)
-                        .frame(minHeight: 220)
-                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    PromptEditor(text: $setupCommandDraft, minHeight: 120)
                         .onAppear {
                             setupCommandDraft = model.reviewSetupCommandTemplate ?? PRReviewCommand.defaultTemplate
                         }
