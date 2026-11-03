@@ -1318,9 +1318,9 @@ public final class AgentBrowser: NSObject {
         controller.releaseWebViews()
     }
 
-    /// The session is gone for good.
-    public func tearDown() {
-        cancelAll("The session was archived.")
+    /// The session is gone for good, or the person closed the browser.
+    public func tearDown(reason: String) {
+        cancelAll(reason)
         controller.closeAll()
     }
 

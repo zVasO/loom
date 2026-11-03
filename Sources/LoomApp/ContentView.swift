@@ -1295,12 +1295,14 @@ struct StackTab: View {
 }
 
 /// The stack's "✦ Agent" tab (ADR-0014): the agent's browser beside the
-/// "Web n" — no close cross, it lives as long as its session.
+/// "Web n". Its cross closes the browser's pages; the agent's next
+/// browser_navigate opens it again.
 struct AgentBrowserStackTab: View {
     let isActive: Bool
     let isRunning: Bool
     let onSelect: () -> Void
     let onShowBesideTerminal: () -> Void
+    let onClose: () -> Void
     @State private var hovered = false
 
     var body: some View {
@@ -1320,6 +1322,9 @@ struct AgentBrowserStackTab: View {
                     .symbolEffect(.pulse)
                     .help("claude is using its browser")
             }
+            if hovered || isActive {
+                HoverIconButton(systemImage: "xmark", help: "Close the agent's browser", action: onClose)
+            }
         }
         .padding(.horizontal, 9).padding(.vertical, 5)
         .background(isActive ? DefaultTheme.surfaceRaised
@@ -1334,6 +1339,8 @@ struct AgentBrowserStackTab: View {
         .help("The agent's own browser — its profile, never your cookies")
         .contextMenu {
             Button("Show beside the terminal", action: onShowBesideTerminal)
+            Divider()
+            Button("Close", action: onClose)
         }
     }
 }
@@ -2093,7 +2100,8 @@ struct SessionsView: View {
                                 onShowBesideTerminal: {
                                     model.showInSidePanel(.agent, for: parent.id)
                                     selected = .session(parent.id)
-                                })
+                                },
+                                onClose: { confirmCloseAgentBrowser(parent.id) })
                         }
                         let panes = model.browserPanes.filter { $0.parentID == context.parent?.id }
                         ForEach(panes) { pane in
@@ -2504,8 +2512,25 @@ struct SessionsView: View {
                 model.showInSidePanel(.agent, for: parent.id)
                 selected = .session(parent.id)
             }
+            Divider()
+            Button("Close") { confirmCloseAgentBrowser(parent.id) }
         }
         .help("The agent's own browser — its profile, never your cookies")
+    }
+
+    /// The person closes the agent's browser: its pages go (a command in
+    /// progress stops), its sign-ins stay; the agent can open it again.
+    private func confirmCloseAgentBrowser(_ parent: SessionID) {
+        let running = model.agentBrowsers[parent]?.activity?.isRunning == true
+        let pages = model.agentBrowserPageCount(parent)
+        var message = "The agent's browser will be closed"
+        message += pages > 0 ? " — its \(pages) page\(pages > 1 ? "s" : "") will be lost." : "."
+        if running { message += " claude's command in progress stops." }
+        message += " Sign-ins stay; claude can open it again."
+        pendingClose = PendingClose(message: message) {
+            if selected == .agentBrowser(parent) { selected = .session(parent) }
+            model.closeAgentBrowser(parent)
+        }
     }
 
     /// WEB-03: the dedicated browser in the stack ("🌐 Web n · parent").

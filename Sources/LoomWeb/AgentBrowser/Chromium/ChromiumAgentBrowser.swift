@@ -123,9 +123,10 @@ public final class ChromiumAgentBrowser {
         Task { await core.suspend() }
     }
 
-    /// The session was archived: everything goes.
-    public func tearDown() {
-        cancelAll("The session was archived.")
+    /// The session was archived, or the person closed the browser:
+    /// everything goes.
+    public func tearDown(reason: String) {
+        cancelAll(reason)
         let core = self.core
         Task { await core.tearDown() }
     }

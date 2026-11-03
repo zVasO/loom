@@ -31,11 +31,18 @@ public protocol AgentBrowserEngine: AnyObject, Observable {
     func clearData() async
     /// The session ended: its pages' processes go, the tabs stay to look at.
     func suspend()
-    /// The session was archived: everything goes.
-    func tearDown()
+    /// Everything goes — the session archived, or the person closed the
+    /// browser: pending and running commands fail with `reason`. The
+    /// profile (sign-ins) stays.
+    func tearDown(reason: String)
 }
 
 extension AgentBrowserEngine {
+    /// The session was archived: everything goes.
+    public func tearDown() {
+        tearDown(reason: "The session was archived.")
+    }
+
     public func run(_ command: AgentCommand, deadline: ContinuousClock.Instant) async throws -> AgentResult {
         try await run(command, options: AgentCommandOptions(), deadline: deadline)
     }
