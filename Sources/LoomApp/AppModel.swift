@@ -2112,6 +2112,10 @@ public final class AppModel {
     /// (AgentBrowserAPI.swift).
     var agentBrowsers: [SessionID: any AgentBrowserEngine] = [:]
 
+    /// The stacks whose agent browser the person closed (its tab's ×), until
+    /// the agent opens it again: its next command is told why there is none.
+    var agentBrowsersClosedByUser: Set<SessionID> = []
+
     /// The engine each session's browser uses, pinned when it launched or
     /// resumed: the browser tools `loom mcp` listed, and their words, follow it.
     var agentEngines: [SessionID: APIBrowserEngine] = [:]

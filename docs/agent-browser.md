@@ -59,6 +59,11 @@ navigateurs « Web n » (qui, eux, restent toujours WebKit).
   — jamais vos cookies. L'agent n'y bascule jamais de lui-même. La page ne
   s'affiche qu'à un endroit à la fois : revenir à la session la rend au panneau
   latéral.
+- **Fermer le navigateur de l'agent** : le × de l'onglet ✦ Agent, ou **Close**
+  dans le menu de l'onglet et de la ligne **Agent browser**, après confirmation.
+  Ses pages sont perdues et une commande en cours s'arrête ; le profil — vos
+  connexions — reste. La commande suivante de l'agent apprend que vous l'avez
+  fermé, et son `browser_navigate` suivant le rouvre, vide.
 - La première fois que l'agent touche une page, le panneau s'ouvre sur son
   navigateur — une seule fois, et seulement si le terminal garde ses 80 colonnes.
   Refermé par vous, il ne se rouvre plus de lui-même : un **point qui pulse** sur le

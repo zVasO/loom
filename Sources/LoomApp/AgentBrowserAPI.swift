@@ -92,7 +92,10 @@ extension AppModel {
             throw AgentError.unavailable(AgentBrowser.runCodeUnavailable).apiError
         }
         guard let browser = agentBrowser(for: id, create: command.createsBrowser) else {
-            throw APIError(code: .unavailable, message: "No page is open yet — start with browser_navigate.")
+            let message = agentBrowsersClosedByUser.contains(id)
+                ? Self.agentBrowserClosedByUser + " browser_navigate opens it again."
+                : "No page is open yet — start with browser_navigate."
+            throw APIError(code: .unavailable, message: message)
         }
         // Before running: a panel that opens now hosts the page while it loads.
         if command.touchesPage { noteAgentBrowserUse(for: id) }
@@ -145,7 +148,21 @@ extension AppModel {
             browser = ChromiumAgentBrowser(profile: profile, environment: environment, pool: agentChromiumPool)
         }
         agentBrowsers[parent] = browser
+        agentBrowsersClosedByUser.remove(parent)
         return browser
+    }
+
+    /// What the agent reads once the person closed its browser.
+    static let agentBrowserClosedByUser = "The person closed your browser: its pages are gone, its sign-ins stay."
+
+    /// The person closes the agent's browser (the ✦ Agent tab's ×, its
+    /// sidebar row): its pages go and a command in progress stops; the
+    /// profile — sign-ins — stays. The agent's next browser_navigate opens
+    /// it again, empty.
+    func closeAgentBrowser(_ parent: SessionID) {
+        guard let browser = agentBrowsers.removeValue(forKey: parent) else { return }
+        browser.tearDown(reason: Self.agentBrowserClosedByUser)
+        agentBrowsersClosedByUser.insert(parent)
     }
 
     // MARK: - Engine (ADR-0016)
@@ -332,6 +349,7 @@ extension AppModel {
     /// An archived session's browser and screenshots are gone for good.
     func forgetAgentBrowser(_ session: SessionID) {
         agentBrowsers.removeValue(forKey: session)?.tearDown()
+        agentBrowsersClosedByUser.remove(session)
         agentEngines[session] = nil
         try? FileManager.default.removeItem(at: agentScreenshotsDirectory(for: session))
         try? FileManager.default.removeItem(at: agentUploadsDirectory(for: session))
