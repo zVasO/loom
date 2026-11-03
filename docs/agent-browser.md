@@ -92,7 +92,11 @@ navigateurs « Web n » (qui, eux, restent toujours WebKit).
   jusqu'à 3) : l'image du panneau et de l'onglet ✦ Agent est nette. La page voit
   `devicePixelRatio` en conséquence, comme dans un navigateur du Mac ; la mise en
   page en pixels CSS ne change pas, et les captures pour l'agent restent à la
-  taille CSS.
+  taille CSS. Pendant que la page bouge, le panneau montre des images JPEG ;
+  **dès qu'elle ne bouge plus** (0,2 s), il montre la page sans perte, pixel pour
+  pixel avec l'écran — exactement ce que Chromium dessine. Le journal du
+  navigateur de l'agent indique la taille des images (`screencast: 3256×1800 px
+  for 1628×900 CSS (2×)`).
 
 ## Le profil
 

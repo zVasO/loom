@@ -138,9 +138,20 @@ public final class ChromiumPageView: NSView, NSTextInputClient {
 
     /// Drawn at the display's pace however many frames arrived since. The
     /// layer is transparent: the letterbox shows the panel's background.
+    /// A frame of the view's own pixels (Fit) is drawn one to one, never
+    /// resampled: `.resize` over a `contentsRect` a hair past the frame, so
+    /// the scale is exactly the screen's. Anything else fits, centred.
     public override func updateLayer() {
         guard let layer else { return }
-        layer.contentsGravity = .resizeAspect
+        if let exact = geometry?.pixelExactContentsRect {
+            layer.contentsGravity = .resize
+            layer.contentsRect = exact
+        } else {
+            layer.contentsGravity = .resizeAspect
+            layer.contentsRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+        }
+        // A lossless frame larger than the view (a set width) shrinks smoothly.
+        layer.minificationFilter = .trilinear
         layer.contents = picture?.image
     }
 
@@ -190,6 +201,9 @@ public final class ChromiumPageView: NSView, NSTextInputClient {
 
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+        // Pixel exact or not is the new size's call: the frame on screen
+        // scales to fit meanwhile rather than stretch.
+        needsDisplay = true
         refresh(resizing: true)
     }
 

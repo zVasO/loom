@@ -74,6 +74,10 @@ public final class ScreencastStream: @unchecked Sendable {
     private var delivering = false
     private var cache: [CDPSessionID: ScreencastFrame] = [:]
     private var cacheOrder: [CDPSessionID] = []
+    /// JPEG while the page moves, PNG — lossless — once it holds still.
+    private var refiner = StillFrameRefiner()
+    /// The run whose frame size was last logged.
+    private var loggedGeneration = -1
 
     /// `log` nil: the agent browser's log.
     public init(label: String = "panel", log: (@Sendable (String) -> Void)? = nil,
@@ -123,6 +127,7 @@ public final class ScreencastStream: @unchecked Sendable {
         size = wanted
         pending = nil
         ready = nil
+        refiner.restarted()
         let cached = previous == next ? nil : cache[next.session]
         if let cached {
             pending = cached
@@ -141,10 +146,7 @@ public final class ScreencastStream: @unchecked Sendable {
            ScreencastRouter.shared.unregister(self, connection: previous.connection, session: previous.session) {
             previous.connection.post("Page.stopScreencast", [:], session: previous.session)
         }
-        let start: (String, [String: Any]) = ("Page.startScreencast", [
-            "format": "jpeg", "quality": Self.quality,
-            "maxWidth": wanted.width, "maxHeight": wanted.height, "everyNthFrame": 1,
-        ])
+        let start = Self.startCommand(.jpeg, width: wanted.width, height: wanted.height)
         if previous == next {
             // New size, same tab: one write, stop then start, in order.
             _ = next.connection.post(batch: [("Page.stopScreencast", [:]), start], session: next.session,
@@ -156,6 +158,50 @@ public final class ScreencastStream: @unchecked Sendable {
             decodeQueue.async { self.drain() }
         }
         return cached != nil || previous == next
+    }
+
+    /// `Page.startScreencast` in `format`, at most `width` × `height` pixels.
+    static func startCommand(_ format: StillFrameRefiner.Format, width: Int, height: Int) -> (String, [String: Any]) {
+        var params: [String: Any] = ["format": format.rawValue, "maxWidth": width, "maxHeight": height,
+                                     "everyNthFrame": 1]
+        if format == .jpeg { params["quality"] = Self.quality }
+        return ("Page.startScreencast", params)
+    }
+
+    /// What the refiner answered, for the run of `generation` on `current`.
+    private func perform(_ step: StillFrameRefiner.Step, on current: ChromiumScreencastSource, generation run: Int,
+                         size wanted: (width: Int, height: Int)) {
+        switch step {
+        case .none:
+            return
+        case .wait(let seconds, let token):
+            decodeQueue.asyncAfter(deadline: .now() + seconds) { [weak self] in
+                self?.stillOver(token: token, on: current, generation: run)
+            }
+        case .restart(let format):
+            // One write, stop then start: the start's first frame is the page
+            // now. Checked and queued under the lock: a tab the view just left
+            // is never restarted after `show` stopped it.
+            let start = Self.startCommand(format, width: wanted.width, height: wanted.height)
+            lock.lock()
+            defer { lock.unlock() }
+            guard source == current, generation == run else { return }
+            _ = current.connection.post(batch: [("Page.stopScreencast", [:]), start], session: current.session,
+                                        options: CDPCallOptions())
+        }
+    }
+
+    /// No frame since the wait began: the page holds still.
+    private func stillOver(token: Int, on current: ChromiumScreencastSource, generation run: Int) {
+        lock.lock()
+        guard source == current, generation == run else {
+            lock.unlock()
+            return
+        }
+        let step = refiner.still(token: token)
+        let wanted = size
+        lock.unlock()
+        perform(step, on: current, generation: run, size: wanted)
     }
 
     /// No more frames: the view left the screen, or has no tab to show.
@@ -207,10 +253,15 @@ public final class ScreencastStream: @unchecked Sendable {
         if decodeNow {
             decoding = true
         }
+        let step = refiner.frame(StillFrameRefiner.Format.of(frame.image),
+                                 at: Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000)
+        let run = generation
+        let wanted = size
         lock.unlock()
         if decodeNow {
             decodeQueue.async { self.drain() }
         }
+        perform(step, on: current, generation: run, size: wanted)
     }
 
     /// Under `lock`.
@@ -246,6 +297,14 @@ public final class ScreencastStream: @unchecked Sendable {
             guard frameGeneration == generation, source != nil else {
                 lock.unlock()
                 continue
+            }
+            let firstOfRun = loggedGeneration != frameGeneration
+            loggedGeneration = frameGeneration
+            if firstOfRun {
+                let css = frame.metadata.deviceSize
+                let scale = css.width > 0 ? Double(image.width) / Double(css.width) : 0
+                log("screencast: \(image.width)×\(image.height) px for \(Int(css.width))×\(Int(css.height)) CSS"
+                    + " (\(String(format: "%.2g", scale))×), lossless once still")
             }
             ready = picture
             readyGeneration = frameGeneration
