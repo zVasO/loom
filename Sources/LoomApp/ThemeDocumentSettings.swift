@@ -86,14 +86,9 @@ struct ThemeDocumentSettings: View {
         }
     }
 
+    /// No scroll of its own: the Settings page's wheel stays the page's.
     private func code(_ text: Binding<String>, minHeight: CGFloat) -> some View {
-        TextEditor(text: text)
-            .font(.system(size: 11, design: .monospaced))
-            .scrollContentBackground(.hidden)
-            .padding(6)
-            .frame(minHeight: minHeight)
-            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        PromptEditor(text: text, foldedLines: 3, minHeight: minHeight)
     }
 
     private func select(_ name: String) {
