@@ -312,7 +312,7 @@ private struct ReviewScheduleEditor: View {
 
 // MARK: - PRs sidebar
 
-/// The PRs sidebar's "SCHEDULED REVIEWS": the run going on (or the last
+/// Browse's rail "SCHEDULED REVIEWS": the run going on (or the last
 /// one), a row per PR with where its review stands, and "Run now".
 struct ScheduledReviewsSidebarSection: View {
     let model: AppModel
@@ -417,12 +417,14 @@ struct ScheduledReviewsSidebarSection: View {
         }
     }
 
+    /// Lives in Browse's rail; its PR opens in Review.
     private func open(_ item: AutoReviewRun.Item) {
         if model.prTabs.contains(item.id) {
             model.activatePRTab(item.id)
         } else {
             model.openPRTab(item.pr, in: item.projectID)
         }
+        model.prMode = .review
     }
 
     private func runCaption(_ run: AutoReviewRun) -> String {

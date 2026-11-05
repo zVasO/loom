@@ -59,7 +59,7 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   le rapport que claude écrit dans `.loom-review/auto-review.json` : résumé dans la
   barre de verdict, commentaires sur les lignes du diff en commentaires en attente,
   verdict suggéré. L'humain relit, corrige, envoie. Une PR n'est revue à nouveau
-  qu'après un push. Réglages › Scheduled reviews ; suivi dans la sidebar PR.
+  qu'après un push. Réglages › Scheduled reviews ; suivi dans le rail du mode Browse de l'onglet PRs.
 - **Workflows** (ADR-0017) : des graphes d'étapes dessinés dans l'onglet Workflows
   (éditeur React Flow embarqué) — départ, contexte (PR, ticket Jira via un connecteur
   Atlassian, repo), agents confiés à des **experts** (instructions, modèle, skills,

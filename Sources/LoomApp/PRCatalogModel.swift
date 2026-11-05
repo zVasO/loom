@@ -147,36 +147,40 @@ extension AppModel {
         if pendingClone == pending { pendingClone = nil }
         guard let projectID = await addRepositoryAsProject(pending.repo) else { return }
         if let number = pending.number {
-            await openPR(number, in: projectID, repo: pending.repo)
+            await openPR(number, in: projectID, repo: pending.repo, pin: pending.pin)
         }
     }
 
     // MARK: Opening a PR from outside a list — inbox, search, pasted URL
 
     /// Opens a PR of a repository named `owner/name`: in its project when one
-    /// clones it, else after asking to clone it first.
-    public func openPR(repo nameWithOwner: String, number: Int) async {
+    /// clones it, else after asking to clone it first. `pin`: a kept tab,
+    /// shown in Review — what the Browse table asks for.
+    public func openPR(repo nameWithOwner: String, number: Int, pin: Bool = false) async {
         if let project = project(forRepo: nameWithOwner) {
-            await openPR(number, in: project.id, repo: nameWithOwner)
+            await openPR(number, in: project.id, repo: nameWithOwner, pin: pin)
         } else {
-            pendingClone = PendingClone(repo: nameWithOwner, number: number)
+            pendingClone = PendingClone(repo: nameWithOwner, number: number, pin: pin)
         }
     }
 
     /// A pasted URL or shorthand. A bare number means the selected project.
-    public func openPR(reference: PRReference) async {
+    public func openPR(reference: PRReference, pin: Bool = false) async {
         if let repo = reference.repo {
-            await openPR(repo: repo, number: reference.number)
+            await openPR(repo: repo, number: reference.number, pin: pin)
         } else if let projectID = selectedProject ?? projects.first?.id {
-            await openPR(reference.number, in: projectID, repo: repoName(for: projectID))
+            await openPR(reference.number, in: projectID, repo: repoName(for: projectID), pin: pin)
         } else {
             startupError = "Add a project first — a bare PR number needs a repository."
         }
     }
 
     /// Fetches the full row (the search knows neither branch nor checks) and
-    /// hands it to the tab through the same channel a project row uses.
-    private func openPR(_ number: Int, in projectID: ProjectID, repo nameWithOwner: String?) async {
+    /// hands it to the tab through the same channel a project row uses — or,
+    /// pinned, straight to a kept tab: several opened at once from the table
+    /// must not overwrite each other in the one-slot channel.
+    private func openPR(_ number: Int, in projectID: ProjectID, repo nameWithOwner: String?,
+                        pin: Bool = false) async {
         do {
             let pr: GitHubService.PullRequest?
             if let nameWithOwner {
@@ -191,7 +195,13 @@ extension AppModel {
                 startupError = "Pull request #\(number) was not found."
                 return
             }
-            pendingPR = PendingPR(projectID: projectID, pr: pr)
+            if pin {
+                openPRTab(pr, in: projectID)
+                prMode = .review
+                Task { await ensurePRs(for: projectID) }
+            } else {
+                pendingPR = PendingPR(projectID: projectID, pr: pr)
+            }
         } catch {
             startupError = "Could not load PR #\(number): \(Self.ghErrorText(error))"
         }
@@ -268,9 +278,9 @@ extension AppModel {
 
     public func closePRTab(_ id: String) {
         prTabs.close(id)
-        // The last tab gone, the folded list is the only thing left to
-        // click — and the toggle that unfolds it lives on the toolbar.
-        if prTabs.isEmpty { prSidebarHidden = false }
+        // The last tab gone, Review has nothing left to show: back to the
+        // table the next PR will be picked from.
+        if prTabs.isEmpty { prMode = .browse }
         savePRTabs()
     }
 

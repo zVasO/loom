@@ -72,6 +72,20 @@ _Avoid_ : quota, limite (la limite d'usage est autre chose)
 Étiquette courte et colorée portée par une session (`PR #42`, `review`, `wip`). Une session en porte zéro ou plusieurs, dans l'ordre d'attribution ; les définitions (nom + couleur) sont globales à l'app. Une métadonnée, jamais un état.
 _Avoid_ : label, tag
 
+### Onglet PRs
+
+**Mode Browse** :
+Le mode de l'onglet PRs où l'on trouve les pull requests : un rail de portées à gauche (en attente de moi, tous les projets, un projet, une recherche GitHub, les dépôts à ajouter) et un tableau triable. On n'y relit rien : une PR choisie part en Review.
+_Avoid_ : liste, sidebar, barre latérale (il n'y a plus de liste à côté du diff)
+
+**Mode Review** :
+Le mode de l'onglet PRs où l'on relit : un onglet par PR ouverte, l'espace de travail (aperçu, fichiers, diff), la session de review dans le **tiroir**. Les deux modes ne partagent jamais l'écran ; ⌘1 / ⌘2 basculent.
+_Avoid_ : détail, vue PR
+
+**Portée** :
+Ce que le tableau de Browse liste, choisie dans son rail. Les portées de projets passent par le filtre de PR ; « en attente de moi » et la recherche sont des requêtes GitHub à part.
+_Avoid_ : scope (terme du code), dossier
+
 ### États de session
 
 **working** :

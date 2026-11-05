@@ -931,11 +931,14 @@ public final class AppModel {
     @ObservationIgnored var prTabsSaveTask: Task<Void, Never>?
     /// One serial queue: the writes land in the order they were asked.
     static let prTabsWriteQueue = DispatchQueue(label: "loom.pr.tabs.write", qos: .utility)
-    /// The PR list folded away (a review took the room) — kept while the
-    /// app runs, whichever tab is on screen.
-    public var prSidebarHidden = false
-    /// Projects unfolded in the PRs sidebar — gh is queried for those only.
-    public var expandedPRProjects: Set<ProjectID> = []
+    /// Browse (the table of PRs) or Review (the open PR tabs). Persisted:
+    /// the PRs tab reopens where you were working.
+    var prMode: PRMode = PRMode(rawValue: UserDefaults.standard
+        .string(forKey: "loom.pr.mode") ?? "") ?? .browse {
+        didSet { UserDefaults.standard.set(prMode.rawValue, forKey: "loom.pr.mode") }
+    }
+    /// What the Browse table lists — gh is queried for that scope only.
+    var prBrowseScope: PRBrowseScope = .inbox
     /// The organizations' repositories, from disk at launch, then refreshed
     /// a day later or on demand.
     public internal(set) var catalog: RepoCatalogCache.Entry?
@@ -977,6 +980,8 @@ public final class AppModel {
         public let repo: String
         /// The PR to open once the clone is a project — nil for a bare add.
         public let number: Int?
+        /// Opened from the Browse table: the PR gets a kept tab, in Review.
+        public var pin = false
     }
 
     // MARK: PR filters

@@ -5,9 +5,11 @@ import LoomUI
 import LoomWorkflows
 import SwiftUI
 
-/// The global PRs tab: every project's open pull requests in one sidebar, the
-/// shared PR workspace in the middle, and the review session in a drawer that
-/// slides over the right edge — the diff never gives up width for it.
+/// The global PRs tab, in two modes that never share the screen (see
+/// `PRMode`): BROWSE finds pull requests in a table (`PRBrowserView`);
+/// REVIEW works on the ones opened from it — one tab each, the shared PR
+/// workspace in the middle, and the review session in a drawer that slides
+/// over the right edge, so the diff never gives up width for it.
 /// "Start review" is the one-click quick action — one claude session per PR,
 /// badged, reattached when it already exists.
 struct GlobalPRsView: View {
@@ -15,9 +17,9 @@ struct GlobalPRsView: View {
     /// Opens the session in the Sessions tab.
     let onOpenSession: (SessionID) -> Void
 
-    // The selection, the drawer and the folded list are the MODEL's
-    // (`prTabs`, `prSidebarHidden`, `expandedPRProjects`): this view is
-    // rebuilt every time the app's tabs switch, and its @State with it.
+    // The mode, the scope, the tabs and their drawers are the MODEL's
+    // (`prMode`, `prBrowseScope`, `prTabs`): this view is rebuilt every time
+    // the app's tabs switch, and its @State with it.
 
     /// The tab on screen — what the toolbar, workspace and drawer show.
     private var activeTab: PRTab? { model.prTabs.active }
@@ -39,21 +41,6 @@ struct GlobalPRsView: View {
         guard let tab = activeTab else { return }
         model.setPRTabDrawer(open: open, for: tab.id)
     }
-    /// What is typed in the search field: an instant filter over every list,
-    /// a GitHub search (or a PR to open) on Return.
-    @State private var query = ""
-    @FocusState private var searchFocused: Bool
-    /// Organizations whose repositories are unfolded — folded by default,
-    /// an organization can hold hundreds.
-    @State private var expandedOwners: Set<String> = []
-    /// "WAITING ON ME" and "PROJECTS" folded away — persisted: a section
-    /// the user put aside stays aside across tabs and relaunches. Unlike an
-    /// organization, a search does not unfold them: the count in the header
-    /// says what matched, and the chevron always does what it shows.
-    @AppStorage("loom.pr.inboxFolded") private var inboxFolded = false
-    @AppStorage("loom.pr.projectsFolded") private var projectsFolded = false
-    @State private var addRepoShown = false
-    @State private var addRepoText = ""
     /// Which region of the workspace is showing. Persisted: whichever one you
     /// work in, you come back to it.
     @State private var pane = PRPane(rawValue: UserDefaults.standard
@@ -76,6 +63,12 @@ struct GlobalPRsView: View {
 
     private var gitProjects: [ProjectRecord] { model.projects }
 
+    /// The PR the minute poll follows: the active tab's, in Review only —
+    /// Browse shows no diff to keep true.
+    private var watchedTabID: String? {
+        model.prMode == .review ? activeTab?.id : nil
+    }
+
     var body: some View {
         if !GitHubService.isAvailable {
             VStack(spacing: 10) {
@@ -92,559 +85,61 @@ struct GlobalPRsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DefaultTheme.background)
         } else {
-            HStack(spacing: 0) {
-                if !model.prSidebarHidden {
-                    sidebar
-                    Divider().overlay(DefaultTheme.cardBorder)
+            Group {
+                switch model.prMode {
+                case .browse: PRBrowserView(model: model)
+                case .review: reviewMode
                 }
-                detail
-                PRTabShortcuts(model: model)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DefaultTheme.background)
+            .background(PRTabShortcuts(model: model))
             // The PR on screen stays true to GitHub: checked on every tab
             // switch, every minute, and whenever the app comes back to the
             // front (a push made meanwhile lands before anyone reviews it).
-            .task(id: activeTab?.id) { await watchActivePR() }
+            .task(id: watchedTabID) { await watchActivePR() }
             .onReceive(NotificationCenter.default.publisher(
                 for: NSApplication.didBecomeActiveNotification)) { _ in
-                guard let tab = activeTab else { return }
+                guard model.prMode == .review, let tab = activeTab else { return }
                 Task { await model.refreshOpenPR(tab.pr.number, in: tab.projectID) }
             }
             .onAppear { consumePendingPR() }
             .onChange(of: model.pendingPR) { consumePendingPR() }
+            .confirmationDialog(
+                "Clone \(model.pendingClone?.repo ?? "") and add it as a project?",
+                isPresented: Binding(get: { model.pendingClone != nil },
+                                     set: { if !$0 { model.pendingClone = nil } }),
+                titleVisibility: .visible
+            ) {
+                Button(model.pendingClone?.number == nil ? "Clone" : "Clone and open the PR") {
+                    // Read now: dismissing the dialog clears pendingClone before
+                    // the task below gets to run.
+                    let pending = model.pendingClone
+                    Task { await model.confirmClone(pending) }
+                }
+                Button("Cancel", role: .cancel) { model.pendingClone = nil }
+            } message: {
+                Text(model.cloneDirectory.map { "The clone lands in \($0.path)." }
+                     ?? "You will be asked where clones should land.")
+            }
         }
     }
 
-    /// A PR clicked in the project tab, the inbox, a search or a pasted URL
-    /// lands here: previewed in a tab, its project unfolded, the cache
-    /// warmed, the channel cleared.
+    /// A PR clicked in the project tab or opened by a pasted URL lands here:
+    /// previewed in a tab, shown in Review, the cache warmed, the channel
+    /// cleared.
     private func consumePendingPR() {
         guard let pending = model.pendingPR else { return }
         model.showPR(pending.pr, in: pending.projectID)
-        model.expandedPRProjects.insert(pending.projectID)
-        projectsFolded = false   // the project just unfolded must be on screen
+        model.prMode = .review
         Task { await model.ensurePRs(for: pending.projectID) }
         model.pendingPR = nil
     }
 
-    // MARK: Sidebar — search, inbox, projects, the organizations' catalog
-
-    private var sidebar: some View {
-        VStack(spacing: 0) {
-            searchBar
-            // The question every list below answers: all open, mine, waiting
-            // on my review… Changing it refetches the expanded projects only.
-            HStack(spacing: 8) {
-                PRFilterMenu(model: model,
-                             projectsToRefresh: { Array(model.expandedPRProjects) })
-                Spacer()
-                if model.catalogLoading || model.inboxLoading {
-                    ProgressView().controlSize(.mini)
-                }
-                HoverIconButton(systemImage: "arrow.clockwise",
-                                help: "Refresh the inbox and the organizations' repositories") {
-                    Task {
-                        async let inbox: Void = model.refreshInbox()
-                        async let catalog: Void = model.refreshCatalog()
-                        _ = await (inbox, catalog)
-                    }
-                }
-            }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            Divider().overlay(DefaultTheme.cardBorder)
-            ScrollView {
-                // Lazy: an account with dozens of organizations builds the
-                // groups it shows, not every catalog row at once.
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if let results = model.searchResults {
-                        searchSection(results)
-                    }
-                    ScheduledReviewsSidebarSection(model: model, activeTabID: activeTab?.id)
-                    inboxSection
-                    projectsSection
-                    ForEach(model.visibleOwners, id: \.self) { owner in
-                        ownerGroup(owner)
-                    }
-                    catalogFooter
-                }
-                .padding(12)
-            }
-        }
-        .frame(width: Self.sidebarWidth)
-        .background(DefaultTheme.background)
-        .task {
-            // Both come from disk first; gh is only asked past their TTL.
-            async let inbox: Void = model.ensureInbox()
-            async let catalog: Void = model.ensureCatalog()
-            _ = await (inbox, catalog)
-        }
-        .confirmationDialog(
-            "Clone \(model.pendingClone?.repo ?? "") and add it as a project?",
-            isPresented: Binding(get: { model.pendingClone != nil },
-                                 set: { if !$0 { model.pendingClone = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button(model.pendingClone?.number == nil ? "Clone" : "Clone and open the PR") {
-                // Read now: dismissing the dialog clears pendingClone before
-                // the task below gets to run.
-                let pending = model.pendingClone
-                Task { await model.confirmClone(pending) }
-            }
-            Button("Cancel", role: .cancel) { model.pendingClone = nil }
-        } message: {
-            Text(model.cloneDirectory.map { "The clone lands in \($0.path)." }
-                 ?? "You will be asked where clones should land.")
-        }
-    }
-
-    private static let sidebarWidth: CGFloat = 340
-
-    /// One field, two behaviours: typing narrows every list on screen; Return
-    /// asks GitHub — or opens the PR the text names (a pasted URL, `o/r#12`).
-    private var searchBar: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(DefaultTheme.secondaryText)
-            TextField("Search PRs and repos, or paste a PR URL", text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .focused($searchFocused)
-                .onSubmit { submitSearch() }
-                .onExitCommand { clearQuery() }
-            if model.searchLoading {
-                ProgressView().controlSize(.mini)
-            } else if !query.isEmpty || model.searchResults != nil {
-                HoverIconButton(systemImage: "xmark.circle.fill", help: "Clear") { clearQuery() }
-            }
-            HoverIconButton(systemImage: "plus", help: "Add a repository by owner/name or URL") {
-                addRepoShown = true
-            }
-            .popover(isPresented: $addRepoShown, arrowEdge: .bottom) { addRepoPopover }
-            // ⌘F lands in the field; the button itself is never seen.
-            Button("") { searchFocused = true }
-                .keyboardShortcut("f", modifiers: .command)
-                .frame(width: 0, height: 0)
-                .opacity(0)
-        }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(searchFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
-                    lineWidth: 1))
-        .padding(.horizontal, 12).padding(.top, 10)
-    }
-
-    private func submitSearch() {
-        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        if let reference = PRReference.parse(text) {
-            Task { await model.openPR(reference: reference) }
-        } else {
-            Task { await model.searchPRs(text) }
-        }
-    }
-
-    private func clearQuery() {
-        query = ""
-        model.clearSearch()
-    }
-
-    /// `owner/name`, a repository URL, or a PR URL: the repository is cloned
-    /// and added as a project; a PR URL opens the PR once it is.
-    private var addRepoPopover: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Add a repository")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(DefaultTheme.primaryText)
-            TextField("owner/name, or a GitHub URL", text: $addRepoText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12, design: .monospaced))
-                .padding(.horizontal, 8).padding(.vertical, 6)
-                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(DefaultTheme.cardBorder, lineWidth: 1))
-                .onSubmit { submitAddRepo() }
-            Text("Cloned with gh into your clone folder, then added as a project — its PRs appear with the others. A PR URL opens that PR right after.")
-                .font(.system(size: 10))
-                .foregroundStyle(DefaultTheme.mutedText)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Spacer()
-                GhostButton("Cancel") { addRepoShown = false }
-                AccentButton("Add") { submitAddRepo() }
-            }
-        }
-        .padding(14)
-        .frame(width: 340)
-        .background(DefaultTheme.background)
-    }
-
-    private func submitAddRepo() {
-        let text = addRepoText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        addRepoShown = false
-        addRepoText = ""
-        if let reference = PRReference.parse(text), reference.repo != nil {
-            Task { await model.openPR(reference: reference) }
-        } else if let repo = GitHubRepoName.parse(nameWithOwner: text)
-                    ?? GitHubRepoName.parse(remoteURL: text) {
-            model.pendingClone = .init(repo: repo, number: nil)
-        } else {
-            model.startupError = "“\(text)” is neither owner/name nor a GitHub URL."
-        }
-    }
-
-    // MARK: Sections
-
-    private func header(_ title: String, count: Int?, systemImage: String? = nil) -> some View {
-        HStack(spacing: 6) {
-            if let systemImage {
-                Image(systemName: systemImage).font(.system(size: 9, weight: .semibold))
-            }
-            Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
-            if let count, count > 0 {
-                Text("\(count)")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(DefaultTheme.surfaceRaised, in: Capsule())
-            }
-        }
-        .foregroundStyle(DefaultTheme.groupHeader)
-    }
-
-    /// A section header that folds its section: the organizations' chevron,
-    /// icon, title and count, the whole line clickable.
-    private func foldableHeader(_ title: String, count: Int?, systemImage: String,
-                                folded: Binding<Bool>) -> some View {
-        Button {
-            withAnimation(.hover) { folded.wrappedValue.toggle() }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .rotationEffect(.degrees(folded.wrappedValue ? -90 : 0))
-                    .foregroundStyle(DefaultTheme.groupHeader)
-                header(title, count: count, systemImage: systemImage)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(folded.wrappedValue ? "Unfold" : "Fold")
-    }
-
-    /// GitHub's answer to the typed text, grouped by repository. A hit in a
-    /// repository nobody cloned yet offers the clone.
-    private func searchSection(_ results: [GitHubService.PRSearchHit]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                header("SEARCH RESULTS", count: results.count, systemImage: "magnifyingglass")
-                Spacer()
-                HoverIconButton(systemImage: "xmark", help: "Close the results") { clearQuery() }
-            }
-            .padding(.horizontal, 2)
-            if let error = model.searchError {
-                Text(error)
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.danger)
-                    .textSelection(.enabled)
-            } else if results.isEmpty {
-                Text("Nothing open matches on GitHub.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.mutedText)
-                    .padding(.leading, 2)
-            }
-            hitList(results)
-        }
-    }
-
-    /// Every PR waiting on the user's review — all organizations, external
-    /// repositories included. Filtered by the typed text like the rest.
-    @ViewBuilder
-    private var inboxSection: some View {
-        let hits = model.inbox.filter { PRSidebarFilter.matches($0, query: query) }
-        if !hits.isEmpty || query.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    foldableHeader("WAITING ON ME", count: hits.count, systemImage: "tray",
-                                   folded: $inboxFolded)
-                    Spacer()
-                    if model.inboxLoading { ProgressView().controlSize(.mini) }
-                }
-                .padding(.horizontal, 2)
-                if !inboxFolded {
-                    if let error = model.inboxError {
-                        Text(error)
-                            .font(.system(size: 11))
-                            .foregroundStyle(DefaultTheme.danger)
-                            .textSelection(.enabled)
-                    } else if hits.isEmpty && !model.inboxLoading {
-                        Text("No review requested from you.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(DefaultTheme.mutedText)
-                            .padding(.leading, 2)
-                    }
-                    hitList(hits)
-                }
-            }
-        }
-    }
-
-    /// Hits grouped by repository, repositories alphabetical.
-    private func hitList(_ hits: [GitHubService.PRSearchHit]) -> some View {
-        let groups = Dictionary(grouping: hits, by: \.repo)
-            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
-        let selectedRepo = activeTab.flatMap { model.repoName(for: $0.projectID) } ?? ""
-        return VStack(alignment: .leading, spacing: 6) {
-            ForEach(groups, id: \.key) { group in
-                let repo = group.key
-                let hits = group.value
-                let cloned = model.project(forRepo: repo) != nil
-                HStack(spacing: 5) {
-                    Image(systemName: cloned ? "folder" : "icloud.and.arrow.down")
-                        .font(.system(size: 9))
-                    Text(repo)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .lineLimit(1)
-                }
-                .foregroundStyle(DefaultTheme.mutedText)
-                .help(cloned ? "Cloned as a project" : "Not cloned yet — opening a PR asks to clone it")
-                .padding(.leading, 2)
-                ForEach(hits) { hit in
-                    let selected = activeTab?.pr.number == hit.number
-                        && selectedRepo.caseInsensitiveCompare(hit.repo) == .orderedSame
-                    PRHitRow(hit: hit, isSelected: selected) {
-                        Task { await model.openPR(repo: hit.repo, number: hit.number) }
-                    }
-                }
-            }
-        }
-    }
-
-    /// The projects, each with its PRs. The typed text keeps a project when
-    /// its name matches (every PR shown) or when some of its PRs do (those).
-    @ViewBuilder
-    private var projectsSection: some View {
-        let visible = gitProjects.filter { project in
-            query.isEmpty
-                || PRSidebarFilter.matches(projectName: project.name,
-                                           repo: model.repoName(for: project.id), query: query)
-                || model.prs(for: project.id).contains { PRSidebarFilter.matches($0, query: query) }
-        }
-        if !visible.isEmpty || query.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                foldableHeader("PROJECTS", count: visible.count, systemImage: "folder",
-                               folded: $projectsFolded)
-                    .padding(.horizontal, 2)
-                if !projectsFolded {
-                    if visible.isEmpty {
-                        Text("No project yet — add one from an organization below, or with +.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(DefaultTheme.mutedText)
-                            .padding(.leading, 2)
-                    }
-                    ForEach(visible, id: \.id) { project in
-                        projectGroup(project)
-                    }
-                }
-            }
-        }
-    }
-
-    private func projectGroup(_ project: ProjectRecord) -> some View {
-        let nameMatches = !query.isEmpty && PRSidebarFilter.matches(
-            projectName: project.name, repo: model.repoName(for: project.id), query: query)
-        let prs = model.prs(for: project.id).filter {
-            nameMatches || PRSidebarFilter.matches($0, query: query)
-        }
-        // A search opens every project with a match: what was typed is what
-        // the user wants to see, not a chevron away.
-        let expanded = model.expandedPRProjects.contains(project.id) || (!query.isEmpty && !prs.isEmpty)
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Button {
-                    if expanded {
-                        model.expandedPRProjects.remove(project.id)
-                    } else {
-                        model.expandedPRProjects.insert(project.id)
-                        Task { await model.ensurePRs(for: project.id) }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .bold))
-                            .rotationEffect(.degrees(expanded ? 0 : -90))
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(project.name.uppercased())
-                                .font(.system(size: 10, weight: .semibold))
-                                .kerning(0.8)
-                            if let repo = model.repoName(for: project.id),
-                               repo.caseInsensitiveCompare(project.name) != .orderedSame {
-                                Text(repo)
-                                    .font(.system(size: 9, design: .monospaced))
-                                    .foregroundStyle(DefaultTheme.mutedText)
-                                    .lineLimit(1)
-                            }
-                        }
-                        if !prs.isEmpty {
-                            Text("\(prs.count)")
-                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(DefaultTheme.secondaryText)
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(DefaultTheme.surfaceRaised, in: Capsule())
-                        }
-                    }
-                    .foregroundStyle(DefaultTheme.groupHeader)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                Spacer()
-                if model.isLoadingPRs(for: project.id) {
-                    ProgressView().controlSize(.mini)
-                }
-                if expanded {
-                    HoverIconButton(systemImage: "arrow.clockwise",
-                                    help: model.prCacheHelp(for: project.id)) {
-                        Task { await model.refreshPRs(for: project.id) }
-                    }
-                }
-            }
-            .padding(.horizontal, 2)
-            if expanded {
-                if prs.isEmpty && !model.isLoadingPRs(for: project.id) {
-                    Text(!query.isEmpty ? "No loaded PR matches."
-                         : model.selectedPRFilterID == PRFilter.all.id
-                         ? "No open PR" : "No PR matches “\(model.selectedPRFilter.name)”")
-                        .font(.system(size: 11))
-                        .foregroundStyle(DefaultTheme.mutedText)
-                        .padding(.leading, 2)
-                }
-                ForEach(prs) { pr in
-                    PRSidebarRow(pr: pr,
-                                 isSelected: activeTab?.id == PRTab.key(project.id, pr.number),
-                                 isOpen: model.prTabs.contains(PRTab.key(project.id, pr.number)),
-                                 hasSession: model.reviewSession(forPR: pr.number,
-                                                                 in: project.id) != nil,
-                                 launching: model.isLaunchingReview(forPR: pr.number,
-                                                                    in: project.id),
-                                 onSelect: { model.showPR(pr, in: project.id) },
-                                 onOpen: { model.openPRTab(pr, in: project.id) },
-                                 onStartReview: { startReview(pr, project: project) })
-                        .equatable()
-                }
-            }
-        }
-    }
-
-    /// One organization (or the account itself): its repositories that are
-    /// not projects yet, each one click from becoming one.
-    @ViewBuilder
-    private func ownerGroup(_ owner: String) -> some View {
-        let repos = model.catalogRepositories(of: owner)
-            .filter { PRSidebarFilter.matches($0, query: query) }
-        let isViewer = owner == model.catalog?.viewer
-        if !repos.isEmpty || query.isEmpty {
-            let pinnedOpen = expandedOwners.contains(owner)
-            let expanded = pinnedOpen || (!query.isEmpty && !repos.isEmpty)
-            // A search unfolds every owner with a match — capped: the first
-            // keystroke used to build hundreds of rows, each with its menu,
-            // its help and its gestures, for a large organization.
-            let shown = pinnedOpen ? repos : Array(repos.prefix(Self.searchUnfoldCap))
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Button {
-                        if expanded { expandedOwners.remove(owner) } else { expandedOwners.insert(owner) }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 8, weight: .bold))
-                                .rotationEffect(.degrees(expanded ? 0 : -90))
-                            Image(systemName: isViewer ? "person" : "building.2")
-                                .font(.system(size: 9, weight: .semibold))
-                            Text(owner.uppercased())
-                                .font(.system(size: 10, weight: .semibold))
-                                .kerning(0.8)
-                            if !repos.isEmpty {
-                                Text("\(repos.count)")
-                                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(DefaultTheme.secondaryText)
-                                    .padding(.horizontal, 5).padding(.vertical, 1)
-                                    .background(DefaultTheme.surfaceRaised, in: Capsule())
-                            }
-                        }
-                        .foregroundStyle(DefaultTheme.groupHeader)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(isViewer ? "Your own repositories" : "Organization — repositories not added as projects yet")
-                    Spacer()
-                }
-                .padding(.horizontal, 2)
-                .contextMenu {
-                    Button("Hide \(owner)") { model.hide(owner: owner) }
-                }
-                if expanded {
-                    if repos.isEmpty {
-                        Text("Every repository here is already a project.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(DefaultTheme.mutedText)
-                            .padding(.leading, 2)
-                    }
-                    ForEach(shown) { repo in
-                        CatalogRepoRow(repo: repo, cloning: model.isCloning(repo.nameWithOwner),
-                                       onAdd: { model.pendingClone = .init(repo: repo.nameWithOwner, number: nil) },
-                                       onHide: { model.hide(repo: repo.nameWithOwner) })
-                    }
-                    if shown.count < repos.count {
-                        Button {
-                            expandedOwners.insert(owner)
-                        } label: {
-                            Text("\(repos.count - shown.count) more…")
-                                .font(.system(size: 11))
-                                .foregroundStyle(DefaultTheme.secondaryText)
-                                .underline()
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.leading, 2)
-                    }
-                }
-            }
-        }
-    }
-
-    private static let searchUnfoldCap = 20
-
-    @ViewBuilder
-    private var catalogFooter: some View {
-        if let error = model.catalogError {
-            Text(error)
-                .font(.system(size: 11))
-                .foregroundStyle(DefaultTheme.danger)
-                .textSelection(.enabled)
-        } else if model.catalog == nil && !model.catalogLoading {
-            Text("Your organizations' repositories will show here once gh answers.")
-                .font(.system(size: 11))
-                .foregroundStyle(DefaultTheme.mutedText)
-        }
-        if model.hiddenCount > 0 {
-            Button {
-                model.unhideAll()
-            } label: {
-                Text(model.hiddenCount == 1 ? "1 hidden — show" : "\(model.hiddenCount) hidden — show")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                    .underline()
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, 2)
-        }
-    }
     /// Polls the active tab's PR while the PR tab is on screen — cancelled
     /// by a tab switch (the next tab starts its own) or leaving the view.
     private func watchActivePR() async {
-        guard let tab = activeTab else { return }
+        guard model.prMode == .review, let tab = activeTab else { return }
         repeat {
             await model.refreshOpenPR(tab.pr.number, in: tab.projectID)
             try? await Task.sleep(for: .seconds(60))
@@ -688,34 +183,29 @@ struct GlobalPRsView: View {
         }
     }
 
-    /// `fresh`: a new session takes over the PR instead of the one it has.
-    private func startReview(_ pr: GitHubService.PullRequest, project: ProjectRecord,
-                             fresh: Bool = false) {
-        guard !model.isLaunchingReview(forPR: pr.number, in: project.id) else { return }
-        // A review pins its tab: browsing the list must not take it away.
-        model.openPRTab(pr, in: project.id)
-        Task {
-            if await model.launchPRReviewSession(pr, in: project.id, fresh: fresh) != nil {
-                // Stay in the PR tab: the session opens in the drawer, and the
-                // PR list steps aside to give the diff room.
-                withAnimation(.hover) {
-                    model.setPRTabDrawer(open: true, for: PRTab.key(project.id, pr.number))
-                    model.prSidebarHidden = true
-                }
-            }
+    // MARK: Review — the open tabs, the workspace, the session drawer
+
+    /// The top bar: the mode switch, then one tab per open PR.
+    private var reviewBar: some View {
+        HStack(spacing: 0) {
+            PRModeSwitch(model: model)
+                .padding(.horizontal, 12)
+            Divider().overlay(DefaultTheme.cardBorder)
+            PRTabStrip(model: model)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(height: PRModeSwitch.barHeight)
+        .background(DefaultTheme.background)
     }
 
-    // MARK: Detail — toolbar, workspace, session drawer
-
     @ViewBuilder
-    private var detail: some View {
-        if let tab = activeTab,
-           let project = gitProjects.first(where: { $0.id == tab.projectID }) {
-            let pr = tab.pr
-            VStack(spacing: 0) {
-                PRTabStrip(model: model)
-                Divider().overlay(DefaultTheme.cardBorder)
+    private var reviewMode: some View {
+        VStack(spacing: 0) {
+            reviewBar
+            Divider().overlay(DefaultTheme.cardBorder)
+            if let tab = activeTab,
+               let project = gitProjects.first(where: { $0.id == tab.projectID }) {
+                let pr = tab.pr
                 toolbar(pr, project: project)
                 Divider().overlay(DefaultTheme.cardBorder)
                 GeometryReader { geometry in
@@ -740,33 +230,38 @@ struct GlobalPRsView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+            } else {
+                reviewEmptyState
             }
-        } else {
-            VStack(spacing: 8) {
-                Text("Pick a pull request")
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Text("A click previews a PR in a tab; a double-click, or sparkles, keeps the tab for a review.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(DefaultTheme.mutedText)
-                if model.prSidebarHidden {
-                    // No toolbar without a tab: the way back to the list is here.
-                    GhostButton("Show the PR list", systemImage: "sidebar.leading") {
-                        withAnimation(.hover) { model.prSidebarHidden = false }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(DefaultTheme.contentBackground)
         }
+    }
+
+    /// No PR open: Review has nothing of its own — the way to Browse is here.
+    private var reviewEmptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 26))
+                .foregroundStyle(DefaultTheme.mutedText)
+            Text("No pull request open for review")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(DefaultTheme.secondaryText)
+            Text("Pick one in Browse: double-click a row, press Return, or select several and open them together.")
+                .font(.system(size: 12))
+                .foregroundStyle(DefaultTheme.mutedText)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+            AccentButton("Browse pull requests", systemImage: "tablecells") {
+                withAnimation(.hover) { model.prMode = .browse }
+            }
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DefaultTheme.contentBackground)
     }
 
     private func toolbar(_ pr: GitHubService.PullRequest,
                          project: ProjectRecord) -> some View {
         HStack(spacing: 10) {
-            HoverIconButton(systemImage: "sidebar.leading",
-                            help: model.prSidebarHidden ? "Show the PR list" : "Hide the PR list") {
-                withAnimation(.hover) { model.prSidebarHidden.toggle() }
-            }
             Text("#\(pr.number)")
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .foregroundStyle(DefaultTheme.accent)
@@ -804,11 +299,11 @@ struct GlobalPRsView: View {
                 // one (new brief, Settings' /setup-pr-review, empty context).
                 HStack(spacing: 2) {
                     AccentButton("Review session", systemImage: "sparkles") {
-                        startReview(pr, project: project)
+                        model.startPRReview(pr, in: project.id)
                     }
                     Menu {
                         Button {
-                            startReview(pr, project: project, fresh: true)
+                            model.startPRReview(pr, in: project.id, fresh: true)
                         } label: {
                             Label("New review session", systemImage: "plus.bubble")
                         }
@@ -826,7 +321,7 @@ struct GlobalPRsView: View {
                 }
             } else {
                 AccentButton("Start review", systemImage: "sparkles") {
-                    startReview(pr, project: project)
+                    model.startPRReview(pr, in: project.id)
                 }
             }
             workflowMenu(pr, project: project)
@@ -1010,7 +505,7 @@ extension GlobalPRsView {
                 }
                 if let tab, let project {
                     HoverIconButton(systemImage: "plus", help: "New review session") {
-                        startReview(tab.pr, project: project, fresh: true)
+                        model.startPRReview(tab.pr, in: project.id, fresh: true)
                     }
                     .disabled(model.isLaunchingReview(forPR: tab.pr.number, in: project.id))
                 }
@@ -1077,138 +572,6 @@ private struct ReviewSessionTab: View {
         }
         .buttonStyle(.plain)
         .help(help)
-        .onHover { hovered = $0 }
-        .animation(.hover, value: hovered)
-    }
-}
-
-/// A PR in the global sidebar: CI dot, number, title — sparkles quick action
-/// on hover starts (or reopens) its review session.
-private struct PRSidebarRow: View, Equatable {
-    let pr: GitHubService.PullRequest
-    let isSelected: Bool
-    /// Has a tab (pinned or preview) — shown with a faint mark.
-    let isOpen: Bool
-    let hasSession: Bool
-    let launching: Bool
-    /// One click: preview in a tab. Two: keep the tab.
-    let onSelect: () -> Void
-    let onOpen: () -> Void
-    let onStartReview: () -> Void
-    @State private var hovered = false
-
-    /// What the row SHOWS decides whether it re-runs — every keystroke in the
-    /// search field re-evaluates the whole sidebar.
-    static func == (lhs: PRSidebarRow, rhs: PRSidebarRow) -> Bool {
-        lhs.pr == rhs.pr && lhs.isSelected == rhs.isSelected && lhs.isOpen == rhs.isOpen
-            && lhs.hasSession == rhs.hasSession && lhs.launching == rhs.launching
-    }
-
-    private func chip(_ label: String, color: Color) -> some View {
-        Text(label)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(DefaultTheme.surfaceRaised, in: Capsule())
-            // One line, at its own width: the HStack would otherwise offer it
-            // half the remaining room and "changes requested" would fold.
-            .lineLimit(1)
-            .fixedSize()
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Circle()
-                .fill(PRChips.checksColor(pr))
-                .frame(width: 6, height: 6)
-                .padding(.top, 4)
-                .help(PRChips.checksSummary(pr))
-            Text("#\(pr.number)")
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundStyle(DefaultTheme.accent)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(pr.title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(DefaultTheme.primaryText)
-                    .lineLimit(1)
-                HStack(spacing: 7) {
-                    Text("@" + pr.author)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(DefaultTheme.mutedText)
-                        .lineLimit(1)
-                    MonoTag(pr.branch, systemImage: "arrow.triangle.branch",
-                            color: DefaultTheme.mutedText)
-                }
-                // One more line at most: who it waits on, what it is tagged,
-                // how big it is, whether it still merges. The chips are rigid,
-                // so the line can be wider than the row: the stack keeps its
-                // ideal width, the frame takes exactly the proposed one and
-                // clips the rest. A disabled horizontal ScrollView did the
-                // same at the price of an NSScrollView per row — hundreds of
-                // them on the first keystroke of a search.
-                if !pr.reviewers.isEmpty || !pr.labels.isEmpty || pr.additions + pr.deletions > 0
-                    || pr.isConflicting {
-                    HStack(spacing: 6) {
-                        if !pr.reviewers.isEmpty {
-                            Label(PRChips.reviewers(pr, limit: 2), systemImage: "person.2")
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(DefaultTheme.mutedText)
-                                .lineLimit(1)
-                        }
-                        ForEach(pr.labels.prefix(2), id: \.name) { PRChips.label($0) }
-                        if pr.additions + pr.deletions > 0 { PRChips.size(pr) }
-                        if pr.isConflicting {
-                            Text("conflicts")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(DefaultTheme.danger)
-                        }
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                    .clipped()
-                }
-            }
-            // The column takes every point the trailing chips leave — safe now
-            // that none of its lines can outgrow the proposal. Not a Spacer: one
-            // would share that width fifty-fifty with the equally greedy column.
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if launching {
-                ProgressView().controlSize(.mini)
-                    .help("Preparing the review worktree…")
-            } else if hovered {
-                HoverIconButton(systemImage: "sparkles",
-                                help: hasSession ? "Open the review session"
-                                                 : "Start a review session",
-                                action: onStartReview)
-            } else {
-                VStack(alignment: .trailing, spacing: 3) {
-                    if pr.isDraft { chip("draft", color: DefaultTheme.secondaryText) }
-                    if !pr.reviewDecision.isEmpty {
-                        chip(pr.reviewDecision.replacingOccurrences(of: "_", with: " ").lowercased(),
-                             color: pr.reviewDecision == "APPROVED" ? DefaultTheme.groupHeader
-                                                                    : DefaultTheme.secondaryText)
-                    }
-                    if hasSession {
-                        Circle().fill(AppModel.color(hex: "#A78BFA")).frame(width: 5, height: 5)
-                            .help("A review session exists for this PR")
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 9).padding(.vertical, 8)
-        .background(isSelected ? DefaultTheme.surfaceRaised
-                    : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : DefaultTheme.surface,
-                    in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(isSelected ? DefaultTheme.accent.opacity(0.6)
-                    : isOpen ? DefaultTheme.accent.opacity(0.25) : DefaultTheme.cardBorder,
-                    lineWidth: 1))
-        .contentShape(Rectangle())
-        // The double-tap is declared first so a second click is not two
-        // single ones.
-        .onTapGesture(count: 2, perform: onOpen)
-        .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
     }
