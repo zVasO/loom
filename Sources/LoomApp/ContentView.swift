@@ -2505,6 +2505,9 @@ struct SessionsView: View {
         .padding(10)
         .contentShape(Rectangle())
         .hoverSurface(0.6)
+        // The cross on hover, like every other row of the stack — with the
+        // same confirmation as Close in the menu: its pages are lost.
+        .stackQuickActions(onClose: { confirmCloseAgentBrowser(parent.id) })
         .onTapGesture { selected = .agentBrowser(parent.id) }
         .contextMenu {
             Button("Open as a tab") { selected = .agentBrowser(parent.id) }

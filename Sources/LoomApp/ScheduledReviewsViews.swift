@@ -11,7 +11,6 @@ import SwiftUI
 /// PRs, how many at once, and what it asks claude.
 struct ScheduledReviewsSettings: View {
     let model: AppModel
-    @State private var promptDraft = ""
 
     var body: some View {
         // Its title is the Settings page's: the sidebar scrolls to it.
@@ -47,27 +46,12 @@ struct ScheduledReviewsSettings: View {
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
                 Divider().overlay(DefaultTheme.cardBorder)
-                HStack {
-                    Text("Review prompt")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                    Spacer()
-                    if promptDraft != AutoReviewPrompt.defaultTemplate {
-                        GhostButton("Reset to default", systemImage: "arrow.counterclockwise") {
-                            promptDraft = AutoReviewPrompt.defaultTemplate
-                        }
-                    }
+                PromptEditor(id: "autoReviewPrompt", title: "Review prompt",
+                             text: model.autoReviewPromptTemplate ?? AutoReviewPrompt.defaultTemplate,
+                             defaultText: AutoReviewPrompt.defaultTemplate) { text in
+                    // The setter stores nothing for the default text.
+                    model.autoReviewPromptTemplate = text
                 }
-                TextEditor(text: $promptDraft)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.primaryText)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .frame(minHeight: 200)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
-                    .onAppear { promptDraft = model.autoReviewPromptTemplate ?? AutoReviewPrompt.defaultTemplate }
-                    .onChange(of: promptDraft) { _, draft in model.autoReviewPromptTemplate = draft }
                 Text("Typed into the review session once the PR is loaded. Placeholders: \(AutoReviewPrompt.placeholders.joined(separator: ", ")). Keep the report part: it is what Loom imports — {{report}} is where claude writes it.")
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)

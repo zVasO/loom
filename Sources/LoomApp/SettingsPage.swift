@@ -119,6 +119,79 @@ private extension View {
     }
 }
 
+/// The sidebar's highlight, and how long the scroll may not move it.
+@MainActor
+@Observable
+final class SettingsNavigation {
+    /// The section at the top of the page, highlighted in the sidebar.
+    var active: SettingsAnchor = .general
+    /// Until then the scroll does not move the highlight: a click's own
+    /// animated scroll passes over the sections in between, and the last one
+    /// may never reach the top. Never drawn: not observed.
+    @ObservationIgnored var followScrollAfter = Date.distantPast
+}
+
+/// Settings' left column: the groups and their sections, the one at the
+/// top of the page highlighted. Its own view: it alone reads `active`.
+private struct SettingsSidebar: View {
+    let navigation: SettingsNavigation
+    let onJump: (SettingsAnchor) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Settings")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 2)
+                ForEach(SettingsAnchor.groups) { entry in
+                    VStack(alignment: .leading, spacing: 1) {
+                        row(entry.id)
+                        ForEach(entry.items) { item in
+                            row(item)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 22)
+        }
+    }
+
+    private func row(_ anchor: SettingsAnchor) -> some View {
+        let active = navigation.active
+        let isGroup = anchor.group == anchor
+        let isActive = active == anchor
+        let inActiveGroup = active.group == anchor.group
+        return Button {
+            onJump(anchor)
+        } label: {
+            HStack(spacing: 8) {
+                if isGroup {
+                    Image(systemName: anchor.icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(inActiveGroup ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                        .frame(width: 16)
+                }
+                Text(anchor.title)
+                    .font(.system(size: isGroup ? 12.5 : 12, weight: isGroup ? .semibold : .regular))
+                    .foregroundStyle(isActive ? DefaultTheme.accent
+                                     : (isGroup ? DefaultTheme.primaryText : DefaultTheme.secondaryText))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, isGroup ? 8 : 32).padding(.trailing, 8)
+            .padding(.vertical, isGroup ? 6 : 4)
+            .background(isActive ? DefaultTheme.accent.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverSurface()
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
 /// The in-app Settings page (gear icon): a sidebar of groups and their
 /// sections on the left — a click scrolls there, and it follows the scroll —
 /// and the settings themselves on the right.
@@ -130,12 +203,10 @@ struct SettingsPage: View {
 
     static let scrollSpace = "loom.settings.scroll"
 
-    /// The section at the top of the page, highlighted in the sidebar.
-    @State private var active: SettingsAnchor = .general
-    /// Until then the scroll does not move the highlight: a click's own
-    /// animated scroll passes over the sections in between, and the last one
-    /// may never reach the top.
-    @State private var followScrollAfter = Date.distantPast
+    /// Which section the sidebar highlights. An object only the sidebar
+    /// reads: the highlight moving as the page scrolls repaints the sidebar,
+    /// never the page's seven groups.
+    @State private var navigation = SettingsNavigation()
 
     @AppStorage("loom.terminal.fps") private var fps = 60
     @AppStorage("loom.terminal.copyOnSelect") private var copyOnSelect = false
@@ -172,7 +243,9 @@ struct SettingsPage: View {
     var body: some View {
         ScrollViewReader { proxy in
             HStack(spacing: 0) {
-                sidebar(proxy)
+                SettingsSidebar(navigation: navigation) { anchor in
+                    jump(to: anchor, with: proxy)
+                }
                     .frame(width: 220)
                     .background(DefaultTheme.background)
                 Divider().overlay(DefaultTheme.cardBorder)
@@ -216,8 +289,8 @@ struct SettingsPage: View {
     // MARK: Navigation
 
     private func jump(to anchor: SettingsAnchor, with proxy: ScrollViewProxy, animated: Bool = true) {
-        active = anchor
-        followScrollAfter = Date().addingTimeInterval(0.6)
+        navigation.active = anchor
+        navigation.followScrollAfter = Date().addingTimeInterval(0.6)
         if animated {
             withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(anchor, anchor: .top) }
         } else {
@@ -227,62 +300,9 @@ struct SettingsPage: View {
 
     /// The last section whose top went past the top of the page.
     private func follow(_ offsets: [SettingsAnchor: CGFloat]) {
-        guard Date() >= followScrollAfter else { return }
+        guard Date() >= navigation.followScrollAfter else { return }
         let reached = SettingsAnchor.allCases.last(where: { (offsets[$0] ?? .infinity) <= 48 }) ?? .general
-        if reached != active { active = reached }
-    }
-
-    private func sidebar(_ proxy: ScrollViewProxy) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Settings")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(DefaultTheme.primaryText)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 2)
-                ForEach(SettingsAnchor.groups) { entry in
-                    VStack(alignment: .leading, spacing: 1) {
-                        sidebarRow(entry.id, proxy: proxy)
-                        ForEach(entry.items) { item in
-                            sidebarRow(item, proxy: proxy)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 10).padding(.vertical, 22)
-        }
-    }
-
-    private func sidebarRow(_ anchor: SettingsAnchor, proxy: ScrollViewProxy) -> some View {
-        let isGroup = anchor.group == anchor
-        let isActive = active == anchor
-        let inActiveGroup = active.group == anchor.group
-        return Button {
-            jump(to: anchor, with: proxy)
-        } label: {
-            HStack(spacing: 8) {
-                if isGroup {
-                    Image(systemName: anchor.icon)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(inActiveGroup ? DefaultTheme.accent : DefaultTheme.secondaryText)
-                        .frame(width: 16)
-                }
-                Text(anchor.title)
-                    .font(.system(size: isGroup ? 12.5 : 12, weight: isGroup ? .semibold : .regular))
-                    .foregroundStyle(isActive ? DefaultTheme.accent
-                                     : (isGroup ? DefaultTheme.primaryText : DefaultTheme.secondaryText))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.leading, isGroup ? 8 : 32).padding(.trailing, 8)
-            .padding(.vertical, isGroup ? 6 : 4)
-            .background(isActive ? DefaultTheme.accent.opacity(0.12) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .hoverSurface()
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        if reached != navigation.active { navigation.active = reached }
     }
 
     // MARK: Building blocks
@@ -698,7 +718,6 @@ struct SettingsPage: View {
     // MARK: Session instructions
 
     @State private var instructionsOn = true
-    @State private var instructionsDraft = ""
 
     /// What every claude session is told on top of its system prompt.
     private var instructionsCard: some View {
@@ -706,39 +725,17 @@ struct SettingsPage: View {
             toggleRow("Give every claude session these instructions", isOn: $instructionsOn,
                       detail: "Appended to claude's system prompt (--append-system-prompt) in every session Loom starts or resumes, reviews included — your own rules for all projects, next to each project's CLAUDE.md. The default tells claude to keep its Loom session's title and badges current through Loom's tools. Applies to sessions started or resumed after the change.")
             .onChange(of: instructionsOn) { _, on in model.sessionInstructionsEnabled = on }
-            HStack {
-                Text("Instructions")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(DefaultTheme.primaryText)
-                Spacer()
-                if instructionsDraft != SessionInstructions.defaultText {
-                    GhostButton("Reset to default", systemImage: "arrow.counterclockwise") {
-                        instructionsDraft = SessionInstructions.defaultText
-                    }
-                }
+            PromptEditor(id: "instructions", title: "Instructions",
+                         text: model.sessionInstructionsText,
+                         defaultText: SessionInstructions.defaultText,
+                         minHeight: 180, dimmed: !instructionsOn) { text in
+                model.sessionInstructionsText = text
             }
-            TextEditor(text: $instructionsDraft)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(DefaultTheme.primaryText)
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .frame(minHeight: 180)
-                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
-                .opacity(instructionsOn ? 1 : 0.5)
-                .onChange(of: instructionsDraft) { _, draft in
-                    model.sessionInstructionsText = draft
-                }
         }
-        .onAppear {
-            instructionsOn = model.sessionInstructionsEnabled
-            instructionsDraft = model.sessionInstructionsText
-        }
+        .onAppear { instructionsOn = model.sessionInstructionsEnabled }
     }
 
     // MARK: Code review
-
-    @State private var setupCommandDraft = ""
 
     private var reviewGroup: some View {
         group(.review) {
@@ -786,32 +783,13 @@ struct SettingsPage: View {
                         get: { model.reviewSetupCommandEnabled },
                         set: { model.reviewSetupCommandEnabled = $0 }),
                               detail: "The command is installed in every review worktree either way; on, it is typed into a fresh review session so claude loads the PR — body, diff, threads, linked issues — and keeps a brief in memory before you point it at lines.")
-                    HStack {
-                        Text("/\(PRReviewCommand.name) command")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(DefaultTheme.primaryText)
-                        Spacer()
-                        if model.reviewSetupCommandTemplate != nil {
-                            GhostButton("Reset to default", systemImage: "arrow.counterclockwise") {
-                                model.reviewSetupCommandTemplate = nil
-                                setupCommandDraft = PRReviewCommand.defaultTemplate
-                            }
-                        }
+                    PromptEditor(id: "reviewSetupCommand", title: "/\(PRReviewCommand.name) command",
+                                 text: model.reviewSetupCommandTemplate ?? PRReviewCommand.defaultTemplate,
+                                 defaultText: PRReviewCommand.defaultTemplate,
+                                 minHeight: 220) { text in
+                        // The setter stores nothing for the default text.
+                        model.reviewSetupCommandTemplate = text
                     }
-                    TextEditor(text: $setupCommandDraft)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                        .scrollContentBackground(.hidden)
-                        .padding(8)
-                        .frame(minHeight: 220)
-                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
-                        .onAppear {
-                            setupCommandDraft = model.reviewSetupCommandTemplate ?? PRReviewCommand.defaultTemplate
-                        }
-                        .onChange(of: setupCommandDraft) { _, draft in
-                            model.reviewSetupCommandTemplate = draft
-                        }
                     detail("Claude Code slash-command markdown: a frontmatter, then the prompt. Placeholders filled at launch: \(PRReviewCommand.placeholders.joined(separator: ", ")). $ARGUMENTS is claude's own — the PR number typed after the command.")
                 }
             }
