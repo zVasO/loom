@@ -3,9 +3,9 @@ import LoomGit
 import LoomUI
 import SwiftUI
 
-/// The open pull requests, one tab each, over the PR toolbar. A preview tab
-/// (italic) is the one the next click in the list reuses; a pinned one
-/// stays until closed. ⌘W closes the active tab, ⌘⇧] / ⌘⇧[ move along,
+/// The open pull requests, one tab each, in Review's top bar. A preview tab
+/// (italic) is the one the next PR opened from the Projects tab reuses; a
+/// pinned one — anything opened from Browse — stays until closed. ⌘W closes the active tab, ⌘⇧] / ⌘⇧[ move along,
 /// ⌘⇧P pins.
 struct PRTabStrip: View {
     let model: AppModel
@@ -38,24 +38,29 @@ struct PRTabStrip: View {
 }
 
 /// Invisible buttons carrying the tab key equivalents. Mounted for the
-/// whole PRs tab, tabs open or not: once the last tab is closed, one ⌘W
-/// too many must land here (a no-op) and not on File › Close, which would
-/// close the only window — and the app with it.
+/// whole PRs tab, tabs open or not, Browse or Review: once the last tab is
+/// closed, one ⌘W too many must land here (a no-op) and not on File › Close,
+/// which would close the only window — and the app with it. They act in
+/// Review only: in Browse no tab is on screen to close or move along.
 struct PRTabShortcuts: View {
     let model: AppModel
+
+    private var reviewing: Bool { model.prMode == .review }
 
     var body: some View {
         Group {
             Button("Close tab") {
-                if let id = model.prTabs.activeID { model.closePRTab(id) }
+                guard reviewing, let id = model.prTabs.activeID else { return }
+                model.closePRTab(id)
             }
             .keyboardShortcut("w", modifiers: .command)
-            Button("Next tab") { model.nextPRTab() }
+            Button("Next tab") { if reviewing { model.nextPRTab() } }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
-            Button("Previous tab") { model.previousPRTab() }
+            Button("Previous tab") { if reviewing { model.previousPRTab() } }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
             Button("Pin tab") {
-                if let id = model.prTabs.activeID { model.pinPRTab(id) }
+                guard reviewing, let id = model.prTabs.activeID else { return }
+                model.pinPRTab(id)
             }
             .keyboardShortcut("p", modifiers: [.command, .shift])
         }
