@@ -112,6 +112,7 @@ struct TerminalPane: View {
                                                onCopy: { selection.capturedText },
                                                onCopied: { badge = copiedBadge($0) },
                                                onFocus: { surface.setFocus($0) },
+                                               claimsIdleFocus: role != .panel,
                                                onText: { text in
                                                    // Typing dismisses the selection, like any
                                                    // terminal — and this is also what covers

@@ -235,6 +235,7 @@ public final class AppModel {
         AppModel.storedGrid(role: .session) ?? .default
     private var preferredReviewGrid: TerminalGeometry? = AppModel.storedGrid(role: .review)
     private var preferredSplitGrid: TerminalGeometry? = AppModel.storedGrid(role: .sessionSplit)
+    private var preferredPanelGrid: TerminalGeometry? = AppModel.storedGrid(role: .panel)
 
     private static func storedGrid(role: TerminalPaneRole) -> TerminalGeometry? {
         let cols = UserDefaults.standard.integer(forKey: role.colsKey)
@@ -263,6 +264,9 @@ public final class AppModel {
             guard layout.showsPanel else { return preferredGrid }
             let cols = TerminalMetrics.grid(fitting: CGSize(width: layout.terminalWidth, height: 0)).cols
             return TerminalGeometry(cols: cols, rows: preferredGrid.rows)
+        case .panel:
+            // Never measured: the Sessions width, a dozen rows.
+            return preferredPanelGrid ?? TerminalGeometry(cols: preferredGrid.cols, rows: 12)
         }
     }
 
@@ -344,6 +348,7 @@ public final class AppModel {
         case .session: preferredGrid = grid
         case .review: preferredReviewGrid = grid
         case .sessionSplit: preferredSplitGrid = grid
+        case .panel: preferredPanelGrid = grid
         }
         UserDefaults.standard.set(cols, forKey: role.colsKey)
         UserDefaults.standard.set(rows, forKey: role.rowsKey)
@@ -1962,7 +1967,10 @@ public final class AppModel {
     /// appears indented under it ("Term n"). Shells die with the app and
     /// are never offered for Resume (no native conversation).
     @discardableResult
-    public func launchShell(for parent: SessionItem, title: String? = nil) async -> SessionID? {
+    /// `grid`: the shape the shell is born at — the stack's launch grid by
+    /// default; the fleet panel passes its own.
+    public func launchShell(for parent: SessionItem, title: String? = nil,
+                            grid: TerminalGeometry? = nil) async -> SessionID? {
         guard let manager else { return nil }
         let record = (try? store?.session(id: parent.id)) ?? nil
         guard let directory = workingDirectory(worktreePath: record?.worktreePath,
@@ -1981,7 +1989,7 @@ public final class AppModel {
         var spec = SessionManager.SessionSpec(
             command: Command(executable: shell, arguments: ["-l"]),
             workingDirectory: directory,
-            geometry: launchGrid(forStack: parent.id),
+            geometry: grid ?? launchGrid(forStack: parent.id),
             samplingInterval: .seconds(1))
         spec.title = name
         spec.projectID = parent.projectID
@@ -2034,10 +2042,10 @@ public final class AppModel {
         saveStackChildren()
     }
 
-    public func reopenDormantShell(_ dormant: DormantShell) async -> SessionID? {
+    public func reopenDormantShell(_ dormant: DormantShell, grid: TerminalGeometry? = nil) async -> SessionID? {
         guard let parent = stackParent(dormant.parentID) else { return nil }
         dormantShells.removeAll { $0.id == dormant.id }
-        return await launchShell(for: parent, title: dormant.title)
+        return await launchShell(for: parent, title: dormant.title, grid: grid)
     }
 
     private func stackParent(_ id: SessionID) -> SessionItem? {

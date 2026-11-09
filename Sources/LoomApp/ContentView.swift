@@ -1290,9 +1290,10 @@ struct StackTab: View {
                 .lineLimit(1)
                 .frame(maxWidth: 150, alignment: .leading)
                 .fixedSize(horizontal: true, vertical: false)
-            if hovered || isActive {
-                HoverIconButton(systemImage: "xmark", help: "Close", action: onClose)
-            }
+            // The cross keeps its slot: showing it on hover never widens the tab.
+            HoverIconButton(systemImage: "xmark", help: "Close", action: onClose)
+                .opacity(hovered || isActive ? 1 : 0)
+                .allowsHitTesting(hovered || isActive)
         }
         .padding(.horizontal, 8)
         .frame(height: 24)
@@ -1337,9 +1338,10 @@ struct AgentBrowserStackTab: View {
                     .symbolEffect(.pulse)
                     .help("claude is using its browser")
             }
-            if hovered || isActive {
-                HoverIconButton(systemImage: "xmark", help: "Close the agent's browser", action: onClose)
-            }
+            // The cross keeps its slot: showing it on hover never widens the tab.
+            HoverIconButton(systemImage: "xmark", help: "Close the agent's browser", action: onClose)
+                .opacity(hovered || isActive ? 1 : 0)
+                .allowsHitTesting(hovered || isActive)
         }
         .padding(.horizontal, 9).padding(.vertical, 5)
         .background(isActive ? DefaultTheme.surfaceRaised
@@ -3384,11 +3386,19 @@ struct HoverIconButton: View {
 
     var body: some View {
         Button(action: action) {
+            // A 16 pt box — the height of a line of text — so revealing it on
+            // hover never grows its row; the hover pill bleeds 3 pt around it,
+            // drawn without taking any room.
             AppIcon(systemImage, size: 12)
                 .foregroundStyle(hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
-                .frame(width: 20, height: 20)
-                .background(hovered ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(hovered ? DefaultTheme.line : .clear, lineWidth: 1))
+                .frame(width: 16, height: 16)
+                .background {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(hovered ? DefaultTheme.surfaceRaised : .clear)
+                        .overlay(RoundedRectangle(cornerRadius: 4)
+                            .strokeBorder(hovered ? DefaultTheme.line : .clear, lineWidth: 1))
+                        .padding(-3)
+                }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -3462,6 +3472,8 @@ struct SidebarSessionCard: View, Equatable {
                                         help: "Close session",
                                         action: onClose)
                     }
+                    // No taller than the title: revealing it never moves the card.
+                    .frame(height: 14)
                 }
             }
             if let branch = item.branch {

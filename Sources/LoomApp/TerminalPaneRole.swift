@@ -10,6 +10,9 @@ public enum TerminalPaneRole: Sendable {
     /// so a split never becomes the launch grid of every new session — and a
     /// stack resumed with its panel open is born at the split's grid.
     case sessionSplit
+    /// The fleet panel under the Sessions view: the stack's shell, a short
+    /// wide band of its own.
+    case panel
 
     /// The drawer's width before the user ever dragged it (GlobalPRsView).
     public static let defaultReviewDrawerWidth: CGFloat = 420
@@ -19,6 +22,7 @@ public enum TerminalPaneRole: Sendable {
         case .session: "loom.terminal.cols"
         case .review: "loom.review.cols"
         case .sessionSplit: "loom.terminal.split.cols"
+        case .panel: "loom.terminal.panel.cols"
         }
     }
 
@@ -27,6 +31,7 @@ public enum TerminalPaneRole: Sendable {
         case .session: "loom.terminal.rows"
         case .review: "loom.review.rows"
         case .sessionSplit: "loom.terminal.split.rows"
+        case .panel: "loom.terminal.panel.rows"
         }
     }
 }
