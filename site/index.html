@@ -1,0 +1,1645 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Loom</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Loom, l'environnement macOS natif pour vos agents de code : chaque session Claude Code dans son terminal persistant, sur son propre worktree Git, avec un état détecté en temps réel.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout : grille SaaS 12 colonnes, bento à alignements rigides, surfaces OLED et bordures hairline.
+   Couleurs : tokens de Loom Dark (Sources/LoomUI/ThemeStore.swift) posés sur un fond noir absolu. */
+:root {
+  color-scheme: dark;
+  /* Surfaces */
+  --bg: #000000;
+  --s1: #09090b;
+  --s2: #121214;
+  --s3: #17171a;
+  /* Hairlines */
+  --line: rgba(255, 255, 255, 0.08);
+  --line-2: rgba(255, 255, 255, 0.13);
+  --line-3: rgba(255, 255, 255, 0.2);
+  /* Texte (Loom Dark) */
+  --fg: #ececee;
+  --fg-2: #8e8e96;
+  --fg-3: #6b6b73;
+  /* Accent unique (Loom Dark) */
+  --accent: #e8945c;
+  --accent-ink: #201204;
+  /* Sémantique des états (Loom Dark, invariante) */
+  --working: #4cc38a;
+  --needs: #e5b455;
+  --idle: #6aa2e8;
+  --danger: #e5646c;
+  --branch: #5cc8c2;
+  /* Type */
+  --sans: "Geist", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: "Geist Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Motion */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur: 160ms;
+  /* Géométrie */
+  --r-card: 10px;
+  --r-ctl: 6px;
+  --r-tag: 3px;
+  --max: 1200px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--bg); scroll-behavior: smooth; scroll-padding-top: 72px; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "ss01", "cv11";
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 60;
+  background: var(--bg);
+}
+::selection { background: rgba(232, 148, 92, 0.28); color: var(--fg); }
+a { color: inherit; text-decoration: none; }
+p { margin: 0; }
+h1, h2, h3 { margin: 0; font-weight: 600; text-wrap: balance; }
+table { border-collapse: collapse; width: 100%; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+.wrap {
+  max-width: calc(var(--max) + 2 * 24px);
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+@media (min-width: 720px) {
+  .wrap {
+    padding-left: max(24px, env(safe-area-inset-left, 0px));
+    padding-right: max(24px, env(safe-area-inset-right, 0px));
+  }
+}
+
+/* ---------- Primitives ---------- */
+.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.i-sm { width: 14px; height: 14px; }
+
+.m {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
+}
+.code { font-family: var(--mono); font-size: 12px; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.dim { color: var(--fg-2); }
+.dimmer { color: var(--fg-3); }
+
+kbd, .kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--fg-2);
+  background: var(--s2);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.kbds { display: inline-flex; gap: 3px; align-items: center; }
+
+.tag {
+  --c: var(--fg-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  color: var(--c);
+  border: 1px solid color-mix(in srgb, var(--c) 32%, transparent);
+  background: color-mix(in srgb, var(--c) 7%, transparent);
+  border-radius: var(--r-tag);
+  font-variant-numeric: tabular-nums;
+}
+.tag.neutral { --c: var(--fg-2); border-color: var(--line-2); background: transparent; }
+.tag.accent { --c: var(--accent); }
+.tag.working { --c: var(--working); }
+.tag.needs { --c: var(--needs); }
+.tag.idle { --c: var(--idle); }
+.tag.danger { --c: var(--danger); }
+
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c, var(--fg-3)); flex: none; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--line-2);
+  background: var(--s2);
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease), filter var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.btn:hover { border-color: var(--line-3); background: var(--s3); }
+.btn:active { transform: translateY(1px); background: var(--s2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.primary:active { filter: brightness(0.94); }
+.btn.primary kbd { background: rgba(32, 18, 4, 0.12); border-color: rgba(32, 18, 4, 0.22); color: var(--accent-ink); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--fg-2); }
+.btn.ghost:hover { color: var(--fg); background: var(--s2); border-color: var(--line); }
+.btn.sm { height: 28px; padding: 0 10px; font-size: 12px; gap: 6px; }
+
+.cmd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 6px 0 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-ctl);
+  background: var(--s1);
+  min-width: 0;
+}
+.cmd code { font-family: var(--mono); font-size: 12px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+.cmd .prompt { color: var(--fg-3); font-family: var(--mono); font-size: 12px; }
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+  flex: none;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+.icon-btn:hover { color: var(--fg); border-color: var(--line-2); background: var(--s2); }
+.icon-btn:active { background: var(--s1); }
+
+/* ---------- Spotlight ---------- */
+.spot { position: relative; isolation: isolate; }
+.spot::before,
+.spot::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 200ms var(--ease);
+}
+.spot::before {
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(520px circle at var(--mx, -999px) var(--my, -999px), rgba(255, 255, 255, 0.05), transparent 42%);
+}
+.spot::after {
+  inset: -1px;
+  z-index: 2;
+  padding: 1px;
+  background: radial-gradient(320px circle at var(--mx, -999px) var(--my, -999px), rgba(255, 255, 255, 0.24), transparent 45%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+.spot:hover::before { opacity: 1; }
+[data-spot]:hover .spot::after { opacity: 1; }
+.spot > * { position: relative; z-index: 1; }
+@media (hover: none) { .spot::before, .spot::after { display: none; } }
+
+/* ---------- Nav ---------- */
+.nav {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+.nav-in { display: flex; align-items: center; gap: 20px; height: 56px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; letter-spacing: -0.02em; }
+.brand svg { width: 24px; height: 24px; }
+.brand .m { color: var(--fg-3); font-weight: 400; }
+.nav-links { display: flex; gap: 2px; margin-left: 8px; }
+.nav-links a {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: var(--r-ctl);
+  color: var(--fg-2);
+  font-size: 13px;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+.nav-links a:hover { color: var(--fg); background: var(--s2); }
+.nav-links a[aria-current="true"] { color: var(--fg); }
+.nav-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.search-trigger { width: 200px; justify-content: space-between; color: var(--fg-2); background: var(--s1); }
+.search-trigger span:first-child { display: inline-flex; gap: 8px; align-items: center; }
+@media (max-width: 980px) { .nav-links { display: none; } }
+@media (max-width: 640px) {
+  .search-trigger { width: auto; }
+  .search-trigger .label, .search-trigger .kbds, .nav .gh-label { display: none; }
+  .brand .m { display: none; }
+}
+
+/* ---------- Hero ---------- */
+.hero { padding-block: 64px 40px; border-bottom: 1px solid var(--line); }
+.hero-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; align-items: start; }
+@media (min-width: 1120px) { .hero-grid { grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: 44px; } .hero { padding-block: 88px 56px; } }
+.hero-copy { display: flex; flex-direction: column; gap: 24px; min-width: 0; padding-top: 8px; }
+.eyebrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.hero h1 {
+  font-size: clamp(36px, 4.2vw, 52px);
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+  font-weight: 600;
+}
+.hero h1 em { font-style: normal; color: var(--fg-2); }
+.lede { color: var(--fg-2); font-size: 16px; line-height: 1.6; max-width: 34em; }
+.lede code { font-family: var(--mono); font-size: 13px; color: var(--fg); }
+.hero-cta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.hero-cta .cmd { flex: 1 1 260px; max-width: 320px; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 14px; color: var(--fg-3); }
+.hero-meta span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- App mock ---------- */
+.app {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  background: var(--s1);
+  overflow: hidden;
+  min-width: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 1), 0 30px 80px -40px rgba(0, 0, 0, 1);
+}
+.app:focus-within { border-color: var(--line-3); }
+.app-bar { display: flex; align-items: center; gap: 12px; height: 38px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--bg); }
+.lights { display: flex; gap: 6px; }
+.lights i { width: 10px; height: 10px; border-radius: 50%; background: #232327; border: 1px solid var(--line); }
+.tabs { display: flex; gap: 2px; margin-left: 6px; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  color: var(--fg-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tab.on { color: var(--fg); background: var(--s2); box-shadow: inset 0 0 0 1px var(--line); }
+.app-bar .tag { margin-left: auto; }
+
+.app-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.app-head h3 { font-size: 13px; font-weight: 500; letter-spacing: -0.01em; }
+.seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg); margin-left: auto; }
+.seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.seg button:hover { color: var(--fg); }
+.seg button[aria-pressed="true"] { color: var(--fg); background: var(--s2); border-color: var(--line-2); }
+.seg .n { color: var(--fg-2); }
+
+.table-scroll { overflow-x: auto; position: relative; }
+.grid-table { min-width: 600px; }
+.grid-table th {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-3);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.grid-table td { padding: 0 10px; height: 38px; border-bottom: 1px solid var(--line); white-space: nowrap; font-size: 13px; }
+.grid-table tr:last-child td { border-bottom: 0; }
+.sess tbody tr { cursor: pointer; transition: background-color var(--dur) var(--ease); }
+.sess tbody tr:hover { background: rgba(255, 255, 255, 0.022); }
+.sess tbody tr[aria-selected="true"] { background: rgba(255, 255, 255, 0.04); box-shadow: inset 2px 0 0 var(--accent); }
+.sess tbody tr:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.sess tbody tr[hidden] { display: none; }
+.st { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--c); letter-spacing: 0.02em; min-width: 96px; }
+.title-cell { display: flex; flex-direction: column; justify-content: center; line-height: 1.25; max-width: 190px; }
+.title-cell b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.title-cell span { font-family: var(--mono); font-size: 10.5px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.br { font-family: var(--mono); font-size: 11.5px; color: var(--branch); }
+.ctx { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.ring { --p: 0; width: 14px; height: 14px; border-radius: 50%; background: conic-gradient(var(--fg-2) calc(var(--p) * 1%), var(--line-2) 0); -webkit-mask: radial-gradient(circle, transparent 4px, #000 4.5px); mask: radial-gradient(circle, transparent 4px, #000 4.5px); }
+.dur { font-family: var(--mono); font-size: 11.5px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.act { text-align: right; width: 1%; }
+.act .btn { height: 24px; padding: 0 8px; font-size: 11.5px; }
+
+.term { border-top: 1px solid var(--line); background: var(--bg); }
+.term-head { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.term-head .br { margin-left: auto; }
+.term pre {
+  margin: 0;
+  padding: 12px 14px;
+  min-height: 104px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--fg-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.term pre .hl { color: var(--fg); }
+.term pre .ok { color: var(--working); }
+.term pre .q { color: var(--needs); }
+.term pre .ac { color: var(--accent); }
+.caret { display: inline-block; width: 7px; height: 13px; vertical-align: -2px; background: var(--fg); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.app-foot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 8px 14px; border-top: 1px solid var(--line); background: var(--s1); color: var(--fg-3); }
+.app-foot .grow { flex: 1; }
+.app-foot span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- Metrics strip ---------- */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  margin-top: 48px;
+}
+@media (min-width: 720px) { .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1120px) { .metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+.metric { background: var(--bg); padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+.metric .v { font-family: var(--mono); font-size: 22px; font-weight: 500; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.metric .v small { font-size: 12px; color: var(--fg-2); letter-spacing: 0.04em; margin-left: 3px; }
+.metric .m { color: var(--fg-2); }
+
+.stack { display: flex; flex-wrap: wrap; gap: 6px 18px; padding-block: 20px; color: var(--fg-3); border-bottom: 1px solid var(--line); }
+.stack b { color: var(--fg-2); font-weight: 500; }
+
+/* ---------- Sections ---------- */
+section.block { padding-block: 72px; border-bottom: 1px solid var(--line); }
+.sec-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-bottom: 28px; align-items: end; }
+@media (min-width: 900px) { .sec-head { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); } }
+.sec-head h2 { font-size: clamp(26px, 3vw, 36px); letter-spacing: -0.04em; line-height: 1.08; }
+.sec-head .label { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-2); margin-bottom: 12px; }
+.sec-head .label::before { content: ""; width: 12px; height: 1px; background: var(--fg-3); }
+.sec-head p { color: var(--fg-2); font-size: 15px; max-width: 42em; }
+
+/* ---------- Bento ---------- */
+.bento { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 720px) { .bento { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+@media (min-width: 1120px) { .bento { grid-template-columns: repeat(12, minmax(0, 1fr)); } }
+
+.card {
+  background: var(--s1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+.card:hover { border-color: var(--line-2); }
+.card-h { display: flex; align-items: center; gap: 10px; }
+.card-h .ico { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-ctl); border: 1px solid var(--line-2); background: var(--s2); color: var(--fg); flex: none; }
+.card-h h3 { font-size: 14px; font-weight: 500; letter-spacing: -0.01em; }
+.card-h .tag { margin-left: auto; }
+.card > p { color: var(--fg-2); font-size: 13px; line-height: 1.55; max-width: 60ch; }
+.card > p code { font-family: var(--mono); font-size: 12px; color: var(--fg); }
+.panel { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
+.panel-h { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--line); color: var(--fg-3); }
+.panel-h .tag { margin-left: auto; }
+.push { margin-top: auto; }
+
+@media (min-width: 720px) {
+  .c-6 { grid-column: span 6; }
+  .c-3 { grid-column: span 3; }
+}
+@media (min-width: 1120px) {
+  .l-7 { grid-column: span 7; }
+  .l-6 { grid-column: span 6; }
+  .l-5 { grid-column: span 5; }
+  .l-4 { grid-column: span 4; }
+  .l-3 { grid-column: span 3; }
+  .r-2 { grid-row: span 2; }
+}
+
+/* Pipeline */
+.pipe { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.pipe-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pipe-row .lane { width: 92px; color: var(--fg-3); }
+.node { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 4px; font-family: var(--mono); font-size: 11px; color: var(--fg); background: var(--s1); white-space: nowrap; }
+.node.sink { border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
+.arrow { color: var(--fg-3); font-family: var(--mono); font-size: 11px; }
+
+.kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.kv > div { padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--line); }
+.kv > div:last-child { border-right: 0; }
+.kv .v { font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums; }
+.kv .m { color: var(--fg-3); }
+
+.log { list-style: none; margin: 0; padding: 6px 0; font-family: var(--mono); font-size: 11.5px; height: 214px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+.log li { display: grid; grid-template-columns: 92px 46px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 3px 10px; white-space: nowrap; animation: in 180ms var(--ease); }
+.log li .t { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.log li .src { color: var(--fg-2); }
+.log li .ev { color: var(--fg); overflow: hidden; text-overflow: ellipsis; }
+.log li .ev i { font-style: normal; color: var(--fg-3); }
+.log li .to { font-size: 10.5px; color: var(--c); }
+@keyframes in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (max-width: 520px) { .log li { grid-template-columns: 62px 40px minmax(0, 1fr) auto; } .log li .t .ms { display: none; } }
+
+.tree { margin: 0; padding: 10px 12px; font-family: var(--mono); font-size: 12px; line-height: 1.85; list-style: none; }
+.tree li { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.tree .g { color: var(--fg-3); }
+.tree .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.tree .add { color: var(--working); }
+.tree .del { color: var(--danger); }
+
+.seq { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 12px; }
+.seq .t { color: var(--fg-3); }
+
+.mini { min-width: 0; }
+.mini td { padding: 7px 10px; border-bottom: 1px solid var(--line); font-size: 12.5px; white-space: nowrap; }
+.mini tr:last-child td { border-bottom: 0; }
+.mini .num { font-family: var(--mono); font-size: 11.5px; color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.mini .ttl { overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+.mini .r { text-align: right; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); font-family: var(--mono); font-size: 11px; color: var(--fg-2); transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease); }
+.chip:hover { border-color: var(--line-2); color: var(--fg); }
+.chip.on { border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--accent); }
+
+.facts { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.facts dt, .facts dd { margin: 0; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.facts dt { color: var(--fg-3); padding-right: 14px; }
+.facts dd { font-size: 12.5px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.facts dt:last-of-type, .facts dd:last-of-type { border-bottom: 0; }
+
+.snap { margin: 0; padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; line-height: 1.7; color: var(--fg-2); white-space: pre; overflow-x: auto; }
+.snap .ref { color: var(--accent); }
+.snap .s { color: var(--fg); }
+
+.searchbox { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-bottom: 1px solid var(--line); color: var(--fg-2); }
+.searchbox span { font-size: 12.5px; color: var(--fg); }
+.results { list-style: none; margin: 0; padding: 4px 0; }
+.results li { display: flex; gap: 10px; align-items: baseline; padding: 5px 10px; font-size: 12.5px; }
+.results li .m { color: var(--fg-3); flex: none; width: 54px; }
+.results mark { background: rgba(232, 148, 92, 0.18); color: var(--fg); border-radius: 2px; padding: 0 1px; }
+.results .snip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-2); min-width: 0; }
+
+.notif { display: flex; gap: 10px; padding: 12px; align-items: flex-start; }
+.notif .app-ico { width: 30px; height: 30px; flex: none; }
+.notif b { display: block; font-size: 12.5px; font-weight: 500; }
+.notif p { font-size: 12.5px; color: var(--fg-2); }
+.notif .when { margin-left: auto; color: var(--fg-3); flex: none; }
+
+.wf svg { display: block; width: 100%; height: auto; }
+.wf .box { fill: var(--s1); stroke: var(--line-2); }
+.wf .box.acc { stroke: var(--accent); stroke-opacity: 0.55; }
+.wf .edge { fill: none; stroke: var(--fg-3); stroke-width: 1; }
+.wf text { font-family: var(--mono); font-size: 8.5px; fill: var(--fg-2); letter-spacing: 0.04em; }
+.wf text.hi { fill: var(--fg); }
+
+/* ---------- Tables (états, archi) ---------- */
+.data { min-width: 640px; }
+.data th { text-align: left; font-family: var(--mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-3); padding: 10px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; background: var(--bg); }
+.data td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 13px; color: var(--fg-2); }
+.data td:first-child { color: var(--fg); }
+.data tr:last-child td { border-bottom: 0; }
+.data tbody tr { transition: background-color var(--dur) var(--ease); }
+.data tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
+.data code { font-family: var(--mono); font-size: 11.5px; color: var(--fg); background: var(--s2); border: 1px solid var(--line); border-radius: 3px; padding: 1px 4px; white-space: nowrap; }
+.tablecard { padding: 0; overflow: hidden; gap: 0; }
+.tablecard .card-h { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+
+.keys { list-style: none; margin: 0; padding: 0; }
+.keys li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--fg-2); transition: background-color var(--dur) var(--ease); }
+.keys li:hover { background: rgba(255, 255, 255, 0.02); color: var(--fg); }
+.keys li:last-child { border-bottom: 0; }
+
+/* ---------- CTA ---------- */
+.cta { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; padding: 28px; }
+@media (min-width: 900px) { .cta { grid-template-columns: minmax(0, 6fr) minmax(0, 6fr); padding: 36px; align-items: center; } }
+.cta h2 { font-size: clamp(26px, 3.2vw, 40px); letter-spacing: -0.045em; line-height: 1.04; }
+.cta p { color: var(--fg-2); font-size: 15px; margin-top: 12px; max-width: 36em; }
+.cta .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 22px; }
+.steps { display: flex; flex-direction: column; gap: 8px; }
+.step { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: center; }
+.step .n { color: var(--fg-3); }
+.step .cmd { max-width: none; }
+
+/* ---------- Footer ---------- */
+footer { padding-block: 28px 40px; color: var(--fg-3); }
+.foot { display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: center; }
+.foot nav { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-left: auto; }
+.foot a { color: var(--fg-2); transition: color var(--dur) var(--ease); }
+.foot a:hover { color: var(--fg); }
+
+/* ---------- Palette ⌘K ---------- */
+.pal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: max(12vh, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px));
+  background: rgba(0, 0, 0, 0.72);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 150ms var(--ease), visibility 0s linear 150ms;
+}
+.pal[data-open] { visibility: visible; opacity: 1; transition: opacity 150ms var(--ease); }
+.pal-box {
+  width: min(580px, 100%);
+  background: var(--s1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  box-shadow: 0 40px 120px -20px rgba(0, 0, 0, 1);
+  transform: translateY(6px) scale(0.99);
+  transition: transform 180ms var(--ease);
+}
+.pal[data-open] .pal-box { transform: none; }
+.pal-in { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 14px; border-bottom: 1px solid var(--line); color: var(--fg-2); }
+.pal-in input { flex: 1; min-width: 0; height: 100%; background: transparent; border: 0; outline: 0; color: var(--fg); font: inherit; font-size: 14px; }
+.pal-in input::placeholder { color: var(--fg-3); }
+.pal-list { list-style: none; margin: 0; padding: 6px; max-height: min(360px, 55vh); overflow-y: auto; }
+.pal-group { padding: 8px 8px 4px; color: var(--fg-3); }
+.pal-item { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 8px; border-radius: var(--r-ctl); color: var(--fg-2); cursor: pointer; border: 1px solid transparent; }
+.pal-item .grow { flex: 1; color: var(--fg); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-item[aria-selected="true"] { background: var(--s2); border-color: var(--line-2); }
+.pal-item[aria-selected="true"] .i { color: var(--accent); }
+.pal-empty { padding: 22px; text-align: center; color: var(--fg-3); }
+.pal-foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--line); color: var(--fg-3); background: var(--bg); }
+.pal-foot span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- Toast ---------- */
+.toast {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--s2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-ctl);
+  font-size: 12.5px;
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition: opacity 160ms var(--ease), transform 160ms var(--ease);
+  max-width: calc(100vw - 32px);
+}
+.toast[data-show] { opacity: 1; transform: none; }
+.toast code { font-family: var(--mono); font-size: 11.5px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- Icônes : tracés Lucide, stroke-width 1.5 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-terminal" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-pr" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+  <symbol id="i-workflow" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+  <symbol id="i-blocks" viewBox="0 0 24 24"><rect width="7" height="7" x="14" y="3" rx="1"/><path d="M10 21V8a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1H3"/></symbol>
+  <symbol id="i-contrast" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 18a6 6 0 0 0 0-12v12z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
+  <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M6 8h.01"/><path d="M7 16h10"/><path d="M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+  <symbol id="i-cmd" viewBox="0 0 24 24"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></symbol>
+  <symbol id="logo" viewBox="0 0 24 24">
+    <rect x=".5" y=".5" width="23" height="23" rx="6.5" fill="#09090b" stroke="rgba(255,255,255,.14)"/>
+    <rect x="5" y="6.5" width="14" height="10.5" rx="2.6" fill="none" stroke="rgba(255,255,255,.28)" transform="rotate(-12 12 17)"/>
+    <rect x="5" y="7.5" width="14" height="10.5" rx="2.6" fill="#E8945C" transform="rotate(3 12 17)"/>
+    <path d="M8.2 10.6l2.2 1.5-2.2 1.5M11.6 14.6h3.4" fill="none" stroke="#201204" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" transform="rotate(3 12 17)"/>
+  </symbol>
+</svg>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top" aria-label="Loom, accueil">
+      <svg aria-hidden="true"><use href="#logo"/></svg>
+      Loom
+      <span class="m">v1</span>
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#fonctionnalites">Fonctionnalités</a>
+      <a href="#etats">États</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#raccourcis">Raccourcis</a>
+      <a href="#installer">Installer</a>
+    </nav>
+    <div class="nav-right">
+      <button class="btn sm search-trigger" type="button" data-open-palette aria-label="Ouvrir la palette de commandes">
+        <span><svg class="i i-sm"><use href="#i-search"/></svg><span class="label">Rechercher…</span></span>
+        <span class="kbds"><kbd>⌘</kbd><kbd>K</kbd></span>
+      </button>
+      <a class="btn sm ghost" href="https://github.com/zVasO/loom" target="_blank" rel="noopener">
+        <svg class="i i-sm"><use href="#i-github"/></svg><span class="gh-label">GitHub</span>
+      </a>
+      <a class="btn sm primary" href="#installer">
+        <svg class="i i-sm"><use href="#i-download"/></svg>Installer
+      </a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+  <!-- ================= HERO ================= -->
+  <section class="hero">
+    <div class="wrap">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <div class="eyebrow">
+            <span class="tag accent">Natif macOS 14+</span>
+            <span class="tag neutral">SwiftUI</span>
+            <span class="tag neutral">Claude Code</span>
+          </div>
+          <h1>Vos agents codent en parallèle. <em>Loom vous dit lequel vous attend.</em></h1>
+          <p class="lede">Chaque session d'agent vit dans un terminal persistant, sur son propre worktree Git. Son état est détecté en temps réel&nbsp;: <code>working</code>, <code>needs_input</code>, <code>idle</code>. Vous n'intervenez que quand il le faut.</p>
+          <div class="hero-cta">
+            <a class="btn primary" href="https://github.com/zVasO/loom/releases" target="_blank" rel="noopener">
+              <svg class="i"><use href="#i-download"/></svg>Télécharger pour macOS
+            </a>
+            <div class="cmd">
+              <span class="prompt">$</span>
+              <code>swift build -c release</code>
+              <button class="icon-btn" type="button" data-copy="swift build -c release" aria-label="Copier la commande">
+                <svg class="i i-sm"><use href="#i-copy"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="hero-meta m">
+            <span><svg class="i i-sm"><use href="#i-shield"/></svg>App non sandboxée, aucun service distant</span>
+            <span><svg class="i i-sm"><use href="#i-cmd"/></svg>Palette <kbd>⌘</kbd><kbd>K</kbd></span>
+          </div>
+        </div>
+
+        <!-- Mission control (démo interactive) -->
+        <div class="app" data-spot>
+          <div class="app-bar">
+            <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+            <div class="tabs" aria-hidden="true">
+              <span class="tab on"><svg class="i i-sm"><use href="#i-terminal"/></svg>Sessions</span>
+              <span class="tab"><svg class="i i-sm"><use href="#i-pr"/></svg>PRs</span>
+              <span class="tab"><svg class="i i-sm"><use href="#i-workflow"/></svg>Workflows</span>
+              <span class="tab"><svg class="i i-sm"><use href="#i-blocks"/></svg>Extensions</span>
+            </div>
+            <span class="tag working"><span class="dot"></span>Hooks online</span>
+          </div>
+          <div class="app-head">
+            <h3>Mission control</h3>
+            <span class="m dimmer">~/dev/loom</span>
+            <div class="seg" role="group" aria-label="Filtrer par état">
+              <button type="button" class="m" data-filter="all" aria-pressed="true">Tout <span class="n" data-count="all">6</span></button>
+              <button type="button" class="m" data-filter="working" aria-pressed="false">Working <span class="n" data-count="working">0</span></button>
+              <button type="button" class="m" data-filter="needs_input" aria-pressed="false">Needs input <span class="n" data-count="needs_input">0</span></button>
+              <button type="button" class="m" data-filter="idle" aria-pressed="false">Idle <span class="n" data-count="idle">0</span></button>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="grid-table sess" aria-label="Sessions actives (démo)">
+              <thead>
+                <tr><th>État</th><th>Session</th><th>Branche</th><th>Contexte</th><th>Durée</th><th class="act"><span class="sr">Action</span></th></tr>
+              </thead>
+              <tbody id="sessRows"></tbody>
+            </table>
+          </div>
+          <div class="term" aria-live="polite">
+            <div class="term-head">
+              <svg class="i i-sm dim"><use href="#i-terminal"/></svg>
+              <span class="m dim">Terminal principal</span>
+              <span class="m dimmer" id="termAgent">claude</span>
+              <span class="br" id="termBranch">loom/auth-oauth</span>
+            </div>
+            <pre id="termOut"></pre>
+          </div>
+          <div class="app-foot m">
+            <span><span class="dot" style="--c: var(--working)"></span>Socket 0600</span>
+            <span id="footStats">6 sessions</span>
+            <span class="grow"></span>
+            <span><kbd>↑</kbd><kbd>↓</kbd> naviguer</span>
+            <span><kbd>↵</kbd> répondre</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="metrics" role="list">
+        <div class="metric" role="listitem"><span class="v">10<small>S</small></span><span class="m">Priorité des hooks</span></div>
+        <div class="metric" role="listitem"><span class="v">2<small>S</small></span><span class="m">Hystérésis</span></div>
+        <div class="metric" role="listitem"><span class="v">4<small>S</small></span><span class="m">Péremption</span></div>
+        <div class="metric" role="listitem"><span class="v">0600</span><span class="m">Socket Unix par session</span></div>
+        <div class="metric" role="listitem"><span class="v">10<small>MO</small></span><span class="m">Rotation des transcripts</span></div>
+        <div class="metric" role="listitem"><span class="v">9<small>×2</small></span><span class="m">Familles de thèmes</span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="wrap">
+    <div class="stack m" aria-label="Technologies">
+      <b>Construit sur</b>
+      <span>SwiftUI</span><span>SwiftTerm</span><span>GRDB</span><span>SQLite FTS5</span><span>MCP</span><span>Chromium CDP</span><span>WebKit</span><span>gh CLI</span><span>React Flow</span>
+    </div>
+  </div>
+
+  <!-- ================= FONCTIONNALITÉS ================= -->
+  <section class="block" id="fonctionnalites">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <div class="label m">Fonctionnalités</div>
+          <h2>Un poste de pilotage pour dix sessions, pas un onglet de plus.</h2>
+        </div>
+        <p>Loom héberge vos agents CLI sans les remplacer. Il isole leur travail, observe leur état et garde tout ce qu'ils ont produit, consultable après coup.</p>
+      </div>
+
+      <div class="bento" data-spot>
+        <!-- Détection d'état -->
+        <article class="card spot c-6 l-7 r-2" id="detection">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-activity"/></svg></span>
+            <h3>Détection d'état en temps réel</h3>
+            <span class="tag accent">2 canaux</span>
+          </div>
+          <p>Les hooks de Claude Code arrivent par un socket Unix. Pour les agents sans hooks, une heuristique lit le silence, les octets, les invites et le CPU. Une machine à états pure fusionne les deux.</p>
+          <div class="panel pipe" aria-label="Canaux de détection">
+            <div class="pipe-row">
+              <span class="lane m">Hooks</span>
+              <span class="node">--settings</span><span class="arrow">→</span>
+              <span class="node">loom-hook</span><span class="arrow">→</span>
+              <span class="node">socket 0600</span><span class="arrow">→</span>
+              <span class="node sink">réducteur</span>
+            </div>
+            <div class="pipe-row">
+              <span class="lane m">Heuristique</span>
+              <span class="node">PTY</span><span class="arrow">→</span>
+              <span class="node">silence · octets · CPU</span><span class="arrow">→</span>
+              <span class="node sink">réducteur</span>
+            </div>
+          </div>
+          <div class="panel kv">
+            <div><span class="v">10 s</span><span class="m">Priorité hooks</span></div>
+            <div><span class="v">2 s</span><span class="m">Hystérésis</span></div>
+            <div><span class="v">4 s</span><span class="m">Péremption</span></div>
+          </div>
+          <div class="panel push">
+            <div class="panel-h">
+              <span class="m">Journal des transitions</span>
+              <span class="tag working"><span class="dot"></span>Live</span>
+            </div>
+            <ol class="log" id="eventLog" aria-label="Journal des transitions (démo)"></ol>
+          </div>
+        </article>
+
+        <!-- Worktrees -->
+        <article class="card spot c-6 l-5">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-branch"/></svg></span>
+            <h3>Un worktree par session</h3>
+            <span class="tag neutral">loom/&lt;slug&gt;</span>
+          </div>
+          <p>Chaque session travaille sur sa branche, dans son checkout. Les collisions de noms sont départagées, et Loom refuse de supprimer un worktree qui contient du travail non commité.</p>
+          <div class="panel">
+            <ul class="tree">
+              <li><span class="g">~/dev/loom</span></li>
+              <li><span class="g">├─</span><span class="grow">main</span><span class="tag neutral">Clean</span></li>
+              <li><span class="g">├─</span><span class="grow br">loom/auth-oauth</span><span class="add">+142</span><span class="del">−37</span></li>
+              <li><span class="g">├─</span><span class="grow br">loom/grdb-v5</span><span class="add">+18</span><span class="del">−4</span></li>
+              <li><span class="g">└─</span><span class="grow br">loom/pty-flaky</span><span class="tag needs">Non commité</span></li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- Reprise -->
+        <article class="card spot c-6 l-5">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-rotate"/></svg></span>
+            <h3>Reprise après crash</h3>
+            <span class="tag neutral">Même UUID</span>
+          </div>
+          <p>Loom impose l'identifiant de la session native au lancement. Si l'app s'arrête, la session passe <code>interrupted</code> et reprend la conversation là où elle était.</p>
+          <div class="panel">
+            <div class="seq">
+              <span class="tag working">working</span><span class="arrow">→</span>
+              <span class="tag neutral">interrupted</span><span class="arrow">→</span>
+              <span class="tag working">working</span>
+            </div>
+            <div class="cmd" style="border:0;border-top:1px solid var(--line);border-radius:0 0 6px 6px;background:transparent">
+              <span class="prompt">$</span>
+              <code>claude --resume 7f3c9e1a-52d0-4b8e-9a61-0c2f7d4e8b13</code>
+            </div>
+          </div>
+        </article>
+
+        <!-- PRs -->
+        <article class="card spot c-6 l-4">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-pr"/></svg></span>
+            <h3>Pull requests</h3>
+            <span class="tag neutral">gh</span>
+          </div>
+          <p>Une inbox « en attente de moi » tous repos confondus, le diff côte à côte, les checks CI, et des commentaires en brouillon envoyés en une seule review.</p>
+          <div class="panel push table-scroll">
+            <table class="mini">
+              <tbody>
+                <tr><td class="num">#214</td><td class="ttl">Panneau latéral 120 Hz</td><td class="r"><span class="tag working">12/12</span></td></tr>
+                <tr><td class="num">#209</td><td class="ttl">Rotation des transcripts</td><td class="r"><span class="tag danger">11/12</span></td></tr>
+                <tr><td class="num">#201</td><td class="ttl">ADR-0020 propositions</td><td class="r"><span class="tag accent">Moi</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <!-- Reviews planifiées -->
+        <article class="card spot c-6 l-4">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-clock"/></svg></span>
+            <h3>Reviews planifiées</h3>
+            <span class="tag working"><span class="dot"></span>Actif</span>
+          </div>
+          <p>Un projet, une requête GitHub, un maximum par passage. Loom ouvre chaque PR sans voler l'écran et importe le rapport. Vous relisez, puis vous envoyez.</p>
+          <div class="panel push table-scroll">
+            <table class="mini">
+              <tbody>
+                <tr><td class="num">LUN–VEN</td><td class="num">09:00</td><td class="ttl">review-requested</td><td class="num r">MAX 5</td></tr>
+                <tr><td class="num">MAR·JEU</td><td class="num">14:30</td><td class="ttl">label:security</td><td class="num r">MAX 3</td></tr>
+                <tr><td class="num">RATTRAPAGE</td><td class="num">≤ 4 H</td><td class="ttl dim">au réveil du Mac</td><td class="num r">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <!-- Workflows -->
+        <article class="card spot c-6 l-4 wf" id="workflows">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-workflow"/></svg></span>
+            <h3>Workflows multi-agents</h3>
+            <span class="tag neutral">ADR-0017</span>
+          </div>
+          <p>Des graphes d'étapes confiées à des experts, en parallèle, avec verdicts, boucles bornées et estimation du coût avant lancement.</p>
+          <div class="panel push">
+            <svg viewBox="0 0 300 118" role="img" aria-label="Workflow PR review en 3 passes : départ, contexte PR, trois agents en parallèle, rapport">
+              <path class="edge" d="M52 59 H66"/>
+              <path class="edge" d="M118 59 H128 V21 H142 M128 59 H142 M128 59 V97 H142"/>
+              <path class="edge" d="M204 21 H218 V59 H232 M204 59 H232 M204 97 H218 V59"/>
+              <rect class="box" x="8" y="47" width="44" height="24" rx="4"/>
+              <text x="30" y="62" text-anchor="middle">DÉPART</text>
+              <rect class="box" x="66" y="47" width="52" height="24" rx="4"/>
+              <text x="92" y="62" text-anchor="middle">PR #214</text>
+              <rect class="box" x="142" y="9" width="62" height="24" rx="4"/>
+              <text x="173" y="24" text-anchor="middle" class="hi">SÉCURITÉ</text>
+              <rect class="box" x="142" y="47" width="62" height="24" rx="4"/>
+              <text x="173" y="62" text-anchor="middle" class="hi">PERF</text>
+              <rect class="box" x="142" y="85" width="62" height="24" rx="4"/>
+              <text x="173" y="100" text-anchor="middle" class="hi">LISIBILITÉ</text>
+              <rect class="box acc" x="232" y="47" width="60" height="24" rx="4"/>
+              <text x="262" y="62" text-anchor="middle" class="hi">RAPPORT</text>
+            </svg>
+          </div>
+        </article>
+
+        <!-- Navigateur de l'agent -->
+        <article class="card spot c-6 l-6">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-globe"/></svg></span>
+            <h3>Navigateur de l'agent</h3>
+            <span class="tag accent">Chromium</span>
+            <span class="tag neutral" style="margin-left:0">WebKit</span>
+          </div>
+          <p>Chaque session a son navigateur, à côté de son terminal, sur un profil isolé par projet. Jamais vos cookies. L'agent le pilote par les outils <code>browser_*</code> au format de Playwright MCP.</p>
+          <div class="chips">
+            <span class="chip">browser_navigate</span><span class="chip">browser_snapshot</span><span class="chip">browser_click</span><span class="chip">browser_type</span><span class="chip">browser_fill_form</span><span class="chip">browser_take_screenshot</span><span class="chip">browser_run_code</span>
+          </div>
+          <div class="panel push">
+            <div class="panel-h"><span class="m">Instantané de page</span><span class="m dimmer" style="margin-left:auto">localhost:5173</span></div>
+<pre class="snap">- <span class="s">heading "Pull request #214"</span> [level=1]
+- <span class="s">button "Approve"</span> <span class="ref">[ref=e12]</span>
+- <span class="s">textbox "Leave a comment"</span> <span class="ref">[ref=e15]</span>
+- <span class="s">link "Files changed (8)"</span> <span class="ref">[ref=e21]</span></pre>
+          </div>
+        </article>
+
+        <!-- Terminal -->
+        <article class="card spot c-3 l-3">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-terminal"/></svg></span>
+            <h3>Terminal persistant</h3>
+          </div>
+          <p>Un écran jamais vide, des transcripts écrits en continu.</p>
+          <dl class="facts push">
+            <dt class="m">Moteur</dt><dd>SwiftTerm</dd>
+            <dt class="m">Accès</dt><dd>Queue série</dd>
+            <dt class="m">Transcript</dt><dd>Brut + texte</dd>
+            <dt class="m">Rotation</dt><dd class="code">10 Mo</dd>
+            <dt class="m">Largeur min.</dt><dd class="code">80 col</dd>
+          </dl>
+        </article>
+
+        <!-- Extensions -->
+        <article class="card spot c-3 l-3">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-blocks"/></svg></span>
+            <h3>Extensions</h3>
+          </div>
+          <p>Des pages web isolées avec un pont <code>window.loom</code> gardé par permissions.</p>
+          <dl class="facts push">
+            <dt class="m">Store</dt><dd>Non persistant</dd>
+            <dt class="m">Réseau</dt><dd>Hôtes consentis</dd>
+            <dt class="m">Secrets</dt><dd>Trousseau</dd>
+            <dt class="m">Exemples</dt><dd class="code">jira · pomodoro</dd>
+          </dl>
+        </article>
+
+        <!-- Historique -->
+        <article class="card spot c-6 l-4">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-database"/></svg></span>
+            <h3>Historique et recherche</h3>
+            <span class="tag neutral">FTS5</span>
+          </div>
+          <p>Toutes les sessions passées, leurs transcripts et le journal des transitions, interrogeables en plein texte.</p>
+          <div class="panel push">
+            <div class="searchbox"><svg class="i i-sm"><use href="#i-search"/></svg><span>rate limit</span><span class="m dimmer" style="margin-left:auto">3 résultats</span></div>
+            <ul class="results">
+              <li><span class="m">12 OCT</span><span class="snip">…backoff sur <mark>rate limit</mark> de l'API GitHub</span></li>
+              <li><span class="m">03 OCT</span><span class="snip">gh renvoie 403 : <mark>rate limit</mark> exceeded</span></li>
+              <li><span class="m">28 SEP</span><span class="snip">anneau de contexte et <mark>rate limit</mark> d'usage</span></li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- Notifications -->
+        <article class="card spot c-6 l-4">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-bell"/></svg></span>
+            <h3>Badge et notification</h3>
+            <span class="tag needs">needs_input</span>
+          </div>
+          <p>Une question, une permission demandée : la carte de la session se badge et macOS vous prévient. Une fin de tour sans question reste <code>idle</code>, sans bruit.</p>
+          <div class="panel push notif">
+            <svg class="app-ico" aria-hidden="true"><use href="#logo"/></svg>
+            <div>
+              <b>Refonte de l'auth OAuth</b>
+              <p>Autoriser <span class="code">Bash(git push -u origin loom/auth-oauth)</span> ?</p>
+            </div>
+            <span class="when m">À l'instant</span>
+          </div>
+        </article>
+
+        <!-- Thèmes -->
+        <article class="card spot c-6 l-4">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-contrast"/></svg></span>
+            <h3>Thèmes</h3>
+            <span class="tag neutral">Clair · Sombre</span>
+          </div>
+          <p>Neuf familles, un override par projet, l'import d'un thème tweakcn ou shadcn, et le même thème appliqué à Claude Code en direct.</p>
+          <div class="chips push" role="list">
+            <span class="chip on" role="listitem">Loom</span><span class="chip" role="listitem">Dracula</span><span class="chip" role="listitem">Nord</span><span class="chip" role="listitem">Tokyo Night</span><span class="chip" role="listitem">Catppuccin</span><span class="chip" role="listitem">One</span><span class="chip" role="listitem">Gruvbox</span><span class="chip" role="listitem">Monokai</span><span class="chip" role="listitem">Solarized</span>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ÉTATS ================= -->
+  <section class="block" id="etats">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <div class="label m">Machine à états</div>
+          <h2>Sept états, une sémantique qui ne change jamais.</h2>
+        </div>
+        <p>Les couleurs des badges restent les mêmes quel que soit le thème. La frontière qui compte : un agent qui termine son tour par une question est <code class="code">needs_input</code>, pas <code class="code">idle</code>.</p>
+      </div>
+      <div class="card tablecard" data-spot>
+        <div class="table-scroll">
+          <table class="data">
+            <thead><tr><th>État</th><th>Déclencheur</th><th>Canal</th><th>Effet</th></tr></thead>
+            <tbody>
+              <tr><td><span class="tag working"><span class="dot"></span>working</span></td><td><code>PreToolUse</code>, <code>UserPromptSubmit</code>, sortie du PTY</td><td>Hooks · heuristique</td><td>L'agent produit, rien à faire</td></tr>
+              <tr><td><span class="tag needs"><span class="dot"></span>needs_input</span></td><td><code>PermissionRequest</code>, <code>Notification</code>, question en fin de tour</td><td>Hooks</td><td>Badge sur la carte et notification macOS</td></tr>
+              <tr><td><span class="tag idle"><span class="dot"></span>idle</span></td><td><code>Stop</code> sans question, silence prolongé</td><td>Hooks · heuristique</td><td>Le process vit, prêt pour un prompt</td></tr>
+              <tr><td><span class="tag neutral"><span class="dot" style="--c: var(--fg-2)"></span>completed</span></td><td>Process terminé, <code>exit 0</code></td><td>Process</td><td>Session et transcript consultables</td></tr>
+              <tr><td><span class="tag danger"><span class="dot"></span>failed</span></td><td>Process terminé, <code>exit ≠ 0</code></td><td>Process</td><td>Session et transcript consultables</td></tr>
+              <tr><td><span class="tag neutral"><span class="dot" style="--c: var(--accent)"></span>interrupted</span></td><td>Session vivante quand l'app s'est arrêtée</td><td>Relancement</td><td>Reprise par <code>claude --resume</code></td></tr>
+              <tr><td><span class="tag neutral"><span class="dot"></span>archived</span></td><td>Action de l'utilisateur</td><td>—</td><td>Sort des vues actives, rien n'est détruit</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ARCHITECTURE + RACCOURCIS ================= -->
+  <section class="block" id="architecture">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+          <div class="label m">Architecture</div>
+          <h2>Des frontières imposées, une UI qui ne voit que des valeurs.</h2>
+        </div>
+        <p>Aucun service ne dépend de l'interface. Tout accès au moteur du terminal est confiné à la queue série de sa session. Les décisions sont tracées dans 20 ADR.</p>
+      </div>
+      <div class="bento" data-spot>
+        <article class="card spot tablecard c-6 l-7">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-layers"/></svg></span>
+            <h3>Packages Swift</h3>
+            <span class="tag neutral">SPM</span>
+          </div>
+          <div class="table-scroll">
+            <table class="data" style="min-width:520px">
+              <thead><tr><th>Package</th><th>Rôle</th><th>Dépend de</th></tr></thead>
+              <tbody>
+                <tr><td class="code">LoomCore</td><td>États, réducteur pur</td><td class="code">—</td></tr>
+                <tr><td class="code">LoomTerminal</td><td>PTY, moteur, runtime</td><td class="code">Core</td></tr>
+                <tr><td class="code">LoomAgents</td><td>Adapter Claude Code, classification</td><td class="code">Core</td></tr>
+                <tr><td class="code">LoomGit</td><td>Worktrees, status porcelain v2, diff</td><td class="code">Core</td></tr>
+                <tr><td class="code">LoomWeb</td><td>Navigateurs, navigateur de l'agent</td><td class="code">Core</td></tr>
+                <tr><td class="code">LoomPersistence</td><td>GRDB, transcripts, FTS5</td><td class="code">Core</td></tr>
+                <tr><td class="code">LoomIPC</td><td>Socket des hooks et requêtes</td><td class="code">Core</td></tr>
+                <tr><td class="code">LoomSessions</td><td>SessionManager, orchestration</td><td class="code">Tous</td></tr>
+                <tr><td class="code">LoomApp</td><td>SwiftUI</td><td class="code">Sessions</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="card spot tablecard c-6 l-5" id="raccourcis">
+          <div class="card-h">
+            <span class="ico"><svg class="i"><use href="#i-keyboard"/></svg></span>
+            <h3>Raccourcis clavier</h3>
+            <span class="tag neutral">Remappables</span>
+          </div>
+          <ul class="keys">
+            <li>Nouvelle session<span class="kbds"><kbd>⌘</kbd><kbd>N</kbd></span></li>
+            <li>Palette de commandes<span class="kbds"><kbd>⌘</kbd><kbd>K</kbd></span></li>
+            <li>Mission control<span class="kbds"><kbd>⌘</kbd><kbd>G</kbd></span></li>
+            <li>Nouvel onglet<span class="kbds"><kbd>⌘</kbd><kbd>T</kbd></span></li>
+            <li>Panneau latéral<span class="kbds"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>B</kbd></span></li>
+            <li>Rechercher dans le terminal<span class="kbds"><kbd>⌘</kbd><kbd>F</kbd></span></li>
+            <li>Épingler l'onglet de PR<span class="kbds"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd></span></li>
+            <li>Réglages<span class="kbds"><kbd>⌘</kbd><kbd>,</kbd></span></li>
+            <li>Fermer l'onglet<span class="kbds"><kbd>⌘</kbd><kbd>W</kbd></span></li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= INSTALLER ================= -->
+  <section class="block" id="installer" style="border-bottom:0">
+    <div class="wrap">
+      <div class="card spot cta" data-spot>
+        <div>
+          <span class="tag accent">macOS 14+ · Apple Silicon et Intel</span>
+          <h2 style="margin-top:16px">Du clone à votre première session.</h2>
+          <p>Construisez en release : le rendu du terminal en debug est 10 à 50 fois plus lent. <code class="code">loom-hook</code> est construit avec l'app.</p>
+          <div class="actions">
+            <a class="btn primary" href="https://github.com/zVasO/loom/releases" target="_blank" rel="noopener"><svg class="i"><use href="#i-download"/></svg>Télécharger pour macOS</a>
+            <a class="btn" href="https://github.com/zVasO/loom" target="_blank" rel="noopener"><svg class="i"><use href="#i-github"/></svg>Code source</a>
+          </div>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <span class="m n">01</span>
+            <div class="cmd"><span class="prompt">$</span><code>git clone https://github.com/zVasO/loom</code><button class="icon-btn" type="button" data-copy="git clone https://github.com/zVasO/loom" aria-label="Copier la commande"><svg class="i i-sm"><use href="#i-copy"/></svg></button></div>
+          </div>
+          <div class="step">
+            <span class="m n">02</span>
+            <div class="cmd"><span class="prompt">$</span><code>swift build -c release</code><button class="icon-btn" type="button" data-copy="swift build -c release" aria-label="Copier la commande"><svg class="i i-sm"><use href="#i-copy"/></svg></button></div>
+          </div>
+          <div class="step">
+            <span class="m n">03</span>
+            <div class="cmd"><span class="prompt">$</span><code>swift run -c release LoomApp</code><button class="icon-btn" type="button" data-copy="swift run -c release LoomApp" aria-label="Copier la commande"><svg class="i i-sm"><use href="#i-copy"/></svg></button></div>
+          </div>
+          <div class="step">
+            <span class="m n">04</span>
+            <div class="cmd" style="justify-content:space-between"><code style="font-family:var(--sans);font-size:13px">Créer une session depuis un objectif</code><span class="kbds" style="padding-right:6px"><kbd>⌘</kbd><kbd>N</kbd></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot m">
+    <span class="brand" style="font-size:13px;text-transform:none;letter-spacing:-0.01em;font-family:var(--sans);color:var(--fg)"><svg aria-hidden="true" style="width:18px;height:18px"><use href="#logo"/></svg>Loom</span>
+    <span>macOS 14+</span>
+    <span>Swift 5.10</span>
+    <nav aria-label="Liens">
+      <a href="https://github.com/zVasO/loom/blob/main/README.md" target="_blank" rel="noopener">README</a>
+      <a href="https://github.com/zVasO/loom/blob/main/CONTEXT.md" target="_blank" rel="noopener">Vocabulaire</a>
+      <a href="https://github.com/zVasO/loom/tree/main/docs/adr" target="_blank" rel="noopener">ADR</a>
+      <a href="https://github.com/zVasO/loom/blob/main/docs/workflows.md" target="_blank" rel="noopener">Workflows</a>
+      <a href="https://github.com/zVasO/loom/blob/main/docs/extensions.md" target="_blank" rel="noopener">Extensions</a>
+    </nav>
+  </div>
+</footer>
+
+<!-- Palette de commandes -->
+<div class="pal" id="palette" role="dialog" aria-modal="true" aria-label="Palette de commandes">
+  <div class="pal-box">
+    <div class="pal-in">
+      <svg class="i"><use href="#i-search"/></svg>
+      <input id="palInput" type="text" placeholder="Rechercher une section ou une action…" autocomplete="off" spellcheck="false" aria-controls="palList" aria-activedescendant="">
+      <kbd>esc</kbd>
+    </div>
+    <ul class="pal-list" id="palList" role="listbox" aria-label="Commandes"></ul>
+    <div class="pal-foot m">
+      <span><kbd>↑</kbd><kbd>↓</kbd> naviguer</span>
+      <span><kbd>↵</kbd> exécuter</span>
+      <span><kbd>esc</kbd> fermer</span>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span class="tag working" id="toastTag">Copié</span><code id="toastText"></code>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- Spotlight : un seul listener, rAF ---------- */
+  let spotFrame = 0, lastEvt = null;
+  document.addEventListener("pointermove", (e) => {
+    lastEvt = e;
+    if (spotFrame) return;
+    spotFrame = requestAnimationFrame(() => {
+      spotFrame = 0;
+      const host = lastEvt.target.closest && lastEvt.target.closest("[data-spot]");
+      if (!host) return;
+      const cards = host.classList.contains("spot") ? [host] : $$(".spot", host);
+      for (const c of cards) {
+        const r = c.getBoundingClientRect();
+        c.style.setProperty("--mx", (lastEvt.clientX - r.left) + "px");
+        c.style.setProperty("--my", (lastEvt.clientY - r.top) + "px");
+      }
+    });
+  }, { passive: true });
+
+  /* ---------- Toast + copie ---------- */
+  const toast = $("#toast");
+  let toastTimer = 0;
+  function showToast(tag, text) {
+    $("#toastTag").textContent = tag;
+    $("#toastText").textContent = text;
+    toast.setAttribute("data-show", "");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.removeAttribute("data-show"), 1800);
+  }
+  function selectText(el) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  function copy(text, sourceEl) {
+    const done = () => showToast("Copié", text);
+    const fallback = () => {
+      const code = sourceEl && sourceEl.closest(".cmd") && sourceEl.closest(".cmd").querySelector("code");
+      if (code) { selectText(code); showToast("Sélectionné", "⌘C pour copier"); }
+    };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+      else fallback();
+    } catch (_) { fallback(); }
+  }
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-copy]");
+    if (!b) return;
+    copy(b.getAttribute("data-copy"), b);
+    const use = b.querySelector("use");
+    if (use) {
+      use.setAttribute("href", "#i-check");
+      setTimeout(() => use.setAttribute("href", "#i-copy"), 1200);
+    }
+  });
+
+  /* ---------- Simulation Mission control ---------- */
+  const STATE = {
+    working: { c: "var(--working)" },
+    needs_input: { c: "var(--needs)" },
+    idle: { c: "var(--idle)" },
+    interrupted: { c: "var(--accent)" },
+  };
+  const sessions = [
+    { id: "auth", title: "Refonte de l'auth OAuth", agent: "claude", branch: "loom/auth-oauth", state: "needs_input", ctx: 64, t: 2472, ask: "Bash(git push -u origin loom/auth-oauth)" },
+    { id: "grdb", title: "Migration GRDB v5", agent: "claude", branch: "loom/grdb-v5", state: "working", ctx: 38, t: 1315, tool: "Edit(Sources/LoomPersistence/Migrations.swift)" },
+    { id: "pty", title: "Test PTY instable", agent: "claude", branch: "loom/pty-flaky", state: "working", ctx: 22, t: 604, tool: "Bash(swift test --filter PTYTests)" },
+    { id: "rev", title: "Revue PR #214", agent: "claude", branch: "loom/review-214", state: "idle", ctx: 71, t: 3920 },
+    { id: "lint", title: "Lint Swift 6", agent: "codex", branch: "loom/swift6-lint", state: "working", ctx: 12, t: 187, tool: "swiftlint --strict" },
+    { id: "exp", title: "Export des transcripts", agent: "claude", branch: "loom/export", state: "interrupted", ctx: 45, t: 5110 },
+  ];
+  const TOOLS = [
+    "Bash(swift build -c release)", "Read(Sources/LoomCore/Reducer.swift)", "Grep(\"needs_input\")",
+    "Edit(Sources/LoomGit/Worktree.swift)", "Bash(swift test --filter Reducer)", "Write(docs/adr/0021.md)",
+  ];
+  const ASKS = [
+    "Bash(git push -u origin {b})", "Bash(rm -rf .build)", "Question : garder l'ancienne migration ?",
+    "WebFetch(developer.apple.com)",
+  ];
+
+  const rowsEl = $("#sessRows");
+  let selected = "auth";
+  let filter = "all";
+
+  function fmt(t) {
+    const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60;
+    return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+  function buildRows() {
+    rowsEl.innerHTML = "";
+    for (const s of sessions) {
+      const tr = document.createElement("tr");
+      tr.dataset.id = s.id;
+      tr.tabIndex = 0;
+      tr.innerHTML =
+        '<td><span class="st"><span class="dot"></span><span class="lbl"></span></span></td>' +
+        '<td><div class="title-cell"><b>' + esc(s.title) + '</b><span>' + esc(s.agent) + '</span></div></td>' +
+        '<td><span class="br">' + esc(s.branch) + '</span></td>' +
+        '<td><span class="ctx"><span class="ring"></span><span class="pct"></span></span></td>' +
+        '<td><span class="dur"></span></td>' +
+        '<td class="act"></td>';
+      s.el = tr;
+      rowsEl.appendChild(tr);
+      paintRow(s);
+    }
+  }
+
+  function paintRow(s) {
+    const tr = s.el;
+    const st = tr.querySelector(".st");
+    st.style.setProperty("--c", STATE[s.state].c);
+    st.querySelector(".lbl").textContent = s.state;
+    tr.querySelector(".ring").style.setProperty("--p", s.ctx);
+    tr.querySelector(".pct").textContent = s.ctx + "%";
+    tr.querySelector(".dur").textContent = fmt(s.t);
+    const act = tr.querySelector(".act");
+    const want = s.state === "needs_input" ? "answer" : s.state === "interrupted" ? "resume" : "";
+    if (act.dataset.kind !== want) {
+      act.dataset.kind = want;
+      act.innerHTML = want === "answer"
+        ? '<button class="btn sm primary" type="button" data-act="answer" tabindex="-1">Répondre</button>'
+        : want === "resume"
+          ? '<button class="btn sm" type="button" data-act="resume" tabindex="-1">Reprendre</button>'
+          : "";
+    }
+    tr.setAttribute("aria-selected", String(s.id === selected));
+    tr.hidden = !(filter === "all" || s.state === filter);
+    tr.setAttribute("aria-label", s.title + ", " + s.state);
+  }
+
+  function paintCounts() {
+    const n = { all: sessions.length, working: 0, needs_input: 0, idle: 0 };
+    for (const s of sessions) if (n[s.state] !== undefined) n[s.state]++;
+    for (const k in n) { const el = $('[data-count="' + k + '"]'); if (el) el.textContent = n[k]; }
+    $("#footStats").textContent = sessions.length + " sessions · " + n.working + " working · " + n.needs_input + " needs_input";
+  }
+
+  function paintTerm() {
+    const s = sessions.find((x) => x.id === selected) || sessions[0];
+    $("#termAgent").textContent = s.agent;
+    $("#termBranch").textContent = s.branch;
+    let html = "";
+    if (s.state === "needs_input") {
+      html = '<span class="hl">⏺ ' + esc(s.ask || "Question") + '</span>\n' +
+        '<span class="q">  Autoriser cette action ?</span>\n' +
+        '  <span class="hl">❯ 1. Oui</span>   2. Oui, et ne plus demander   3. Non\n' +
+        '<span class="dim">  ↵ pour confirmer · esc pour annuler</span>';
+    } else if (s.state === "working") {
+      html = '<span class="hl">⏺ ' + esc(s.tool || "Réflexion…") + '</span>\n' +
+        '  ⎿ en cours…\n' +
+        '<span class="ok">✓</span> 3 fichiers lus, 1 modifié\n' +
+        '<span class="ac">✻</span> <span class="dim">Travail en cours · ' + fmt(s.t).slice(3) + ' · esc pour interrompre</span>';
+    } else if (s.state === "idle") {
+      html = '<span class="ok">✓</span> Revue terminée : 2 suggestions, aucun blocage.\n' +
+        '<span class="dim">  Rapport écrit dans .loom-review/auto-review.json</span>\n\n' +
+        '<span class="hl">&gt;</span> <span class="caret"></span>';
+    } else {
+      html = '<span class="dim">Session interrompue au relancement de Loom.</span>\n' +
+        'Session native <span class="hl">7f3c9e1a-52d0-4b8e-9a61-0c2f7d4e8b13</span>\n' +
+        '<span class="dim">Reprise :</span> <span class="ac">claude --resume 7f3c9e1a…</span>';
+    }
+    $("#termOut").innerHTML = html;
+  }
+
+  function paintAll() { sessions.forEach(paintRow); paintCounts(); paintTerm(); }
+
+  /* Journal */
+  const logEl = $("#eventLog");
+  function stamp() {
+    const d = new Date();
+    const p = (n, l = 2) => String(n).padStart(l, "0");
+    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + '<span class="ms">.' + p(d.getMilliseconds(), 3) + "</span>";
+  }
+  function log(src, ev, sess, to) {
+    const li = document.createElement("li");
+    li.innerHTML = '<span class="t">' + stamp() + '</span><span class="src">' + src + '</span>' +
+      '<span class="ev">' + esc(ev) + ' <i>· ' + esc(sess.branch.replace("loom/", "")) + '</i></span>' +
+      '<span class="to" style="--c:' + STATE[to].c + '">→ ' + to + '</span>';
+    logEl.appendChild(li);
+    while (logEl.children.length > 10) logEl.removeChild(logEl.firstChild);
+  }
+
+  function setState(s, to, src, ev) {
+    s.state = to;
+    log(src, ev, s, to);
+    paintRow(s); paintCounts();
+    if (s.id === selected) paintTerm();
+  }
+
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+
+  function step() {
+    const alive = sessions.filter((s) => s.state !== "interrupted");
+    const needing = alive.filter((s) => s.state === "needs_input");
+    // Au-delà de deux sessions en attente, l'utilisateur « répond » à la plus ancienne.
+    if (needing.length >= 2) { answer(needing[0], true); return; }
+    const s = pick(alive);
+    if (s.state === "working") {
+      const r = Math.random();
+      if (r < 0.28) {
+        s.ask = pick(ASKS).replace("{b}", s.branch);
+        if (s.agent === "codex") { setState(s, "idle", "HEUR", "silence 4.0 s"); return; }
+        setState(s, "needs_input", "HOOK", s.ask.startsWith("Question") ? "Stop · question" : "PermissionRequest");
+      } else if (r < 0.5) {
+        setState(s, "idle", s.agent === "codex" ? "HEUR" : "HOOK", s.agent === "codex" ? "silence 4.0 s" : "Stop");
+      } else {
+        s.tool = pick(TOOLS);
+        s.ctx = Math.min(96, s.ctx + 1 + Math.floor(Math.random() * 4));
+        setState(s, "working", s.agent === "codex" ? "HEUR" : "HOOK", s.agent === "codex" ? "octets +2.1 Ko" : "PreToolUse " + s.tool.split("(")[0]);
+      }
+    } else if (s.state === "idle") {
+      s.tool = pick(TOOLS);
+      setState(s, "working", s.agent === "codex" ? "HEUR" : "HOOK", s.agent === "codex" ? "octets +0.8 Ko" : "UserPromptSubmit");
+    }
+    // needs_input : on attend l'utilisateur.
+  }
+
+  function answer(s, auto) {
+    s.tool = pick(TOOLS);
+    setState(s, "working", "USER", auto ? "Autorisé" : "Autorisé depuis Loom");
+  }
+  function resume(s) {
+    s.t = 0;
+    s.tool = "Read(Sources/LoomPersistence/Transcripts.swift)";
+    setState(s, "working", "RESUME", "claude --resume 7f3c9e1a");
+  }
+
+  function select(id, focus) {
+    selected = id;
+    sessions.forEach(paintRow);
+    paintTerm();
+    if (focus) { const s = sessions.find((x) => x.id === id); s && s.el.focus({ preventScroll: true }); }
+  }
+
+  rowsEl.addEventListener("click", (e) => {
+    const tr = e.target.closest("tr");
+    if (!tr) return;
+    const s = sessions.find((x) => x.id === tr.dataset.id);
+    const b = e.target.closest("[data-act]");
+    if (b) { b.dataset.act === "answer" ? answer(s) : resume(s); }
+    select(s.id);
+  });
+  rowsEl.addEventListener("keydown", (e) => {
+    const tr = e.target.closest("tr");
+    if (!tr) return;
+    const visible = sessions.filter((s) => !s.el.hidden);
+    const i = visible.findIndex((s) => s.id === tr.dataset.id);
+    if (e.key === "ArrowDown" || e.key === "j") { e.preventDefault(); const n = visible[Math.min(visible.length - 1, i + 1)]; n && select(n.id, true); }
+    else if (e.key === "ArrowUp" || e.key === "k") { e.preventDefault(); const n = visible[Math.max(0, i - 1)]; n && select(n.id, true); }
+    else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      const s = visible[i];
+      if (s.state === "needs_input") answer(s); else if (s.state === "interrupted") resume(s);
+      select(s.id, true);
+    }
+  });
+  $$(".seg [data-filter]").forEach((b) => b.addEventListener("click", () => {
+    filter = b.dataset.filter;
+    $$(".seg [data-filter]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    sessions.forEach(paintRow);
+  }));
+
+  buildRows();
+  paintAll();
+  // Journal amorcé avec des événements plausibles.
+  log("HOOK", "SessionStart", sessions[2], "working");
+  log("HOOK", "PreToolUse Read", sessions[0], "working");
+  log("HEUR", "silence 4.0 s", sessions[4], "idle");
+  log("HOOK", "PreToolUse Edit", sessions[1], "working");
+  log("HEUR", "octets +3.4 Ko", sessions[4], "working");
+  log("HOOK", "Stop", sessions[3], "idle");
+  log("HOOK", "PreToolUse Bash", sessions[2], "working");
+  log("HOOK", "PermissionRequest", sessions[0], "needs_input");
+
+  setInterval(() => {
+    for (const s of sessions) if (s.state !== "interrupted") s.t++;
+    for (const s of sessions) s.el.querySelector(".dur").textContent = fmt(s.t);
+    const cur = sessions.find((x) => x.id === selected);
+    if (cur && cur.state === "working") paintTerm();
+  }, 1000);
+  if (!reduce) {
+    (function loop() { setTimeout(() => { if (!document.hidden) step(); loop(); }, 2200 + Math.random() * 1800); })();
+  }
+
+  /* ---------- Palette ⌘K ---------- */
+  const pal = $("#palette"), input = $("#palInput"), list = $("#palList");
+  const go = (h) => () => { const el = document.querySelector(h); el && el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" }); };
+  const open = (u) => () => { window.open(u, "_blank", "noopener") || (location.href = u); };
+  const COMMANDS = [
+    { g: "Aller à", label: "Détection d'état", icon: "i-activity", hint: "#detection", run: go("#detection") },
+    { g: "Aller à", label: "Workflows multi-agents", icon: "i-workflow", hint: "#workflows", run: go("#workflows") },
+    { g: "Aller à", label: "États de session", icon: "i-layers", hint: "#etats", run: go("#etats") },
+    { g: "Aller à", label: "Architecture", icon: "i-layers", hint: "#architecture", run: go("#architecture") },
+    { g: "Aller à", label: "Raccourcis clavier", icon: "i-keyboard", hint: "#raccourcis", run: go("#raccourcis") },
+    { g: "Aller à", label: "Installer", icon: "i-download", hint: "#installer", run: go("#installer") },
+    { g: "Actions", label: "Copier : swift build -c release", icon: "i-copy", hint: "copier", run: () => copy("swift build -c release") },
+    { g: "Actions", label: "Copier : git clone https://github.com/zVasO/loom", icon: "i-copy", hint: "copier", run: () => copy("git clone https://github.com/zVasO/loom") },
+    { g: "Actions", label: "Simuler une PermissionRequest", icon: "i-bell", hint: "démo", run: () => {
+        const s = sessions.find((x) => x.state === "working");
+        if (s) { s.ask = "Bash(git push -u origin " + s.branch + ")"; setState(s, "needs_input", "HOOK", "PermissionRequest"); select(s.id); go("#top")(); }
+        else showToast("Démo", "Aucune session working");
+      } },
+    { g: "Actions", label: "Reprendre la session interrompue", icon: "i-rotate", hint: "démo", run: () => {
+        const s = sessions.find((x) => x.state === "interrupted");
+        if (s) { resume(s); select(s.id); go("#top")(); } else showToast("Démo", "Aucune session interrompue");
+      } },
+    { g: "Liens", label: "Releases GitHub", icon: "i-download", hint: "github.com", run: open("https://github.com/zVasO/loom/releases") },
+    { g: "Liens", label: "Code source", icon: "i-github", hint: "github.com", run: open("https://github.com/zVasO/loom") },
+    { g: "Liens", label: "Décisions d'architecture (ADR)", icon: "i-github", hint: "github.com", run: open("https://github.com/zVasO/loom/tree/main/docs/adr") },
+  ];
+  const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  let shown = [], active = 0, lastFocus = null;
+
+  function renderPal() {
+    const q = norm(input.value.trim());
+    shown = COMMANDS.filter((c) => !q || q.split(/\s+/).every((w) => norm(c.g + " " + c.label + " " + c.hint).includes(w)));
+    active = Math.min(active, Math.max(0, shown.length - 1));
+    list.innerHTML = "";
+    if (!shown.length) {
+      list.innerHTML = '<li class="pal-empty m">Aucun résultat pour « ' + esc(input.value) + ' »</li>';
+      input.setAttribute("aria-activedescendant", "");
+      return;
+    }
+    let g = "";
+    shown.forEach((c, i) => {
+      if (c.g !== g) {
+        g = c.g;
+        const h = document.createElement("li");
+        h.className = "pal-group m";
+        h.setAttribute("role", "presentation");
+        h.textContent = g;
+        list.appendChild(h);
+      }
+      const li = document.createElement("li");
+      li.className = "pal-item";
+      li.id = "pal-" + i;
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", String(i === active));
+      li.innerHTML = '<svg class="i"><use href="#' + c.icon + '"/></svg><span class="grow">' + esc(c.label) + '</span><span class="m dimmer">' + esc(c.hint) + "</span>";
+      li.addEventListener("mousemove", () => { if (active !== i) { active = i; markActive(); } });
+      li.addEventListener("click", () => run(i));
+      list.appendChild(li);
+    });
+    markActive();
+  }
+  function markActive() {
+    $$(".pal-item", list).forEach((el, i) => el.setAttribute("aria-selected", String(i === active)));
+    const el = $("#pal-" + active);
+    if (el) { el.scrollIntoView({ block: "nearest" }); input.setAttribute("aria-activedescendant", el.id); }
+  }
+  function run(i) { const c = shown[i]; if (!c) return; closePal(); c.run(); }
+  function openPal() {
+    lastFocus = document.activeElement;
+    pal.setAttribute("data-open", "");
+    input.value = ""; active = 0; renderPal();
+    setTimeout(() => input.focus(), 0);
+  }
+  function closePal() {
+    pal.removeAttribute("data-open");
+    if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
+  }
+  input.addEventListener("input", () => { active = 0; renderPal(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); active = (active + 1) % Math.max(1, shown.length); markActive(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); active = (active - 1 + shown.length) % Math.max(1, shown.length); markActive(); }
+    else if (e.key === "Enter") { e.preventDefault(); run(active); }
+    else if (e.key === "Escape") { e.preventDefault(); closePal(); }
+    else if (e.key === "Tab") { e.preventDefault(); }
+  });
+  pal.addEventListener("mousedown", (e) => { if (e.target === pal) closePal(); });
+  $$("[data-open-palette]").forEach((b) => b.addEventListener("click", openPal));
+  document.addEventListener("keydown", (e) => {
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); pal.hasAttribute("data-open") ? closePal() : openPal(); }
+    else if (e.key === "/" && !typing && !pal.hasAttribute("data-open")) { e.preventDefault(); openPal(); }
+    else if (e.key === "Escape" && pal.hasAttribute("data-open")) closePal();
+  });
+
+  /* ---------- Nav : section courante ---------- */
+  const links = $$(".nav-links a");
+  const targets = links.map((a) => document.querySelector(a.getAttribute("href"))).filter(Boolean);
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver((entries) => {
+      for (const en of entries) if (en.isIntersecting) {
+        links.forEach((a) => a.setAttribute("aria-current", String(a.getAttribute("href") === "#" + en.target.id)));
+      }
+    }, { rootMargin: "-45% 0px -50% 0px" });
+    targets.forEach((t) => io.observe(t));
+  }
+})();
+</script>
+</body>
+</html>
