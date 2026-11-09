@@ -1,10 +1,68 @@
 import Foundation
 
-/// What a new library starts with: the PR review in three passes and the
-/// experts it dispatches to — copies the user edits, renames, deletes.
+/// The PR review in three passes and the experts and connectors it uses —
+/// what libraries USED to start with. A library now starts empty: these
+/// definitions stay so the leftovers of an older library can be recognised
+/// and removed (`untouchedLeftovers`), and as the tests' reference workflow.
 /// Prompts in English like every prompt claude reads; the answers in French,
 /// the language the report is read in.
 public enum BuiltInWorkflows {
+
+    /// What an older library still holds of the shipped defaults, exactly as
+    /// shipped and used by nothing that stays.
+    public struct Leftovers: Equatable, Sendable {
+        public var workflowIDs: [UUID] = []
+        public var expertIDs: [UUID] = []
+        public var connectorIDs: [UUID] = []
+
+        public var isEmpty: Bool { workflowIDs.isEmpty && expertIDs.isEmpty && connectorIDs.isEmpty }
+    }
+
+    /// The shipped defaults a library can let go: the PR review when the
+    /// person never changed it, then each shipped expert and connector still
+    /// as shipped that no remaining workflow, block or expert uses. Anything
+    /// the person edited, or still relies on, stays theirs.
+    public static func untouchedLeftovers(workflows: [Workflow], experts: [Expert], connectors: [Connector],
+                                          blocks: [WorkflowBlock] = []) -> Leftovers {
+        var leftovers = Leftovers()
+        let shipped = prReview()
+        let remaining = workflows.filter { stored in
+            guard stored.id == shipped.id else { return true }
+            var reference = shipped
+            reference.createdAt = stored.createdAt
+            reference.updatedAt = stored.updatedAt
+            guard stored == reference else { return true }
+            leftovers.workflowIDs.append(stored.id)
+            return false
+        }
+
+        var usedExperts = Set<UUID>()
+        var usedConnectors = Set<UUID>()
+        for workflow in remaining {
+            let bundle = WorkflowBundle.make(workflow, experts: experts, connectors: connectors, blocks: blocks)
+            usedExperts.formUnion(bundle.experts.map(\.id))
+            usedConnectors.formUnion(bundle.connectors.map(\.id))
+        }
+        for block in blocks {
+            if let id = block.template.expertID { usedExperts.insert(id) }
+            usedConnectors.formUnion(block.template.connectorIDs)
+        }
+
+        let shippedExperts = Dictionary(uniqueKeysWithValues: Self.experts.map { ($0.id, $0) })
+        for expert in experts {
+            if shippedExperts[expert.id] == expert, !usedExperts.contains(expert.id) {
+                leftovers.expertIDs.append(expert.id)
+            } else {
+                usedConnectors.formUnion(expert.connectorIDs)
+            }
+        }
+        let shippedConnectors = Dictionary(uniqueKeysWithValues: Self.connectors.map { ($0.id, $0) })
+        for connector in connectors where shippedConnectors[connector.id] == connector
+            && !usedConnectors.contains(connector.id) {
+            leftovers.connectorIDs.append(connector.id)
+        }
+        return leftovers
+    }
 
     public static let prReviewID = UUID(uuidString: "0B1E5D3A-2C4F-4A6B-8D9E-7F1A2B3C4D01")!
 

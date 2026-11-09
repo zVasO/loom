@@ -89,19 +89,33 @@ final class WorkflowsModel {
 
     // MARK: Loading
 
-    /// Reads the library, seeding it with the built-ins the first time.
+    /// Reads the library. A new library starts empty: no workflow, expert or
+    /// connector the person did not make or import.
     func load() {
-        if !store.exists {
-            for expert in BuiltInWorkflows.experts { try? store.save(expert) }
-            for connector in BuiltInWorkflows.connectors { try? store.save(connector) }
-            try? store.save(BuiltInWorkflows.prReview())
-        }
+        removeShippedDefaults()
         reload()
         runs = runStore.load()
         loadBuilders()
         // A run cut short by a quit is saved as such, once.
         for run in runs where run.status == .interrupted { try? runStore.save(run) }
-        if selectedWorkflowID == nil { selectedWorkflowID = workflows.first?.id }
+        if workflow(selectedWorkflowID) == nil { selectedWorkflowID = workflows.first?.id }
+    }
+
+    /// Libraries used to start with the PR review, its six experts and the
+    /// Atlassian connectors. Once, an older library lets go of those still
+    /// exactly as shipped and used by nothing that stays; what the person
+    /// changed or relies on remains.
+    private func removeShippedDefaults() {
+        let key = "loom.workflows.shippedDefaultsRemoved"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        guard store.exists else { return }
+        let leftovers = BuiltInWorkflows.untouchedLeftovers(
+            workflows: store.loadWorkflows(), experts: store.loadExperts(),
+            connectors: store.loadConnectors(), blocks: store.loadBlocks())
+        for id in leftovers.workflowIDs { store.deleteWorkflow(id) }
+        for id in leftovers.expertIDs { store.deleteExpert(id) }
+        for id in leftovers.connectorIDs { store.deleteConnector(id) }
     }
 
     private func reload() {

@@ -4,7 +4,7 @@ Un workflow enchaîne des étapes confiées à des **experts** : on le dessine d
 
 ## L'onglet Workflows
 
-- **Workflows** : la bibliothèque. Un clic ouvre l'éditeur ; un double-clic renomme ; le menu contextuel lance, duplique, exporte (avec ses experts et connecteurs, sans secret) ou supprime. Le `+` crée, importe un fichier `.loom-workflow.json`, ou ajoute le built-in « PR review — 3 passes ».
+- **Workflows** : la bibliothèque. Un clic ouvre l'éditeur ; un double-clic renomme ; le menu contextuel lance, duplique, exporte (avec ses experts et connecteurs, sans secret) ou supprime. Le `+` crée ou importe un fichier `.loom-workflow.json`. La bibliothèque démarre vide : Loom ne livre aucun workflow, expert ni connecteur par défaut. Une bibliothèque plus ancienne perd une fois ceux qu'elle avait reçus (la « PR review — 3 passes », ses six experts, les connecteurs Atlassian), seulement s'ils sont restés tels quels et que rien d'autre ne s'en sert.
 - **Experts**, **Connectors** : des formulaires natifs (voir plus bas).
 - **Runs** : l'historique. Un run en cours se suit sur le graphe (les étapes s'allument, « pass 2 »…) ; **Report** ouvre le rapport, **Log** le journal, le dossier contient tout.
 - En bas : combien d'étapes tournent à la fois dans un run, et le modèle par défaut.
@@ -92,7 +92,7 @@ Un workflow peut avoir un **orchestrateur** ([ADR-0018](adr/0018-orchestrateur-d
   - l'orchestrateur n'atteint que son run, et seulement avec le jeton de sa session.
 - **Sur le graphe d'un run** : chaque étape porte ce qu'il en a fait (« rerun », « asked », « skipped »).
 
-Le built-in « PR review — 3 passes » a pour orchestrateur le lead reviewer. Une bibliothèque créée avant lui le reçoit en ajoutant de nouveau le built-in (`+`).
+Un workflow importé peut apporter son orchestrateur avec l'expert qui le tient (export avec ses experts et connecteurs).
 
 ## Construire avec un agent ([ADR-0020](adr/0020-propositions-d-agent.md))
 

@@ -67,7 +67,8 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   Étapes en parallèle, réponses JSON validées entre étapes, headless (`claude -p`)
   ou en session visible ; estimation de coût avant lancement ; runs suivis en direct
   et conservés. Lancés à la main, depuis l'onglet d'une PR ou par une review
-  planifiée. Built-in : « PR review — 3 passes ». Le rapport, animé, porte un thème
+  planifiée. La bibliothèque démarre vide : aucun workflow, expert ou connecteur par
+  défaut. Le rapport, animé, porte un thème
   de Loom (thème HomeServe prêt dans `docs/themes/`). Un run peut avoir un
   **orchestrateur** (ADR-0018) : une session visible, sous Sessions › Workflows, qui
   reçoit chaque résultat, questionne une étape (même headless, en reprenant sa

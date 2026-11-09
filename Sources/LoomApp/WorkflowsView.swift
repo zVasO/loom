@@ -162,27 +162,13 @@ struct WorkflowsView: View {
                         workflows.detail = .workflow
                     }
                     Button("Import…") { importWorkflow() }
-                    Divider()
-                    Button("Add the built-in PR review") {
-                        var copy = BuiltInWorkflows.prReview()
-                        copy.id = UUID()
-                        for expert in BuiltInWorkflows.experts where workflows.expert(expert.id) == nil {
-                            workflows.save(expert)
-                        }
-                        for connector in BuiltInWorkflows.connectors where workflows.connector(connector.id) == nil {
-                            workflows.save(connector)
-                        }
-                        workflows.save(copy)
-                        workflows.selectedWorkflowID = copy.id
-                        workflows.detail = .workflow
-                    }
                 } label: {
                     Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("New workflow, import, built-ins")
+                .help("New workflow, or import one")
             }
             if let message {
                 Text(message).font(.system(size: 11)).foregroundStyle(DefaultTheme.danger)

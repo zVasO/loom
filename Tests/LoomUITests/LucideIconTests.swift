@@ -29,10 +29,10 @@ struct LucideIconTests {
 
     @Test("a relative quarter arc lands where the SVG says, and stays inside its corner")
     func quarterArc() {
-        // The corner of git-pull-request: 13,6 → 16,6, quarter turn to 18,8, down to 18,13.
+        // The corner of git-pull-request: 13,6 → 16,6, quarter turn to 18,8, down 7 to 18,15.
         let box = SVGPathData.path("M13 6h3a2 2 0 0 1 2 2v7").boundingRect
         #expect(close(box.minX, 13) && close(box.maxX, 18))
-        #expect(close(box.minY, 6) && close(box.maxY, 13))
+        #expect(close(box.minY, 6) && close(box.maxY, 15))
         var arcOnly = Path()
         arcOnly.move(to: CGPoint(x: 16, y: 6))
         SVGPathData.addArc(to: &arcOnly, from: CGPoint(x: 16, y: 6), to: CGPoint(x: 18, y: 8),
