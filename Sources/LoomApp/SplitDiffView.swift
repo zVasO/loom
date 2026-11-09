@@ -422,8 +422,7 @@ struct SplitDiffView: View {
                 HStack(spacing: 10) {
                     // The grip: the bar must be movable off the very lines
                     // being discussed.
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 10, weight: .semibold))
+                    AppIcon("line.3.horizontal", size: 12)
                         .foregroundStyle(DefaultTheme.mutedText)
                         .help("Drag to move")
                     Text(snippet.label)
@@ -529,7 +528,7 @@ struct SplitDiffView: View {
                               design: composer == .suggestion ? .monospaced : .default))
                 .lineLimit(composer == .suggestion ? 3...10 : 1...5)
                 .padding(8)
-                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
+                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
                 .onSubmit { submitComposer(snippet) }
             HStack(spacing: 8) {
                 if composer == .suggestion {
@@ -941,8 +940,7 @@ private struct DraftCommentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
-                Image(systemName: "tray.and.arrow.down")
-                    .font(.system(size: 10))
+                AppIcon("tray.and.arrow.down", size: 12)
                     .foregroundStyle(pending)
                 Text("pending")
                     .font(.system(size: 9, weight: .semibold))
@@ -1000,7 +998,7 @@ private struct CommentThreadView: View {
                             .lineLimit(1...5)
                             .padding(8)
                             .background(DefaultTheme.surfaceRaised,
-                                        in: RoundedRectangle(cornerRadius: 7))
+                                        in: RoundedRectangle(cornerRadius: 6))
                         HStack(spacing: 8) {
                             Spacer()
                             GhostButton("Cancel") { replying = false; draft = "" }

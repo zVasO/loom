@@ -64,8 +64,8 @@ struct PromptEditor: View {
                     .scrollContentBackground(.hidden)
                     .padding(8)
                     .frame(minHeight: minHeight, maxHeight: 520)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
                     // Saved once typing pauses: a new task per change, the
                     // previous one cancelled before it writes.
                     .task(id: draft) {
@@ -87,8 +87,8 @@ struct PromptEditor: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10).padding(.vertical, 8)
                         .background(DefaultTheme.surfaceRaised.opacity(0.6),
-                                    in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8)
+                                    in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6)
                             .stroke(DefaultTheme.cardBorder, lineWidth: 1))
                         .contentShape(Rectangle())
                 }

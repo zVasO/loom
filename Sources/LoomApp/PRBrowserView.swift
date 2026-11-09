@@ -160,9 +160,9 @@ struct PRBrowserView: View {
                                             @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
-                .foregroundStyle(DefaultTheme.groupHeader)
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .kerning(0.53)
+                .foregroundStyle(DefaultTheme.mutedText)
                 .padding(.horizontal, 6)
                 .padding(.bottom, 2)
             content()
@@ -275,8 +275,7 @@ struct PRBrowserView: View {
 
     private var searchField: some View {
         HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
+            AppIcon("magnifyingglass", size: 13)
                 .foregroundStyle(DefaultTheme.secondaryText)
             TextField(scope == .repositories ? "Filter repositories"
                       : "Filter — Return searches GitHub or opens a PR URL",
@@ -299,8 +298,8 @@ struct PRBrowserView: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
         .frame(width: 300)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6)
             .stroke(searchFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
                     lineWidth: 1))
     }
@@ -617,8 +616,8 @@ struct PRBrowserView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, design: .monospaced))
                 .padding(.horizontal, 8).padding(.vertical, 6)
-                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
                 .onSubmit { submitAddRepo() }
             Text("Cloned with gh into your clone folder, then added as a project — its PRs appear with the others. A PR URL opens that PR right after.")
                 .font(.system(size: 10))
@@ -676,8 +675,8 @@ struct PRModeSwitch: View {
             }
         }
         .padding(2)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
         .fixedSize()
     }
 }
@@ -695,8 +694,7 @@ private struct PRModeSegment: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 10, weight: .semibold))
+                AppIcon(systemImage, size: 12)
                     .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
                 Text(title)
                     .font(.system(size: 12, weight: isActive ? .semibold : .regular))
@@ -718,7 +716,7 @@ private struct PRModeSegment: View {
             .padding(.horizontal, 10).padding(.vertical, 5)
             .background(isActive ? DefaultTheme.surfaceRaised
                         : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                        in: RoundedRectangle(cornerRadius: 7))
+                        in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -748,8 +746,7 @@ private struct PRScopeRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11))
+                AppIcon(systemImage, size: 13)
                     .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.secondaryText)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
@@ -779,7 +776,7 @@ private struct PRScopeRow: View {
             .padding(.horizontal, 6).padding(.vertical, 5)
             .background(isSelected ? DefaultTheme.surfaceRaised
                         : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                        in: RoundedRectangle(cornerRadius: 7))
+                        in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -960,8 +957,7 @@ private enum CatalogCells {
                     .foregroundStyle(DefaultTheme.primaryText)
             }
             if repo.isFork {
-                Image(systemName: "tuningfork")
-                    .font(.system(size: 9))
+                AppIcon("tuningfork", size: 11)
                     .foregroundStyle(DefaultTheme.mutedText)
                     .help("Fork")
             }

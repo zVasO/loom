@@ -353,7 +353,7 @@ struct ContentView: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(DefaultTheme.accentText)
                     .frame(width: 26, height: 26)
-                    .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 7))
+                    .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 6))
                     .hoverBrightness()
             }
             .buttonStyle(.plain)
@@ -405,12 +405,22 @@ struct ContentView: View {
             Button {
                 paletteShown = true
             } label: {
-                Text("⌘\(keyPalette.uppercased())")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
-                    .hoverBrightness(0.1)
+                HStack(spacing: 8) {
+                    AppIcon("magnifyingglass", size: 13)
+                    Text("Search…").font(.system(size: 12))
+                    Spacer(minLength: 8)
+                    HStack(spacing: 3) {
+                        KeyCap("⌘")
+                        KeyCap(keyPalette.uppercased())
+                    }
+                }
+                .foregroundStyle(DefaultTheme.secondaryText)
+                .padding(.leading, 9).padding(.trailing, 5)
+                .frame(width: 168, height: 26)
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(DefaultTheme.line2, lineWidth: 1))
+                .hoverBrightness(0.04)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .keyboardShortcut(KeyEquivalent(keyPalette.first ?? "k"), modifiers: .command)
@@ -714,9 +724,9 @@ struct ProjectsView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("PROJECTS")
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
-                .foregroundStyle(DefaultTheme.groupHeader)
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .kerning(0.53)
+                .foregroundStyle(DefaultTheme.mutedText)
                 .padding(.horizontal, 10).padding(.top, 14).padding(.bottom, 6)
             ForEach(model.projects, id: \.id) { project in
                 ProjectSidebarRow(project: project,
@@ -1014,13 +1024,12 @@ struct ProjectsView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12)
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10)
                         .stroke(DefaultTheme.cardBorder, lineWidth: 1))
             } else {
                 VStack(spacing: 8) {
-                    Image(systemName: "doc.zipper")
-                        .font(.system(size: 28))
+                    AppIcon("doc.zipper", size: 33.5)
                         .foregroundStyle(DefaultTheme.secondaryText)
                     Text("Binary file — open it from the Finder")
                         .font(.system(size: 12))
@@ -1028,7 +1037,7 @@ struct ProjectsView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 60)
-                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
             }
         }
     }
@@ -1083,8 +1092,7 @@ struct ProjectsView: View {
 
     private func header(_ project: ProjectRecord) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: "folder.fill")
-                .font(.system(size: 17))
+            AppIcon("folder.fill", size: 20.5)
                 .foregroundStyle(DefaultTheme.accent)
                 .frame(width: 40, height: 40)
                 .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
@@ -1203,8 +1211,8 @@ struct ProjectsView: View {
     private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {
         HStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .kerning(0.53)
                 .foregroundStyle(DefaultTheme.secondaryText)
             Text("\(count)")
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -1241,8 +1249,8 @@ struct ProjectsView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 60)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
     private func pickProject() {
@@ -1267,8 +1275,7 @@ struct StackTab: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 9))
+            AppIcon(icon, size: 13)
                 .foregroundStyle(isDormant ? DefaultTheme.mutedText
                                  : isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
             ForEach(Array(badges.enumerated()), id: \.offset) { _, badge in
@@ -1276,7 +1283,7 @@ struct StackTab: View {
                     .help(badge.label)
             }
             Text(title)
-                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .font(.system(size: 12))
                 .foregroundStyle(isDormant ? DefaultTheme.secondaryText
                                  : isActive || hovered ? DefaultTheme.primaryText
                                                        : DefaultTheme.secondaryText)
@@ -1287,12 +1294,13 @@ struct StackTab: View {
                 HoverIconButton(systemImage: "xmark", help: "Close", action: onClose)
             }
         }
-        .padding(.horizontal, 9).padding(.vertical, 5)
+        .padding(.horizontal, 8)
+        .frame(height: 24)
         .background(isActive ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                    in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7)
-            .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
+                    in: RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4)
+            .strokeBorder(isActive ? DefaultTheme.line : .clear, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
@@ -1316,8 +1324,7 @@ struct AgentBrowserStackTab: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 9))
+            AppIcon("sparkles", size: 11)
                 .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
             Text("Agent")
                 .font(.system(size: 11, weight: isActive ? .semibold : .regular))
@@ -1325,8 +1332,7 @@ struct AgentBrowserStackTab: View {
                 .lineLimit(1)
                 .fixedSize()
             if isRunning {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 6))
+                AppIcon("circle.fill", size: 7)
                     .foregroundStyle(DefaultTheme.badgeColor(for: .working))
                     .symbolEffect(.pulse)
                     .help("claude is using its browser")
@@ -1338,8 +1344,8 @@ struct AgentBrowserStackTab: View {
         .padding(.horizontal, 9).padding(.vertical, 5)
         .background(isActive ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                    in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7)
+                    in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6)
             .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
@@ -1363,12 +1369,11 @@ struct SkillCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 13))
+            AppIcon("sparkles", size: 15.5)
                 .foregroundStyle(Color(red: 0.62, green: 0.55, blue: 0.95))
                 .frame(width: 30, height: 30)
                 .background(Color(red: 0.62, green: 0.55, blue: 0.95).opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: 8))
+                            in: RoundedRectangle(cornerRadius: 6))
             VStack(alignment: .leading, spacing: 5) {
                 Text(skill.name)
                     .font(.system(size: 13, weight: .semibold))
@@ -1415,12 +1420,11 @@ struct RuleCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "doc.text")
-                .font(.system(size: 13))
+            AppIcon("doc.text", size: 15.5)
                 .foregroundStyle(DefaultTheme.accent)
                 .frame(width: 30, height: 30)
                 .background(DefaultTheme.accent.opacity(0.12),
-                            in: RoundedRectangle(cornerRadius: 8))
+                            in: RoundedRectangle(cornerRadius: 6))
             VStack(alignment: .leading, spacing: 5) {
                 Text(rule.name)
                     .font(.system(size: 13, weight: .semibold))
@@ -1575,8 +1579,7 @@ struct PRTourView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(tour.warnings.enumerated()), id: \.offset) { _, warning in
                         HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 9))
+                            AppIcon("exclamationmark.triangle.fill", size: 11)
                                 .foregroundStyle(gauge.color)
                             Text("\(warning.file)\(warning.line.map { ":\($0)" } ?? "")")
                                 .font(.system(size: 10, design: .monospaced))
@@ -1597,8 +1600,8 @@ struct PRTourView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 11))
-        .overlay(RoundedRectangle(cornerRadius: 11)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10)
             .stroke(DefaultTheme.accent.opacity(0.35), lineWidth: 1))
     }
 }
@@ -1729,8 +1732,7 @@ struct ProjectSidebarRow: View {
             Spacer()
             if hovered {
                 HStack(spacing: 4) {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 9))
+                    AppIcon("line.3.horizontal", size: 11)
                         .foregroundStyle(DefaultTheme.mutedText)
                     HoverIconButton(systemImage: "xmark", help: "Delete project",
                                     action: onRemove)
@@ -1744,7 +1746,7 @@ struct ProjectSidebarRow: View {
         .padding(.horizontal, 7).padding(.vertical, 6)
         .background(isSelected ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                    in: RoundedRectangle(cornerRadius: 7))
+                    in: RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
@@ -1795,7 +1797,7 @@ struct QuickSessionCard: View {
     var body: some View {
         VStack(spacing: 8) {
             HStack(spacing: 7) {
-                Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                AppIcon("plus", size: 13)
                 Text("Quick empty session").font(.system(size: 12, weight: .medium))
             }
             .foregroundStyle(hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
@@ -1869,7 +1871,7 @@ struct RecentSessionRow: View {
         .padding(.horizontal, 10).padding(.vertical, 8)
         .contentShape(Rectangle())
         .hoverSurface(0.6)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
         .onTapGesture(perform: onOpen)
     }
 
@@ -2388,8 +2390,7 @@ struct SessionsView: View {
                                   dormants: [AppModel.DormantShell]) -> some View {
         let count = shells.count + dormants.count
         return HStack(spacing: 8) {
-            Image(systemName: "terminal")
-                .font(.system(size: 11))
+            AppIcon("terminal", size: 13)
                 .foregroundStyle(shells.isEmpty ? DefaultTheme.mutedText : DefaultTheme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -2445,8 +2446,7 @@ struct SessionsView: View {
     private func webGroupRow(parent: AppModel.SessionItem,
                              panes: [AppModel.BrowserPane]) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "globe")
-                .font(.system(size: 11))
+            AppIcon("globe", size: 13)
                 .foregroundStyle(DefaultTheme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -2496,8 +2496,7 @@ struct SessionsView: View {
         let running = browser?.activity?.isRunning == true
         let pages = model.agentBrowserPageCount(parent.id)
         return HStack(spacing: 8) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 11))
+            AppIcon("sparkles", size: 13)
                 .foregroundStyle(DefaultTheme.accent)
                 .symbolEffect(.pulse, isActive: running)
             VStack(alignment: .leading, spacing: 2) {
@@ -2565,8 +2564,7 @@ struct SessionsView: View {
     private func paneRowBody(_ pane: AppModel.BrowserPane, parentTitle: String?,
                              parent: AppModel.SessionItem?) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "globe")
-                .font(.system(size: 11))
+            AppIcon("globe", size: 13)
                 .foregroundStyle(DefaultTheme.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(pane.title)
@@ -2626,10 +2624,10 @@ struct SessionsView: View {
                             .font(.system(size: 8, weight: .bold))
                             .rotationEffect(.degrees(collapsed ? -90 : 0))
                         Text(title)
-                            .font(.system(size: 10, weight: .semibold))
-                            .kerning(0.8)
+                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                            .kerning(0.53)
                     }
-                    .foregroundStyle(DefaultTheme.groupHeader)
+                    .foregroundStyle(DefaultTheme.mutedText)
                     .contentShape(Rectangle())
                     .hoverBrightness(0.2)
                 }
@@ -2683,11 +2681,10 @@ struct SessionsView: View {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .bold))
                         .rotationEffect(.degrees(workflowsFolded ? -90 : 0))
-                    Image(systemName: "point.3.connected.trianglepath.dotted")
-                        .font(.system(size: 9, weight: .semibold))
+                    AppIcon("point.3.connected.trianglepath.dotted", size: 11)
                     Text("WORKFLOWS")
-                        .font(.system(size: 10, weight: .semibold))
-                        .kerning(0.8)
+                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                        .kerning(0.53)
                     Text("\(count)")
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundStyle(DefaultTheme.secondaryText)
@@ -2695,7 +2692,7 @@ struct SessionsView: View {
                         .background(DefaultTheme.surfaceRaised, in: Capsule())
                     Spacer()
                 }
-                .foregroundStyle(DefaultTheme.groupHeader)
+                .foregroundStyle(DefaultTheme.mutedText)
                 .contentShape(Rectangle())
                 .hoverBrightness(0.2)
             }
@@ -2730,11 +2727,10 @@ struct SessionsView: View {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .bold))
                         .rotationEffect(.degrees(reviewsFolded ? -90 : 0))
-                    Image(systemName: "checklist")
-                        .font(.system(size: 9, weight: .semibold))
+                    AppIcon("checklist", size: 11)
                     Text("CODE REVIEW")
-                        .font(.system(size: 10, weight: .semibold))
-                        .kerning(0.8)
+                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                        .kerning(0.53)
                     Text("\(count)")
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundStyle(DefaultTheme.secondaryText)
@@ -2742,7 +2738,7 @@ struct SessionsView: View {
                         .background(DefaultTheme.surfaceRaised, in: Capsule())
                     Spacer()
                 }
-                .foregroundStyle(DefaultTheme.groupHeader)
+                .foregroundStyle(DefaultTheme.mutedText)
                 .contentShape(Rectangle())
                 .hoverBrightness(0.2)
             }
@@ -2774,7 +2770,7 @@ private struct StackChrome: ViewModifier {
         content
             .background(isSelected ? DefaultTheme.accent.opacity(0.08) : .clear)
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: 6)
                     .stroke(isSelected ? DefaultTheme.accent : .clear, lineWidth: 1)
                     .padding(2))
     }
@@ -3011,7 +3007,7 @@ struct SessionDetailView: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
                         .padding(8)
-                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
+                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
                         .frame(width: 320)
                         .onSubmit {
                             model.setFollowUp(followUpDraft, for: sessionID)
@@ -3258,8 +3254,8 @@ struct SessionDetailView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 7))
-                    .overlay(RoundedRectangle(cornerRadius: 7)
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6)
                         .stroke(DefaultTheme.cardBorder, lineWidth: 1))
                 AccentButton("Commit") {
                     let message = shipMessage.trimmingCharacters(in: .whitespaces)
@@ -3388,13 +3384,16 @@ struct HoverIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 10))
-                .foregroundStyle(hovered ? DefaultTheme.accent : DefaultTheme.secondaryText)
+            AppIcon(systemImage, size: 12)
+                .foregroundStyle(hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
+                .frame(width: 20, height: 20)
+                .background(hovered ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(hovered ? DefaultTheme.line : .clear, lineWidth: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
         .help(help)
     }
 }
@@ -3479,7 +3478,7 @@ struct SidebarSessionCard: View, Equatable {
                 }
                 if childCount > 0 {
                     HStack(spacing: 2) {
-                        Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+                        AppIcon("chevron.down", size: 8.5)
                         Text("\(childCount)").font(.system(size: 10))
                     }
                     .foregroundStyle(DefaultTheme.secondaryText)
@@ -3592,7 +3591,7 @@ struct GoalFieldView: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(DefaultTheme.accentText)
                         .frame(width: 22, height: 30)
-                        .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 7))
+                        .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -3601,8 +3600,8 @@ struct GoalFieldView: View {
             }
         }
         .padding(.horizontal, 18).padding(.vertical, 17)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10)
             .stroke(goalFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
                     lineWidth: 1))
         .animation(.hover, value: goalFocused)

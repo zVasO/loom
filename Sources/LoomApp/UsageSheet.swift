@@ -66,8 +66,7 @@ struct UsageSheet: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "dollarsign")
-                .font(.system(size: 14, weight: .semibold))
+            AppIcon("dollarsign", size: 17)
                 .foregroundStyle(DefaultTheme.accent)
             Text("Usage & Estimated Costs")
                 .font(.system(size: 16, weight: .semibold))
@@ -249,7 +248,7 @@ struct UsageSheet: View {
             }
         }
         .padding(3)
-        .background(DefaultTheme.background, in: RoundedRectangle(cornerRadius: 8))
+        .background(DefaultTheme.background, in: RoundedRectangle(cornerRadius: 6))
     }
 
     // MARK: - Work

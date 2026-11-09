@@ -37,9 +37,9 @@ struct ExtensionsView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("EXTENSIONS")
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
-                .foregroundStyle(DefaultTheme.groupHeader)
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .kerning(0.53)
+                .foregroundStyle(DefaultTheme.mutedText)
                 .padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 6)
             ScrollView {
                 VStack(spacing: 2) {
@@ -79,7 +79,7 @@ struct ExtensionsView: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(selected ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .background(selected ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -155,8 +155,7 @@ struct ExtensionsView: View {
     private func notice(icon: String, title: String, lines: [String],
                         action: (String, () -> Void)?) -> some View {
         VStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 28))
+            AppIcon(icon, size: 33.5)
                 .foregroundStyle(DefaultTheme.mutedText)
             Text(title)
                 .font(.system(size: 15, weight: .semibold))

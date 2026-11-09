@@ -23,7 +23,10 @@ public enum DefaultTheme {
     public static var contentBackground: Color { palette.contentBackground }
     public static var surface: Color { palette.surface }
     public static var surfaceRaised: Color { palette.surfaceRaised }
-    public static var cardBorder: Color { palette.cardBorder }
+    /// Every edge is a hairline (the charter's 1 px at 8 % of the text):
+    /// the palette's own `cardBorder` still feeds Claude Code's theme and
+    /// the theme preview, the views draw the hairline.
+    public static var cardBorder: Color { line }
 
     // Hairlines: the text colour at low opacity, so a rule reads the same on
     // every surface of every theme (the landing page's --line, --line-2, --line-3).

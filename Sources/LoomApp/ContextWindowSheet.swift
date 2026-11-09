@@ -75,8 +75,7 @@ struct ContextWindowSheet: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "cylinder")
-                .font(.system(size: 14, weight: .semibold))
+            AppIcon("cylinder", size: 17)
                 .foregroundStyle(DefaultTheme.accent)
             Text("Context Window")
                 .font(.system(size: 16, weight: .semibold))
@@ -135,8 +134,7 @@ struct ContextWindowSheet: View {
         if let text = Self.bannerText(for: usage.level) {
             let color = usage.level.color
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 13, weight: .semibold))
+                AppIcon("exclamationmark.triangle", size: 15.5)
                     .foregroundStyle(color)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(text.title)
@@ -166,7 +164,7 @@ struct ContextWindowSheet: View {
     private func tile(_ title: String, icon: String, value: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 11)).foregroundStyle(tint)
+                AppIcon(icon, size: 13).foregroundStyle(tint)
                 Text(title).font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
             }
             Text(value)

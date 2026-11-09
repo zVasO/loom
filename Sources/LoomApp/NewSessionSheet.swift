@@ -123,8 +123,7 @@ struct NewSessionSheet: View {
 
     private func searchField(_ matches: [ProjectRecord]) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
+            AppIcon("magnifyingglass", size: 14.5)
                 .foregroundStyle(DefaultTheme.secondaryText)
             TextField("Search projects…", text: $query)
                 .textFieldStyle(.plain)
@@ -147,8 +146,8 @@ struct NewSessionSheet: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6)
             .stroke(searchFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
     }
 
@@ -173,8 +172,8 @@ struct NewSessionSheet: View {
 
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 10, weight: .semibold))
-            .kerning(0.8)
+            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+            .kerning(0.53)
             .foregroundStyle(DefaultTheme.secondaryText)
     }
 
@@ -204,8 +203,8 @@ struct NewSessionSheet: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface,
-                        in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8)
+                        in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6)
                 .stroke(selected ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
             .contentShape(Rectangle())
         }

@@ -63,7 +63,7 @@ struct ConversationRow: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture { if isLong { expanded.toggle() } }
     }
@@ -271,7 +271,7 @@ struct PRWorkspaceView: View {
                         }
                     }
                     .padding(8)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
                 }
             }
         }
@@ -285,7 +285,7 @@ struct PRWorkspaceView: View {
         case .skipped, .cancelled, .neutral: ("minus.circle", DefaultTheme.mutedText)
         }
         return HStack(spacing: 8) {
-            Image(systemName: symbol).font(.system(size: 11)).foregroundStyle(color)
+            AppIcon(symbol, size: 13).foregroundStyle(color)
                 .frame(width: 14)
             Text(check.name.isEmpty ? "(unnamed)" : check.name)
                 .font(.system(size: 11, weight: .medium))
@@ -323,7 +323,7 @@ struct PRWorkspaceView: View {
             HStack(spacing: 12) {
                 if !reviewers.isEmpty {
                     HStack(spacing: 6) {
-                        Image(systemName: "person.2").font(.system(size: 10))
+                        AppIcon("person.2", size: 12)
                             .foregroundStyle(DefaultTheme.secondaryText)
                         ForEach(reviewers, id: \.self) { reviewer in
                             reviewerChip(reviewer, verdict: verdicts[reviewer])
@@ -367,7 +367,7 @@ struct PRWorkspaceView: View {
         default: ("circle.dotted", DefaultTheme.mutedText)
         }
         return HStack(spacing: 4) {
-            Image(systemName: symbol).font(.system(size: 10)).foregroundStyle(color)
+            AppIcon(symbol, size: 12).foregroundStyle(color)
             Text(reviewer.hasPrefix("team/") ? reviewer : "@" + reviewer)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(DefaultTheme.primaryText)
@@ -395,8 +395,7 @@ struct PRWorkspaceView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(DefaultTheme.secondaryText)
             MonoTag(pr.branch, systemImage: "arrow.triangle.branch")
-            Image(systemName: "arrow.right")
-                .font(.system(size: 9, weight: .semibold))
+            AppIcon("arrow.right", size: 11)
                 .foregroundStyle(DefaultTheme.mutedText)
             MonoTag(pr.baseBranch.isEmpty ? "main" : pr.baseBranch,
                     systemImage: "arrow.triangle.branch",
@@ -544,8 +543,7 @@ struct PRWorkspaceView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(DefaultTheme.secondaryText)
             } else {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 11))
+                AppIcon("exclamationmark.triangle", size: 13)
                     .foregroundStyle(DefaultTheme.danger)
                 Text(diffError ?? "This PR has no diff.")
                     .font(.system(size: 11))
@@ -581,8 +579,8 @@ struct PRWorkspaceView: View {
                     .font(.system(size: 12))
                     .lineLimit(1...4)
                     .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8)
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6)
                         .stroke(DefaultTheme.cardBorder, lineWidth: 1))
                 AccentButton("Approve") { submitReview(pr, .approve, project) }
                 GhostButton("Request changes", systemImage: "exclamationmark.bubble") {
@@ -613,7 +611,7 @@ struct PRWorkspaceView: View {
         let pending = DefaultTheme.badgeColor(for: .needsInput)
         let count = draft.comments.count
         return HStack(spacing: 8) {
-            Image(systemName: "tray.and.arrow.down").font(.system(size: 10)).foregroundStyle(pending)
+            AppIcon("tray.and.arrow.down", size: 12).foregroundStyle(pending)
             Text(count == 1 ? "1 pending comment" : "\(count) pending comments")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(DefaultTheme.primaryText)
@@ -701,8 +699,8 @@ struct PRWorkspaceView: View {
     private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {
         HStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .kerning(0.53)
                 .foregroundStyle(DefaultTheme.secondaryText)
             Text("\(count)")
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))

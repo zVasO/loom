@@ -72,8 +72,8 @@ struct ScheduledReviewsSettings: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 11))
-            .overlay(RoundedRectangle(cornerRadius: 11).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
         }
     }
 }
@@ -127,7 +127,7 @@ private struct ReviewScheduleEditor: View {
                         }
                     }
                     .padding(10)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
                 }
                 HStack(spacing: 10) {
                     DatePicker("", selection: time(of: schedule), displayedComponents: .hourAndMinute)
@@ -315,12 +315,12 @@ struct ScheduledReviewsSidebarSection: View {
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 8, weight: .bold))
                                 .rotationEffect(.degrees(folded ? -90 : 0))
-                            Image(systemName: "calendar.badge.clock").font(.system(size: 9, weight: .semibold))
+                            AppIcon("calendar.badge.clock", size: 11)
                             Text("SCHEDULED REVIEWS")
-                                .font(.system(size: 10, weight: .semibold))
-                                .kerning(0.8)
+                                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                                .kerning(0.53)
                         }
-                        .foregroundStyle(DefaultTheme.groupHeader)
+                        .foregroundStyle(DefaultTheme.mutedText)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -434,8 +434,7 @@ private struct AutoReviewRow: View {
     var body: some View {
         let described = Self.describe(item.status)
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: described.symbol)
-                .font(.system(size: 11))
+            AppIcon(described.symbol, size: 13)
                 .foregroundStyle(described.color)
                 .frame(width: 14)
                 .padding(.top, 1)
@@ -459,8 +458,8 @@ private struct AutoReviewRow: View {
         .padding(.horizontal, 9).padding(.vertical, 7)
         .background(isSelected ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : DefaultTheme.surface,
-                    in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
+                    in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6)
             .stroke(isSelected ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)

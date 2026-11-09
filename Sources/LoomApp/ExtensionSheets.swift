@@ -86,8 +86,8 @@ struct ExtensionLaunchSheet: View {
                     .frame(minHeight: 160, maxHeight: 280)
                     .scrollContentBackground(.hidden)
                     .padding(6)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
             }
 
             HStack {
@@ -152,8 +152,8 @@ struct ExtensionLaunchSheet: View {
     private func field(_ title: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .kerning(0.53)
                 .foregroundStyle(DefaultTheme.secondaryText)
             content()
         }
@@ -192,8 +192,8 @@ struct ExtensionConsentSheet: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(request.permissions.isEmpty ? "IT ASKS FOR NOTHING BEYOND ITS OWN PAGE" : "IT WILL BE ABLE TO")
-                    .font(.system(size: 10, weight: .semibold))
-                    .kerning(0.8)
+                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                    .kerning(0.53)
                     .foregroundStyle(DefaultTheme.secondaryText)
                 ForEach(request.permissions.summary, id: \.self) { line in
                     Label(line, systemImage: "checkmark.shield")
@@ -206,8 +206,8 @@ struct ExtensionConsentSheet: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
 
             Text("An extension runs in its own sandboxed web view: it cannot read your files, your terminals or your browser's cookies, and it reaches the network only through the hosts above.")
                 .font(.system(size: 11))
@@ -276,8 +276,8 @@ struct ExtensionHostsSheet: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
 
             Text("HTTPS only. The extension can send and receive anything with these sites. Revoke them any time in Settings › Extensions.")
                 .font(.system(size: 11))

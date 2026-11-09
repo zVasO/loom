@@ -98,8 +98,8 @@ struct ThemePreview: View {
                                 in: RoundedRectangle(cornerRadius: 6))
             }
             Spacer()
-            Image(systemName: "magnifyingglass").font(.system(size: 9)).foregroundStyle(palette.secondaryText)
-            Image(systemName: "gearshape").font(.system(size: 9)).foregroundStyle(palette.secondaryText)
+            AppIcon("magnifyingglass", size: 11).foregroundStyle(palette.secondaryText)
+            AppIcon("gearshape", size: 11).foregroundStyle(palette.secondaryText)
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
         .background(palette.background)
@@ -151,8 +151,8 @@ struct ThemePreview: View {
             }
         }
         .padding(7)
-        .background(palette.surface, in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(palette.cardBorder, lineWidth: 1))
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(palette.cardBorder, lineWidth: 1))
     }
 
     private func stateColor(_ state: SessionState) -> Color {
@@ -196,12 +196,12 @@ struct ThemePreview: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(palette.accentText)
                     .padding(.horizontal, 9).padding(.vertical, 5)
-                    .background(palette.accent, in: RoundedRectangle(cornerRadius: 7))
+                    .background(palette.accent, in: RoundedRectangle(cornerRadius: 6))
                 Text("Request changes")
                     .font(.system(size: 10))
                     .foregroundStyle(palette.secondaryText)
                     .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(palette.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
+                    .background(palette.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
             }
             diff
             terminal
@@ -223,7 +223,7 @@ struct ThemePreview: View {
     private var diff: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
-                Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+                AppIcon("chevron.down", size: 8.5)
                     .foregroundStyle(palette.secondaryText)
                 Text("Sources/Cache.swift")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -241,8 +241,8 @@ struct ThemePreview: View {
             diffLine("+", "    generation += 1", tint: palette.groupHeader.opacity(0.14))
         }
         .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(palette.cardBorder, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(palette.cardBorder, lineWidth: 1))
     }
 
     private func diffLine(_ marker: String, _ code: String, tint: Color) -> some View {
@@ -277,8 +277,8 @@ struct ThemePreview: View {
         .font(.system(size: 9, design: .monospaced))
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.background, in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(palette.cardBorder, lineWidth: 1))
+        .background(palette.background, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(palette.cardBorder, lineWidth: 1))
     }
 }
 
@@ -313,8 +313,8 @@ struct ThemeImportSheet: View {
                 .scrollContentBackground(.hidden)
                 .padding(8)
                 .frame(height: family == nil ? 160 : 72)
-                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
             HStack(spacing: 8) {
                 AccentButton(importing ? "Importing…" : "Import", systemImage: "square.and.arrow.down") {
                     runImport()
@@ -337,8 +337,8 @@ struct ThemeImportSheet: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
                         .padding(.horizontal, 8).padding(.vertical, 6)
-                        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
                     Spacer()
                     AccentButton("Save and use", systemImage: "checkmark") { save(family) }
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)

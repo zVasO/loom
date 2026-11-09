@@ -72,8 +72,7 @@ struct GlobalPRsView: View {
     var body: some View {
         if !GitHubService.isAvailable {
             VStack(spacing: 10) {
-                Image(systemName: "arrow.triangle.pull")
-                    .font(.system(size: 34))
+                AppIcon("arrow.triangle.pull", size: 41)
                     .foregroundStyle(DefaultTheme.secondaryText)
                 Text("GitHub CLI required")
                     .font(.system(size: 15, weight: .semibold))
@@ -239,8 +238,7 @@ struct GlobalPRsView: View {
     /// No PR open: Review has nothing of its own — the way to Browse is here.
     private var reviewEmptyState: some View {
         VStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 26))
+            AppIcon("sparkles", size: 31)
                 .foregroundStyle(DefaultTheme.mutedText)
             Text("No pull request open for review")
                 .font(.system(size: 14, weight: .semibold))
@@ -312,7 +310,7 @@ struct GlobalPRsView: View {
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(DefaultTheme.accentText)
                             .frame(width: 22, height: 30)
-                            .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 7))
+                            .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 6))
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
@@ -403,8 +401,7 @@ struct GlobalPRsView: View {
                 Image(systemName: paneOpen ? "chevron.right" : "chevron.left")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(DefaultTheme.secondaryText)
-                Image(systemName: "sparkles")
-                    .font(.system(size: 12))
+                AppIcon("sparkles", size: 14.5)
                     .foregroundStyle(DefaultTheme.accent)
                 if let state, !paneOpen {
                     Circle()
@@ -471,8 +468,7 @@ extension GlobalPRsView {
         let reviews = tab.map { model.reviewSessions(forPR: $0.pr.number, in: $0.projectID) } ?? []
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 10))
+                AppIcon("sparkles", size: 12)
                     .foregroundStyle(DefaultTheme.accent)
                 if reviews.count > 1, let tab {
                     // One tab per review of this PR: the fresh ones and the
@@ -512,8 +508,7 @@ extension GlobalPRsView {
                 // The review's agent browses out of sight (no side panel in
                 // the drawer): a dot says so, and the Sessions tab shows it.
                 if model.agentBrowsers[sessionID]?.activity?.isRunning == true {
-                    Image(systemName: "globe")
-                        .font(.system(size: 10))
+                    AppIcon("globe", size: 12)
                         .foregroundStyle(DefaultTheme.accent)
                         .help("claude is using its browser — open the session to watch")
                 }

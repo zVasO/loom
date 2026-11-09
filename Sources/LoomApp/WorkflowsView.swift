@@ -59,13 +59,13 @@ struct WorkflowsView: View {
     private var sidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(DefaultTheme.mutedText)
+                AppIcon("magnifyingglass", size: 13).foregroundStyle(DefaultTheme.mutedText)
                 TextField("Filter", text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
             .padding(12)
             Divider().overlay(DefaultTheme.cardBorder)
             ScrollView {
@@ -87,12 +87,12 @@ struct WorkflowsView: View {
     private func header<Trailing: View>(_ title: String, systemImage: String,
                                         @ViewBuilder trailing: () -> Trailing) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: systemImage).font(.system(size: 9, weight: .semibold))
-            Text(title).font(.system(size: 10, weight: .semibold)).kerning(0.8)
+            AppIcon(systemImage, size: 11)
+            Text(title).font(.system(size: 10.5, weight: .medium, design: .monospaced)).kerning(0.53)
             Spacer()
             trailing()
         }
-        .foregroundStyle(DefaultTheme.groupHeader)
+        .foregroundStyle(DefaultTheme.mutedText)
         .padding(.horizontal, 2)
     }
 
@@ -147,8 +147,8 @@ struct WorkflowsView: View {
             .controlSize(.small)
         }
         .padding(9)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.badgeColor(for: .needsInput).opacity(0.5), lineWidth: 1))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.badgeColor(for: .needsInput).opacity(0.5), lineWidth: 1))
     }
 
     private var workflowsSection: some View {
@@ -219,8 +219,8 @@ struct WorkflowsView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 9).padding(.vertical, 7)
-        .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
+        .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6)
             .stroke(selected ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { startRename(workflow) }
@@ -390,8 +390,8 @@ struct WorkflowsView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 9).padding(.vertical, 7)
-        .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
+        .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6)
             .stroke(selected ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture { workflows.detail = .run(run.id) }
@@ -422,8 +422,8 @@ struct WorkflowsView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 9).padding(.vertical, 6)
-        .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
+        .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6)
             .stroke(selected ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: action)
@@ -486,8 +486,7 @@ struct WorkflowsView: View {
         case .workflow:
             if workflows.workflow(workflows.selectedWorkflowID) == nil {
                 VStack(spacing: 12) {
-                    Image(systemName: "point.3.connected.trianglepath.dotted")
-                        .font(.system(size: 34)).foregroundStyle(DefaultTheme.secondaryText)
+                    AppIcon("point.3.connected.trianglepath.dotted", size: 41).foregroundStyle(DefaultTheme.secondaryText)
                     Text("Workflows").font(.system(size: 15, weight: .semibold)).foregroundStyle(DefaultTheme.primaryText)
                     Text("A start, steps for experts, paths between them — and a report at the end.")
                         .font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)

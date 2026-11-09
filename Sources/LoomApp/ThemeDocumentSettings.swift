@@ -92,8 +92,8 @@ struct ThemeDocumentSettings: View {
             .scrollContentBackground(.hidden)
             .padding(6)
             .frame(minHeight: minHeight)
-            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
     private func select(_ name: String) {

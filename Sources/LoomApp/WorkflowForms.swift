@@ -8,8 +8,8 @@ import SwiftUI
 @MainActor
 private func formTitle(_ text: String) -> some View {
     Text(text.uppercased())
-        .font(.system(size: 10, weight: .semibold))
-        .kerning(0.8)
+        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+        .kerning(0.53)
         .foregroundStyle(DefaultTheme.secondaryText)
 }
 
@@ -24,8 +24,8 @@ private struct FormCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) { content }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 11))
-            .overlay(RoundedRectangle(cornerRadius: 11).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 }
 
@@ -39,8 +39,8 @@ private struct MonoEditor: View {
             .scrollContentBackground(.hidden)
             .padding(8)
             .frame(minHeight: minHeight)
-            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 }
 
@@ -281,7 +281,7 @@ struct ConnectorEditor: View {
                         .foregroundStyle(DefaultTheme.primaryText)
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
                 }
             }
             GhostButton("Delete this connector", systemImage: "trash", role: .destructive) {

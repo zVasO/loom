@@ -265,7 +265,7 @@ public struct MarkdownBlockView: View {
                     .background(isSuggestion ? DefaultTheme.groupHeader.opacity(0.06)
                                              : DefaultTheme.surfaceRaised)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
         case .rule:
             Rectangle().fill(DefaultTheme.cardBorder).frame(height: 1)
         }

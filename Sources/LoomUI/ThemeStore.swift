@@ -559,9 +559,10 @@ extension ThemeFamily {
             primaryText: "#1C1C21", secondaryText: "#6B6B76", mutedText: "#9494A0",
             branch: "#1C9C95", danger: "#C9333C", groupHeader: "#2A9D63",
             stateWorking: "#2A9D63", stateNeedsInput: "#B8860B", stateIdle: "#3B6BB5"),
+        // The charter's OLED dark: absolute black, zinc surfaces.
         dark: ThemeTokens(
-            background: "#0D0D0E", contentBackground: "#111113",
-            surface: "#17171A", surfaceRaised: "#1E1E22", cardBorder: "#26262B",
+            background: "#000000", contentBackground: "#000000",
+            surface: "#09090B", surfaceRaised: "#121214", cardBorder: "#1D1D20",
             accent: "#E8945C", accentText: "#201204",
             primaryText: "#ECECEE", secondaryText: "#86868E", mutedText: "#6B6B73",
             branch: "#5CC8C2", danger: "#E5646C", groupHeader: "#4CC38A",

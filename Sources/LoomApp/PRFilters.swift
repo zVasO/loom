@@ -38,8 +38,8 @@ struct PRFilterMenu: View {
             .foregroundStyle(model.selectedPRFilterID == PRFilter.all.id
                              ? DefaultTheme.secondaryText : DefaultTheme.accent)
             .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -112,8 +112,8 @@ struct PRFilterEditorSheet: View {
     private var filterList: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("YOUR FILTERS")
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .kerning(0.53)
                 .foregroundStyle(DefaultTheme.secondaryText)
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
@@ -138,7 +138,7 @@ struct PRFilterEditorSheet: View {
                             .padding(8)
                             .background(editingID == filter.id ? DefaultTheme.surfaceRaised
                                         : DefaultTheme.surface,
-                                        in: RoundedRectangle(cornerRadius: 7))
+                                        in: RoundedRectangle(cornerRadius: 6))
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -163,8 +163,8 @@ struct PRFilterEditorSheet: View {
     private var form: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(editingID == nil ? "NEW FILTER" : "EDIT FILTER")
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .kerning(0.53)
                 .foregroundStyle(DefaultTheme.secondaryText)
             field("Name", text: $name, mono: false)
             field("Query", text: $query, mono: true)
@@ -233,8 +233,8 @@ struct PRFilterEditorSheet: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 12, design: mono ? .monospaced : .default))
                 .padding(.horizontal, 8).padding(.vertical, 6)
-                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
         }
     }
 

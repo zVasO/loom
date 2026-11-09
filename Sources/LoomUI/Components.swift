@@ -1,14 +1,15 @@
 import LoomCore
 import SwiftUI
 
-// The visual vocabulary of the reference: tab pills, mono tags,
-// status dots, accent-filled buttons. Everything clickable
-// responds to hover — same recipe everywhere: background rises, text
-// lights up, 120 ms easeOut.
+// The visual vocabulary of the landing page's charter: tab pills, mono
+// tags, status dots, accent-filled buttons, hairline edges. Everything
+// clickable responds to hover the same way — the surface rises a step, the
+// edge lightens a step, the text lights up — in 160 ms on a sharp
+// ease-out, never a slow fade or a bounce.
 
 public extension Animation {
-    /// The hover transition shared by all controls.
-    static var hover: Animation { .easeOut(duration: 0.12) }
+    /// The hover transition shared by all controls: cubic-bezier(0.16, 1, 0.3, 1), 160 ms.
+    static var hover: Animation { .timingCurve(0.16, 1, 0.3, 1, duration: 0.16) }
 }
 
 /// Brightens the control on hover — for hand-rolled filled buttons
@@ -129,15 +130,16 @@ public struct AccentButton: View {
 
     public var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                if let systemImage { Image(systemName: systemImage).font(.system(size: 12, weight: .bold)) }
-                Text(title).font(.system(size: 13, weight: .semibold))
+            HStack(spacing: 8) {
+                if let systemImage { AppIcon(systemImage, size: 14) }
+                Text(title).font(.system(size: 13, weight: .medium))
             }
             .foregroundStyle(DefaultTheme.accentText)
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 9))
+            .frame(height: 32)
+            .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 6))
             .brightness(hovered ? 0.06 : 0)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
@@ -165,17 +167,19 @@ public struct GhostButton: View {
     public var body: some View {
         Button(role: role, action: action) {
             HStack(spacing: 6) {
-                if let systemImage { Image(systemName: systemImage).font(.system(size: 12)) }
-                if let title { Text(title).font(.system(size: 13)) }
+                if let systemImage { AppIcon(systemImage, size: 14) }
+                if let title { Text(title).font(.system(size: 12.5)) }
             }
             .foregroundStyle(role == .destructive ? DefaultTheme.danger
                              : hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .frame(height: 28)
             .background(hovered ? (role == .destructive ? DefaultTheme.danger.opacity(0.12)
                                                         : DefaultTheme.surfaceRaised)
                                 : .clear,
-                        in: RoundedRectangle(cornerRadius: 7))
+                        in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(hovered ? DefaultTheme.line : .clear, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -202,14 +206,15 @@ public struct BarIconButton: View {
 
     public var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .medium))
+            AppIcon(systemImage, size: 15)
                 .foregroundStyle(isActive ? DefaultTheme.accent
                                  : hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
-                .frame(width: 30, height: 26)
+                .frame(width: 28, height: 26)
                 .background(isActive ? DefaultTheme.surfaceRaised
                             : hovered ? DefaultTheme.surfaceRaised.opacity(0.7) : .clear,
-                            in: RoundedRectangle(cornerRadius: 7))
+                            in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(isActive ? DefaultTheme.line2 : hovered ? DefaultTheme.line : .clear, lineWidth: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -227,10 +232,11 @@ public struct StatusLabel: View {
     }
 
     public var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 8) {
             Circle().fill(DefaultTheme.badgeColor(for: state)).frame(width: 6, height: 6)
             Text(DefaultTheme.label(for: state))
-                .font(.system(size: 11))
+                .font(.system(size: 11, design: .monospaced))
+                .tracking(0.22)
                 .foregroundStyle(DefaultTheme.badgeColor(for: state))
         }
     }
@@ -251,9 +257,9 @@ public struct MonoTag: View {
     }
 
     public var body: some View {
-        HStack(spacing: 4) {
-            if let systemImage { Image(systemName: systemImage).font(.system(size: 10)) }
-            Text(text).font(.system(size: 11, design: .monospaced))
+        HStack(spacing: 5) {
+            if let systemImage { AppIcon(systemImage, size: 12) }
+            Text(text).font(.system(size: 11.5, design: .monospaced))
         }
         .foregroundStyle(color ?? DefaultTheme.branch)
         .lineLimit(1)

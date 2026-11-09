@@ -84,8 +84,7 @@ struct PRTabButton: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "arrow.triangle.pull")
-                .font(.system(size: 9))
+            AppIcon("arrow.triangle.pull", size: 11)
                 .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
             if let sessionState {
                 Circle().fill(DefaultTheme.badgeColor(for: sessionState)).frame(width: 5, height: 5)
@@ -112,8 +111,8 @@ struct PRTabButton: View {
         .padding(.horizontal, 9).padding(.vertical, 5)
         .background(isActive ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                    in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7)
+                    in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6)
             .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
         .contentShape(Rectangle())
         .help(tab.isPreview ? "Preview — the next click in the list replaces it; double-click or pin to keep"

@@ -310,11 +310,11 @@ struct SettingsPage: View {
     /// A group's heading: its icon, its title, what is in it.
     private func groupHeader(_ anchor: SettingsAnchor) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: anchor.icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(DefaultTheme.accent)
+            AppIcon(anchor.icon, size: 16)
+                .foregroundStyle(DefaultTheme.primaryText)
                 .frame(width: 32, height: 32)
-                .background(DefaultTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(DefaultTheme.line2, lineWidth: 1))
             VStack(alignment: .leading, spacing: 2) {
                 Text(anchor.title)
                     .font(.system(size: 19, weight: .bold))
@@ -346,8 +346,8 @@ struct SettingsPage: View {
 
     private func sectionTitle(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.system(size: 10, weight: .semibold))
-            .kerning(0.8)
+            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+            .kerning(0.53)
             .foregroundStyle(DefaultTheme.secondaryText)
     }
 
@@ -355,8 +355,8 @@ struct SettingsPage: View {
         VStack(alignment: .leading, spacing: 12, content: content)
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 11))
-            .overlay(RoundedRectangle(cornerRadius: 11)
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10)
                 .stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
@@ -452,8 +452,8 @@ struct SettingsPage: View {
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .multilineTextAlignment(.center)
                 .frame(width: 36, height: 28)
-                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7)
+                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6)
                     .stroke(DefaultTheme.cardBorder, lineWidth: 1))
                 // The ⇧ row follows ⌘N's letter: shown, not edited apart.
                 .disabled(shift)
@@ -827,7 +827,7 @@ struct SettingsPage: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
                     .frame(maxWidth: 220)
                 ColorPicker("", selection: $newBadgeColor, supportsOpacity: false)
                     .labelsHidden()
@@ -955,8 +955,7 @@ struct SettingsPage: View {
                 ForEach(Array(model.projects.enumerated()), id: \.element.id) { index, project in
                     if index > 0 { cardDivider }
                     HStack(spacing: 12) {
-                        Image(systemName: "folder.fill")
-                            .font(.system(size: 11))
+                        AppIcon("folder.fill", size: 13)
                             .foregroundStyle(DefaultTheme.accent)
                         Text(project.name)
                             .font(.system(size: 13))
@@ -977,8 +976,7 @@ struct SettingsPage: View {
                         .labelsHidden()
                         .fixedSize()
                         .help("This project's theme")
-                        Image(systemName: "macwindow")
-                            .font(.system(size: 11))
+                        AppIcon("macwindow", size: 13)
                             .foregroundStyle(DefaultTheme.mutedText)
                             .help("Agent browser page width")
                         agentWidthPicker(for: project)
@@ -1099,8 +1097,8 @@ struct SettingsPage: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("SITES YOU ADDED")
-                            .font(.system(size: 10, weight: .semibold))
-                            .kerning(0.8)
+                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                            .kerning(0.53)
                             .foregroundStyle(DefaultTheme.secondaryText)
                         Spacer()
                         GhostButton("Revoke All") { extensions.revokeHosts(nil, for: installed.id) }
@@ -1163,8 +1161,7 @@ private struct ThemeCard: View {
                 }
                 Spacer()
                 if isActive {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 12))
+                    AppIcon("checkmark.circle.fill", size: 14.5)
                         .foregroundStyle(DefaultTheme.accent)
                 }
             }

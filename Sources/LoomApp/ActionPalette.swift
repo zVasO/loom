@@ -92,8 +92,8 @@ struct ActionPaletteView: View {
         .frame(width: 640)
         .frame(maxHeight: 520)
         .background(DefaultTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
         .onChange(of: query, initial: true) { sections = computeSections() }
         .onChange(of: actions) { sections = computeSections() }
         .task(id: query) {
@@ -112,8 +112,7 @@ struct ActionPaletteView: View {
 
     private var searchField: some View {
         HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 13))
+            AppIcon("magnifyingglass", size: 15.5)
                 .foregroundStyle(DefaultTheme.secondaryText)
             TextField("Search commands, settings, projects, sessions…", text: $query)
                 .textFieldStyle(.plain)
@@ -167,8 +166,8 @@ struct ActionPaletteView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.system(size: 10, weight: .semibold))
-            .kerning(0.8)
+            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+            .kerning(0.53)
             .foregroundStyle(DefaultTheme.secondaryText)
             .padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 4)
     }
@@ -176,8 +175,7 @@ struct ActionPaletteView: View {
     private func row(_ action: PaletteAction, index: Int) -> some View {
         let isSelected = index == selection
         return HStack(spacing: 11) {
-            Image(systemName: action.icon)
-                .font(.system(size: 13))
+            AppIcon(action.icon, size: 15.5)
                 .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.secondaryText)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
@@ -200,7 +198,7 @@ struct ActionPaletteView: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
         .background(isSelected ? DefaultTheme.surfaceRaised : .clear,
-                    in: RoundedRectangle(cornerRadius: 8))
+                    in: RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture {
             isPresented = false
@@ -212,8 +210,7 @@ struct ActionPaletteView: View {
     private func transcriptRow(_ hit: SessionStore.SearchHit, index: Int) -> some View {
         let isSelected = index == selection
         return HStack(spacing: 11) {
-            Image(systemName: "text.magnifyingglass")
-                .font(.system(size: 13))
+            AppIcon("text.magnifyingglass", size: 15.5)
                 .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.secondaryText)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
@@ -230,7 +227,7 @@ struct ActionPaletteView: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
         .background(isSelected ? DefaultTheme.surfaceRaised : .clear,
-                    in: RoundedRectangle(cornerRadius: 8))
+                    in: RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
         .onTapGesture {
             isPresented = false
