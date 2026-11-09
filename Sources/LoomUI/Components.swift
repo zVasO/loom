@@ -228,6 +228,26 @@ public struct MonoTag: View {
     }
 }
 
+/// A keyboard key, drawn the way shortcut hints show it (⌘, ↵, K…).
+public struct KeyCap: View {
+    let key: String
+
+    public init(_ key: String) {
+        self.key = key
+    }
+
+    public var body: some View {
+        Text(key)
+            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+            .foregroundStyle(DefaultTheme.secondaryText)
+            .padding(.horizontal, 4)
+            .frame(minWidth: 18, minHeight: 18)
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(DefaultTheme.cardBorder, lineWidth: 1))
+            .fixedSize()
+    }
+}
+
 /// Context ring: a track that fills clockwise from the top as the session's
 /// window fills. `nil` draws the track alone — nothing recorded yet. The
 /// colour is the caller's: LoomUI knows neither the level nor the model.
