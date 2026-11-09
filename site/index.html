@@ -13,7 +13,8 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
 <style>
 /* Layout : grille SaaS 12 colonnes, bento à alignements rigides, surfaces OLED et bordures hairline.
-   Couleurs : tokens de Loom Dark (Sources/LoomUI/ThemeStore.swift) posés sur un fond noir absolu. */
+   Couleurs : tokens des thèmes de Loom (Sources/LoomUI/ThemeStore.swift). Par défaut Loom Dark posé sur
+   un fond noir absolu ; le sélecteur de thème réécrit ces variables (voir THEMES dans le script). */
 :root {
   color-scheme: dark;
   /* Surfaces */
@@ -22,12 +23,17 @@
   --s2: #121214;
   --s3: #17171a;
   /* Hairlines */
-  --line: rgba(255, 255, 255, 0.08);
-  --line-2: rgba(255, 255, 255, 0.13);
-  --line-3: rgba(255, 255, 255, 0.2);
+  --line: color-mix(in srgb, var(--fg) 8%, transparent);
+  --line-2: color-mix(in srgb, var(--fg) 13%, transparent);
+  --line-3: color-mix(in srgb, var(--fg) 21%, transparent);
+  --wash: color-mix(in srgb, var(--fg) 2.5%, transparent);
+  --wash-2: color-mix(in srgb, var(--fg) 4.5%, transparent);
+  --shadow: rgba(0, 0, 0, 1);
+  --scrim: rgba(0, 0, 0, 0.72);
+  --glass: color-mix(in srgb, var(--bg) 78%, transparent);
   /* Texte (Loom Dark) */
   --fg: #ececee;
-  --fg-2: #8e8e96;
+  --fg-2: #86868e;
   --fg-3: #6b6b73;
   /* Accent unique (Loom Dark) */
   --accent: #e8945c;
@@ -73,7 +79,7 @@ body::before {
   z-index: 60;
   background: var(--bg);
 }
-::selection { background: rgba(232, 148, 92, 0.28); color: var(--fg); }
+::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--fg); }
 a { color: inherit; text-decoration: none; }
 p { margin: 0; }
 h1, h2, h3 { margin: 0; font-weight: 600; text-wrap: balance; }
@@ -180,7 +186,7 @@ kbd, .kbd {
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn.primary:hover { filter: brightness(1.08); }
 .btn.primary:active { filter: brightness(0.94); }
-.btn.primary kbd { background: rgba(32, 18, 4, 0.12); border-color: rgba(32, 18, 4, 0.22); color: var(--accent-ink); }
+.btn.primary kbd { background: color-mix(in srgb, var(--accent-ink) 12%, transparent); border-color: color-mix(in srgb, var(--accent-ink) 22%, transparent); color: var(--accent-ink); }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--fg-2); }
 .btn.ghost:hover { color: var(--fg); background: var(--s2); border-color: var(--line); }
 .btn.sm { height: 28px; padding: 0 10px; font-size: 12px; gap: 6px; }
@@ -228,13 +234,13 @@ kbd, .kbd {
 .spot::before {
   inset: 0;
   z-index: 0;
-  background: radial-gradient(520px circle at var(--mx, -999px) var(--my, -999px), rgba(255, 255, 255, 0.05), transparent 42%);
+  background: radial-gradient(520px circle at var(--mx, -999px) var(--my, -999px), color-mix(in srgb, var(--fg) 5%, transparent), transparent 42%);
 }
 .spot::after {
   inset: -1px;
   z-index: 2;
   padding: 1px;
-  background: radial-gradient(320px circle at var(--mx, -999px) var(--my, -999px), rgba(255, 255, 255, 0.24), transparent 45%);
+  background: radial-gradient(320px circle at var(--mx, -999px) var(--my, -999px), color-mix(in srgb, var(--fg) 24%, transparent), transparent 45%);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
@@ -249,7 +255,7 @@ kbd, .kbd {
   position: sticky;
   top: env(safe-area-inset-top, 0px);
   z-index: 50;
-  background: rgba(0, 0, 0, 0.78);
+  background: var(--glass);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--line);
@@ -308,12 +314,12 @@ kbd, .kbd {
   background: var(--s1);
   overflow: hidden;
   min-width: 0;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 1), 0 30px 80px -40px rgba(0, 0, 0, 1);
+  box-shadow: 0 30px 80px -40px var(--shadow);
 }
 .app:focus-within { border-color: var(--line-3); }
 .app-bar { display: flex; align-items: center; gap: 12px; height: 38px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--bg); }
 .lights { display: flex; gap: 6px; }
-.lights i { width: 10px; height: 10px; border-radius: 50%; background: #232327; border: 1px solid var(--line); }
+.lights i { width: 10px; height: 10px; border-radius: 50%; background: var(--s3); border: 1px solid var(--line); }
 .tabs { display: flex; gap: 2px; margin-left: 6px; overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
 .tab {
@@ -367,8 +373,8 @@ kbd, .kbd {
 .grid-table td { padding: 0 10px; height: 38px; border-bottom: 1px solid var(--line); white-space: nowrap; font-size: 13px; }
 .grid-table tr:last-child td { border-bottom: 0; }
 .sess tbody tr { cursor: pointer; transition: background-color var(--dur) var(--ease); }
-.sess tbody tr:hover { background: rgba(255, 255, 255, 0.022); }
-.sess tbody tr[aria-selected="true"] { background: rgba(255, 255, 255, 0.04); box-shadow: inset 2px 0 0 var(--accent); }
+.sess tbody tr:hover { background: var(--wash); }
+.sess tbody tr[aria-selected="true"] { background: var(--wash-2); box-shadow: inset 2px 0 0 var(--accent); }
 .sess tbody tr:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .sess tbody tr[hidden] { display: none; }
 .st { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--c); letter-spacing: 0.02em; min-width: 96px; }
@@ -539,7 +545,7 @@ section.block { padding-block: 72px; border-bottom: 1px solid var(--line); }
 .results { list-style: none; margin: 0; padding: 4px 0; }
 .results li { display: flex; gap: 10px; align-items: baseline; padding: 5px 10px; font-size: 12.5px; }
 .results li .m { color: var(--fg-3); flex: none; width: 54px; }
-.results mark { background: rgba(232, 148, 92, 0.18); color: var(--fg); border-radius: 2px; padding: 0 1px; }
+.results mark { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--fg); border-radius: 2px; padding: 0 1px; }
 .results .snip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-2); min-width: 0; }
 
 .notif { display: flex; gap: 10px; padding: 12px; align-items: flex-start; }
@@ -562,14 +568,14 @@ section.block { padding-block: 72px; border-bottom: 1px solid var(--line); }
 .data td:first-child { color: var(--fg); }
 .data tr:last-child td { border-bottom: 0; }
 .data tbody tr { transition: background-color var(--dur) var(--ease); }
-.data tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
+.data tbody tr:hover { background: var(--wash); }
 .data code { font-family: var(--mono); font-size: 11.5px; color: var(--fg); background: var(--s2); border: 1px solid var(--line); border-radius: 3px; padding: 1px 4px; white-space: nowrap; }
 .tablecard { padding: 0; overflow: hidden; gap: 0; }
 .tablecard .card-h { padding: 14px 16px; border-bottom: 1px solid var(--line); }
 
 .keys { list-style: none; margin: 0; padding: 0; }
 .keys li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--fg-2); transition: background-color var(--dur) var(--ease); }
-.keys li:hover { background: rgba(255, 255, 255, 0.02); color: var(--fg); }
+.keys li:hover { background: var(--wash); color: var(--fg); }
 .keys li:last-child { border-bottom: 0; }
 
 /* ---------- CTA ---------- */
@@ -599,7 +605,7 @@ footer { padding-block: 28px 40px; color: var(--fg-3); }
   justify-content: center;
   align-items: flex-start;
   padding: max(12vh, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px));
-  background: rgba(0, 0, 0, 0.72);
+  background: var(--scrim);
   visibility: hidden;
   opacity: 0;
   transition: opacity 150ms var(--ease), visibility 0s linear 150ms;
@@ -611,7 +617,7 @@ footer { padding-block: 28px 40px; color: var(--fg-3); }
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
   overflow: hidden;
-  box-shadow: 0 40px 120px -20px rgba(0, 0, 0, 1);
+  box-shadow: 0 40px 120px -20px var(--shadow);
   transform: translateY(6px) scale(0.99);
   transition: transform 180ms var(--ease);
 }
@@ -652,6 +658,62 @@ footer { padding-block: 28px 40px; color: var(--fg-3); }
 .toast[data-show] { opacity: 1; transform: none; }
 .toast code { font-family: var(--mono); font-size: 11.5px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ---------- Sélecteur de thème ---------- */
+.theme-wrap { position: relative; }
+.sw { display: inline-flex; align-items: center; }
+.sw i { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--line-3); margin-left: -3px; }
+.sw i:first-child { margin-left: 0; }
+.theme-trigger .sw i:nth-child(1) { background: var(--bg); }
+.theme-trigger .sw i:nth-child(2) { background: var(--accent); }
+.theme-trigger .sw i:nth-child(3) { background: var(--working); }
+.theme-trigger .chev { color: var(--fg-3); }
+.theme-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 70;
+  width: 272px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  background: var(--s1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  box-shadow: 0 24px 60px -16px var(--shadow);
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 150ms var(--ease), transform 150ms var(--ease), visibility 0s linear 150ms;
+}
+.theme-menu[data-open] { visibility: visible; opacity: 1; transform: none; transition: opacity 150ms var(--ease), transform 150ms var(--ease); }
+.theme-menu .seg { margin: 2px 2px 6px; display: flex; }
+.theme-menu .seg button { flex: 1; justify-content: center; }
+.theme-list { display: flex; flex-direction: column; gap: 1px; }
+.theme-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-ctl);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.theme-item:hover, .theme-item:focus-visible { background: var(--s2); border-color: var(--line); color: var(--fg); outline: none; }
+.theme-item[aria-checked="true"] { color: var(--fg); background: var(--s2); border-color: var(--line-2); }
+.theme-item .grow { flex: 1; }
+.theme-item .ck { width: 14px; height: 14px; color: var(--accent); visibility: hidden; }
+.theme-item[aria-checked="true"] .ck { visibility: visible; }
+.theme-note { padding: 8px 8px 4px; border-top: 1px solid var(--line); margin-top: 6px; }
+button.chip { cursor: pointer; font-family: var(--mono); }
+button.chip[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--accent); }
+.card-h .seg { margin-left: auto; }
+@media (max-width: 640px) { .theme-trigger .label, .theme-trigger .chev { display: none; } }
+
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -659,6 +721,69 @@ footer { padding-block: 28px 40px; color: var(--fg-3); }
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
 </style>
+<script>
+/* Thèmes intégrés de Loom, copiés de Sources/LoomUI/ThemeStore.swift (ThemeFamily.builtins).
+   Ordre des couleurs : background, surface, surfaceRaised, primaryText, secondaryText, mutedText,
+   accent, accentText, branch, danger, stateWorking, stateNeedsInput, stateIdle.
+   Appliqué dans le <head> pour que le premier rendu soit déjà dans le thème choisi. */
+(() => {
+  "use strict";
+  const THEMES = [
+    { key: "loom", name: "Loom", light: { name: "Loom Light", c: ["#f2f2f4","#ffffff","#ececef","#1c1c21","#6b6b76","#9494a0","#d9782f","#fff7ef","#1c9c95","#c9333c","#2a9d63","#b8860b","#3b6bb5"] }, dark: { name: "Loom Dark", c: ["#0d0d0e","#17171a","#1e1e22","#ececee","#86868e","#6b6b73","#e8945c","#201204","#5cc8c2","#e5646c","#4cc38a","#e5b455","#6aa2e8"] } },
+    { key: "dracula", name: "Dracula", light: { name: "Alucard", c: ["#f7f3e3","#ffffff","#efebdb","#1f1f1f","#6c664b","#9a9478","#644ac9","#ffffff","#036a96","#cb3a2a","#14710a","#846e15","#036a96"] }, dark: { name: "Dracula", c: ["#21222c","#2b2d3a","#363948","#f8f8f2","#9ba3c9","#6272a4","#bd93f9","#1e1029","#8be9fd","#ff5555","#50fa7b","#f1fa8c","#8be9fd"] } },
+    { key: "nord", name: "Nord", light: { name: "Nord Light", c: ["#e5e9f0","#f4f6fa","#d8dee9","#2e3440","#4c566a","#7b8394","#5e81ac","#eceff4","#3b8a87","#bf616a","#6a8f4e","#b48a2e","#5e81ac"] }, dark: { name: "Nord", c: ["#2e3440","#3b4252","#434c5e","#eceff4","#a3abb8","#7b8394","#88c0d0","#10222a","#8fbcbb","#bf616a","#a3be8c","#ebcb8b","#81a1c1"] } },
+    { key: "tokyo-night", name: "Tokyo Night", light: { name: "Tokyo Night Day", c: ["#d6d8df","#e9e9ec","#d0d5e3","#343b58","#6172b0","#848cb5","#2e7de9","#ffffff","#007197","#f52a65","#587539","#8c6c3e","#2e7de9"] }, dark: { name: "Tokyo Night", c: ["#16161e","#1f2335","#292e42","#c0caf5","#7982a9","#565f89","#7aa2f7","#0b1220","#7dcfff","#f7768e","#9ece6a","#e0af68","#7aa2f7"] } },
+    { key: "catppuccin", name: "Catppuccin", light: { name: "Catppuccin Latte", c: ["#e6e9ef","#f7f8fb","#dce0e8","#4c4f69","#6c6f85","#9ca0b0","#8839ef","#ffffff","#179299","#d20f39","#40a02b","#df8e1d","#1e66f5"] }, dark: { name: "Catppuccin Mocha", c: ["#181825","#24243a","#313244","#cdd6f4","#9399b2","#6c7086","#cba6f7","#21102f","#94e2d5","#f38ba8","#a6e3a1","#f9e2af","#89b4fa"] } },
+    { key: "one", name: "One", light: { name: "One Light", c: ["#efeff1","#ffffff","#e5e5e6","#383a42","#696c77","#a0a1a7","#4078f2","#ffffff","#0184bc","#e45649","#50a14f","#c18401","#4078f2"] }, dark: { name: "One Dark", c: ["#21252b","#2c313a","#333842","#abb2bf","#828997","#5c6370","#61afef","#0d1a26","#56b6c2","#e06c75","#98c379","#e5c07b","#61afef"] } },
+    { key: "gruvbox", name: "Gruvbox", light: { name: "Gruvbox Light", c: ["#f2e5bc","#f9f5d7","#ebdbb2","#3c3836","#665c54","#928374","#af3a03","#fbf1c7","#427b58","#9d0006","#79740e","#b57614","#076678"] }, dark: { name: "Gruvbox Dark", c: ["#1d2021","#282828","#3c3836","#ebdbb2","#a89984","#7c6f64","#fe8019","#291302","#8ec07c","#fb4934","#b8bb26","#fabd2f","#83a598"] } },
+    { key: "monokai", name: "Monokai", light: { name: "Monokai Light", c: ["#efe6dd","#fff9f3","#e6ddd4","#2c232e","#6e6a70","#a59f9a","#218871","#ffffff","#2473b6","#ce4770","#218871","#b16803","#2473b6"] }, dark: { name: "Monokai", c: ["#1e1f1c","#272822","#3e3d32","#f8f8f2","#a59f85","#75715e","#a6e22e","#141704","#66d9ef","#f92672","#a6e22e","#e6db74","#66d9ef"] } },
+    { key: "solarized", name: "Solarized", light: { name: "Solarized Light", c: ["#fdf6e3","#eee8d5","#e4dcc5","#073642","#586e75","#93a1a1","#268bd2","#fdf6e3","#2aa198","#dc322f","#859900","#b58900","#268bd2"] }, dark: { name: "Solarized Dark", c: ["#002b36","#073642","#0d4350","#eee8d5","#93a1a1","#657b83","#268bd2","#fdf6e3","#2aa198","#dc322f","#859900","#b58900","#268bd2"] } },
+  ];
+  const VARS = ["--bg", "--s1", "--s2", "--fg", "--fg-2", "--fg-3", "--accent", "--accent-ink", "--branch", "--danger", "--working", "--needs", "--idle"];
+  const KEY = "loom-lp-theme";
+  const root = document.documentElement;
+  let current = { key: "loom", mode: "dark" };
+  const listeners = [];
+
+  function apply(key, mode, persist) {
+    const fam = THEMES.find((t) => t.key === key) || THEMES[0];
+    const m = mode === "light" ? "light" : "dark";
+    const c = fam[m].c;
+    VARS.forEach((v, i) => root.style.setProperty(v, c[i]));
+    if (fam.key === "loom" && m === "dark") {
+      // Loom Dark tel que la landing le pose : noir OLED, surfaces zinc.
+      root.style.setProperty("--bg", "#000000");
+      root.style.setProperty("--s1", "#09090b");
+      root.style.setProperty("--s2", "#121214");
+      root.style.setProperty("--s3", "#17171a");
+    } else {
+      root.style.setProperty("--s3", "color-mix(in srgb, " + c[2] + " 92%, " + c[3] + ")");
+    }
+    const dark = m === "dark";
+    root.style.setProperty("--shadow", dark ? "rgba(0, 0, 0, 1)" : "rgba(20, 20, 30, 0.16)");
+    root.style.setProperty("--scrim", dark ? "rgba(0, 0, 0, 0.72)" : "rgba(20, 20, 30, 0.3)");
+    root.style.colorScheme = m;
+    root.dataset.loomTheme = fam.key;
+    root.dataset.loomMode = m;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", getComputedStyle(root).getPropertyValue("--bg").trim() || c[0]);
+    current = { key: fam.key, mode: m };
+    if (persist) { try { localStorage.setItem(KEY, JSON.stringify(current)); } catch (_) {} }
+    listeners.forEach((fn) => fn(current, fam));
+  }
+
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (_) {}
+  if (saved && saved.key) apply(saved.key, saved.mode, false);
+
+  window.LoomTheme = {
+    themes: THEMES,
+    get current() { return current; },
+    apply: (key, mode) => apply(key, mode, true),
+    onChange: (fn) => listeners.push(fn),
+  };
+})();
+</script>
 </head>
 <body>
 
@@ -686,12 +811,13 @@ footer { padding-block: 28px 40px; color: var(--fg-3); }
   <symbol id="i-keyboard" viewBox="0 0 24 24"><path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M6 8h.01"/><path d="M7 16h10"/><path d="M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/></symbol>
   <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
   <symbol id="i-cmd" viewBox="0 0 24 24"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></symbol>
   <symbol id="logo" viewBox="0 0 24 24">
-    <rect x=".5" y=".5" width="23" height="23" rx="6.5" fill="#09090b" stroke="rgba(255,255,255,.14)"/>
-    <rect x="5" y="6.5" width="14" height="10.5" rx="2.6" fill="none" stroke="rgba(255,255,255,.28)" transform="rotate(-12 12 17)"/>
-    <rect x="5" y="7.5" width="14" height="10.5" rx="2.6" fill="#E8945C" transform="rotate(3 12 17)"/>
-    <path d="M8.2 10.6l2.2 1.5-2.2 1.5M11.6 14.6h3.4" fill="none" stroke="#201204" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" transform="rotate(3 12 17)"/>
+    <rect x=".5" y=".5" width="23" height="23" rx="6.5" style="fill: var(--s1); stroke: var(--line-3)"/>
+    <rect x="5" y="6.5" width="14" height="10.5" rx="2.6" style="fill: none; stroke: color-mix(in srgb, var(--fg) 30%, transparent)" transform="rotate(-12 12 17)"/>
+    <rect x="5" y="7.5" width="14" height="10.5" rx="2.6" style="fill: var(--accent)" transform="rotate(3 12 17)"/>
+    <path d="M8.2 10.6l2.2 1.5-2.2 1.5M11.6 14.6h3.4" style="fill: none; stroke: var(--accent-ink)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" transform="rotate(3 12 17)"/>
   </symbol>
 </svg>
 
@@ -717,6 +843,21 @@ footer { padding-block: 28px 40px; color: var(--fg-3); }
       <a class="btn sm ghost" href="https://github.com/zVasO/loom" target="_blank" rel="noopener">
         <svg class="i i-sm"><use href="#i-github"/></svg><span class="gh-label">GitHub</span>
       </a>
+      <div class="theme-wrap">
+        <button class="btn sm theme-trigger" type="button" id="themeBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="themeMenu" aria-label="Changer de thème">
+          <span class="sw" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="label" id="themeLabel">Loom Dark</span>
+          <svg class="i i-sm chev" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </button>
+        <div class="theme-menu" id="themeMenu" role="menu" aria-label="Thèmes de Loom">
+          <div class="seg" role="group" aria-label="Apparence">
+            <button type="button" class="m" data-mode="dark" aria-pressed="true">Sombre</button>
+            <button type="button" class="m" data-mode="light" aria-pressed="false">Clair</button>
+          </div>
+          <div class="theme-list" id="themeList"></div>
+          <div class="theme-note m dimmer">Les 9 familles intégrées de Loom</div>
+        </div>
+      </div>
       <a class="btn sm primary" href="#installer">
         <svg class="i i-sm"><use href="#i-download"/></svg>Installer
       </a>
@@ -1071,12 +1212,13 @@ footer { padding-block: 28px 40px; color: var(--fg-3); }
           <div class="card-h">
             <span class="ico"><svg class="i"><use href="#i-contrast"/></svg></span>
             <h3>Thèmes</h3>
-            <span class="tag neutral">Clair · Sombre</span>
+            <div class="seg" role="group" aria-label="Apparence">
+              <button type="button" class="m" data-mode="dark" aria-pressed="true">Sombre</button>
+              <button type="button" class="m" data-mode="light" aria-pressed="false">Clair</button>
+            </div>
           </div>
-          <p>Neuf familles, un override par projet, l'import d'un thème tweakcn ou shadcn, et le même thème appliqué à Claude Code en direct.</p>
-          <div class="chips push" role="list">
-            <span class="chip on" role="listitem">Loom</span><span class="chip" role="listitem">Dracula</span><span class="chip" role="listitem">Nord</span><span class="chip" role="listitem">Tokyo Night</span><span class="chip" role="listitem">Catppuccin</span><span class="chip" role="listitem">One</span><span class="chip" role="listitem">Gruvbox</span><span class="chip" role="listitem">Monokai</span><span class="chip" role="listitem">Solarized</span>
-          </div>
+          <p>Neuf familles, un override par projet, l'import d'un thème tweakcn ou shadcn, et le même thème appliqué à Claude Code en direct. Choisissez-en un : toute la page passe dedans.</p>
+          <div class="chips push" role="group" aria-label="Familles de thèmes" id="themeChips"></div>
         </article>
       </div>
     </div>
@@ -1429,7 +1571,7 @@ footer { padding-block: 28px 40px; color: var(--fg-3); }
       '<span class="ev">' + esc(ev) + ' <i>· ' + esc(sess.branch.replace("loom/", "")) + '</i></span>' +
       '<span class="to" style="--c:' + STATE[to].c + '">→ ' + to + '</span>';
     logEl.appendChild(li);
-    while (logEl.children.length > 10) logEl.removeChild(logEl.firstChild);
+    while (logEl.children.length > 8) logEl.removeChild(logEl.firstChild);
   }
 
   function setState(s, to, src, ev) {
@@ -1556,6 +1698,10 @@ footer { padding-block: 28px 40px; color: var(--fg-3); }
         const s = sessions.find((x) => x.state === "interrupted");
         if (s) { resume(s); select(s.id); go("#top")(); } else showToast("Démo", "Aucune session interrompue");
       } },
+    ...window.LoomTheme.themes.map((t) => ({ g: "Thèmes", label: "Thème : " + t.name, icon: "i-contrast", hint: t.light.name + " · " + t.dark.name,
+      run: () => window.LoomTheme.apply(t.key, window.LoomTheme.current.mode) })),
+    { g: "Thèmes", label: "Basculer clair / sombre", icon: "i-contrast", hint: "apparence",
+      run: () => { const c = window.LoomTheme.current; window.LoomTheme.apply(c.key, c.mode === "dark" ? "light" : "dark"); } },
     { g: "Liens", label: "Releases GitHub", icon: "i-download", hint: "github.com", run: open("https://github.com/zVasO/loom/releases") },
     { g: "Liens", label: "Code source", icon: "i-github", hint: "github.com", run: open("https://github.com/zVasO/loom") },
     { g: "Liens", label: "Décisions d'architecture (ADR)", icon: "i-github", hint: "github.com", run: open("https://github.com/zVasO/loom/tree/main/docs/adr") },
@@ -1626,6 +1772,66 @@ footer { padding-block: 28px 40px; color: var(--fg-3); }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); pal.hasAttribute("data-open") ? closePal() : openPal(); }
     else if (e.key === "/" && !typing && !pal.hasAttribute("data-open")) { e.preventDefault(); openPal(); }
     else if (e.key === "Escape" && pal.hasAttribute("data-open")) closePal();
+  });
+
+
+  /* ---------- Thèmes ---------- */
+  const LT = window.LoomTheme;
+  const themeBtn = $("#themeBtn"), themeMenu = $("#themeMenu"), themeList = $("#themeList"), chipsEl = $("#themeChips");
+  LT.themes.forEach((t) => {
+    const it = document.createElement("button");
+    it.type = "button";
+    it.className = "theme-item";
+    it.setAttribute("role", "menuitemradio");
+    it.dataset.themeKey = t.key;
+    const c = t.dark.c, l = t.light.c;
+    it.innerHTML = '<span class="sw" aria-hidden="true"><i style="background:' + c[0] + '"></i><i style="background:' + l[0] + '"></i><i style="background:' + c[6] + '"></i></span>' +
+      '<span class="grow">' + esc(t.name) + '</span><svg class="i ck" aria-hidden="true"><use href="#i-check"/></svg>';
+    it.addEventListener("click", () => LT.apply(t.key, LT.current.mode));
+    themeList.appendChild(it);
+
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.dataset.themeKey = t.key;
+    chip.textContent = t.name;
+    chip.addEventListener("click", () => LT.apply(t.key, LT.current.mode));
+    chipsEl.appendChild(chip);
+  });
+  $$("[data-mode]").forEach((b) => b.addEventListener("click", () => LT.apply(LT.current.key, b.dataset.mode)));
+
+  function syncTheme(cur) {
+    const fam = LT.themes.find((t) => t.key === cur.key) || LT.themes[0];
+    $("#themeLabel").textContent = fam[cur.mode].name;
+    themeBtn.setAttribute("aria-label", "Thème : " + fam[cur.mode].name + ". Changer de thème");
+    $$(".theme-item", themeList).forEach((el) => el.setAttribute("aria-checked", String(el.dataset.themeKey === cur.key)));
+    $$("button.chip", chipsEl).forEach((el) => el.setAttribute("aria-pressed", String(el.dataset.themeKey === cur.key)));
+    $$("[data-mode]").forEach((el) => el.setAttribute("aria-pressed", String(el.dataset.mode === cur.mode)));
+  }
+  LT.onChange((cur) => {
+    syncTheme(cur);
+    showToast("Thème", (LT.themes.find((t) => t.key === cur.key) || LT.themes[0])[cur.mode].name);
+  });
+  syncTheme(LT.current);
+
+  function setMenu(open) {
+    if (open) themeMenu.setAttribute("data-open", ""); else themeMenu.removeAttribute("data-open");
+    themeBtn.setAttribute("aria-expanded", String(open));
+    if (open) {
+      const on = $('.theme-item[aria-checked="true"]', themeList) || $(".theme-item", themeList);
+      if (on) setTimeout(() => on.focus(), 0);
+    }
+  }
+  themeBtn.addEventListener("click", () => setMenu(!themeMenu.hasAttribute("data-open")));
+  document.addEventListener("mousedown", (e) => {
+    if (themeMenu.hasAttribute("data-open") && !e.target.closest(".theme-wrap")) setMenu(false);
+  });
+  themeMenu.addEventListener("keydown", (e) => {
+    const items = $$(".theme-item", themeList);
+    const i = items.indexOf(document.activeElement);
+    if (e.key === "Escape") { e.preventDefault(); setMenu(false); themeBtn.focus(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
   });
 
   /* ---------- Nav : section courante ---------- */
