@@ -153,6 +153,11 @@ public final class SessionStore: Sendable {
                 t.column("modifiedAt", .double).notNull()
             }
         }
+        migrator.registerMigration("v11-transition-event") { db in
+            // What moved the state, in words the journal can show ("PermissionRequest",
+            // "Stop · question", "silence"). NULL for rows written before it existed.
+            try db.alter(table: "stateTransition") { $0.add(column: "event", .text) }
+        }
         try migrator.migrate(database)
     }
 
@@ -439,11 +444,22 @@ public final class SessionStore: Sendable {
     // MARK: - Transition journal (STA-06, storage side)
 
     public func recordTransition(session id: SessionID, from: SessionState, to: SessionState,
-                                 source: TransitionSource, at instant: Date) throws {
+                                 source: TransitionSource, event: String? = nil, at instant: Date) throws {
         try database.write { db in
             try db.execute(
-                sql: "INSERT INTO stateTransition (sessionID, fromState, toState, source, at) VALUES (?, ?, ?, ?, ?)",
-                arguments: [id.rawValue.uuidString, from.rawValue, to.rawValue, source.rawValue, instant])
+                sql: "INSERT INTO stateTransition (sessionID, fromState, toState, source, event, at) VALUES (?, ?, ?, ?, ?, ?)",
+                arguments: [id.rawValue.uuidString, from.rawValue, to.rawValue, source.rawValue, event, instant])
+        }
+    }
+
+    /// The last transitions of every session, oldest first — the fleet's journal.
+    public func recentTransitions(limit: Int) throws -> [TransitionRecord] {
+        try database.read { db in
+            let newestFirst = try TransitionRecord
+                .order(Column("at").desc, Column("rowID").desc)
+                .limit(limit)
+                .fetchAll(db)
+            return Array(newestFirst.reversed())
         }
     }
 
@@ -644,6 +660,8 @@ public struct TransitionRecord: Codable, Equatable, Sendable, FetchableRecord, T
     public var from: SessionState
     public var to: SessionState
     public var source: TransitionSource
+    /// What moved the state ("PermissionRequest", "silence"…) — nil before v11.
+    public var event: String?
     public var at: Date
 
     public init(row: Row) throws {
@@ -651,6 +669,7 @@ public struct TransitionRecord: Codable, Equatable, Sendable, FetchableRecord, T
         from = SessionState(rawValue: row["fromState"]) ?? .interrupted
         to = SessionState(rawValue: row["toState"]) ?? .interrupted
         source = TransitionSource(rawValue: row["source"]) ?? .user
+        event = row["event"]
         at = row["at"]
     }
 }

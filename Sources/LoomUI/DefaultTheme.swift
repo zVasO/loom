@@ -25,6 +25,15 @@ public enum DefaultTheme {
     public static var surfaceRaised: Color { palette.surfaceRaised }
     public static var cardBorder: Color { palette.cardBorder }
 
+    // Hairlines: the text colour at low opacity, so a rule reads the same on
+    // every surface of every theme (the landing page's --line, --line-2, --line-3).
+    public static var line: Color { palette.primaryText.opacity(0.08) }
+    public static var line2: Color { palette.primaryText.opacity(0.13) }
+    public static var line3: Color { palette.primaryText.opacity(0.21) }
+    /// Row washes: hover, then selection.
+    public static var wash: Color { palette.primaryText.opacity(0.025) }
+    public static var wash2: Color { palette.primaryText.opacity(0.045) }
+
     // Accent (filled buttons: contrasting text on top, like the reference)
     public static var accent: Color { palette.accent }
     public static var accentText: Color { palette.accentText }

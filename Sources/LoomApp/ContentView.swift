@@ -334,12 +334,14 @@ struct ContentView: View {
                 .background(DefaultTheme.surfaceRaised, in: Capsule())
 
             Spacer().frame(width: 18)
-            NavTab("Projects", isActive: tab == .projects) { tab = .projects }
-            NavTab("Sessions", isActive: tab == .sessions) { tab = .sessions }
-            NavTab("PRs", isActive: tab == .prs) { tab = .prs }
-            NavTab("Workflows", isActive: tab == .workflows) { tab = .workflows }
-            if !model.extensions.extensions.isEmpty {
-                NavTab("Extensions", isActive: tab == .extensions) { tab = .extensions }
+            HStack(spacing: 2) {
+                NavTab("Projects", icon: .folder, isActive: tab == .projects) { tab = .projects }
+                NavTab("Sessions", icon: .terminal, isActive: tab == .sessions) { tab = .sessions }
+                NavTab("PRs", icon: .gitPullRequest, isActive: tab == .prs) { tab = .prs }
+                NavTab("Workflows", icon: .workflow, isActive: tab == .workflows) { tab = .workflows }
+                if !model.extensions.extensions.isEmpty {
+                    NavTab("Extensions", icon: .blocks, isActive: tab == .extensions) { tab = .extensions }
+                }
             }
             // The +: pick the project — or any folder, which becomes one —
             // and whether the session gets its own worktree. ⌘N keeps the
@@ -371,6 +373,13 @@ struct ContentView: View {
                     tab = .extensions
                 }
             }
+
+            // The hook socket: what state detection hangs on.
+            StatusTag(model.hooksOnline ? "Hooks online" : "Hooks offline",
+                      color: model.hooksOnline ? DefaultTheme.badgeColor(for: .working) : DefaultTheme.danger)
+                .help(model.hooksOnline
+                      ? "Claude Code hooks reach Loom: states come from the agent itself"
+                      : "The hook socket is down: states come from the heuristics only")
 
             // v2 — Mission Control: the fleet at a glance (⌘G). A TOGGLE:
             // press again to return to the view you came from.
@@ -1922,6 +1931,12 @@ struct SessionsView: View {
     /// Close requested but not yet confirmed: every close cross goes through here.
     @State private var pendingClose: PendingClose?
 
+    /// The session the detail shows, if it shows one.
+    private var currentSessionID: SessionID? {
+        if case .session(let id) = selected { return id }
+        return nil
+    }
+
     struct PendingClose {
         var message: String
         var action: () -> Void
@@ -1959,6 +1974,10 @@ struct SessionsView: View {
                 case nil:
                     placeholder
                 }
+                // The fleet under whatever the stack shows: another session's
+                // terminal, the journal, Mission Control's table (⌘J folds it).
+                FleetPanel(model: model, currentSessionID: currentSessionID,
+                           onOpen: { selected = .session($0) })
             }
         }
         .alert("Close this tab?",

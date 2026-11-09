@@ -137,6 +137,30 @@ struct SessionStoreTests {
         #expect(journal[1].source == .hook, "the source of each transition is journaled")
     }
 
+    @Test("the fleet's journal: the last transitions of every session, oldest first, with what moved them")
+    func journalDeLaFlotte() throws {
+        let store = try makeStore()
+        let first = SessionID()
+        let second = SessionID()
+        for id in [first, second] {
+            try store.insert(SessionRecord(id: id, title: "t", agentID: "claude-code",
+                                           state: .starting, createdAt: Date()))
+        }
+        try store.recordTransition(session: first, from: .starting, to: .working,
+                                   source: .hook, event: "UserPromptSubmit", at: Date(timeIntervalSince1970: 1000))
+        try store.recordTransition(session: second, from: .starting, to: .working,
+                                   source: .heuristic, event: "output", at: Date(timeIntervalSince1970: 2000))
+        try store.recordTransition(session: first, from: .working, to: .needsInput,
+                                   source: .hook, event: "PermissionRequest", at: Date(timeIntervalSince1970: 3000))
+        try store.recordTransition(session: second, from: .working, to: .idle,
+                                   source: .heuristic, at: Date(timeIntervalSince1970: 4000))
+
+        let recent = try store.recentTransitions(limit: 3)
+        #expect(recent.map(\.to) == [.working, .needsInput, .idle], "the newest three, oldest first")
+        #expect(recent.map(\.sessionID) == [second, first, second].map(\.rawValue.uuidString))
+        #expect(recent.map(\.event) == ["output", "PermissionRequest", nil], "an event left out stays nil")
+    }
+
     @Test("on relaunch, live sessions become interrupted (NFR-R, UC-7)")
     func marquageInterruptedAuRelancement() throws {
         let store = try makeStore()

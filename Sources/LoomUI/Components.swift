@@ -48,36 +48,68 @@ public extension View {
     }
 }
 
-/// Navigation bar tab (Projects / Sessions).
+/// Navigation bar tab (Projects / Sessions): a Lucide icon and a label; the
+/// active one sits on a raised pill with a hairline edge.
 public struct NavTab: View {
     let title: String
+    let icon: LucideIcon.Glyph?
     let isActive: Bool
     let action: () -> Void
     @State private var hovered = false
 
-    public init(_ title: String, isActive: Bool, action: @escaping () -> Void) {
+    public init(_ title: String, icon: LucideIcon.Glyph? = nil, isActive: Bool, action: @escaping () -> Void) {
         self.title = title
+        self.icon = icon
         self.isActive = isActive
         self.action = action
     }
 
     public var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
-                                                     : DefaultTheme.secondaryText)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(isActive ? DefaultTheme.surfaceRaised
-                            : hovered ? DefaultTheme.surfaceRaised.opacity(0.6) : .clear,
-                            in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8)
-                    .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
+            HStack(spacing: 6) {
+                if let icon { LucideIcon(icon, size: 14) }
+                Text(title).font(.system(size: 12))
+            }
+            .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText : DefaultTheme.mutedText)
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(isActive ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4)
+                .strokeBorder(isActive ? DefaultTheme.line : .clear, lineWidth: 1))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
+    }
+}
+
+/// A status tag: mono capitals in the colour of what it reports, on a 7 %
+/// wash with a 32 % edge ("● HOOKS ONLINE", "LIVE").
+public struct StatusTag: View {
+    let text: String
+    let color: Color
+    let showsDot: Bool
+
+    public init(_ text: String, color: Color, dot: Bool = true) {
+        self.text = text
+        self.color = color
+        self.showsDot = dot
+    }
+
+    public var body: some View {
+        HStack(spacing: 6) {
+            if showsDot { Circle().fill(color).frame(width: 6, height: 6) }
+            Text(text.uppercased())
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .tracking(0.5)
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 6)
+        .frame(height: 20)
+        .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 3))
+        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(color.opacity(0.32), lineWidth: 1))
+        .fixedSize()
     }
 }
 
@@ -243,7 +275,7 @@ public struct KeyCap: View {
             .padding(.horizontal, 4)
             .frame(minWidth: 18, minHeight: 18)
             .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(DefaultTheme.cardBorder, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(DefaultTheme.line2, lineWidth: 1))
             .fixedSize()
     }
 }

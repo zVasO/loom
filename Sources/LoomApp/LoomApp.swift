@@ -85,6 +85,10 @@ struct LoomApp: App {
                     NotificationCenter.default.post(name: .loomToggleSidePanel, object: nil)
                 }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
+                Button("Show Fleet Panel") {
+                    NotificationCenter.default.post(name: .loomToggleFleetPanel, object: nil)
+                }
+                .keyboardShortcut("j", modifiers: .command)
             }
         }
     }
@@ -108,4 +112,6 @@ extension Notification.Name {
     static let loomSelectAllTerminal = Notification.Name("loom.selectAllTerminal")
     /// ⌘⇧B — the browser beside the selected session's terminal.
     static let loomToggleSidePanel = Notification.Name("loom.toggleSidePanel")
+    /// ⌘J — fold or unfold the fleet panel under the Sessions view.
+    static let loomToggleFleetPanel = Notification.Name("loom.toggleFleetPanel")
 }

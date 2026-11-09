@@ -2440,9 +2440,26 @@ public final class AppModel {
         }
     }
 
+    /// Bumped on every state change the manager announces: what the fleet's
+    /// journal watches to read the store again.
+    public private(set) var transitionTick = 0
+
+    /// The hook socket is up: hooks reach their sessions.
+    public var hooksOnline: Bool { hookServer != nil }
+
+    /// The fleet's journal — the last transitions of every session, oldest
+    /// first, read off the main actor.
+    public func recentTransitions(limit: Int = 80) async -> [TransitionRecord] {
+        guard let store else { return [] }
+        return await Task.detached(priority: .utility) {
+            (try? store.recentTransitions(limit: limit)) ?? []
+        }.value
+    }
+
     private func observeStates(of manager: SessionManager) async {
         let updates = await manager.stateUpdates()
         for await update in updates {
+            transitionTick &+= 1
             let index = sessions.firstIndex(where: { $0.id == update.id })
             // A terminal state must be processed even when the item is already
             // gone (optimistic close) — that is what turns the record into an

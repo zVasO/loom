@@ -300,7 +300,8 @@ public actor SessionManager {
         // moment it receives an update, so announcing before writing would hand
         // it the state this transition replaces.
         try? store?.recordTransition(session: id, from: current.session, to: next.session,
-                                     source: Self.source(of: event), at: Date())
+                                     source: Self.source(of: event), event: Self.label(of: event),
+                                     at: Date())
         if case .process(.exited(let code)) = event {
             try? store?.updateState(session: id, to: next.session, exitCode: code, endedAt: Date())
         } else {
@@ -310,6 +311,23 @@ public actor SessionManager {
         if next.session == .needsInput {
             let record = (try? store?.session(id: id)) ?? nil
             notifier?.sessionNeedsInput(id, title: record?.title ?? "Session")
+        }
+    }
+
+    /// The journal's words for what moved the state: the hook's name, or what
+    /// the heuristic saw.
+    static func label(of event: StateEngine.Event) -> String {
+        switch event {
+        case .hook(.userPromptSubmit): "UserPromptSubmit"
+        case .hook(.stop(let awaitsReply)): awaitsReply ? "Stop · question" : "Stop"
+        case .hook(.permissionRequested): "PermissionRequest"
+        case .heuristic(.working): "output"
+        case .heuristic(.idle): "silence"
+        case .heuristic(.needsInput): "prompt"
+        case .process(.exited(let code)): code.map { "exit \($0)" } ?? "exit"
+        case .process(.interrupted): "app stopped"
+        case .user(.resume): "Resume"
+        case .user(.archive): "Archive"
         }
     }
 

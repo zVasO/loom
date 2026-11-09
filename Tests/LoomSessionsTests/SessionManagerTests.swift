@@ -137,6 +137,7 @@ struct SessionManagerTests {
         let journal = try store.transitions(session: id)
         #expect(journal.map(\.to) == [.working, .completed], "the STA-06 journal tells the story")
         #expect(journal.map(\.source) == [.hook, .process])
+        #expect(journal.map(\.event) == ["UserPromptSubmit", "exit 0"], "and what moved each step")
     }
 
     @Test("agent without hooks: samples travel through the interpreter to the badge (STA-02)")
