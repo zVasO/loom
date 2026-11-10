@@ -139,6 +139,8 @@ struct ContentView: View {
     @State private var paletteShown = false
     @State private var usageShown = false
     @State private var newSessionSheetShown = false
+    /// The Sessions sidebar as one line per session (shared with SessionsView).
+    @AppStorage("loom.sessions.compact") private var compactSessions = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -490,6 +492,12 @@ struct ContentView: View {
                                      section: "Actions", shortcut: "⌘N") {
             createSession(in: model.selectedProject)
         })
+        actions.append(PaletteAction(id: "act.sessions.compact",
+                                     icon: compactSessions ? "rectangle.grid.1x2" : "list.bullet",
+                                     title: compactSessions ? "Sessions: show details" : "Sessions: compact list",
+                                     subtitle: compactSessions ? "Branch, state and tabs under each session"
+                                                               : "One line per session — its title only",
+                                     section: "Actions") { compactSessions.toggle() })
         actions.append(PaletteAction(id: "act.newSessionIn", icon: "plus.rectangle.on.folder",
                                      title: "New claude session in…",
                                      subtitle: "Choose the project first",
@@ -1926,6 +1934,10 @@ struct SessionsView: View {
     /// group per run, its orchestrator first — off, they sit with their project.
     @AppStorage("loom.sessions.groupWorkflows") private var groupWorkflows = true
     @AppStorage("loom.sessions.workflowsFolded") private var workflowsFolded = false
+    /// The sidebar's sessions reduced to one line each — the title and
+    /// nothing else: no branch, no state, no row for their terminals and
+    /// browsers (those stay in the tab bar of the session once it is open).
+    @AppStorage("loom.sessions.compact") private var compactSessions = false
 
     /// A sidebar group's identity: its fold state and the drag confinement.
     private static func groupKey(_ projectID: ProjectID?, review: Bool = false) -> String {
@@ -2194,6 +2206,19 @@ struct SessionsView: View {
     private var sidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 6) {
+                    Text("SESSIONS")
+                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                        .kerning(0.53)
+                        .foregroundStyle(DefaultTheme.mutedText)
+                    Spacer()
+                    HoverIconButton(systemImage: compactSessions ? "rectangle.grid.1x2" : "list.bullet",
+                                    help: compactSessions ? "Show each session's branch, state and tabs"
+                                                          : "Compact: one line per session, its title only") {
+                        compactSessions.toggle()
+                    }
+                }
+                .padding(.horizontal, 2)
                 let globalPanes = model.browserPanes.filter { $0.parentID == nil }
                 if !globalPanes.isEmpty {
                     group("BROWSER", projectID: nil) {
@@ -2334,13 +2359,23 @@ struct SessionsView: View {
                               shells: [AppModel.SessionItem],
                               dormantShells: [AppModel.DormantShell],
                               panes: [AppModel.BrowserPane]) -> some View {
-        VStack(spacing: 0) {
+        // Compact, the line stands for the whole stack: it is the selected
+        // one whichever of its tabs the detail shows.
+        let ownSelected = selected == .session(item.id)
+        let shellSelected = shells.contains { selected == .session($0.id) }
+        let paneSelected = panes.contains { selected == .webPane($0.id) }
+        let agentSelected = selected == .agentBrowser(item.id)
+        let childSelected = shellSelected || paneSelected || agentSelected
+        let cardSelected = ownSelected || (compactSessions && childSelected)
+        let radius: CGFloat = compactSessions ? 6 : 10
+        return VStack(spacing: 0) {
             SidebarSessionCard(
                 model: model,
                 item: item,
                 childCount: shells.count + dormantShells.count + panes.count,
-                isSelected: selected == .session(item.id),
+                isSelected: cardSelected,
                 agentBrowsing: model.agentBrowsers[item.id]?.activity?.isRunning == true,
+                compact: compactSessions,
                 onSelect: {
                     if item.isDormant {
                         Task {
@@ -2375,28 +2410,31 @@ struct SessionsView: View {
                         }
                 })
                 .equatable()
-                .stackChrome(isSelected: selected == .session(item.id))
+                .stackChrome(isSelected: cardSelected)
             // Individual tabs live in the HORIZONTAL bar: the vertical
-            // stack only shows one group row per type.
-            if !shells.isEmpty || !dormantShells.isEmpty {
-                Divider().overlay(DefaultTheme.cardBorder)
-                terminalGroupRow(parent: item, shells: shells, dormants: dormantShells)
-                    .stackChrome(isSelected: shells.contains { selected == .session($0.id) })
-            }
-            if !panes.isEmpty {
-                Divider().overlay(DefaultTheme.cardBorder)
-                webGroupRow(parent: item, panes: panes)
-                    .stackChrome(isSelected: panes.contains { selected == .webPane($0.id) })
-            }
-            if !item.isShell, model.hasAgentBrowser(item.id) {
-                Divider().overlay(DefaultTheme.cardBorder)
-                agentBrowserRow(parent: item)
-                    .stackChrome(isSelected: selected == .agentBrowser(item.id))
+            // stack only shows one group row per type — and none at all
+            // when the sessions are reduced to their title.
+            if !compactSessions {
+                if !shells.isEmpty || !dormantShells.isEmpty {
+                    Divider().overlay(DefaultTheme.cardBorder)
+                    terminalGroupRow(parent: item, shells: shells, dormants: dormantShells)
+                        .stackChrome(isSelected: shells.contains { selected == .session($0.id) })
+                }
+                if !panes.isEmpty {
+                    Divider().overlay(DefaultTheme.cardBorder)
+                    webGroupRow(parent: item, panes: panes)
+                        .stackChrome(isSelected: panes.contains { selected == .webPane($0.id) })
+                }
+                if !item.isShell, model.hasAgentBrowser(item.id) {
+                    Divider().overlay(DefaultTheme.cardBorder)
+                    agentBrowserRow(parent: item)
+                        .stackChrome(isSelected: selected == .agentBrowser(item.id))
+                }
             }
         }
         .background(DefaultTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: radius))
+        .overlay(RoundedRectangle(cornerRadius: radius).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
     /// SES-04: THE stack's terminal group — a single row, the tab detail
@@ -2628,7 +2666,7 @@ struct SessionsView: View {
                        @ViewBuilder content: () -> some View) -> some View {
         let foldKey = key ?? title
         let collapsed = collapsedGroups.contains(foldKey)
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: compactSessions ? 3 : 6) {
             HStack {
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) {
@@ -3447,6 +3485,9 @@ struct SidebarSessionCard: View, Equatable {
     let isSelected: Bool
     /// Its agent is driving its browser right now (ADR-0014).
     var agentBrowsing = false
+    /// One line: the title, nothing else — no badge, branch or state. What
+    /// is left out is a hover away, in the line's tooltip.
+    var compact = false
     let onSelect: () -> Void
     let onNewTerminal: () -> Void
     let onOpenBrowser: () -> Void
@@ -3460,7 +3501,16 @@ struct SidebarSessionCard: View, Equatable {
     /// on every session transition, and ~25 of these used to re-run each time.
     static func == (lhs: SidebarSessionCard, rhs: SidebarSessionCard) -> Bool {
         lhs.item == rhs.item && lhs.childCount == rhs.childCount && lhs.isSelected == rhs.isSelected
-            && lhs.agentBrowsing == rhs.agentBrowsing
+            && lhs.agentBrowsing == rhs.agentBrowsing && lhs.compact == rhs.compact
+    }
+
+    /// What the compact line leaves out, for its tooltip: "working · loom/fix-cache · 2 tabs".
+    private var compactSummary: String {
+        var parts = [DefaultTheme.label(for: item.state)]
+        if let branch = item.branch { parts.append(branch) }
+        if !item.badges.isEmpty { parts.append(item.badges.joined(separator: ", ")) }
+        if childCount > 0 { parts.append("\(childCount) tab\(childCount == 1 ? "" : "s")") }
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
@@ -3470,7 +3520,7 @@ struct SidebarSessionCard: View, Equatable {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(DefaultTheme.primaryText)
                     .lineLimit(1)
-                BadgeRow(model: model, badges: item.badges)
+                if !compact { BadgeRow(model: model, badges: item.badges) }
                 Spacer()
                 if hovered {
                     // Same cluster as the stack rows: identical spacing
@@ -3490,34 +3540,38 @@ struct SidebarSessionCard: View, Equatable {
                     .frame(height: 14)
                 }
             }
-            if let branch = item.branch {
-                MonoTag(branch, systemImage: "arrow.triangle.branch",
-                        color: DefaultTheme.secondaryText)
-            }
-            HStack(spacing: 6) {
-                StatusLabel(item.state)
-                if agentBrowsing {
-                    Image(systemName: "globe")
-                        .font(.system(size: 9))
-                        .foregroundStyle(DefaultTheme.accent)
-                        .help("claude is using its browser")
+            if !compact {
+                if let branch = item.branch {
+                    MonoTag(branch, systemImage: "arrow.triangle.branch",
+                            color: DefaultTheme.secondaryText)
                 }
-                if childCount > 0 {
-                    HStack(spacing: 2) {
-                        AppIcon("chevron.down", size: 8.5)
-                        Text("\(childCount)").font(.system(size: 10))
+                HStack(spacing: 6) {
+                    StatusLabel(item.state)
+                    if agentBrowsing {
+                        Image(systemName: "globe")
+                            .font(.system(size: 9))
+                            .foregroundStyle(DefaultTheme.accent)
+                            .help("claude is using its browser")
                     }
-                    .foregroundStyle(DefaultTheme.secondaryText)
+                    if childCount > 0 {
+                        HStack(spacing: 2) {
+                            AppIcon("chevron.down", size: 8.5)
+                            Text("\(childCount)").font(.system(size: 10))
+                        }
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                    }
                 }
             }
         }
-        .padding(10)
+        .padding(.horizontal, 10)
+        .padding(.vertical, compact ? 6 : 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
+        .help(compact ? compactSummary : "")
         .contextMenu {
             BadgeMenu(model: model, sessionID: item.id, current: item.badges)
             Button("Rename…", action: onRename)
