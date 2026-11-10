@@ -52,6 +52,33 @@ struct GitServiceTests {
         #expect(changes.contains(FileChange(path: "note.txt", kind: .untracked)))
     }
 
+    @Test("what a worktree changed since it was made: committed lines, uncommitted ones, new files, commits")
+    func changementsDepuisLaBase() async throws {
+        let repo = try await makeFixtureRepo()
+        let root = repo.deletingLastPathComponent().appendingPathComponent("worktrees")
+        let worktree = try await service.createWorktree(repo: repo, root: root, slug: "run")
+        let base = try await service.headRevision(in: worktree.path)
+        #expect(base.count == 40, "a full commit id")
+
+        let nothing = try await service.changes(since: base, in: worktree.path)
+        #expect(nothing.numstat.isEmpty && nothing.untracked.isEmpty && nothing.commits == 0)
+
+        // One commit, then an edit left uncommitted and a file never added.
+        try "# Fixture\ncommitted line\n".write(to: worktree.path.appendingPathComponent("README.md"),
+                                                 atomically: true, encoding: .utf8)
+        _ = try await git(["-c", "user.email=t@t", "-c", "user.name=T", "commit", "-am", "work"], in: worktree.path)
+        try "# Fixture\ncommitted line\nuncommitted line\n".write(to: worktree.path.appendingPathComponent("README.md"),
+                                                                    atomically: true, encoding: .utf8)
+        try "new".write(to: worktree.path.appendingPathComponent("note.txt"), atomically: true, encoding: .utf8)
+
+        let changes = try await service.changes(since: base, in: worktree.path)
+        #expect(changes.commits == 1)
+        #expect(changes.untracked == ["note.txt"])
+        // Against the base: the committed line and the uncommitted one, and the
+        // fixture's first line rewritten with the newline it lacked.
+        #expect(changes.numstat == "3\t1\tREADME.md")
+    }
+
     @Test("the current branch is detected: the project's base (PRJ-01)")
     func brancheCourante() async throws {
         let repo = try await makeFixtureRepo()

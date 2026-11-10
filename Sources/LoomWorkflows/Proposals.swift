@@ -149,7 +149,9 @@ public enum WorkflowReference {
             + "jiraTicket (through an Atlassian connector in `connectorIDs`), repository (tree, README, touched files).",
         .agent: "One claude run for an expert. `prompt` is a template; `output` the JSON fields it answers; "
             + "`verdict.options` (best first) lets links follow it; `mode` headless or visible; `blockID` places a "
-            + "block (then `prompt` and `rules` are this use's own, on top of the block's).",
+            + "block (then `prompt` and `rules` are this use's own, on top of the block's). `continues`: the id of "
+            + "an earlier agent step of the same mode — or its own id — whose conversation it carries on instead "
+            + "of starting from nothing (a developer who plans, then implements, then fixes what a review found).",
         .condition: "Takes its `yes` or `no` links (edges with `branch`) from a test on a path.",
         .loop: "Runs the steps between its `targets` and itself again, `maxIterations` more times (0–5), "
             + "earlier when `stopWhen` holds. Prefer a link that retries (below).",
@@ -173,6 +175,15 @@ public enum WorkflowReference {
             "",
             "Everything you save is a PROPOSAL: it does not run and is not scheduled until the person validates it "
             + "in Loom (Workflows › To review). Say so when you are done, and what to check.",
+            "",
+            "## Where a run works",
+            "`workspace` on the workflow: `\"project\"` (the default) — the steps read the project's folder, or a "
+            + "pull request's read-only checkout, and write nothing; or `\"worktree\"` — the run makes a git worktree "
+            + "on a `loom/…` branch of its own when it starts, every step works there, and the branch is what the run "
+            + "leaves. A workflow that must change code is a `worktree` one; it cannot load a pull request. Its "
+            + "writing steps are best `visible` sessions (the person sees them and answers their permission "
+            + "prompts); a step that only judges stays headless with a read-only expert. A workflow whose prompts "
+            + "name `{{run.task}}` asks the person what is to be done when it is launched.",
             "",
             "## Steps",
         ]
@@ -199,7 +210,10 @@ public enum WorkflowReference {
             "## Templates in prompts",
             "`{{in.text}}`, `{{in.<field>}}` (the steps right before), `{{steps.<id>.<field>}}`, `{{steps.<id>.text}}`, "
                 + "`{{steps.<id>.verdict}}`, `{{previous.<id>}}` (its last pass), `{{pr.number|title|url|author|base|head|body}}`, "
-                + "`{{ticket.key}}`, `{{repo.name|path}}`, `{{run.note}}`, `{{iteration}}`, `{{item}}`, `{{index}}`.",
+                + "`{{ticket.key}}`, `{{repo.name|path}}`, `{{run.task}}` (what the person asked for at launch), "
+                + "`{{run.title}}` (its first line), `{{run.note}}`, `{{run.branch}}` and `{{run.base}}` (a worktree "
+                + "run's branch and the commit it started from: `git diff {{run.base}}` is what the run changed), "
+                + "`{{iteration}}`, `{{item}}`, `{{index}}`.",
             "",
             "## Rules, blocks, experts",
             "- Rules: `rules` (strings) on an agent step, a block, a link; `ruleSetIDs` ticks named rule sets.",
@@ -270,7 +284,9 @@ public enum BuilderPrompt {
     in Loom (Workflows › To review). Tell them what to validate and what to look at — \
     above all any command step.
     Never put {{…}} in a command step; never set allowOnPullRequests or give an expert \
-    write tools unless the person asked for it explicitly. Write titles in the person's language.
+    write tools unless the person asked for it explicitly. A workflow that must change code \
+    works in its own worktree (`workspace`), never in the project's folder. Write titles in \
+    the person's language.
     """
 
     public static func opening(improving workflow: Workflow?) -> String {

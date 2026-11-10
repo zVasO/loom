@@ -2655,7 +2655,8 @@ public final class AppModel {
     func launchWorkflowSession(directory: URL, projectID: ProjectID?, title: String, badges: [String],
                                prompt: String, instructions: String, untrusted: Bool,
                                role: APIWorkflowRole? = nil, model: String? = nil,
-                               sessionID: SessionID = SessionID()) async -> SessionID? {
+                               sessionID: SessionID = SessionID(),
+                               worktree: RunWorktree? = nil) async -> SessionID? {
         guard let manager else { return nil }
         do {
             let token = UUID().uuidString
@@ -2665,7 +2666,9 @@ public final class AppModel {
             if let role { launcher.tools.workflow = role }
             if let model, !model.isEmpty { launcher.model = model }
             var spec = SessionManager.SessionSpec(
-                command: launcher.launchCommand(session: sessionID, initialPrompt: prompt, hookToken: token,
+                // No prompt: the session opens on claude's field, for the person to type in.
+                command: launcher.launchCommand(session: sessionID, initialPrompt: prompt.isEmpty ? nil : prompt,
+                                               hookToken: token,
                                                userStatusLine: userStatusLine(in: directory),
                                                theme: claudeTheme(for: projectID)),
                 workingDirectory: directory,
@@ -2676,12 +2679,17 @@ public final class AppModel {
             spec.sessionID = sessionID
             spec.title = title
             spec.badges = SessionRecord.normalizedBadges(badges)
+            // The run's own worktree (ADR-0021): the record knows it is one —
+            // the git panel and the ship actions read worktreePath.
+            if let worktree {
+                spec.worktree = .existing(path: URL(fileURLWithPath: worktree.path), branch: worktree.branch)
+            }
             if untrusted { markRunsUntrustedCode(sessionID) }
             let id = try await manager.launch(spec)
             await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: title, state: .starting, projectID: projectID,
-                                        branch: nil, badges: spec.badges))
+                                        branch: worktree?.branch, badges: spec.badges))
             reloadPersistedSessions()
             return id
         } catch {

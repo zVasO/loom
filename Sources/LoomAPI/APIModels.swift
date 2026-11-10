@@ -289,14 +289,17 @@ public struct APILibraryRunParams: Codable, Equatable, Sendable {
     public var prNumber: Int?
     public var jiraKey: String?
     public var note: String?
+    /// What the run is to do — for a workflow that starts from a task.
+    public var task: String?
 
     public init(workflowId: String, projectId: String? = nil, prNumber: Int? = nil, jiraKey: String? = nil,
-                note: String? = nil) {
+                note: String? = nil, task: String? = nil) {
         self.workflowId = workflowId
         self.projectId = projectId
         self.prNumber = prNumber
         self.jiraKey = jiraKey
         self.note = note
+        self.task = task
     }
 }
 

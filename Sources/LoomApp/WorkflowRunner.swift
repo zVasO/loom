@@ -21,6 +21,13 @@ extension AppModel {
         var projectID: ProjectID?
         /// The worktree checks out someone else's code (ADR-0014).
         var untrusted: Bool
+        /// The run's own worktree, when its workflow works on a branch (ADR-0021).
+        var worktree: RunWorktree?
+    }
+
+    /// Why a run could not be prepared, in words for the run's header.
+    struct RunPreparationError: Error, CustomStringConvertible {
+        let description: String
     }
 
     enum StepOutcome: Sendable {
@@ -46,10 +53,21 @@ extension AppModel {
         if !pending.isEmpty {
             return "Validate first (Workflows › To review): " + pending.joined(separator: ", ") + "."
         }
-        let needsPR = workflow.nodes.contains {
-            if case .context(let config) = $0.kind { return config.source == .pullRequest }
-            return false
+        if workflow.asksForTask, inputs.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Say what the run should do: this workflow starts from a task."
         }
+        if workflow.workspace == .worktree {
+            if inputs.prNumber != nil {
+                return "This workflow works on a branch of its own: it does not run on a pull request."
+            }
+            guard let repo = projectRepo(inputs.projectID) else {
+                return "Choose the project: the run works on a branch of it."
+            }
+            guard FileManager.default.fileExists(atPath: repo.appendingPathComponent(".git").path) else {
+                return "This project is not a git repository: the run cannot make a branch of its own there."
+            }
+        }
+        let needsPR = workflow.readsPullRequest
         if inputs.prNumber != nil || needsPR || workflow.nodes.contains(where: {
             if case .context(let config) = $0.kind { return config.source == .repository }
             return false
@@ -229,6 +247,9 @@ extension AppModel {
                         }
                         if let session { run.state.nodes[id]?.sessionID = session }
                         if let conversation { run.state.nodes[id]?.claudeSessionID = conversation }
+                        // Kept past the pass: a step that continues picks it up (ADR-0021).
+                        planner.remember(StepConversation(sessionID: session, claudeSessionID: conversation),
+                                         of: id, in: &run.state)
                         run.costUSD += cost ?? 0
                         if let artifact { run.artifactPath = artifact }
                     case .failed(let message):
@@ -256,6 +277,7 @@ extension AppModel {
             // The orchestrator's wake-up, and every step when the run stops.
             group.cancelAll()
         }
+        await recordRunChanges(runID)
         guard let final = workflows.run(runID) else { return }
         if Task.isCancelled {
             finishRun(runID, status: .cancelled, error: "Stopped.")
@@ -286,7 +308,14 @@ extension AppModel {
         guard let run = workflows.run(id) else { return }
         let body: String
         switch status {
-        case .succeeded: body = "\(run.subject) · terminé" + (run.artifactPath != nil ? " — le rapport est prêt" : "")
+        case .succeeded:
+            var done = "\(run.subject) · terminé"
+            if let worktree = run.worktree {
+                done += " — branche \(worktree.branch)" + (run.changes.map { " (\($0.summary))" } ?? "")
+            } else if run.artifactPath != nil {
+                done += " — le rapport est prêt"
+            }
+            body = done
         case .cancelled: body = "\(run.subject) · arrêté"
         default: body = "\(run.subject) · échec : \(error ?? "")"
         }
@@ -323,6 +352,30 @@ extension AppModel {
                 "headSHA": .string(fetched.headSHA),
             ]
         }
+        // A workflow that works on its own branch (ADR-0021): a worktree made
+        // now, where every step runs and writes; the project's folder is left alone.
+        var worktree: RunWorktree?
+        if run.workflow.workspace == .worktree {
+            guard let repoURL, pr == nil else {
+                throw RunPreparationError(description: "A run on its own branch needs a project, and no pull request.")
+            }
+            let slug = inputs.taskSlug.isEmpty ? Self.slug(from: run.workflow.name) : inputs.taskSlug
+            let root = repoURL.deletingLastPathComponent()
+                .appendingPathComponent(repoURL.lastPathComponent + "-worktrees")
+            let git = GitService()
+            let created: Worktree
+            do {
+                created = try await git.createWorktree(repo: repoURL, root: root, slug: slug)
+            } catch {
+                throw RunPreparationError(description: "The run's worktree could not be made: \(error)")
+            }
+            let made = RunWorktree(path: created.path.path, branch: created.branch,
+                                   baseRevision: try? await git.headRevision(in: created.path))
+            worktree = made
+            workdir = created.path
+            updateRun(run.id) { $0.worktree = made }
+            workflows.log("Working on \(made.branch), in \(made.path)", run: run.id)
+        }
         try? FileManager.default.createDirectory(at: workflows.folder(for: run.id), withIntermediateDirectories: true)
         let key = (inputs.jiraKey?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0.uppercased() }
             ?? pr.flatMap { JiraKey.detect(in: [$0.title, $0.branch, body]) }
@@ -336,10 +389,50 @@ extension AppModel {
             "repo": .object(["name": .string(projectName), "path": .string(workdir.path),
                              "github": .string(inputs.projectID.flatMap { repoName(for: $0) } ?? "")]),
             "run": .object(["id": .string(run.id.uuidString), "workflow": .string(run.workflow.name),
-                            "note": .string(inputs.note)]),
+                            "note": .string(inputs.note),
+                            "task": .string(inputs.task.trimmingCharacters(in: .whitespacesAndNewlines)),
+                            "title": .string(inputs.taskHeadline ?? pr?.title ?? run.workflow.name),
+                            "branch": .string(worktree?.branch ?? ""),
+                            "base": .string(worktree?.baseRevision ?? "HEAD")]),
         ]
         return PreparedRun(inputs: .object(object), workdir: workdir, pr: pr, projectID: inputs.projectID,
-                           untrusted: untrusted)
+                           untrusted: untrusted, worktree: worktree)
+    }
+
+    /// A session in the run's worktree, to carry the work on by hand: the
+    /// one a step ran in while it is still there (resumed when it was
+    /// closed), else a new one, in that worktree and on its branch.
+    func sessionInRunWorktree(_ runID: UUID) async -> SessionID? {
+        guard let run = workflows.run(runID), let worktree = run.worktree else { return nil }
+        let candidates = run.state.conversations.values.compactMap(\.sessionID)
+            + run.stepSessionIDs.reversed()
+        for raw in candidates {
+            guard let uuid = UUID(uuidString: raw) else { continue }
+            let id = SessionID(uuid)
+            guard let item = sessions.first(where: { $0.id == id }) else { continue }
+            if item.isDormant { await resumeDormant(id) }
+            return id
+        }
+        guard FileManager.default.fileExists(atPath: worktree.path) else {
+            startupError = "The run's worktree is gone: \(worktree.path)"
+            return nil
+        }
+        return await launchWorkflowSession(directory: URL(fileURLWithPath: worktree.path),
+                                           projectID: run.inputs.projectID,
+                                           title: "\(run.workflow.name) · \(run.subject)", badges: ["workflow"],
+                                           prompt: "", instructions: "", untrusted: false, worktree: worktree)
+    }
+
+    /// What the run changed in its worktree, measured against the commit it
+    /// started from — committed or not. Nothing for a run without one.
+    private func recordRunChanges(_ runID: UUID) async {
+        guard let worktree = workflows.run(runID)?.worktree, let base = worktree.baseRevision else { return }
+        let path = URL(fileURLWithPath: worktree.path)
+        guard FileManager.default.fileExists(atPath: path.path),
+              let found = try? await GitService().changes(since: base, in: path) else { return }
+        let changes = RunChanges.parse(numstat: found.numstat, untracked: found.untracked, commits: found.commits)
+        updateRun(runID) { $0.changes = changes }
+        workflows.log("Changes on \(worktree.branch): \(changes.summary)", run: runID)
     }
 
     // MARK: Steps
@@ -537,13 +630,19 @@ extension AppModel {
         let model = config.model ?? expert?.model ?? workflows.defaultModel
         let fields = config.answerFields
         let schema = OutputSchema.instructions(for: fields)
+        // The conversation this step carries on (ADR-0021): its own from an
+        // earlier pass, or that of the step it continues. nil starts a new one.
+        let carried = headlessOnly ? nil : WorkflowPlanner(run.workflow).conversation(for: node.id, in: run.state)
         switch config.mode {
         case .headless:
             let prompt = schema.isEmpty ? rendered : rendered + "\n\n" + schema
+            // In the run's own worktree a step without an expert may work; anywhere else it reads.
+            let tools = expert?.allowedTools ?? (prepared.worktree != nil ? Expert.workTools : Expert.readOnlyTools)
             return await runHeadless(prompt: prompt, fields: fields, appendSystemPrompt: instructions,
-                                     wiring: wiring, allowedTools: expert?.allowedTools ?? Expert.readOnlyTools,
+                                     wiring: wiring, allowedTools: tools,
                                      model: model, workdir: prepared.workdir,
-                                     timeout: TimeInterval(max(60, config.timeoutSeconds)))
+                                     timeout: TimeInterval(max(60, config.timeoutSeconds)),
+                                     resume: carried?.claudeSessionID)
         case .visible:
             let file = workflows.folder(for: run.id).appendingPathComponent("answers/\(node.id)-\(pass).json")
             try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -557,12 +656,27 @@ extension AppModel {
             let stepInstructions = orchestrated
                 ? [instructions, OrchestratorPrompt.stepRules].filter { !$0.isEmpty }.joined(separator: "\n\n")
                 : instructions
-            guard let session = await launchWorkflowSession(directory: prepared.workdir, projectID: prepared.projectID,
-                                                             title: title, badges: badges, prompt: prompt,
-                                                             instructions: stepInstructions,
-                                                             untrusted: prepared.untrusted,
-                                                             role: orchestrated ? .step : nil,
-                                                             model: config.model ?? expert?.model)
+            // The same session goes on when the step continues one that is
+            // still there: the prompt is typed into it. Otherwise a new one.
+            var continued: SessionID?
+            if let raw = carried?.sessionID, let uuid = UUID(uuidString: raw),
+               await typeIntoStepSession(SessionID(uuid), prompt: "[Next step of the workflow: \(node.title)]\n" + prompt) {
+                continued = SessionID(uuid)
+                workflows.log("\(node.title): continues in its session", run: run.id)
+            }
+            let launched: SessionID?
+            if let continued {
+                launched = continued
+            } else {
+                launched = await launchWorkflowSession(directory: prepared.workdir, projectID: prepared.projectID,
+                                                       title: title, badges: badges, prompt: prompt,
+                                                       instructions: stepInstructions,
+                                                       untrusted: prepared.untrusted,
+                                                       role: orchestrated ? .step : nil,
+                                                       model: config.model ?? expert?.model,
+                                                       worktree: prepared.worktree)
+            }
+            guard let session = launched
             else { return .failed(startupError ?? "The step's session could not start.") }
             updateRun(run.id) {
                 $0.state.nodes[node.id]?.sessionID = session.rawValue.uuidString
@@ -589,23 +703,52 @@ extension AppModel {
         }
     }
 
+    /// Types a step's prompt into a session that already ran one (ADR-0021),
+    /// once it is idle. False when the session is gone, closed, or still
+    /// busy or asking after three minutes — the step then starts a session
+    /// of its own: nothing is ever typed over a question or a permission prompt.
+    private func typeIntoStepSession(_ session: SessionID, prompt: String) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(180)
+        while clock.now < deadline, !Task.isCancelled {
+            guard let item = sessions.first(where: { $0.id == session }), !item.isDormant else { return false }
+            switch item.state {
+            case .idle:
+                return await submitWhenReady(prompt, to: session, timeout: .seconds(60))
+            case .working, .starting, .needsInput:
+                try? await Task.sleep(for: .seconds(1))
+            case .draft, .completed, .failed, .interrupted, .archived:
+                return false
+            }
+        }
+        return false
+    }
+
     /// `claude -p` for one step: the answer parsed against its fields, asked
-    /// again once when it does not fit.
+    /// again once when it does not fit. `resume`: the conversation the step
+    /// carries on — lost (cleared by claude, another folder), it starts anew.
     private func runHeadless(prompt: String, fields: [OutputField], appendSystemPrompt: String,
                              wiring: ConnectorWiring, allowedTools: [String], model: String,
-                             workdir: URL?, timeout: TimeInterval) async -> StepOutcome {
+                             workdir: URL?, timeout: TimeInterval, resume: String? = nil) async -> StepOutcome {
         guard let claude = claudePath else { return .failed("claude was not found on this Mac.") }
         var request = ClaudeOneShot.Request(
             prompt: prompt, model: model, tools: .inherited, timeout: timeout, workingDirectory: workdir,
             appendSystemPrompt: appendSystemPrompt, mcpConfig: wiring.mcpConfig, strictMCPConfig: wiring.strict,
-            allowedTools: allowedTools + wiring.toolPatterns)
+            allowedTools: allowedTools + wiring.toolPatterns, resume: resume)
         var cost = 0.0
         for attempt in 0..<2 {
             let result: ClaudeOneShot.Result
             do {
                 result = try await ClaudeOneShot.run(request, executable: claude)
             } catch {
-                return .failed(String(describing: error))
+                // A conversation that cannot be resumed is no reason to fail the step.
+                guard request.resume != nil, !Task.isCancelled else { return .failed(String(describing: error)) }
+                request.resume = nil
+                do {
+                    result = try await ClaudeOneShot.run(request, executable: claude)
+                } catch {
+                    return .failed(String(describing: error))
+                }
             }
             cost += result.costUSD ?? 0
             if fields.isEmpty { return .done(output: nil, text: result.text, cost: cost, conversation: result.sessionID) }
@@ -616,6 +759,8 @@ extension AppModel {
                 guard attempt == 0 else { return .failed("The answer did not fit its fields: \(error)") }
                 request.prompt = prompt + "\n\nYour previous answer could not be used: \(error) "
                     + "Answer again with the JSON object only.\n\nYour previous answer:\n" + String(result.text.prefix(4000))
+                // Asked again in the conversation it just had, when claude kept one.
+                if let conversation = result.sessionID, request.resume != nil { request.resume = conversation }
             }
         }
         return .failed("No usable answer.")

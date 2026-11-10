@@ -111,6 +111,9 @@ public enum BlockResolver {
         // The rules are composed apart (RuleComposer): they say where they come from.
         result.rules = config.rules
         result.ruleSetIDs = config.ruleSetIDs
+        // Whose conversation it carries on is the placed step's: a block
+        // does not know the workflow it is placed in.
+        result.continues = config.continues
         return result
     }
 
@@ -202,7 +205,9 @@ public enum RuleComposer {
             let done = state.iterations[WorkflowPlanner.retryKey(edge)] ?? 0
             guard done > 0, let last = state.history[edge.from]?.last else { continue }
             let verdict = last["verdict"]?.plainText ?? ""
-            let reason = last["verdictReason"]?.plainText ?? ""
+            // An agent says why in `verdictReason`; a person, in their comment.
+            let reason = [last["verdictReason"]?.plainText, last["comment"]?.plainText]
+                .compactMap { $0 }.first { !$0.isEmpty } ?? ""
             notes.append("- Round \(done + 1): `\(edge.from)` answered «\(verdict)»"
                          + (reason.isEmpty ? "." : ": \(reason)"))
         }
