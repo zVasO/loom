@@ -21,17 +21,25 @@ struct TerminalPane: View {
     /// it closed: the split's), whose grid is remembered from the same fit —
     /// the launch grid of either shape never goes stale while the other shows.
     let otherShape: (role: TerminalPaneRole, width: CGFloat)?
+    /// Bumped by the owner to give this pane the keyboard (Mission Control's
+    /// Reply): a pane that does not claim it by itself takes it then.
+    let focusRequest: Int
+    /// The pane gained or lost the keyboard — for an owner that says so.
+    let onFocusChange: ((Bool) -> Void)?
     /// Seeded from the model's cache: a live session's pane paints its retained
     /// screen in its first commit, no spinner, no actor round trip first.
     @State private var surface: TerminalSurface?
 
     init(model: AppModel, sessionID: SessionID, role: TerminalPaneRole = .session,
-         fitSuspended: Bool = false, otherShape: (role: TerminalPaneRole, width: CGFloat)? = nil) {
+         fitSuspended: Bool = false, otherShape: (role: TerminalPaneRole, width: CGFloat)? = nil,
+         focusRequest: Int = 0, onFocusChange: ((Bool) -> Void)? = nil) {
         self.model = model
         self.sessionID = sessionID
         self.role = role
         self.fitSuspended = fitSuspended
         self.otherShape = otherShape
+        self.focusRequest = focusRequest
+        self.onFocusChange = onFocusChange
         _surface = State(initialValue: model.cachedSurface(for: sessionID))
     }
     @State private var paneSize: CGSize = .zero
@@ -116,8 +124,12 @@ struct TerminalPane: View {
                                                },
                                                onCopy: { selection.capturedText },
                                                onCopied: { badge = copiedBadge($0) },
-                                               onFocus: { surface.setFocus($0) },
-                                               claimsIdleFocus: role != .panel,
+                                               onFocus: { focused in
+                                                   surface.setFocus(focused)
+                                                   onFocusChange?(focused)
+                                               },
+                                               claimsIdleFocus: role.claimsIdleFocus,
+                                               focusRequest: focusRequest,
                                                onText: { text in
                                                    // Typing dismisses the selection, like any
                                                    // terminal — and this is also what covers

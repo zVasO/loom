@@ -505,6 +505,10 @@ public struct KeyCaptureView: NSViewRepresentable {
     /// secondary pane (the fleet panel's shell): it takes the keyboard on a
     /// click only, never from the terminal the person is typing in.
     let claimsIdleFocus: Bool
+    /// Bumped by the pane's owner to hand this view the keyboard — a "Reply"
+    /// button, a key of the table beside it. The value means nothing, only
+    /// its change; a view that appears with one already set takes nothing.
+    let focusRequest: Int
     let onText: (String) -> Void
 
     /// `onText` comes last so the trailing-closure form still means "the keystrokes".
@@ -515,6 +519,7 @@ public struct KeyCaptureView: NSViewRepresentable {
                 onCopied: ((Int) -> Void)? = nil,
                 onFocus: ((Bool) -> Void)? = nil,
                 claimsIdleFocus: Bool = true,
+                focusRequest: Int = 0,
                 onText: @escaping (String) -> Void) {
         self.modes = modes
         self.preferences = preferences
@@ -523,17 +528,29 @@ public struct KeyCaptureView: NSViewRepresentable {
         self.onCopied = onCopied
         self.onFocus = onFocus
         self.claimsIdleFocus = claimsIdleFocus
+        self.focusRequest = focusRequest
         self.onText = onText
     }
 
     public func makeNSView(context: Context) -> CaptureNSView {
         let view = CaptureNSView()
         configure(view)
+        view.answeredFocusRequest = focusRequest
         return view
     }
 
     public func updateNSView(_ view: CaptureNSView, context: Context) {
         configure(view)
+        // Asked for the keyboard: taken even from another owner — the person
+        // just pressed the key or the button that says so.
+        if view.answeredFocusRequest != focusRequest {
+            view.answeredFocusRequest = focusRequest
+            DispatchQueue.main.async { [weak view] in
+                guard let view else { return }
+                view.window?.makeFirstResponder(view)
+            }
+            return
+        }
         // Reclaiming focus when nothing is focused anymore — never by stealing it
         // from an active text field (renaming, palette…). A click inside the pane
         // is handled by the mouse monitor instead, which leaves the press itself
@@ -560,6 +577,8 @@ public struct KeyCaptureView: NSViewRepresentable {
         var onCopied: ((Int) -> Void)?
         var onFocus: ((Bool) -> Void)?
         var claimsIdleFocus = true
+        /// The last `focusRequest` this view acted on.
+        var answeredFocusRequest = 0
         var modes = TerminalModes.none
         var preferences = KeyboardPreferences()
         private var mouseReporting: Bool { modes.mouseReporting }

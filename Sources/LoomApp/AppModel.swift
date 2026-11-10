@@ -236,6 +236,7 @@ public final class AppModel {
     private var preferredReviewGrid: TerminalGeometry? = AppModel.storedGrid(role: .review)
     private var preferredSplitGrid: TerminalGeometry? = AppModel.storedGrid(role: .sessionSplit)
     private var preferredPanelGrid: TerminalGeometry? = AppModel.storedGrid(role: .panel)
+    private var preferredMissionGrid: TerminalGeometry? = AppModel.storedGrid(role: .missionControl)
 
     private static func storedGrid(role: TerminalPaneRole) -> TerminalGeometry? {
         let cols = UserDefaults.standard.integer(forKey: role.colsKey)
@@ -267,6 +268,10 @@ public final class AppModel {
         case .panel:
             // Never measured: the Sessions width, a dozen rows.
             return preferredPanelGrid ?? TerminalGeometry(cols: preferredGrid.cols, rows: 12)
+        case .missionControl:
+            // Never measured: the Sessions width, what the table leaves of its height.
+            return preferredMissionGrid
+                ?? TerminalGeometry(cols: preferredGrid.cols, rows: max(10, preferredGrid.rows * 3 / 5))
         }
     }
 
@@ -349,6 +354,7 @@ public final class AppModel {
         case .review: preferredReviewGrid = grid
         case .sessionSplit: preferredSplitGrid = grid
         case .panel: preferredPanelGrid = grid
+        case .missionControl: preferredMissionGrid = grid
         }
         UserDefaults.standard.set(cols, forKey: role.colsKey)
         UserDefaults.standard.set(rows, forKey: role.rowsKey)
