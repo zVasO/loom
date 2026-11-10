@@ -54,7 +54,11 @@ struct TerminalPane: View {
                                    historyBase: surface.historyBase,
                                    cursorVisible: surface.modes.cursorVisible,
                                    selection: $selection,
-                                   onCopied: { badge = copiedBadge($0) })
+                                   onCopied: { badge = copiedBadge($0) },
+                                   // Only a tracking agent hears it (the engine
+                                   // gates on the mouse mode); for everyone
+                                   // else a click is nothing but a selection.
+                                   onTap: { col, row in surface.sendClick(atCol: col, row: row) })
                     // TRM-02: the view announces its grid. Measured from a
                     // BACKGROUND geometry reader feeding @State — a wrapping
                     // GeometryReader hands `.task(id:)` a value that is not
@@ -103,11 +107,12 @@ struct TerminalPane: View {
                     // which exists precisely because that tap never fired.
                     .background(KeyCaptureView(modes: surface.modes,
                                                preferences: KeyboardPreferences(optionAsMeta: optionAsMeta),
-                                               onWheel: { direction, col, row in
-                                                   surface.sendWheel(direction, atCol: col, row: row)
-                                               },
-                                               onClick: { col, row in
-                                                   surface.sendClick(atCol: col, row: row)
+                                               onWheel: { direction, col, rowsAboveLast in
+                                                   // Counted up from the grid's last row:
+                                                   // the pane is glued to its bottom.
+                                                   let rows = surface.screen.geometry.rows
+                                                   surface.sendWheel(direction, atCol: col,
+                                                                     row: max(0, rows - 1 - rowsAboveLast))
                                                },
                                                onCopy: { selection.capturedText },
                                                onCopied: { badge = copiedBadge($0) },

@@ -74,6 +74,37 @@ public enum TerminalMetrics {
         guard cell.width > 0 else { return 0 }
         return min(max(0, Int(((x - gridInset) / cell.width).rounded(.down))), max(0, cols - 1))
     }
+
+    /// The cell of the LIVE screen under a point of the padded content — what
+    /// a click means to a program that tracks the mouse. Nil over the
+    /// scrollback: those rows are ours, no target of the program is there.
+    ///
+    /// Measured in the content's own space on purpose. The grid hangs from the
+    /// BOTTOM of the pane (the view is anchored there), so the room left over
+    /// by a height that is not a whole number of rows sits ABOVE the first
+    /// row: counting rows down from the pane's top edge was off by that
+    /// fraction, and a click on the lower part of a one-row target — a close
+    /// box, a fold mark — went to the row under it.
+    public static func screenCell(at point: CGPoint, historyRows: Int, screenRows: Int,
+                                  cols: Int) -> (col: Int, row: Int)? {
+        let cell = cellSize
+        guard cell.height > 0, screenRows > 0 else { return nil }
+        let contentRow = max(0, Int(((point.y - gridInset) / cell.height).rounded(.down)))
+        let row = contentRow - max(0, historyRows)
+        guard row >= 0 else { return nil }
+        return (cellColumn(atX: point.x, cols: cols), min(row, screenRows - 1))
+    }
+
+    /// How many rows sit between a point and the LAST row of the grid, the
+    /// point given by its distance up from the pane's bottom edge. The wheel
+    /// uses it: a pane whose program tracks the mouse stays glued to its
+    /// bottom, and the grid is measured from there — never from the top,
+    /// where the leftover fraction of a row is.
+    public static func rowsAboveLast(distanceFromBottom distance: CGFloat) -> Int {
+        let cell = cellSize
+        guard cell.height > 0 else { return 0 }
+        return max(0, Int(((distance - gridInset) / cell.height).rounded(.down)))
+    }
 }
 
 /// Renders a `TerminalScreen` — the view pulls values, never the engine
@@ -91,18 +122,27 @@ public struct TerminalScreenView: View {
     @Binding public var selection: TerminalSelection
     /// How many characters copy-on-select put on the pasteboard.
     private let onCopied: ((Int) -> Void)?
+    /// A press released where it landed, on a cell of the live screen
+    /// (0-based): the click a program that tracks the mouse asked to hear —
+    /// the only way to reach a target it draws without a keybinding.
+    private let onTap: ((_ col: Int, _ row: Int) -> Void)?
 
     public init(screen: TerminalScreen, history: [TerminalLine] = [], historyBase: Int = 0,
                 cursorVisible: Bool = true,
                 selection: Binding<TerminalSelection> = .constant(.empty),
-                onCopied: ((Int) -> Void)? = nil) {
+                onCopied: ((Int) -> Void)? = nil,
+                onTap: ((_ col: Int, _ row: Int) -> Void)? = nil) {
         self.screen = screen
         self.history = history
         self.historyBase = historyBase
         self.cursorVisible = cursorVisible
         self._selection = selection
         self.onCopied = onCopied
+        self.onTap = onTap
     }
+
+    /// A hand never holds perfectly still: below this, the pointer did not travel.
+    private static let tapSlop: CGFloat = 3
 
     /// One press, kept only to tell a double click from two single ones.
     private struct Press {
@@ -305,12 +345,13 @@ public struct TerminalScreenView: View {
                 let head = position(at: value.location)
                 if selection.head != head { selection.head = head }
             }
-            .onEnded { _ in
+            .onEnded { value in
                 dragging = false
                 if openingLink {
                     openingLink = false
                     return
                 }
+                reportTap(from: value.startLocation, to: value.location)
                 guard selection.isActive else { return }
                 selection.capturedText = selection.text(history: history,
                                                         historyBase: historyBase,
@@ -322,6 +363,25 @@ public struct TerminalScreenView: View {
                     onCopied?(text.count)
                 }
             }
+    }
+
+    /// The press is decided on its RELEASE: only then is it known whether the
+    /// pointer travelled. One that moved was a selection, and the program
+    /// hears nothing of it; one that stayed in its cell is a click, at the
+    /// cell this view — the only one that knows where its rows are — finds
+    /// under it.
+    private func reportTap(from down: CGPoint, to up: CGPoint) {
+        guard let onTap else { return }
+        let cols = screen.geometry.cols
+        guard let pressed = TerminalMetrics.screenCell(at: down, historyRows: history.count,
+                                                       screenRows: screen.lines.count, cols: cols),
+              let released = TerminalMetrics.screenCell(at: up, historyRows: history.count,
+                                                        screenRows: screen.lines.count, cols: cols),
+              TerminalClick.isTap(from: down, to: up,
+                                  sameCell: pressed.col == released.col && pressed.row == released.row,
+                                  slop: Self.tapSlop)
+        else { return }
+        onTap(released.col, released.row)
     }
 
     private func position(at point: CGPoint) -> TerminalPosition {
