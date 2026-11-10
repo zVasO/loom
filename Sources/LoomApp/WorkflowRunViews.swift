@@ -370,6 +370,12 @@ private struct RunStepRow: View {
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
                 if let sessionID {
+                    // A running step whose session asks something waits on the
+                    // person, not on claude: say so where the run is watched.
+                    if record.status == .running,
+                       model.sessions.first(where: { $0.id == sessionID })?.state == .needsInput {
+                        StatusTag("waits for you", color: DefaultTheme.badgeColor(for: .needsInput))
+                    }
                     GhostButton("Session", systemImage: "terminal") { model.workflows.sessionToOpen = sessionID }
                         .help("Open this step's session in Sessions: follow it, answer it, take over")
                 }
