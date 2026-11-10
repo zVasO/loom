@@ -546,6 +546,20 @@ struct ContentView: View {
                 model.workflows.launchRequest = .init(workflowID: workflow.id, inputs: nil)
             })
         }
+        // The templates not in the library yet (ADR-0021): picked here, one
+        // joins it and its Run sheet opens.
+        for template in WorkflowTemplates.all
+        where !model.workflows.workflows.contains(where: { $0.name == template.name }) {
+            actions.append(PaletteAction(id: "wf.template.\(template.id)", icon: template.icon,
+                                         title: "Run workflow: \(template.name)",
+                                         subtitle: template.tagline,
+                                         section: "Workflows") {
+                guard let workflow = model.workflows.useTemplate(template) else { return }
+                model.workflows.detail = .workflow
+                tab = .workflows
+                model.workflows.launchRequest = .init(workflowID: workflow.id, inputs: nil)
+            })
+        }
 
         // Extensions (ADR-0011): open one, or run a command it contributes.
         for installed in model.extensions.readyExtensions {

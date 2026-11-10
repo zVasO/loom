@@ -7,9 +7,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
 
-/// The Workflows tab (ADR-0017): the library on the left — workflows,
-/// experts, connectors, runs — and beside it the React Flow editor, a run
-/// being watched, its report, or an expert's or a connector's form.
+/// The Workflows tab (ADR-0017, ADR-0021): on the left the workflows, their
+/// runs, and — folded — what they are made of (experts, rule sets,
+/// connectors); beside it the templates to start from, the React Flow
+/// editor, a run as the list of its steps (or on its graph), its report, or
+/// an expert's or a connector's form.
 struct WorkflowsView: View {
     let model: AppModel
     /// Opens a step's session in the Sessions tab.

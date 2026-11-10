@@ -314,12 +314,16 @@ public actor SessionManager {
         }
     }
 
+    /// The journal's word for a turn that ended on a question: the agent
+    /// waits for an answer in its input field — not on a permission prompt.
+    public static let stopOnQuestionLabel = "Stop · question"
+
     /// The journal's words for what moved the state: the hook's name, or what
     /// the heuristic saw.
     static func label(of event: StateEngine.Event) -> String {
         switch event {
         case .hook(.userPromptSubmit): "UserPromptSubmit"
-        case .hook(.stop(let awaitsReply)): awaitsReply ? "Stop · question" : "Stop"
+        case .hook(.stop(let awaitsReply)): awaitsReply ? stopOnQuestionLabel : "Stop"
         case .hook(.permissionRequested): "PermissionRequest"
         case .heuristic(.working): "output"
         case .heuristic(.idle): "silence"

@@ -149,7 +149,9 @@ private struct ReviewScheduleEditor: View {
                         .foregroundStyle(DefaultTheme.secondaryText)
                     Picker("", selection: field(\.workflowID, of: schedule)) {
                         Text("Claude's full review (built-in)").tag(UUID?.none)
-                        ForEach(model.workflows.workflows.filter { $0.triggers.contains(.schedule) || $0.triggers.contains(.pullRequest) }) { workflow in
+                        ForEach(model.workflows.workflows.filter {
+                            ($0.triggers.contains(.schedule) || $0.triggers.contains(.pullRequest)) && $0.workspace == .project
+                        }) { workflow in
                             Text("Workflow: \(workflow.name)").tag(Optional(workflow.id))
                         }
                     }

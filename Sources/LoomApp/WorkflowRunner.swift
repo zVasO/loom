@@ -3,6 +3,7 @@ import LoomAgents
 import LoomAPI
 import LoomCore
 import LoomGit
+import LoomSessions
 import LoomUI
 import LoomWorkflows
 
@@ -658,9 +659,12 @@ extension AppModel {
                 : instructions
             // The same session goes on when the step continues one that is
             // still there: the prompt is typed into it. Otherwise a new one.
+            // Its rules were the system prompt of a new session: in a session
+            // that already runs they are said with the prompt.
+            let typed = "[Next step of the workflow: \(node.title)]\n" + prompt + (rules.isEmpty ? "" : "\n\n" + rules)
             var continued: SessionID?
             if let raw = carried?.sessionID, let uuid = UUID(uuidString: raw),
-               await typeIntoStepSession(SessionID(uuid), prompt: "[Next step of the workflow: \(node.title)]\n" + prompt) {
+               await typeIntoStepSession(SessionID(uuid), prompt: typed) {
                 continued = SessionID(uuid)
                 workflows.log("\(node.title): continues in its session", run: run.id)
             }
@@ -704,9 +708,11 @@ extension AppModel {
     }
 
     /// Types a step's prompt into a session that already ran one (ADR-0021),
-    /// once it is idle. False when the session is gone, closed, or still
-    /// busy or asking after three minutes — the step then starts a session
-    /// of its own: nothing is ever typed over a question or a permission prompt.
+    /// once its input field is free: the session is idle, or its last turn
+    /// ended on a question — the next step is then its answer. False when
+    /// the session is gone, closed, or still busy or waiting on a permission
+    /// prompt after three minutes — the step then starts a session of its
+    /// own: nothing is ever typed over a permission prompt.
     private func typeIntoStepSession(_ session: SessionID, prompt: String) async -> Bool {
         let clock = ContinuousClock()
         let deadline = clock.now + .seconds(180)
@@ -715,13 +721,26 @@ extension AppModel {
             switch item.state {
             case .idle:
                 return await submitWhenReady(prompt, to: session, timeout: .seconds(60))
-            case .working, .starting, .needsInput:
+            case .needsInput:
+                if await endedOnQuestion(session) {
+                    return await submitWhenReady(prompt, to: session, timeout: .seconds(60))
+                }
+                try? await Task.sleep(for: .seconds(2))
+            case .working, .starting:
                 try? await Task.sleep(for: .seconds(1))
             case .draft, .completed, .failed, .interrupted, .archived:
                 return false
             }
         }
         return false
+    }
+
+    /// Whether the session waits because its turn ended on a question (the
+    /// journal says so) rather than on a permission prompt.
+    private func endedOnQuestion(_ session: SessionID) async -> Bool {
+        let id = session.rawValue.uuidString
+        let last = await recentTransitions(limit: 200).last { $0.sessionID == id }
+        return last?.to == .needsInput && last?.event == SessionManager.stopOnQuestionLabel
     }
 
     /// `claude -p` for one step: the answer parsed against its fields, asked
