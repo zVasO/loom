@@ -60,15 +60,22 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   barre de verdict, commentaires sur les lignes du diff en commentaires en attente,
   verdict suggéré. L'humain relit, corrige, envoie. Une PR n'est revue à nouveau
   qu'après un push. Réglages › Scheduled reviews ; suivi dans le rail du mode Browse de l'onglet PRs.
-- **Workflows** (ADR-0017) : des graphes d'étapes dessinés dans l'onglet Workflows
+- **Workflows** (ADR-0017, ADR-0021) : une tâche en entrée, une branche relue en
+  sortie. L'onglet s'ouvre sur des **gabarits** prêts à lancer — Réaliser une tâche
+  (plan, ton accord, implémentation, relecture indépendante qui renvoie le travail),
+  Corriger jusqu'au vert, Relire une PR, Enquêter sur un bug. Un run peut travailler
+  **sur sa propre branche** (un worktree à lui : ton dossier ne bouge pas, rien n'est
+  poussé) ; une étape peut **poursuivre la conversation** d'une autre (le même
+  développeur planifie, implémente et corrige) ; un run se lit comme une liste
+  d'étapes avec leurs verdicts et leurs réponses. Dessous, des graphes d'étapes
   (éditeur React Flow embarqué) — départ, contexte (PR, ticket Jira via un connecteur
   Atlassian, repo), agents confiés à des **experts** (instructions, modèle, skills,
   connecteurs MCP, outils autorisés), conditions, boucles bornées, rapport final.
   Étapes en parallèle, réponses JSON validées entre étapes, headless (`claude -p`)
   ou en session visible ; estimation de coût avant lancement ; runs suivis en direct
   et conservés. Lancés à la main, depuis l'onglet d'une PR ou par une review
-  planifiée. La bibliothèque démarre vide : aucun workflow, expert ou connecteur par
-  défaut. Le rapport, animé, porte un thème
+  planifiée. La bibliothèque démarre vide : un gabarit n'y entre que lorsqu'on le
+  lance. Le rapport, animé, porte un thème
   de Loom (thème HomeServe prêt dans `docs/themes/`). Un run peut avoir un
   **orchestrateur** (ADR-0018) : une session visible, sous Sessions › Workflows, qui
   reçoit chaque résultat, questionne une étape (même headless, en reprenant sa

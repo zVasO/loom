@@ -1,12 +1,40 @@
 # Workflows
 
-Un workflow enchaîne des étapes confiées à des **experts** : on le dessine dans l'onglet **Workflows**, on le lance sur une PR, un ticket Jira ou à la main, et il se termine par un **rapport**. Les choix de conception sont dans l'[ADR-0017](adr/0017-workflows-multi-agents.md).
+Un workflow enchaîne des étapes confiées à des **experts** : on lui donne une tâche, une PR ou un ticket, il planifie, écrit, fait relire, s'arrête où tu décides — et laisse une **branche** ou un **rapport**. Les choix de conception sont dans l'[ADR-0017](adr/0017-workflows-multi-agents.md) et, pour ce qui suit, l'[ADR-0021](adr/0021-workflows-qui-livrent.md).
+
+## Commencer par un gabarit
+
+L'onglet Workflows s'ouvre sur une **galerie** : des workflows prêts à lancer. **Run…** copie le gabarit dans ta bibliothèque (avec ses experts) et ouvre la feuille de lancement ; **Customize** l'ouvre dans l'éditeur. Un gabarit copié est à toi : modifie-le, duplique-le.
+
+| Gabarit | Ce qu'on lui donne | Ce qu'il laisse |
+|---|---|---|
+| **Réaliser une tâche** | Une tâche | Une branche relue. Un développeur explore et propose un plan ; tu dis `go`, `à revoir` (avec un commentaire) ou `arrêter` ; il implémente, lance les vérifications du projet, commite ; un relecteur indépendant relit le diff et renvoie le travail s'il le faut, deux fois au plus. |
+| **Corriger jusqu'au vert** | Ce qui échoue (tests, lint, build) | Une branche verte. Le développeur reproduit, corrige, relance — trois tours au plus ; un relecteur vérifie que le vert n'a pas été obtenu en affaiblissant un test. |
+| **Relire une PR** | Une PR | Une review dans l'onglet de la PR. Un analyste dit ce que la PR veut faire ; trois relecteurs en parallèle (exactitude, sécurité, tests) ; un lead vérifie chaque retour dans le code et propose le verdict. |
+| **Enquêter sur un bug** | Un symptôme | Une cause prouvée et un plan de correction, contestés par un second avis. Ne modifie rien. |
+
+## Où travaille un run
+
+- **Sur sa propre branche** (« its own branch ») : le run crée un worktree sur une branche `loom/<tâche>` et toutes ses étapes y travaillent. Ton dossier ne bouge pas, rien n'est poussé. À la fin, l'en-tête du run donne la branche et ce qui a changé ; **Open a session there** ouvre une session dans ce worktree pour relire le diff, commiter, pousser, ouvrir la PR.
+- **Dans le projet** (« reads the project ») : le dossier du projet, ou le checkout en lecture seule d'une PR. Les étapes lisent et rapportent.
+
+Ça se règle dans l'éditeur, panneau de droite quand aucune étape n'est sélectionnée (« Where its runs work »). Un workflow sur branche ne charge pas de PR.
+
+Les étapes qui **écrivent** sont des sessions visibles : tu les suis dans Sessions et dans Mission Control, elles demandent leurs permissions comme toute session, tu peux leur répondre ou reprendre la main. Les étapes qui **jugent** tournent en headless, avec un expert en lecture seule.
+
+## Une étape qui poursuit une conversation
+
+Par défaut, chaque étape est un nouvel agent, à chaque passe. Dans l'éditeur, **Conversation** change ça :
+- **Its own** : relancée (une reprise « ↺ »), l'étape garde ce qu'elle a lu et fait ;
+- **Carries on from …** : elle continue la conversation d'une étape d'avant, de même mode.
+
+C'est ainsi que, dans « Réaliser une tâche », le plan, l'implémentation et les corrections sont le travail d'un seul développeur, pendant que le relecteur reste un regard neuf à chaque tour. Une session fermée, occupée ou qui attend ta réponse depuis trois minutes n'est pas forcée : l'étape ouvre la sienne.
 
 ## L'onglet Workflows
 
-- **Workflows** : la bibliothèque. Un clic ouvre l'éditeur ; un double-clic renomme ; le menu contextuel lance, duplique, exporte (avec ses experts et connecteurs, sans secret) ou supprime. Le `+` crée ou importe un fichier `.loom-workflow.json`. La bibliothèque démarre vide : Loom ne livre aucun workflow, expert ni connecteur par défaut. Une bibliothèque plus ancienne perd une fois ceux qu'elle avait reçus (la « PR review — 3 passes », ses six experts, les connecteurs Atlassian), seulement s'ils sont restés tels quels et que rien d'autre ne s'en sert.
-- **Experts**, **Connectors** : des formulaires natifs (voir plus bas).
-- **Runs** : l'historique. Un run en cours se suit sur le graphe (les étapes s'allument, « pass 2 »…) ; **Report** ouvre le rapport, **Log** le journal, le dossier contient tout.
+- **Workflows** : ta bibliothèque. Un clic ouvre l'éditeur ; un double-clic renomme ; le menu contextuel lance, duplique, exporte (avec ses experts et connecteurs, sans secret) ou supprime. Le `+` part d'un gabarit, crée avec l'IA, crée un workflow vide ou importe un fichier `.loom-workflow.json`. La bibliothèque démarre vide : Loom n'y met rien de lui-même. Une bibliothèque plus ancienne perd une fois ce qu'elle avait reçu (la « PR review — 3 passes », ses six experts, les connecteurs Atlassian), seulement ce qui est resté tel quel et dont rien d'autre ne se sert.
+- **Runs** : l'historique, chaque run appelé par sa tâche ou sa PR, avec sa branche. Un run se lit comme une **liste** : la tâche, la branche et les changements, puis chaque étape dans l'ordre — son état, sa passe, son verdict, sa durée ; un clic déplie sa réponse, **Session** ouvre celle d'une étape visible. **Graph** montre le run sur le graphe (les étapes s'allument, « pass 2 »…) ; **Report** ouvre le rapport, **Log** le journal, le dossier contient tout.
+- **Library** : experts, jeux de règles et connecteurs — ce dont les étapes se servent —, repliés tant qu'on n'en a pas besoin : un gabarit apporte les siens.
 - En bas : combien d'étapes tournent à la fois dans un run, et le modèle par défaut.
 
 ## L'éditeur
@@ -41,11 +69,14 @@ Cliquer une variable sous le prompt l'insère :
 - `{{steps.<étape>.<champ>}}` : un champ de la réponse d'une étape d'avant ; `{{steps.<étape>.text}}` sa réponse en texte.
 - `{{previous.<étape>}}` : sa réponse à la passe précédente (vide à la première) — c'est ainsi qu'une relance tient compte des retours ; `{{history.<étape>}}` toutes les passes d'avant.
 - `{{in.text}}` : les réponses des étapes juste avant, en texte ; `{{in.<champ>}}` leurs champs — ce qu'un bloc utilise, puisqu'il ne connaît pas le workflow où il est posé. `{{item}}`, `{{index}}` dans un « pour chaque ». `{{steps.<étape>.verdict}}` le verdict d'une étape.
-- `{{pr.number}}`, `{{pr.title}}`, `{{pr.url}}`, `{{pr.author}}`, `{{pr.base}}`, `{{pr.head}}`, `{{pr.body}}` ; `{{ticket.key}}` ; `{{repo.name}}`, `{{repo.path}}` ; `{{run.note}}` (la note saisie au lancement) ; `{{iteration}}` (le numéro de passe).
+- `{{run.task}}` : la tâche saisie au lancement — un workflow qui la cite la demande, et ne part pas sans ; `{{run.title}}` sa première ligne ; `{{run.note}}` la note ; `{{run.branch}}` et `{{run.base}}` la branche d'un run sur branche et le commit dont il est parti (`git diff {{run.base}}` : ce que le run a changé).
+- `{{pr.number}}`, `{{pr.title}}`, `{{pr.url}}`, `{{pr.author}}`, `{{pr.base}}`, `{{pr.head}}`, `{{pr.body}}` ; `{{ticket.key}}` ; `{{repo.name}}`, `{{repo.path}}` ; `{{iteration}}` (le numéro de passe).
 
 ## Experts
 
 Un expert = des **instructions** ajoutées au prompt système de claude (`--append-system-prompt`), un **modèle** (`opus`, `sonnet`, `haiku` ou un identifiant), des **skills** (lues dans `~/.claude/skills` et `.claude/skills` du projet, injectées dans ses étapes seulement), des **connecteurs**, et les **outils** qu'il peut utiliser. Une étape headless n'a personne pour répondre à une demande de permission : ce qui n'est pas listé est refusé. Par défaut : lecture, recherche, et les commandes `git` / `gh` en lecture seule. Une étape peut ajouter ses propres skills et connecteurs à ceux de son expert.
+
+Les gabarits apportent les leurs : **Développeur** (le seul qui écrit — édition et shell —, sur la branche du run), **Relecteur**, **Enquêteur**, **Analyste**, **Sécurité**, **Tests**, **Lead** (tous en lecture seule). Ce sont des experts comme les autres : change leurs instructions, leur modèle, leurs skills.
 
 ## Connecteurs
 
@@ -63,7 +94,8 @@ Un expert = des **instructions** ajoutées au prompt système de claude (`--appe
 
 ## Lancer
 
-- **Run…** dans l'éditeur, ⌘K « Run workflow: … », ou le menu contextuel : choisir le projet, la PR, la clé Jira (sinon trouvée dans le titre, la branche ou le corps de la PR), une note. L'estimation (nombre de runs claude, ordre de grandeur en dollars) s'affiche avant de lancer.
+- **Run…** dans la galerie ou l'éditeur, ⌘K « Run workflow: … », ou le menu contextuel. La feuille ne demande que ce que le workflow lit : **la tâche** (⌘↵ lance), le projet, la PR, la clé Jira (sinon trouvée dans le titre, la branche ou le corps de la PR), une note. Elle dit où le run travaillera — la branche qu'il créera — et son estimation (nombre de runs claude, ordre de grandeur en dollars) avant de lancer.
+- **Depuis une session** : `loom_library_run_request` ouvre cette feuille préremplie (workflow, projet, tâche) ; rien ne part sans ton clic.
 - **Depuis l'onglet d'une PR** : le menu **Workflow** lance un workflow sur cette PR, ou rouvre un de ses runs.
 - **Planifié** : dans Réglages › Scheduled reviews, « Review with » choisit un workflow plutôt que la review intégrée ; il tourne sur chaque PR choisie.
 
@@ -108,4 +140,4 @@ Il porte **un thème de Loom** : couleurs par rôle (accent → liens et boutons
 
 ## Le format
 
-Un workflow est un fichier JSON lisible — `nodes` (`id`, `title`, `type`, `position`, `config`) et `edges` (`from`, `to`, `branch` pour les sorties d'une condition). L'éditeur se reconstruit par `scripts/build-workflow-editor.sh` après une modification de `WorkflowEditor/src`.
+Un workflow est un fichier JSON lisible — `nodes` (`id`, `title`, `type`, `position`, `config`), `edges` (`from`, `to`, `branch` pour les sorties d'une condition) et `workspace` (`project` ou `worktree`). Une étape agent peut porter `continues` : l'identifiant de l'étape dont elle poursuit la conversation. L'éditeur se reconstruit par `scripts/build-workflow-editor.sh` après une modification de `WorkflowEditor/src`.
