@@ -389,6 +389,8 @@ struct WorkflowLaunchSheet: View {
     @State private var prText = ""
     @State private var jiraKey = ""
     @State private var note = ""
+    @State private var task = ""
+    @FocusState private var taskFocused: Bool
 
     private var workflows: WorkflowsModel { model.workflows }
 
@@ -397,32 +399,116 @@ struct WorkflowLaunchSheet: View {
         let key = jiraKey.trimmingCharacters(in: .whitespaces)
         let trigger: Trigger = request.inputs?.trigger ?? (pr != nil ? .pullRequest : key.isEmpty ? .manual : .jiraTicket)
         return RunInputs(trigger: trigger, projectID: projectID, prNumber: pr,
-                         jiraKey: key.isEmpty ? nil : key.uppercased(), note: note)
+                         jiraKey: key.isEmpty ? nil : key.uppercased(), note: note,
+                         task: task.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// What the sheet asks for depends on what the workflow reads: a task,
+    /// a pull request, a ticket — never fields it would not use.
+    private struct Asks {
+        var task = false
+        var pullRequest = false
+        var ticket = false
+        var note = false
+
+        init(_ workflow: Workflow?) {
+            guard let workflow else { return }
+            let paths = workflow.templates.flatMap(TemplateRenderer.paths(in:))
+            task = workflow.asksForTask
+            note = paths.contains("run.note")
+            let readsTicket = workflow.nodes.contains {
+                if case .context(let config) = $0.kind { return config.source == .jiraTicket }
+                return false
+            }
+            if workflow.workspace == .project {
+                pullRequest = workflow.readsPullRequest || workflow.triggers.contains(.pullRequest)
+                    || paths.contains { $0.hasPrefix("pr.") }
+                ticket = readsTicket || workflow.triggers.contains(.jiraTicket) || paths.contains { $0.hasPrefix("ticket.") }
+            }
+            // A workflow that asks for nothing still takes a note: something to tell its steps.
+            if !task, !pullRequest, !ticket { note = true }
+        }
     }
 
     var body: some View {
         let workflow = workflows.workflow(workflowID)
+        let asks = Asks(workflow)
         let problem = workflow.flatMap { model.workflowLaunchProblem($0, inputs: inputs) }
         VStack(alignment: .leading, spacing: 14) {
-            Text("Run a workflow").font(.system(size: 17, weight: .bold))
-            Picker("Workflow", selection: $workflowID) {
-                ForEach(workflows.workflows) { Text($0.name).tag(Optional($0.id)) }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(workflow.map { "Run «\($0.name)»" } ?? "Run a workflow")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(DefaultTheme.primaryText)
+                if let workflow {
+                    if !workflow.summary.isEmpty {
+                        Text(workflow.summary)
+                            .font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(WorkflowOutline(workflow, experts: workflows.experts, blocks: workflows.blocks).oneLine)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.mutedText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if request.workflowID == nil || workflow == nil {
+                Picker("Workflow", selection: $workflowID) {
+                    ForEach(workflows.workflows) { Text($0.name).tag(Optional($0.id)) }
+                }
+            }
+            if asks.task {
+                VStack(alignment: .leading, spacing: 5) {
+                    formTitle("The task")
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $task)
+                            .font(.system(size: 13))
+                            .foregroundStyle(DefaultTheme.primaryText)
+                            .scrollContentBackground(.hidden)
+                            .focused($taskFocused)
+                            .padding(8)
+                        if task.isEmpty {
+                            Text(taskPlaceholder(for: workflow))
+                                .font(.system(size: 13))
+                                .foregroundStyle(DefaultTheme.mutedText)
+                                .padding(.horizontal, 13).padding(.vertical, 8)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(minHeight: 118, maxHeight: 220)
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .stroke(taskFocused ? DefaultTheme.accent.opacity(0.7) : DefaultTheme.cardBorder, lineWidth: 1))
+                    formHint("As you would tell a colleague: what is wanted, where, and how to know it is done.")
+                }
             }
             Picker("Project", selection: $projectID) {
                 Text("None").tag(ProjectID?.none)
                 ForEach(model.projects, id: \.id) { Text($0.name).tag(Optional($0.id)) }
             }
-            TextField("Pull request number", text: $prText)
-            TextField("Jira key — found in the PR when empty", text: $jiraKey)
-            TextField("A note for the steps ({{run.note}})", text: $note)
+            if asks.pullRequest {
+                TextField("Pull request number", text: $prText)
+            }
+            if asks.ticket {
+                TextField("Jira key — found in the PR when empty", text: $jiraKey)
+            }
+            if asks.note {
+                TextField("A note for the steps ({{run.note}})", text: $note)
+            }
             if let workflow {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    WorkspaceTag(workspace: workflow.workspace)
+                    Text(workspaceLine(workflow))
+                        .font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 let estimate = CostEstimate.estimate(workflow, experts: workflows.experts,
-                                                     defaultModel: workflows.defaultModel)
+                                                     defaultModel: workflows.defaultModel, blocks: workflows.blocks)
                 Text(estimateText(estimate))
                     .font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
             }
             if let problem {
                 Text(problem).font(.system(size: 11)).foregroundStyle(DefaultTheme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
                 Spacer()
@@ -432,18 +518,42 @@ struct WorkflowLaunchSheet: View {
                     workflows.detail = .run(runID)
                     dismiss()
                 }
-                .keyboardShortcut(.defaultAction)
+                // ⌘↵: Return alone is a new line in the task.
+                .keyboardShortcut(.return, modifiers: asks.task ? .command : [])
                 .disabled(workflow == nil || problem != nil)
+                .help(asks.task ? "Run (⌘↵)" : "Run (↵)")
             }
         }
         .padding(22)
-        .frame(width: 460)
+        .frame(width: 520)
         .onAppear {
             workflowID = request.workflowID ?? workflows.selectedWorkflowID ?? workflows.workflows.first?.id
             projectID = request.inputs?.projectID ?? model.selectedProject ?? model.projects.first?.id
             if let number = request.inputs?.prNumber { prText = "\(number)" }
             jiraKey = request.inputs?.jiraKey ?? ""
             note = request.inputs?.note ?? ""
+            task = request.inputs?.task ?? ""
+            taskFocused = true
+        }
+    }
+
+    /// The example a template gives for its task, else a plain invitation.
+    private func taskPlaceholder(for workflow: Workflow?) -> String {
+        let example = WorkflowTemplates.all.first { $0.name == workflow?.name }?.taskPlaceholder ?? ""
+        return example.isEmpty ? "What should be done?" : example
+    }
+
+    /// Where the run will work, said before it starts.
+    private func workspaceLine(_ workflow: Workflow) -> String {
+        let project = model.project(projectID)?.name ?? "the project"
+        switch workflow.workspace {
+        case .worktree:
+            let slug = inputs.taskSlug.isEmpty ? AppModel.slug(from: workflow.name) : inputs.taskSlug
+            return "Works in a new worktree of \(project), on the branch loom/\(slug). "
+                + "Your folder is left alone; nothing is pushed."
+        case .project:
+            if inputs.prNumber != nil { return "Reads the pull request in its read-only checkout." }
+            return "Works in \(project)'s folder, as its steps' experts allow — by default they only read."
         }
     }
 

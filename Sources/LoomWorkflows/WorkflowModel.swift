@@ -18,6 +18,9 @@ public struct Workflow: Codable, Identifiable, Equatable, Sendable, Proposable {
     public var color: String
     public var nodes: [WorkflowNode]
     public var edges: [WorkflowEdge]
+    /// Where its runs work (ADR-0021): the project as it is, read only, or a
+    /// worktree of their own where the steps write and a branch remains.
+    public var workspace: Workspace
     /// The run's conductor (ADR-0018): a Loom session that follows the run,
     /// talks to its steps and steers it. nil: none.
     public var orchestrator: OrchestratorConfig?
@@ -29,6 +32,7 @@ public struct Workflow: Codable, Identifiable, Equatable, Sendable, Proposable {
 
     public init(id: UUID = UUID(), name: String, summary: String = "", tags: [String] = [],
                 color: String = "#0D6E74", nodes: [WorkflowNode] = [], edges: [WorkflowEdge] = [],
+                workspace: Workspace = .project,
                 orchestrator: OrchestratorConfig? = nil, proposal: AgentProposal<Workflow>? = nil,
                 createdAt: Date = Date(), updatedAt: Date = Date(),
                 formatVersion: Int = Workflow.currentFormatVersion) {
@@ -39,6 +43,7 @@ public struct Workflow: Codable, Identifiable, Equatable, Sendable, Proposable {
         self.color = color
         self.nodes = nodes
         self.edges = edges
+        self.workspace = workspace
         self.orchestrator = orchestrator
         self.proposal = proposal
         self.createdAt = createdAt
@@ -56,6 +61,8 @@ public struct Workflow: Codable, Identifiable, Equatable, Sendable, Proposable {
                   color: try c.decodeIfPresent(String.self, forKey: .color) ?? "#0D6E74",
                   nodes: try c.decodeIfPresent([WorkflowNode].self, forKey: .nodes) ?? [],
                   edges: try c.decodeIfPresent([WorkflowEdge].self, forKey: .edges) ?? [],
+                  // A value this version does not know reads as the careful one.
+                  workspace: (try? c.decodeIfPresent(Workspace.self, forKey: .workspace)) ?? .project,
                   orchestrator: try c.decodeIfPresent(OrchestratorConfig.self, forKey: .orchestrator),
                   proposal: try c.decodeIfPresent(AgentProposal<Workflow>.self, forKey: .proposal),
                   createdAt: try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date(),
@@ -77,6 +84,48 @@ public struct Workflow: Codable, Identifiable, Equatable, Sendable, Proposable {
         if case .start(let config)? = start?.kind { return config.triggers }
         return []
     }
+
+    /// Every template a run of it renders: prompts, questions, the report's title.
+    public var templates: [String] {
+        var texts = nodes.flatMap { node -> [String] in
+            switch node.kind {
+            case .agent(let config): [config.prompt]
+            case .forEach(let config): [config.agent.prompt, "{{\(config.items)}}"]
+            case .approval(let config): [config.question]
+            case .artifact(let config): [config.title]
+            case .condition(let config): ["{{\(config.condition.path)}}"]
+            case .start, .context, .loop, .command: []
+            }
+        }
+        if let orchestrator { texts.append(orchestrator.instructions) }
+        return texts
+    }
+
+    /// Whether a step names `{{run.task}}`: the Run sheet then asks what is
+    /// to be done, and a run does not start without it. (A block's own
+    /// prompt is not looked at: a block does not know the run it is in.)
+    public var asksForTask: Bool {
+        templates.contains { TemplateRenderer.paths(in: $0).contains("run.task") }
+    }
+
+    /// Whether a run needs a pull request: a step loads one.
+    public var readsPullRequest: Bool {
+        nodes.contains {
+            if case .context(let config) = $0.kind { return config.source == .pullRequest }
+            return false
+        }
+    }
+}
+
+/// Where a run's steps work (ADR-0021).
+public enum Workspace: String, Codable, Sendable, CaseIterable {
+    /// The project's folder as it is — or, on a pull request, its read-only
+    /// checkout. The steps read and report; nothing is theirs to write.
+    case project
+    /// A worktree of the run's own, on a `loom/…` branch made when it
+    /// starts: the steps write there, and the run ends with a branch to
+    /// review, continue in a session, or open a pull request from.
+    case worktree
 }
 
 public struct WorkflowNode: Codable, Identifiable, Equatable, Sendable {
@@ -361,11 +410,16 @@ public struct AgentConfig: Codable, Equatable, Sendable {
     public var ruleSetIDs: [UUID]
     /// The step answers a verdict among these options: its links may follow it.
     public var verdict: VerdictConfig?
+    /// The step whose conversation this one carries on (ADR-0021) — an
+    /// earlier step, or itself: run again, it then keeps what it learned
+    /// instead of starting from nothing. nil: a new agent every time.
+    public var continues: String?
 
     public init(expertID: UUID? = nil, prompt: String = "", output: [OutputField] = [],
                 mode: AgentMode = .headless, model: String? = nil, skills: [String] = [],
                 connectorIDs: [UUID] = [], timeoutSeconds: Int = 900, blockID: UUID? = nil,
-                rules: [String] = [], ruleSetIDs: [UUID] = [], verdict: VerdictConfig? = nil) {
+                rules: [String] = [], ruleSetIDs: [UUID] = [], verdict: VerdictConfig? = nil,
+                continues: String? = nil) {
         self.expertID = expertID
         self.prompt = prompt
         self.output = output
@@ -378,6 +432,7 @@ public struct AgentConfig: Codable, Equatable, Sendable {
         self.rules = rules
         self.ruleSetIDs = ruleSetIDs
         self.verdict = verdict
+        self.continues = continues.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
     }
 
     public init(from decoder: Decoder) throws {
@@ -393,7 +448,8 @@ public struct AgentConfig: Codable, Equatable, Sendable {
                   blockID: try c.decodeIfPresent(UUID.self, forKey: .blockID),
                   rules: try c.decodeIfPresent([String].self, forKey: .rules) ?? [],
                   ruleSetIDs: try c.decodeIfPresent([UUID].self, forKey: .ruleSetIDs) ?? [],
-                  verdict: try c.decodeIfPresent(VerdictConfig.self, forKey: .verdict))
+                  verdict: try c.decodeIfPresent(VerdictConfig.self, forKey: .verdict),
+                  continues: try c.decodeIfPresent(String.self, forKey: .continues))
     }
 
     /// What claude is asked to answer: the fields, then the verdict's.

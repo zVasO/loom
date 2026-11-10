@@ -155,3 +155,24 @@ test("an agent's proposal shows a banner with its changes, Validate and Revert",
   assert.deepEqual(errors, []);
   await tab.close();
 });
+
+test("where a workflow's runs work and whose conversation a step carries on are set in the inspector (ADR-0021)", { skip }, async () => {
+  const { tab, errors } = await open();
+  // No step selected: the workflow's own settings.
+  await tab.click(".react-flow__pane", { position: { x: 20, y: 20 } });
+  assert.equal(await tab.inputValue('select[name="workspace"]'), "project", "a workflow reads the project unless told otherwise");
+  await tab.selectOption('select[name="workspace"]', "worktree");
+  await tab.waitForFunction(() => window.__loomWorkflowsStandIn.workflow.workspace === "worktree", null, { timeout: 5000 });
+  // An agent step: a new agent by default, or the conversation of an agent before it.
+  await tab.click('.react-flow__node[data-id="php"]');
+  assert.equal(await tab.inputValue('select[name="continues"]'), "");
+  const offered = await tab.$$eval('select[name="continues"] option', (options) => options.map((o) => o.value));
+  assert.deepEqual(offered, ["", "php", "intent"]);
+  await tab.selectOption('select[name="continues"]', "intent");
+  await tab.waitForFunction(() => (window.__loomWorkflowsStandIn.workflow.nodes.find((n) => n.id === "php") || {})
+    .config.continues === "intent", null, { timeout: 5000 });
+  const saved = await tab.evaluate(() => window.__loomWorkflowsStandIn.workflow);
+  assert.equal(saved.workspace, "worktree", "kept by the later save");
+  assert.deepEqual(errors, []);
+  await tab.close();
+});

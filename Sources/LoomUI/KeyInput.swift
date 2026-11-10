@@ -490,9 +490,11 @@ public struct KeyCaptureView: NSViewRepresentable {
     /// keyboard protocol. Read at frame cadence off the surface.
     let modes: TerminalModes
     let preferences: KeyboardPreferences
-    let onWheel: ((WheelDirection, Int, Int) -> Void)?
-    /// A click the agent asked for, at the cell under the pointer (0-based).
-    let onClick: ((Int, Int) -> Void)?
+    /// One notch for a program that tracks the mouse: the column under the
+    /// pointer, and how many rows it is above the grid's LAST row (both
+    /// 0-based) — the grid hangs from the pane's bottom, and only the pane's
+    /// owner knows how many rows it holds.
+    let onWheel: ((_ direction: WheelDirection, _ col: Int, _ rowsAboveLast: Int) -> Void)?
     /// The selected text, or nil when there is no selection.
     let onCopy: (() -> String?)?
     /// How many characters actually reached the pasteboard.
@@ -503,37 +505,52 @@ public struct KeyCaptureView: NSViewRepresentable {
     /// secondary pane (the fleet panel's shell): it takes the keyboard on a
     /// click only, never from the terminal the person is typing in.
     let claimsIdleFocus: Bool
+    /// Bumped by the pane's owner to hand this view the keyboard — a "Reply"
+    /// button, a key of the table beside it. The value means nothing, only
+    /// its change; a view that appears with one already set takes nothing.
+    let focusRequest: Int
     let onText: (String) -> Void
 
     /// `onText` comes last so the trailing-closure form still means "the keystrokes".
     public init(modes: TerminalModes = .none,
                 preferences: KeyboardPreferences = KeyboardPreferences(),
-                onWheel: ((WheelDirection, Int, Int) -> Void)? = nil,
-                onClick: ((Int, Int) -> Void)? = nil,
+                onWheel: ((_ direction: WheelDirection, _ col: Int, _ rowsAboveLast: Int) -> Void)? = nil,
                 onCopy: (() -> String?)? = nil,
                 onCopied: ((Int) -> Void)? = nil,
                 onFocus: ((Bool) -> Void)? = nil,
                 claimsIdleFocus: Bool = true,
+                focusRequest: Int = 0,
                 onText: @escaping (String) -> Void) {
         self.modes = modes
         self.preferences = preferences
         self.onWheel = onWheel
-        self.onClick = onClick
         self.onCopy = onCopy
         self.onCopied = onCopied
         self.onFocus = onFocus
         self.claimsIdleFocus = claimsIdleFocus
+        self.focusRequest = focusRequest
         self.onText = onText
     }
 
     public func makeNSView(context: Context) -> CaptureNSView {
         let view = CaptureNSView()
         configure(view)
+        view.answeredFocusRequest = focusRequest
         return view
     }
 
     public func updateNSView(_ view: CaptureNSView, context: Context) {
         configure(view)
+        // Asked for the keyboard: taken even from another owner — the person
+        // just pressed the key or the button that says so.
+        if view.answeredFocusRequest != focusRequest {
+            view.answeredFocusRequest = focusRequest
+            DispatchQueue.main.async { [weak view] in
+                guard let view else { return }
+                view.window?.makeFirstResponder(view)
+            }
+            return
+        }
         // Reclaiming focus when nothing is focused anymore — never by stealing it
         // from an active text field (renaming, palette…). A click inside the pane
         // is handled by the mouse monitor instead, which leaves the press itself
@@ -545,7 +562,6 @@ public struct KeyCaptureView: NSViewRepresentable {
     private func configure(_ view: CaptureNSView) {
         view.onText = onText
         view.onWheel = onWheel
-        view.onClick = onClick
         view.onCopy = onCopy
         view.onCopied = onCopied
         view.onFocus = onFocus
@@ -557,26 +573,22 @@ public struct KeyCaptureView: NSViewRepresentable {
     public final class CaptureNSView: NSView {
         var onText: ((String) -> Void)?
         var onWheel: ((WheelDirection, Int, Int) -> Void)?
-        var onClick: ((Int, Int) -> Void)?
         var onCopy: (() -> String?)?
         var onCopied: ((Int) -> Void)?
         var onFocus: ((Bool) -> Void)?
         var claimsIdleFocus = true
+        /// The last `focusRequest` this view acted on.
+        var answeredFocusRequest = 0
         var modes = TerminalModes.none
         var preferences = KeyboardPreferences()
         private var mouseReporting: Bool { modes.mouseReporting }
         private var clickMonitor: Any?
-        private var releaseMonitor: Any?
         private var wheelMonitor: Any?
         private var responderObservation: NSKeyValueObservation?
         private var keyWindowObservers: [NSObjectProtocol] = []
         /// The focus last reported to the program — one report per transition,
         /// however many responder swaps happened in between.
         private var reportedFocus: Bool?
-        /// Where the press landed, kept until the release decides what it was.
-        private var press: (point: NSPoint, col: Int, row: Int)?
-        /// A hand never holds perfectly still: below this, the pointer did not travel.
-        private static let tapSlop: CGFloat = 3
         /// Sub-notch trackpad pixels, kept between events.
         private var wheelResidual: CGFloat = 0
         /// A flick of the trackpad must not become a burst the agent has to
@@ -645,10 +657,7 @@ public struct KeyCaptureView: NSViewRepresentable {
             clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
                 guard let self, event.window === self.window else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
-                self.press = nil
                 if self.bounds.contains(point) {
-                    let cell = self.gridPosition(of: point)
-                    self.press = (point: point, col: cell.col, row: cell.row)
                     DispatchQueue.main.async { [weak self] in
                         guard let self else { return }
                         self.window?.makeFirstResponder(self)
@@ -656,26 +665,10 @@ public struct KeyCaptureView: NSViewRepresentable {
                 }
                 return event
             }
-            // 4. The agent also draws TARGETS — a close box, a file row, a "jump
-            //    to bottom". Nothing but a click reaches them: those actions carry
-            //    no keybinding at all. The click is decided on the RELEASE, because
-            //    only then is it known whether the pointer travelled: a press that
-            //    moved was a selection, and the agent must hear nothing of it.
-            releaseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
-                guard let self, let press = self.press else { return event }
-                self.press = nil
-                guard self.mouseReporting, let onClick = self.onClick,
-                      event.window === self.window
-                else { return event }
-                let point = self.convert(event.locationInWindow, from: nil)
-                let cell = self.gridPosition(of: point)
-                guard TerminalClick.isTap(from: press.point, to: point,
-                                          sameCell: cell.col == press.col && cell.row == press.row,
-                                          slop: Self.tapSlop)
-                else { return event }
-                onClick(cell.col, cell.row)
-                return event
-            }
+            // The targets the agent draws — a close box, a fold mark, a file
+            // row — are clicked through the screen view (`onTap`): it alone
+            // knows where its rows are. Finding the cell from here, counting
+            // rows down from the pane's top, missed one-row targets.
             // 3. A full-screen agent REPAINTS its viewport instead of scrolling
             //    it: our scrollback stays empty, our ScrollView has nothing to
             //    move, and the agent asked for the wheel to scroll itself. A
@@ -692,7 +685,7 @@ public struct KeyCaptureView: NSViewRepresentable {
                     let cell = self.gridPosition(of: point)
                     let direction: WheelDirection = notches > 0 ? .up : .down
                     for _ in 0..<min(abs(notches), Self.maxNotchesPerEvent) {
-                        onWheel(direction, cell.col, cell.row)
+                        onWheel(direction, cell.col, cell.rowsAboveLast)
                     }
                 }
                 return nil
@@ -736,16 +729,14 @@ public struct KeyCaptureView: NSViewRepresentable {
             return Int(whole)
         }
 
-        /// View point → terminal cell (0-based). The grid starts inside the
-        /// padding the screen view draws, the same one `TerminalMetrics.grid` deducts.
-        private func gridPosition(of point: NSPoint) -> (col: Int, row: Int) {
-            let cell = TerminalMetrics.cellSize
-            let inset = TerminalMetrics.gridInset
-            let grid = TerminalMetrics.grid(fitting: bounds.size)
-            let column = Int((point.x - inset) / cell.width)
-            let row = Int((bounds.height - point.y - inset) / cell.height)
-            return (col: min(max(0, column), grid.cols - 1),
-                    row: min(max(0, row), grid.rows - 1))
+        /// View point → the column under it and how many rows it is above the
+        /// grid's last row (both 0-based). This view is not flipped: `point.y`
+        /// is already the distance up from the bottom edge, where the grid
+        /// hangs from, inside the padding the screen view draws.
+        private func gridPosition(of point: NSPoint) -> (col: Int, rowsAboveLast: Int) {
+            let cols = TerminalMetrics.grid(fitting: bounds.size).cols
+            return (col: TerminalMetrics.cellColumn(atX: point.x, cols: cols),
+                    rowsAboveLast: TerminalMetrics.rowsAboveLast(distanceFromBottom: point.y))
         }
 
         private func teardownFocusWatchers() {
@@ -755,8 +746,6 @@ public struct KeyCaptureView: NSViewRepresentable {
             keyWindowObservers = []
             if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
             clickMonitor = nil
-            if let releaseMonitor { NSEvent.removeMonitor(releaseMonitor) }
-            releaseMonitor = nil
             if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
             wheelMonitor = nil
         }
@@ -765,7 +754,6 @@ public struct KeyCaptureView: NSViewRepresentable {
             responderObservation?.invalidate()
             for observer in keyWindowObservers { NotificationCenter.default.removeObserver(observer) }
             if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
-            if let releaseMonitor { NSEvent.removeMonitor(releaseMonitor) }
             if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
         }
 

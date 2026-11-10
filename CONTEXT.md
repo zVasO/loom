@@ -168,7 +168,7 @@ _Avoid_ : permission dynamique, hôte optionnel
 ### Workflows
 
 **Workflow** :
-Un graphe nommé d'étapes, dessiné dans l'onglet Workflows (ADR-0017) : un départ, des étapes, des chemins entre elles. Plusieurs chemins sortants s'exécutent en parallèle ; plusieurs entrants attendent tous.
+Un graphe nommé d'étapes, dessiné dans l'onglet Workflows (ADR-0017) ou parti d'un gabarit (ADR-0021) : un départ, des étapes, des chemins entre elles. Plusieurs chemins sortants s'exécutent en parallèle ; plusieurs entrants attendent tous. Ses runs lisent le projet, ou travaillent sur leur propre branche.
 _Avoid_ : pipeline, automation, flow (seul)
 
 **Étape** (nœud) :
@@ -220,4 +220,20 @@ _Avoid_ : commande, action (seul)
 **Artefact** :
 Le rapport HTML qu'un run écrit, dans un thème de Loom.
 _Avoid_ : export, document (seul)
+
+**Gabarit** :
+Un workflow prêt à lancer que Loom propose dans la galerie de l'onglet Workflows (ADR-0021) : copié dans la bibliothèque, avec ses experts, quand on le lance ou qu'on l'ouvre. La bibliothèque, elle, démarre vide.
+_Avoid_ : modèle (c'est celui de claude), template (dans l'UI seulement), workflow par défaut
+
+**Tâche** (d'un run) :
+Ce qu'un run doit faire, dans les mots de la personne, saisi au lancement et cité par `{{run.task}}`. Elle nomme le run et sa branche.
+_Avoid_ : prompt (c'est celui d'une étape), note (la note accompagne, la tâche commande)
+
+**Branche du run** :
+Le worktree et la branche `loom/…` qu'un run crée pour lui quand son workflow travaille « sur sa propre branche » : ses étapes y écrivent, le dossier du projet ne bouge pas, et c'est ce que le run laisse.
+_Avoid_ : sandbox, espace de travail (dans l'UI : « where its runs work »)
+
+**Poursuivre** (une conversation) :
+Pour une étape, reprendre la conversation d'une étape d'avant — ou la sienne à la passe suivante — au lieu de démarrer un nouvel agent : la même session pour une étape visible, `claude -p --resume` pour une étape headless.
+_Avoid_ : reprise (c'est le lien qui remonte, ou celle d'une session interrompue), mémoire
 

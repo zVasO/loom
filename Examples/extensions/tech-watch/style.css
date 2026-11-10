@@ -19,7 +19,7 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
-button, input, select { font: inherit; color: inherit; }
+button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: default; opacity: 0.5; }
 a { color: var(--text); text-decoration: none; }
@@ -101,3 +101,19 @@ input.wide { flex: 1; min-width: 240px; }
 .warn { color: var(--warn); }
 .error { color: var(--danger); font-size: 12px; }
 .hint { font-size: 12px; color: var(--text-2); margin: 2px 0 8px; }
+
+.prompt-editor { margin: 6px 0; }
+textarea.prompt {
+  display: block; width: 100%; min-height: 170px; resize: vertical;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
+  font: 12px/1.55 ui-monospace, "SF Mono", Menlo, monospace; tab-size: 2;
+}
+textarea.prompt:focus { outline: none; border-color: var(--accent); }
+.vars { gap: 6px; }
+.chip.var { border: 1px solid var(--border); cursor: pointer; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.chip.var:hover { border-color: var(--accent); color: var(--text); }
+.preview {
+  margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 12px/1.55 ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-2);
+}
+.prompt-editor summary { cursor: pointer; color: var(--text-2); }

@@ -5,11 +5,12 @@ import LoomTerminal
 import LoomUI
 import SwiftUI
 
-// The fleet's pieces — table, terminal, journal, footer — shared by Mission
-// Control (⌘G) and the fleet panel under the Sessions view. Their measures are
-// the landing page's mock (site/index.html: .app-head, .grid-table, .term,
-// .app-foot, .log): 38 pt rows, 10/14 pt insets, hairlines at 8 % of the text
-// colour, mono capitals for every figure.
+// The fleet's pieces — table, journal, footer — shared by Mission Control (⌘G)
+// and the fleet panel under the Sessions view. Their measures are the landing
+// page's mock (site/index.html: .app-head, .grid-table, .app-foot, .log):
+// 38 pt rows, 10/14 pt insets, hairlines at 8 % of the text colour, mono
+// capitals for every figure. A session's terminal is never one of these
+// pieces: wherever it shows it is the real pane (TerminalPane).
 
 // MARK: - Small pieces
 
@@ -299,6 +300,11 @@ struct FleetTable: View {
     var autofocus = true
     @FocusState private var focused: Bool
 
+    /// The measures a host sizes the table with (Mission Control gives it a
+    /// whole number of rows).
+    static let rowHeight: CGFloat = 38
+    static let headerHeight: CGFloat = 30
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -340,7 +346,9 @@ struct FleetTable: View {
             case "j": move(1)
             case "k": move(-1)
             default:
-                guard let selected, items.first(where: { $0.id == selected })?.state == .needsInput
+                // R: type to the session — any live one, not only one that asked.
+                guard let selected, let item = items.first(where: { $0.id == selected }),
+                      !item.isDormant
                 else { return .ignored }
                 onReply(selected)
             }
@@ -363,7 +371,7 @@ struct FleetTable: View {
             title("Duration").frame(width: FleetColumns.duration, alignment: .leading)
             Color.clear.frame(width: FleetColumns.action, height: 1)
         }
-        .padding(.vertical, 8)
+        .frame(height: Self.headerHeight)
         .background(DefaultTheme.surface)
         .overlay(alignment: .bottom) { Hairline() }
     }
@@ -414,7 +422,7 @@ private struct FleetRow: View {
             durationCell.frame(width: FleetColumns.duration, alignment: .leading)
             actionCell.frame(width: FleetColumns.action, alignment: .trailing)
         }
-        .frame(height: 38)
+        .frame(height: FleetTable.rowHeight)
         .background(isSelected ? DefaultTheme.wash2 : (hovered ? DefaultTheme.wash : .clear))
         .overlay(alignment: .leading) {
             if isSelected { Rectangle().fill(DefaultTheme.accent).frame(width: 2) }
@@ -528,153 +536,6 @@ private struct FleetRow: View {
             }
         }
         .padding(.horizontal, FleetColumns.pad)
-    }
-}
-
-// MARK: - Terminal
-
-/// A session's main terminal: header, live tail and, when the agent waits, a
-/// reply field that types straight into it — the mock's `.term`.
-@MainActor
-struct FleetTerminalView: View {
-    let model: AppModel
-    let item: AppModel.SessionItem
-    let lines: Int
-    var replyFocused: FocusState<Bool>.Binding
-    /// The sessions the header can switch to; empty hides the picker.
-    var choices: [AppModel.SessionItem] = []
-    var onChoose: (SessionID) -> Void = { _ in }
-
-    @State private var surface: TerminalSurface?
-    @State private var reply = ""
-
-    var body: some View {
-        VStack(spacing: 0) {
-            head
-            Hairline()
-            output
-            if item.state == .needsInput, let surface {
-                Hairline()
-                replyField(surface)
-            }
-        }
-        .background(DefaultTheme.background)
-        .onAppear { surface = model.cachedSurface(for: item.id) }
-        .task(id: item.id) {
-            let fetched = await model.surface(for: item.id)
-            if fetched !== surface { surface = fetched }
-        }
-    }
-
-    private var head: some View {
-        HStack(spacing: 10) {
-            LucideIcon(.terminal, size: 14).foregroundStyle(DefaultTheme.secondaryText)
-            MonoLabel("Main terminal")
-            if choices.isEmpty {
-                MonoLabel(item.title, color: DefaultTheme.mutedText)
-            } else {
-                Menu {
-                    ForEach(choices) { choice in
-                        Button(choice.title) { onChoose(choice.id) }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        MonoLabel(item.title, color: DefaultTheme.mutedText)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(DefaultTheme.mutedText)
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Show another session's terminal")
-            }
-            Spacer(minLength: 12)
-            if let branch = item.branch {
-                Text(branch)
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.branch)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-    }
-
-    @ViewBuilder
-    private var output: some View {
-        Group {
-            if let surface {
-                TerminalTail(surface: surface, maxLines: lines)
-                    // A preview's cadence: four frames a second are plenty.
-                    .task(id: ObjectIdentifier(surface)) {
-                        await surface.attached(cadence: .preview(.milliseconds(250)))
-                    }
-            } else if item.isDormant {
-                Text("Session inactive — Resume reopens its conversation.")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                    .padding(.horizontal, 14).padding(.vertical, 12)
-            } else {
-                ProgressView().controlSize(.small).padding(14)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .clipped()
-    }
-
-    private func replyField(_ surface: TerminalSurface) -> some View {
-        HStack(spacing: 8) {
-            Text("›")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
-            TextField("Reply to the agent…", text: $reply)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(DefaultTheme.primaryText)
-                .focused(replyFocused)
-                .onSubmit {
-                    let text = reply.trimmingCharacters(in: .whitespaces)
-                    guard !text.isEmpty else { return }
-                    surface.send(text + "\r")
-                    reply = ""
-                }
-            KeyCap("↵")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(DefaultTheme.surface)
-    }
-}
-
-/// The last populated lines of a terminal: mono 12, 1.65 line height.
-@MainActor
-private struct TerminalTail: View {
-    let surface: TerminalSurface
-    let maxLines: Int
-
-    private var lines: [String] {
-        // P2 perf: find the populated tail FIRST, then map only what we show.
-        let all = surface.screen.lines
-        var end = all.count
-        while end > 0, all[end - 1].cells.allSatisfy({ $0.character == " " }) { end -= 1 }
-        let start = max(0, end - maxLines)
-        return all[start..<end].map { String($0.cells.prefix(220).map(\.character)) }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                Text(line.isEmpty ? " " : line)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                    .lineLimit(1)
-                    .frame(height: 19.8, alignment: .leading)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
     }
 }
 

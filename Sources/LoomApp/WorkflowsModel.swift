@@ -42,6 +42,9 @@ final class WorkflowsModel {
     /// What the Workflows tab shows beside its sidebar.
     enum Detail: Equatable {
         case workflow
+        /// The templates Loom offers (ADR-0021) — also what shows while no
+        /// workflow is selected.
+        case gallery
         case run(UUID)
         case report(UUID)
         case expert(UUID)
@@ -214,6 +217,20 @@ final class WorkflowsModel {
         save(workflow)
         selectedWorkflowID = workflow.id
         return workflow
+    }
+
+    /// A template becomes a workflow of the library (ADR-0021), with the
+    /// experts it names — those the library already has are kept as they
+    /// are. Used twice, a template gives the workflow it already gave: a
+    /// copy is the person's to make (Duplicate).
+    @discardableResult
+    func useTemplate(_ template: WorkflowTemplate) -> Workflow? {
+        if let existing = workflows.first(where: { $0.name == template.name }) {
+            selectedWorkflowID = existing.id
+            return existing
+        }
+        guard let data = try? template.bundle().encoded() else { return nil }
+        return try? importBundle(data)
     }
 
     // MARK: Experts

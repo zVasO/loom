@@ -149,7 +149,10 @@ struct GlobalPRsView: View {
     /// Jira key found in it; the run opens in the Workflows tab.
     @ViewBuilder
     private func workflowMenu(_ pr: GitHubService.PullRequest, project: ProjectRecord) -> some View {
-        let candidates = model.workflows.workflows.filter { $0.triggers.contains(.pullRequest) }
+        // A workflow that works on its own branch does not run on a PR's read-only checkout (ADR-0021).
+        let candidates = model.workflows.workflows.filter {
+            $0.triggers.contains(.pullRequest) && $0.workspace == .project
+        }
         if !candidates.isEmpty {
             Menu {
                 ForEach(candidates) { workflow in

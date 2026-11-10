@@ -7,9 +7,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
 
-/// The Workflows tab (ADR-0017): the library on the left — workflows,
-/// experts, connectors, runs — and beside it the React Flow editor, a run
-/// being watched, its report, or an expert's or a connector's form.
+/// The Workflows tab (ADR-0017, ADR-0021): on the left the workflows, their
+/// runs, and — folded — what they are made of (experts, rule sets,
+/// connectors); beside it the templates to start from, the React Flow
+/// editor, a run as the list of its steps (or on its graph), its report, or
+/// an expert's or a connector's form.
 struct WorkflowsView: View {
     let model: AppModel
     /// Opens a step's session in the Sessions tab.
@@ -20,6 +22,11 @@ struct WorkflowsView: View {
     @State private var renameText = ""
     @State private var query = ""
     @State private var message: String?
+    /// Experts, rules and connectors: what workflows are made of, folded
+    /// until someone wants to look under the hood.
+    @AppStorage("loom.workflows.libraryOpen") private var libraryOpen = false
+    /// A watched run shows as a list of steps, or on the graph.
+    @AppStorage("loom.workflows.runAsGraph") private var runAsGraph = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -72,10 +79,8 @@ struct WorkflowsView: View {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     proposalsSection
                     workflowsSection
-                    expertsSection
-                    rulesSection
-                    connectorsSection
                     runsSection
+                    librarySection
                 }
                 .padding(12)
             }
@@ -155,9 +160,15 @@ struct WorkflowsView: View {
         VStack(alignment: .leading, spacing: 6) {
             header("WORKFLOWS", systemImage: "point.3.connected.trianglepath.dotted") {
                 Menu {
-                    Button("✦ Create with AI…") { Task { await model.startWorkflowBuilder() } }
+                    Section("From a template") {
+                        ForEach(WorkflowTemplates.all) { template in
+                            Button(template.name) { customize(template) }
+                        }
+                    }
+                    Button("Browse the templates…") { workflows.detail = .gallery }
                     Divider()
-                    Button("New workflow") {
+                    Button("✦ Create with AI…") { Task { await model.startWorkflowBuilder() } }
+                    Button("Blank workflow") {
                         workflows.createWorkflow()
                         workflows.detail = .workflow
                     }
@@ -168,13 +179,19 @@ struct WorkflowsView: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("New workflow, or import one")
+                .help("New workflow: from a template, with AI, blank, or imported")
             }
             if let message {
                 Text(message).font(.system(size: 11)).foregroundStyle(DefaultTheme.danger)
             }
             if workflows.workflows.isEmpty {
-                Text("No workflow yet.").font(.system(size: 11)).foregroundStyle(DefaultTheme.mutedText)
+                Button { workflows.detail = .gallery } label: {
+                    Text("No workflow yet — start from a template.")
+                        .font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             ForEach(workflows.workflows.filter { matches($0.name, $0.summary, $0.tags.joined(separator: " ")) }) { workflow in
                 workflowRow(workflow)
@@ -207,7 +224,7 @@ struct WorkflowsView: View {
                     Text(workflow.summary).font(.system(size: 10)).foregroundStyle(DefaultTheme.secondaryText).lineLimit(2)
                 }
                 HStack(spacing: 6) {
-                    Text("\(workflow.nodes.count) steps")
+                    Text(workflow.workspace == .worktree ? "own branch" : "\(max(0, workflow.nodes.count - 1)) steps")
                     if let last {
                         Text("·")
                         Text(RunStatusLabel.text(last.status) + " " + last.startedAt.formatted(.relative(presentation: .named)))
@@ -253,6 +270,44 @@ struct WorkflowsView: View {
         // The editor holds the workflow it shows: it must take the new
         // name, or its next save would write the old one back.
         if workflows.selectedWorkflowID == id { model.emitEditorState() }
+    }
+
+    /// Templates (ADR-0021): into the library, then the Run sheet or the editor.
+    private func run(_ template: WorkflowTemplate) {
+        guard let workflow = workflows.useTemplate(template) else { return }
+        workflows.detail = .workflow
+        workflows.launchRequest = .init(workflowID: workflow.id, inputs: nil)
+    }
+
+    private func customize(_ template: WorkflowTemplate) {
+        guard workflows.useTemplate(template) != nil else { return }
+        workflows.detail = .workflow
+    }
+
+    /// What workflows are made of — experts, rule sets, connectors — behind
+    /// one fold: a template brings its own, most people never open it.
+    private var librarySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button { libraryOpen.toggle() } label: {
+                HStack(spacing: 6) {
+                    AppIcon(libraryOpen ? "chevron.down" : "chevron.right", size: 10)
+                    Text("LIBRARY").font(.system(size: 10.5, weight: .medium, design: .monospaced)).kerning(0.53)
+                    Text("\(workflows.experts.count) experts · \(workflows.ruleSets.count) rules · \(workflows.connectors.count) connectors")
+                        .font(.system(size: 10))
+                    Spacer()
+                }
+                .foregroundStyle(DefaultTheme.mutedText)
+                .padding(.horizontal, 2)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Experts, rule sets and connectors: what the steps of your workflows use")
+            if libraryOpen || !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                expertsSection
+                rulesSection
+                connectorsSection
+            }
+        }
     }
 
     private var expertsSection: some View {
@@ -374,9 +429,17 @@ struct WorkflowsView: View {
                 .frame(width: 14)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {
-                Text(run.workflow.name).font(.system(size: 12, weight: .semibold))
+                // What it was about first: two runs of one workflow differ by their task.
+                Text(run.subject == "Manual run" ? run.workflow.name : run.subject)
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DefaultTheme.primaryText).lineLimit(1)
-                Text(run.subject).font(.system(size: 10)).foregroundStyle(DefaultTheme.secondaryText)
+                Text(run.subject == "Manual run" ? run.subject : run.workflow.name)
+                    .font(.system(size: 10)).foregroundStyle(DefaultTheme.secondaryText).lineLimit(1)
+                if let worktree = run.worktree {
+                    Text(worktree.branch + (run.changes.map { " · " + $0.summary } ?? ""))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DefaultTheme.branch).lineLimit(1).truncationMode(.middle)
+                }
                 HStack(spacing: 6) {
                     Text(run.startedAt.formatted(.relative(presentation: .named)))
                     if run.costUSD > 0 { Text(String(format: "%.2f $", run.costUSD)) }
@@ -483,39 +546,33 @@ struct WorkflowsView: View {
     @ViewBuilder
     private var detail: some View {
         switch workflows.detail {
+        case .gallery:
+            gallery
         case .workflow:
             if workflows.workflow(workflows.selectedWorkflowID) == nil {
-                VStack(spacing: 12) {
-                    AppIcon("point.3.connected.trianglepath.dotted", size: 41).foregroundStyle(DefaultTheme.secondaryText)
-                    Text("Workflows").font(.system(size: 15, weight: .semibold)).foregroundStyle(DefaultTheme.primaryText)
-                    Text("A start, steps for experts, paths between them — and a report at the end.")
-                        .font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
-                    HStack(spacing: 10) {
-                        AccentButton("✦ Create with AI", systemImage: nil) { Task { await model.startWorkflowBuilder() } }
-                        GhostButton("New workflow", systemImage: "plus") { workflows.createWorkflow() }
-                    }
-                    Text("The AI asks what the workflow is for, then builds it: you validate what it proposes.")
-                        .font(.system(size: 11)).foregroundStyle(DefaultTheme.mutedText)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                gallery
             } else {
                 editor
             }
         case .run(let id):
             if let run = workflows.run(id) {
                 VStack(spacing: 0) {
-                    RunHeader(model: model, run: run)
+                    RunHeader(model: model, run: run, asGraph: $runAsGraph)
                     ForEach(workflows.approvals(of: run.id)) { approval in
                         ApprovalBanner(model: model, approval: approval).id(approval.id)
                     }
                     Divider().overlay(DefaultTheme.cardBorder)
-                    editor
+                    if runAsGraph {
+                        editor
+                    } else {
+                        RunTimelineView(model: model, run: run).id(run.id)
+                    }
                 }
             }
         case .report(let id):
             if let run = workflows.run(id), let path = run.artifactPath {
                 VStack(spacing: 0) {
-                    RunHeader(model: model, run: run)
+                    RunHeader(model: model, run: run, asGraph: $runAsGraph)
                     Divider().overlay(DefaultTheme.cardBorder)
                     ArtifactWebView(url: URL(fileURLWithPath: path))
                 }
@@ -533,6 +590,10 @@ struct WorkflowsView: View {
     private var editor: some View {
         ExtensionWebView(webView: model.workflowEditorHost().webView)
             .onAppear { model.emitEditorState() }
+    }
+
+    private var gallery: some View {
+        WorkflowGalleryView(model: model, onRun: run(_:), onCustomize: customize(_:), onImport: importWorkflow)
     }
 }
 
@@ -574,6 +635,8 @@ enum RunStatusLabel {
 private struct RunHeader: View {
     let model: AppModel
     let run: WorkflowRun
+    /// The run as its graph rather than as the list of its steps.
+    @Binding var asGraph: Bool
     @State private var logShown = false
 
     var body: some View {
@@ -600,13 +663,19 @@ private struct RunHeader: View {
                 }
                 .help("Open the run's orchestrator in Sessions: talk to it there")
             }
-            if run.artifactPath != nil {
-                if workflows.detail == .report(run.id) {
-                    GhostButton("Graph", systemImage: "point.3.connected.trianglepath.dotted") { workflows.detail = .run(run.id) }
-                    GhostButton("Open in browser", systemImage: "safari") {
-                        if let path = run.artifactPath { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-                    }
-                } else {
+            if workflows.detail == .report(run.id) {
+                GhostButton("Steps", systemImage: "list.bullet") { workflows.detail = .run(run.id) }
+                GhostButton("Open in browser", systemImage: "safari") {
+                    if let path = run.artifactPath { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+                }
+            } else {
+                GhostButton(asGraph ? "Steps" : "Graph",
+                            systemImage: asGraph ? "list.bullet" : "point.3.connected.trianglepath.dotted") {
+                    asGraph.toggle()
+                }
+                .help(asGraph ? "The run as a list: each step, its verdict, its answer"
+                      : "The run on the workflow's graph")
+                if run.artifactPath != nil {
                     AccentButton("Report", systemImage: "doc.richtext") { workflows.detail = .report(run.id) }
                 }
             }

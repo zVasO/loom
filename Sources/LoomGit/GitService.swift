@@ -118,6 +118,25 @@ public struct GitService: Sendable {
         _ = try await run(arguments, in: repo)
     }
 
+    // MARK: - What a checkout changed since a commit (workflow runs, ADR-0021)
+
+    /// The commit a checkout is on: what a workflow run measures its work against.
+    public func headRevision(in worktree: URL) async throws -> String {
+        try await run(["rev-parse", "HEAD"], in: worktree)
+    }
+
+    /// What changed in the checkout since `base`, committed or not, as
+    /// `git diff --numstat` prints it ("added<TAB>deleted<TAB>path" per
+    /// tracked file) — with the untracked files, which no diff shows, and
+    /// the commits made on top of `base`.
+    public func changes(since base: String, in worktree: URL) async throws
+        -> (numstat: String, untracked: [String], commits: Int) {
+        let numstat = try await run(["diff", "--numstat", base], in: worktree)
+        let untracked = try await status(in: worktree).filter { $0.kind == .untracked }.map(\.path)
+        let count = try await run(["rev-list", "--count", "\(base)..HEAD"], in: worktree)
+        return (numstat, untracked, Int(count) ?? 0)
+    }
+
     // MARK: - Ship (v2): commit and publish straight from a session worktree
 
     /// Stages EVERYTHING and commits. Throws when there is nothing to commit —

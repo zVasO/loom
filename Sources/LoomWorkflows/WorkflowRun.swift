@@ -48,6 +48,10 @@ public struct WorkflowRun: Codable, Identifiable, Equatable, Sendable {
     /// The palette's blocks and the rule sets, frozen at launch (ADR-0019).
     public var blocks: [WorkflowBlock]
     public var ruleSets: [RuleSet]
+    /// The worktree the run works in, when it has one of its own (ADR-0021).
+    public var worktree: RunWorktree?
+    /// What the run changed there, measured when it ended.
+    public var changes: RunChanges?
 
     public init(id: UUID = UUID(), workflow: Workflow, experts: [Expert], connectors: [Connector],
                 inputs: RunInputs, state: RunState, status: Status = .running, startedAt: Date = Date(),
@@ -55,7 +59,8 @@ public struct WorkflowRun: Codable, Identifiable, Equatable, Sendable {
                 orchestratorSessionID: String? = nil, interventions: Int = 0, messages: [RunMessage] = [],
                 workingDirectory: String? = nil, orchestratorInstructions: String? = nil,
                 orchestratorModel: String? = nil, stepSessions: [String: String] = [:],
-                blocks: [WorkflowBlock] = [], ruleSets: [RuleSet] = []) {
+                blocks: [WorkflowBlock] = [], ruleSets: [RuleSet] = [],
+                worktree: RunWorktree? = nil, changes: RunChanges? = nil) {
         self.id = id
         self.workflow = workflow
         self.experts = experts
@@ -77,6 +82,8 @@ public struct WorkflowRun: Codable, Identifiable, Equatable, Sendable {
         self.stepSessions = stepSessions
         self.blocks = blocks
         self.ruleSets = ruleSets
+        self.worktree = worktree
+        self.changes = changes
     }
 
     /// Runs saved before the orchestrator have none of its keys.
@@ -102,7 +109,9 @@ public struct WorkflowRun: Codable, Identifiable, Equatable, Sendable {
                   orchestratorModel: try c.decodeIfPresent(String.self, forKey: .orchestratorModel),
                   stepSessions: try c.decodeIfPresent([String: String].self, forKey: .stepSessions) ?? [:],
                   blocks: try c.decodeIfPresent([WorkflowBlock].self, forKey: .blocks) ?? [],
-                  ruleSets: try c.decodeIfPresent([RuleSet].self, forKey: .ruleSets) ?? [])
+                  ruleSets: try c.decodeIfPresent([RuleSet].self, forKey: .ruleSets) ?? [],
+                  worktree: try c.decodeIfPresent(RunWorktree.self, forKey: .worktree),
+                  changes: try c.decodeIfPresent(RunChanges.self, forKey: .changes))
     }
 
     /// The step a Loom session runs in this run, if any.
@@ -127,12 +136,89 @@ public struct WorkflowRun: Codable, Identifiable, Equatable, Sendable {
         max(0, (workflow.orchestrator?.interventionLimit ?? 0) - interventions)
     }
 
-    /// One line for the runs list: "PR #42 · AB-12".
+    /// One line for the runs list: "PR #42 · AB-12", or the start of the
+    /// task the run was given.
     public var subject: String {
         var parts: [String] = []
         if let number = inputs.prNumber { parts.append("PR #\(number)") }
         if let key = inputs.jiraKey, !key.isEmpty { parts.append(key) }
+        if parts.isEmpty, let headline = inputs.taskHeadline { return headline }
         return parts.isEmpty ? "Manual run" : parts.joined(separator: " · ")
+    }
+}
+
+/// The worktree a run made for itself (ADR-0021): its steps write there,
+/// and its branch is what the run leaves behind.
+public struct RunWorktree: Codable, Equatable, Sendable {
+    public var path: String
+    public var branch: String
+    /// The commit it started from: what its changes are measured against.
+    public var baseRevision: String?
+
+    public init(path: String, branch: String, baseRevision: String? = nil) {
+        self.path = path
+        self.branch = branch
+        self.baseRevision = baseRevision
+    }
+}
+
+/// What a run changed in its worktree, committed or not: how much, and where.
+public struct RunChanges: Codable, Equatable, Sendable {
+    public var files: Int
+    public var additions: Int
+    public var deletions: Int
+    /// The paths touched, the first few dozen.
+    public var paths: [String]
+    /// Commits the steps made on the run's branch.
+    public var commits: Int
+
+    public init(files: Int = 0, additions: Int = 0, deletions: Int = 0, paths: [String] = [], commits: Int = 0) {
+        self.files = files
+        self.additions = additions
+        self.deletions = deletions
+        self.paths = paths
+        self.commits = commits
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(files: try c.decodeIfPresent(Int.self, forKey: .files) ?? 0,
+                  additions: try c.decodeIfPresent(Int.self, forKey: .additions) ?? 0,
+                  deletions: try c.decodeIfPresent(Int.self, forKey: .deletions) ?? 0,
+                  paths: try c.decodeIfPresent([String].self, forKey: .paths) ?? [],
+                  commits: try c.decodeIfPresent(Int.self, forKey: .commits) ?? 0)
+    }
+
+    public var isEmpty: Bool { files == 0 && commits == 0 }
+
+    public static let maxPaths = 40
+
+    /// From `git diff --numstat <base>` (tracked changes against the run's
+    /// starting commit, committed or not) and the untracked files of
+    /// `git status`: "12\t3\tpath", "-\t-\tbinary".
+    public static func parse(numstat: String, untracked: [String] = [], commits: Int = 0) -> RunChanges {
+        var changes = RunChanges(commits: max(0, commits))
+        var paths: [String] = []
+        for line in numstat.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+            guard parts.count == 3 else { continue }
+            changes.additions += Int(parts[0]) ?? 0
+            changes.deletions += Int(parts[1]) ?? 0
+            paths.append(String(parts[2]))
+        }
+        for path in untracked where !paths.contains(path) { paths.append(path) }
+        changes.files = paths.count
+        changes.paths = Array(paths.prefix(maxPaths))
+        return changes
+    }
+
+    /// "4 files · +120 −18 · 2 commits".
+    public var summary: String {
+        guard !isEmpty else { return "no change" }
+        var parts = ["\(files) file\(files == 1 ? "" : "s")"]
+        if additions > 0 || deletions > 0 { parts.append("+\(additions) −\(deletions)") }
+        if commits > 0 { parts.append("\(commits) commit\(commits == 1 ? "" : "s")") }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -178,14 +264,46 @@ public struct RunInputs: Codable, Equatable, Sendable {
     public var jiraKey: String?
     /// Free text the user typed at launch — `{{run.note}}`.
     public var note: String
+    /// What the run is asked to do, in the person's words — `{{run.task}}`
+    /// (ADR-0021). Empty for a workflow that asks for none.
+    public var task: String
 
     public init(trigger: Trigger = .manual, projectID: ProjectID? = nil, prNumber: Int? = nil,
-                jiraKey: String? = nil, note: String = "") {
+                jiraKey: String? = nil, note: String = "", task: String = "") {
         self.trigger = trigger
         self.projectID = projectID
         self.prNumber = prNumber
         self.jiraKey = jiraKey
         self.note = note
+        self.task = task
+    }
+
+    /// Runs saved before tasks have none.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(trigger: try c.decodeIfPresent(Trigger.self, forKey: .trigger) ?? .manual,
+                  projectID: try c.decodeIfPresent(ProjectID.self, forKey: .projectID),
+                  prNumber: try c.decodeIfPresent(Int.self, forKey: .prNumber),
+                  jiraKey: try c.decodeIfPresent(String.self, forKey: .jiraKey),
+                  note: try c.decodeIfPresent(String.self, forKey: .note) ?? "",
+                  task: try c.decodeIfPresent(String.self, forKey: .task) ?? "")
+    }
+
+    /// The task's first line, short: what a list calls the run.
+    public var taskHeadline: String? {
+        let first = task.split(whereSeparator: \.isNewline).first
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        guard !first.isEmpty else { return nil }
+        return first.count <= 72 ? first : String(first.prefix(71)).trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    /// A branch name's worth of the task: "Fix the cache bug!" → `fix-the-cache-bug`.
+    public var taskSlug: String {
+        let source = taskHeadline ?? ""
+        let folded = source.lowercased().folding(options: .diacriticInsensitive, locale: nil)
+        let mapped = folded.map { $0.isLetter || $0.isNumber ? $0 : "-" }
+        let slug = String(mapped).split(separator: "-").joined(separator: "-").prefix(40)
+        return String(slug.split(separator: "-").joined(separator: "-"))
     }
 }
 

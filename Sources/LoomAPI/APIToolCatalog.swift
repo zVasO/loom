@@ -163,7 +163,8 @@ public enum APIToolCatalog {
                                  "projectId": string("The project it runs in (from loom_library_get)."),
                                  "prNumber": number("A pull request of that project."),
                                  "jiraKey": string("A Jira key, e.g. ABC-123."),
-                                 "note": string("A note for the steps ({{run.note}}).")],
+                                 "note": string("A note for the steps ({{run.note}})."),
+                                 "task": string("What the run is to do ({{run.task}}), for a workflow that starts from a task.")],
                                 required: ["workflowId"]),
             cliUsage: "loom library run_request <workflowId>", preapprovable: true),
     ]
