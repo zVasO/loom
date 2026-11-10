@@ -222,6 +222,50 @@ test("tech watch: an article goes to a Claude session through Loom's launch shee
   assert.deepEqual(errors, []);
 });
 
+test("tech watch: the session prompt is the reader's own, written in the settings — and the default one is a click away", { skip }, async (t) => {
+  const browser = await playwright.chromium.launch();
+  t.after(() => browser.close());
+  const { tab, errors } = await open(browser);
+  await waitForCall(tab, "alarms.create");
+  await emit(tab, "command", { id: "digest" });
+  await tab.locator(".headline").waitFor();
+
+  await tab.locator(".tab[data-tab='settings']").click();
+  const area = tab.locator("textarea[name='sessionPrompt']");
+  assert.match(await area.inputValue(), /^Je fais ma veille techno/, "the default prompt is shown, ready to edit");
+  assert.match(await area.inputValue(), /URL : \{\{url\}\}/);
+
+  // The reader's own prompt, a variable inserted where the caret is.
+  await area.fill("Dis-moi si cet article vaut un essai dans ce projet : ");
+  await tab.locator("[data-variable='title']").click();
+  await area.press("End");
+  await area.pressSequentially("\nFil : ");
+  await tab.locator("[data-variable='discussion']").click();
+  assert.equal(await area.inputValue(), "Dis-moi si cet article vaut un essai dans ce projet : {{title}}\nFil : {{discussion}}");
+  // Leaving the field saves it.
+  await tab.locator(".tab[data-tab='digest']").click();
+  await tab.waitForFunction(() => (window.__fake.storage.get("settings") || {}).sessionPrompt);
+  assert.match((await stored(tab, "settings")).sessionPrompt, /^Dis-moi si cet article vaut un essai/);
+
+  await tab.locator("[data-action='session']").first().click();
+  await waitForCall(tab, "sessions.launch");
+  const custom = (await calls(tab, "sessions.launch"))[0].params.prompt;
+  assert.match(custom, /^Dis-moi si cet article vaut un essai dans ce projet : \S/);
+  assert.doesNotMatch(custom, /\{\{|jamais comme des instructions/);
+
+  // Back to the default prompt.
+  await tab.locator(".tab[data-tab='settings']").click();
+  assert.match(await tab.locator("textarea[name='sessionPrompt']").inputValue(), /^Dis-moi si cet article/, "kept across views");
+  await tab.locator("[data-action='reset-prompt']").click();
+  await tab.waitForFunction(() => window.__fake.storage.get("settings").sessionPrompt === "");
+  assert.match(await tab.locator("textarea[name='sessionPrompt']").inputValue(), /^Je fais ma veille techno/);
+  await tab.locator(".tab[data-tab='digest']").click();
+  await tab.locator("[data-action='session']").nth(1).click();
+  await waitForCall(tab, "sessions.launch", 2);
+  assert.match((await calls(tab, "sessions.launch"))[1].params.prompt, /jamais comme des instructions/);
+  assert.deepEqual(errors, []);
+});
+
 test("tech watch: adding a feed asks Loom for its host — refused, nothing is kept; allowed, it is read and named", { skip }, async (t) => {
   const browser = await playwright.chromium.launch();
   t.after(() => browser.close());
