@@ -208,6 +208,14 @@ struct SettingsPage: View {
     /// never the page's seven groups.
     @State private var navigation = SettingsNavigation()
 
+    /// How many of the page's groups are built. Opening the Settings makes
+    /// the first two — more than a window shows before it scrolls — and the
+    /// others one per frame after that: the page is there at once, instead
+    /// of once every switch, picker, editor and theme card of its seven
+    /// groups has been made in a single pass.
+    @State private var builtGroups = 2
+    private static let groupCount = 7
+
     @AppStorage("loom.terminal.fps") private var fps = 60
     @AppStorage("loom.terminal.copyOnSelect") private var copyOnSelect = false
     @AppStorage(KeyboardPreferences.userDefaultsKey) private var optionAsMeta = false
@@ -254,11 +262,11 @@ struct SettingsPage: View {
                         VStack(alignment: .leading, spacing: DefaultTheme.space(44)) {
                             generalGroup
                             sessionsGroup
-                            agentsGroup
-                            reviewGroup
-                            appearanceGroup
-                            projectsGroup
-                            extensionsGroup
+                            if builtGroups > 2 { agentsGroup }
+                            if builtGroups > 3 { reviewGroup }
+                            if builtGroups > 4 { appearanceGroup }
+                            if builtGroups > 5 { projectsGroup }
+                            if builtGroups > 6 { extensionsGroup }
                         }
                         .frame(maxWidth: 760, alignment: .leading)
                         .padding(.horizontal, DefaultTheme.space(36)).padding(.top, DefaultTheme.space(28))
@@ -271,6 +279,7 @@ struct SettingsPage: View {
                     .onPreferenceChange(SettingsAnchorOffsets.self) { offsets in
                         follow(offsets)
                     }
+                    .task { await buildRemainingGroups() }
                 }
             }
             .onChange(of: focus, initial: true) {
@@ -288,7 +297,24 @@ struct SettingsPage: View {
 
     // MARK: Navigation
 
+    /// The groups the page did not build on opening, one per frame: each
+    /// pass is short, and the page answers between two of them.
+    private func buildRemainingGroups() async {
+        while builtGroups < Self.groupCount {
+            try? await Task.sleep(for: .milliseconds(16))
+            if Task.isCancelled { return }
+            builtGroups += 1
+        }
+    }
+
     private func jump(to anchor: SettingsAnchor, with proxy: ScrollViewProxy, animated: Bool = true) {
+        // A section of a group not built yet: build them all, and scroll
+        // once they are laid out.
+        if builtGroups < Self.groupCount {
+            builtGroups = Self.groupCount
+            DispatchQueue.main.async { jump(to: anchor, with: proxy, animated: animated) }
+            return
+        }
         navigation.active = anchor
         navigation.followScrollAfter = Date().addingTimeInterval(0.6)
         if animated {
@@ -1152,7 +1178,7 @@ private struct ThemeCard: View {
                     .themeFont(size: 12, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 if !family.isBuiltIn {
-                    Text("yours")
+                    Text(family.colorsOnly && family.hasDesign ? "yours · colours" : "yours")
                         .themeFont(size: 9, weight: .semibold)
                         .foregroundStyle(DefaultTheme.secondaryText)
                         .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(1))
@@ -1234,6 +1260,11 @@ private struct ThemeGallery: View {
                               })
                     .contextMenu {
                         if !family.isBuiltIn {
+                            if family.hasDesign {
+                                Button(family.colorsOnly ? "Follow the whole theme" : "Follow its colours only") {
+                                    Self.setWholeTheme(family.colorsOnly, for: family)
+                                }
+                            }
                             Button("Delete “\(family.name)”", role: .destructive) {
                                 store.removeFamily(family)
                                 NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
@@ -1242,9 +1273,26 @@ private struct ThemeGallery: View {
                     }
                 }
             }
-            ThemePreview(family: previewFamily, dark: $previewDark, onUse: usePreviewAction(previewFamily))
+            ThemePreview(family: previewFamily, dark: $previewDark, onUse: usePreviewAction(previewFamily),
+                         onWholeTheme: wholeThemeAction(previewFamily))
                 .onAppear { previewDark = store.isDark }
         }
+    }
+
+    /// The "Whole theme" switch — for a theme of the user's that brings
+    /// more than colours.
+    private func wholeThemeAction(_ family: ThemeFamily) -> ((Bool) -> Void)? {
+        guard !family.isBuiltIn, family.hasDesign else { return nil }
+        return { whole in Self.setWholeTheme(whole, for: family) }
+    }
+
+    /// The whole theme, or its colours only: the family is saved with the
+    /// choice — its design is kept either way — and the app redraws.
+    private static func setWholeTheme(_ whole: Bool, for family: ThemeFamily) {
+        var updated = family
+        updated.colorsOnly = !whole
+        try? ThemeStore.shared.addFamily(updated)
+        NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
     }
 
     /// "Use this theme" — absent when the previewed family is already the one.

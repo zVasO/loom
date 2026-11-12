@@ -161,6 +161,49 @@ struct ThemeDesignTests {
         #expect(family.light.sanitized.design == family.light.design, "sanitizing keeps the design")
     }
 
+    // MARK: The switch — the whole theme, or its colours only
+
+    @Test("colours only: the theme's colours and edges on the charter's shapes, spacing and fonts")
+    func colorsOnly() throws {
+        var family = ThemeFamily(name: "T", light: ThemeFamily.loom.light, dark: ThemeFamily.loom.dark)
+        family.light.design = ThemeDesign(radius: 0, spacing: 4.32, letterSpacing: 0.025,
+                                          fontSans: "DM Sans, sans-serif", fontMono: "Space Mono, monospace",
+                                          border: "#000000", input: "#111111",
+                                          shadow: ThemeShadow(color: "#000000", opacity: 1, blur: 0, spread: 0, x: 4, y: 4))
+        family.dark.design = ThemeDesign(radius: 0, border: "#FFFFFF")
+        #expect(family.hasDesign && !family.colorsOnly, "the whole theme unless said otherwise")
+        let whole = family.palette(dark: false)
+        #expect(whole.radius(6) == 0 && whole.space(8) == 8.5 && whole.design?.shadow != nil)
+
+        family.colorsOnly = true
+        let colours = family.palette(dark: false)
+        #expect(colours.radius(6) == 6 && colours.radius(10) == 10 && colours.radius(3) == 3)
+        #expect(colours.space(8) == 8 && colours.tracking == 0)
+        #expect(colours.design == ThemeDesign(border: "#000000", input: "#111111"), "only the edges are left")
+        #expect(colours.line == ThemePalette.color("#000000") && colours.fieldLine == ThemePalette.color("#111111"))
+        #expect(family.palette(dark: true).line == ThemePalette.color("#FFFFFF"))
+        #expect(family.light.design?.radius == 0, "the design itself is kept: the switch goes both ways")
+        #expect(ThemeStore.fontStacks(of: family).isEmpty, "nothing is fetched for colours only")
+        family.colorsOnly = false
+        #expect(ThemeStore.fontStacks(of: family) == ["DM Sans, sans-serif", "Space Mono, monospace"])
+
+        // The choice travels with the family; a file written before it is the whole theme.
+        family.colorsOnly = true
+        let decoded = try JSONDecoder().decode(ThemeFamily.self, from: JSONEncoder().encode(family))
+        #expect(decoded.colorsOnly && decoded.light.design == family.light.design)
+        var object = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(family)) as? [String: Any])
+        object.removeValue(forKey: "colorsOnly")
+        let old = try JSONDecoder().decode(ThemeFamily.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(!old.colorsOnly)
+
+        // Nothing to switch off: colours alone, or the charter.
+        #expect(!ThemeFamily.loom.hasDesign)
+        var edges = ThemeFamily(name: "E", light: ThemeFamily.loom.light, dark: ThemeFamily.loom.dark)
+        edges.light.design = ThemeDesign(border: "#E5E5E5")
+        #expect(!edges.hasDesign)
+        #expect(ThemeDesign(radius: 8).colors == nil && ThemeDesign(input: "#111111").colors == ThemeDesign(input: "#111111"))
+    }
+
     // MARK: CSS lengths
 
     @Test("the lengths a theme writes: rem, px, em, a bare zero")

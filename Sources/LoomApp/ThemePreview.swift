@@ -11,6 +11,9 @@ struct ThemePreview: View {
     @Binding var dark: Bool
     /// "Use this theme" — nil when the family is already the global one.
     var onUse: (() -> Void)?
+    /// The "Whole theme" switch — nil where the family has no design to
+    /// turn off, or where the switch is someone else's (the import sheet).
+    var onWholeTheme: ((Bool) -> Void)?
 
     /// Built once per (family, variant), not once per read: the mock
     /// components read it some sixty times per pass.
@@ -46,6 +49,16 @@ struct ThemePreview: View {
                     .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(1))
                     .background(DefaultTheme.surfaceRaised, in: Capsule())
                 Spacer()
+                if let onWholeTheme, family.hasDesign {
+                    Toggle(isOn: Binding(get: { !family.colorsOnly }, set: { onWholeTheme($0) })) {
+                        Text("Whole theme")
+                            .themeFont(size: 11)
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .help(ThemeImportSheet.wholeThemeHelp)
+                }
                 // The switch previews the other variant; the app's own
                 // appearance is untouched.
                 Picker("", selection: $dark) {
@@ -75,6 +88,9 @@ struct ThemePreview: View {
     /// the fonts its stacks resolve to on this Mac, its radius, spacing,
     /// letter-spacing and shadow. nil for a theme that draws the charter.
     private var designSummary: String? {
+        if family.colorsOnly, family.hasDesign {
+            return "Colours only  ·  Loom's own radius, spacing and fonts"
+        }
         guard let design = palette.design else { return nil }
         var parts: [String] = []
         if let stack = design.fontSans { parts.append("Sans " + fontLabel(stack)) }
@@ -329,6 +345,11 @@ struct ThemeImportSheet: View {
     @State private var family: ThemeFamily?
     @State private var name = ""
     @State private var dark = false
+    /// The whole theme, or its colours only — remembered from one import
+    /// to the next.
+    @AppStorage("loom.theme.import.wholeTheme") private var wholeTheme = true
+
+    static let wholeThemeHelp = "On: the theme is followed to the letter — colours, borders, radius, spacing, fonts, letter-spacing and shadows. Off: its colours only; Loom keeps its own shapes and fonts, and fetches no font."
 
     var body: some View {
         VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
@@ -339,7 +360,7 @@ struct ThemeImportSheet: View {
                 Spacer()
                 GhostButton("Close") { dismiss() }
             }
-            Text("A tweakcn theme name (modern-minimal), its URL (tweakcn.com/themes/… or …/r/themes/….json), or the CSS from tweakcn's Code export — any shadcn theme's :root { … } .dark { … } works. Loom follows it to the letter: colours, borders, radius, spacing, fonts, letter-spacing and shadows. The fonts it names are fetched from Google Fonts when this Mac does not have them.")
+            Text("A tweakcn theme name (modern-minimal), its URL (tweakcn.com/themes/… or …/r/themes/….json), or the CSS from tweakcn's Code export — any shadcn theme's :root { … } .dark { … } works.")
                 .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -358,6 +379,15 @@ struct ThemeImportSheet: View {
                 }
                 .disabled(importing || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 if importing { ProgressView().controlSize(.small) }
+                Toggle(isOn: $wholeTheme) {
+                    Text("Whole theme")
+                        .themeFont(size: 12)
+                        .foregroundStyle(DefaultTheme.primaryText)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .help(Self.wholeThemeHelp)
+                .onChange(of: wholeTheme) { applyMode() }
                 if let error {
                     Text(error)
                         .themeFont(size: 11)
@@ -366,6 +396,12 @@ struct ThemeImportSheet: View {
                 }
                 Spacer()
             }
+            Text(wholeTheme
+                 ? "Whole theme: its colours, borders, radius, spacing, fonts, letter-spacing and shadows, to the letter. The fonts it names are fetched from Google Fonts when this Mac does not have them."
+                 : "Colours only: its colours, borders included; Loom keeps its own radius, spacing and fonts, and fetches nothing. The switch stays in Settings › Themes: the rest of the theme is kept.")
+                .themeFont(size: 11)
+                .foregroundStyle(DefaultTheme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
             if let family {
                 Divider().overlay(DefaultTheme.cardBorder)
                 HStack(spacing: DefaultTheme.space(10)) {
@@ -410,7 +446,9 @@ struct ThemeImportSheet: View {
         error = nil
         Task {
             do {
-                let imported = try await ThemeStore.shared.importTweakcn(input)
+                var imported = try await ThemeStore.shared.importTweakcn(input, colorsOnly: !wholeTheme)
+                // The switch may have moved while the theme was fetched.
+                imported.colorsOnly = !wholeTheme
                 family = imported
                 name = imported.name
             } catch {
@@ -418,6 +456,20 @@ struct ThemeImportSheet: View {
                 self.error = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
             }
             importing = false
+        }
+    }
+
+    /// The switch moved with a theme already read: the preview follows,
+    /// and a whole theme gets its fonts.
+    private func applyMode() {
+        guard var current = family else { return }
+        current.colorsOnly = !wholeTheme
+        family = current
+        guard wholeTheme else { return }
+        Task {
+            let fetched = await ThemeStore.shared.withFonts(current)
+            // Unless the theme or the switch changed meanwhile.
+            if family == current { family = fetched }
         }
     }
 

@@ -95,6 +95,14 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
 
     public var isLight: Bool { Self.luminance(background) > 0.4 }
 
+    /// The tokens with only the colours of their design: the edges stay,
+    /// the radius, spacing, fonts, letter-spacing and shadow go.
+    public var colorsOnly: ThemeTokens {
+        var tokens = self
+        tokens.design = design?.colors
+        return tokens
+    }
+
     /// The tokens with `surfaceRaised` brought back to the surfaces' side: a
     /// raised surface is a step above `surface`, never its opposite. Some
     /// imported themes (tweakcn's Claude) carry a near-white chip colour
@@ -226,10 +234,15 @@ public struct ThemeFamily: Identifiable, Codable, Equatable, Sendable, Hashable 
     /// workflow's artifact (ADR-0017): fonts, corner radius, logo. Optional:
     /// the app itself never reads it.
     public var document: ThemeDocumentStyle?
+    /// The user's switch for a theme that brings a design (ADR-0022): on,
+    /// only its colours are followed — edges included — and the radius,
+    /// spacing, fonts, letter-spacing and shadow stay the charter's. The
+    /// design is kept, so the switch goes both ways.
+    public var colorsOnly: Bool
 
     public init(name: String, light: ThemeTokens, dark: ThemeTokens,
                 lightName: String? = nil, darkName: String? = nil, isBuiltIn: Bool = false,
-                document: ThemeDocumentStyle? = nil) {
+                document: ThemeDocumentStyle? = nil, colorsOnly: Bool = false) {
         self.name = name
         self.light = light
         self.dark = dark
@@ -237,6 +250,7 @@ public struct ThemeFamily: Identifiable, Codable, Equatable, Sendable, Hashable 
         self.darkName = darkName
         self.isBuiltIn = isBuiltIn
         self.document = document
+        self.colorsOnly = colorsOnly
     }
 
     /// Files written by hand or by an older Loom may omit the optional keys.
@@ -250,14 +264,22 @@ public struct ThemeFamily: Identifiable, Codable, Equatable, Sendable, Hashable 
         // A file on disk is the user's by definition.
         isBuiltIn = false
         document = try container.decodeIfPresent(ThemeDocumentStyle.self, forKey: .document)
+        colorsOnly = try container.decodeIfPresent(Bool.self, forKey: .colorsOnly) ?? false
+    }
+
+    /// Whether the family brings more than colours — a radius, a spacing,
+    /// fonts, a letter-spacing or a shadow: what `colorsOnly` turns off.
+    public var hasDesign: Bool {
+        [light, dark].contains { $0.design != nil && $0.design != $0.design?.colors }
     }
 
     public var variantLightName: String { lightName ?? name + " Light" }
     public var variantDarkName: String { darkName ?? name + " Dark" }
 
     public func palette(dark: Bool) -> ThemePalette {
-        dark ? ThemePalette(name: variantDarkName, isLight: false, tokens: self.dark)
-             : ThemePalette(name: variantLightName, isLight: true, tokens: light)
+        let variant = dark ? self.dark : light
+        return ThemePalette(name: dark ? variantDarkName : variantLightName, isLight: !dark,
+                            tokens: colorsOnly ? variant.colorsOnly : variant)
     }
 
     /// A family name, or a variant's name (what the settings stored before
@@ -437,9 +459,11 @@ public final class ThemeStore {
         }
     }
 
-    /// The font stacks a family's two designs name.
+    /// The font stacks a family's two designs name — none for a family
+    /// followed for its colours only: nothing is fetched for it.
     nonisolated static func fontStacks(of family: ThemeFamily) -> [String] {
-        [family.light.design, family.dark.design].flatMap { design in
+        guard !family.colorsOnly else { return [] }
+        return [family.light.design, family.dark.design].flatMap { design in
             [design?.fontSans, design?.fontSerif, design?.fontMono].compactMap { $0 }
         }
     }
@@ -502,12 +526,14 @@ public final class ThemeStore {
     }
 
     /// A tweakcn theme, from what the user pasted: its CSS export, parsed
-    /// here; or a name / URL, fetched from tweakcn's registry. The fonts it
-    /// names are made available before it comes back, so the preview shows
-    /// them. The family comes back unsaved — the caller previews it, then
-    /// `addFamily`.
-    public func importTweakcn(_ input: String) async throws -> ThemeFamily {
-        let family = try await readTweakcn(input)
+    /// here; or a name / URL, fetched from tweakcn's registry. The whole
+    /// theme, or — `colorsOnly` — its colours alone. The fonts a whole
+    /// theme names are made available before it comes back, so the preview
+    /// shows them. The family comes back unsaved — the caller previews it,
+    /// then `addFamily`.
+    public func importTweakcn(_ input: String, colorsOnly: Bool = false) async throws -> ThemeFamily {
+        var family = try await readTweakcn(input)
+        family.colorsOnly = colorsOnly
         return await withFonts(family)
     }
 

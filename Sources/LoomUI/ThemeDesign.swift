@@ -43,6 +43,13 @@ public struct ThemeDesign: Codable, Equatable, Sendable, Hashable {
 
     public var isEmpty: Bool { self == ThemeDesign() }
 
+    /// The part of a design that is colour: its edges. What a family set
+    /// to "colours only" still follows; nil when the design has no edge.
+    public var colors: ThemeDesign? {
+        let kept = ThemeDesign(border: border, input: input)
+        return kept.isEmpty ? nil : kept
+    }
+
     // MARK: Geometry — pure, the charter's value in, the theme's out
 
     /// Tailwind's spacing unit in points: what the charter's lengths are
