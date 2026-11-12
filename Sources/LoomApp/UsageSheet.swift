@@ -160,8 +160,9 @@ struct UsageSheet: View {
             }
             .chartXAxis {
                 AxisMarks(values: .stride(by: .day, count: window == .week ? 1 : window == .month ? 5 : 15)) { _ in
+                    // An axis mark is not a view: it takes the theme's font as a font.
                     AxisValueLabel(format: .dateTime.month(.abbreviated).day().locale(Locale(identifier: "en_US")))
-                        .themeFont(size: 10).foregroundStyle(DefaultTheme.secondaryText)
+                        .font(DefaultTheme.font(size: 10)).foregroundStyle(DefaultTheme.secondaryText)
                 }
             }
             .frame(height: 240)
