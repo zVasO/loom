@@ -8,24 +8,24 @@ import SwiftUI
 @MainActor
 private func formTitle(_ text: String) -> some View {
     Text(text.uppercased())
-        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-        .kerning(0.53)
+        .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
         .foregroundStyle(DefaultTheme.secondaryText)
 }
 
 @MainActor
 private func formHint(_ text: String) -> some View {
-    Text(text).font(.system(size: 11)).foregroundStyle(DefaultTheme.mutedText).fixedSize(horizontal: false, vertical: true)
+    Text(text).themeFont(size: 11).foregroundStyle(DefaultTheme.mutedText).fixedSize(horizontal: false, vertical: true)
 }
 
 private struct FormCard<Content: View>: View {
     @ViewBuilder let content: Content
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) { content }
-            .padding(16)
+        VStack(alignment: .leading, spacing: DefaultTheme.space(10)) { content }
+            .padding(DefaultTheme.space(16))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .themeShadow(.sm, radius: 10)
     }
 }
 
@@ -34,13 +34,14 @@ private struct MonoEditor: View {
     var minHeight: CGFloat = 120
     var body: some View {
         TextEditor(text: $text)
-            .font(.system(size: 11, design: .monospaced))
+            .themeFont(size: 11, design: .monospaced)
             .foregroundStyle(DefaultTheme.primaryText)
             .scrollContentBackground(.hidden)
-            .padding(8)
+            .padding(DefaultTheme.space(8))
             .frame(minHeight: minHeight)
-            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+            .themeShadow(.xs, radius: 6)
     }
 }
 
@@ -67,7 +68,7 @@ struct ExpertEditor: View {
             if let draft {
                 content(draft)
                     .frame(maxWidth: 760, alignment: .leading)
-                    .padding(28)
+                    .padding(DefaultTheme.space(28))
                     .frame(maxWidth: .infinity)
             }
         }
@@ -90,14 +91,14 @@ struct ExpertEditor: View {
 
     @ViewBuilder
     private func content(_ expert: Expert) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(18)) {
+            HStack(spacing: DefaultTheme.space(10)) {
                 ColorPicker("", selection: Binding(get: { AppModel.color(hex: expert.color) },
                                                    set: { draft?.color = hexString($0) }), supportsOpacity: false)
                     .labelsHidden()
                 TextField("Name", text: binding(\.name))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 21, weight: .bold))
+                    .themeFont(size: 21, weight: .bold)
                     .foregroundStyle(DefaultTheme.primaryText)
             }
             FormCard {
@@ -126,9 +127,9 @@ struct ExpertEditor: View {
                         if on { draft?.skills.append(skill.name) } else { draft?.skills.removeAll { $0 == skill.name } }
                     })) {
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(skill.name).font(.system(size: 12, weight: .semibold))
+                            Text(skill.name).themeFont(size: 12, weight: .semibold)
                             if !skill.description.isEmpty {
-                                Text(skill.description).font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                                Text(skill.description).themeFont(size: 11).foregroundStyle(DefaultTheme.secondaryText)
                             }
                         }
                     }
@@ -200,7 +201,7 @@ struct ConnectorEditor: View {
             if let draft {
                 content(draft)
                     .frame(maxWidth: 760, alignment: .leading)
-                    .padding(28)
+                    .padding(DefaultTheme.space(28))
                     .frame(maxWidth: .infinity)
             }
         }
@@ -251,13 +252,13 @@ struct ConnectorEditor: View {
 
     @ViewBuilder
     private func content(_ connector: Connector) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(18)) {
             TextField("Name", text: Binding(get: { connector.name }, set: { draft?.name = $0 }))
                 .textFieldStyle(.plain)
-                .font(.system(size: 21, weight: .bold))
+                .themeFont(size: 21, weight: .bold)
                 .foregroundStyle(DefaultTheme.primaryText)
             Text(Self.kindLabel(connector.kind) + " · tools as mcp__\(connector.serverKey)__…")
-                .font(.system(size: 11, design: .monospaced)).foregroundStyle(DefaultTheme.secondaryText)
+                .themeFont(size: 11, design: .monospaced).foregroundStyle(DefaultTheme.secondaryText)
             if !connector.notes.isEmpty { formHint(connector.notes) }
             FormCard { serverFields(connector) }
             if case .claudeConfigured = connector.kind {} else {
@@ -276,12 +277,12 @@ struct ConnectorEditor: View {
                 formHint("A short claude run with this connector alone: the tools it brings, and who Atlassian says you are.")
                 if let result = workflows.connectorTestResults[connectorID] {
                     Text(result)
-                        .font(.system(size: 11, design: .monospaced))
+                        .themeFont(size: 11, design: .monospaced)
                         .textSelection(.enabled)
                         .foregroundStyle(DefaultTheme.primaryText)
-                        .padding(8)
+                        .padding(DefaultTheme.space(8))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                 }
             }
             GhostButton("Delete this connector", systemImage: "trash", role: .destructive) {
@@ -300,7 +301,7 @@ struct ConnectorEditor: View {
                 draft?.kind = .mcpStdio(command: $0, args: args, env: env)
             }))
             .textFieldStyle(.roundedBorder)
-            .font(.system(size: 12, design: .monospaced))
+            .themeFont(size: 12, design: .monospaced)
             formTitle("Arguments, one per line")
             MonoEditor(text: $argsText, minHeight: 70)
                 .onChange(of: argsText) {
@@ -321,7 +322,7 @@ struct ConnectorEditor: View {
             formTitle("URL")
             TextField("https://…", text: Binding(get: { url }, set: { draft?.kind = .mcpHTTP(url: $0, headers: headers) }))
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12, design: .monospaced))
+                .themeFont(size: 12, design: .monospaced)
             formTitle("Headers, Name: value per line")
             formHint("Write {{secret:NAME}} for a value kept in the Keychain — Authorization: Bearer {{secret:TOKEN}}.")
             MonoEditor(text: $envText, minHeight: 90)
@@ -334,7 +335,7 @@ struct ConnectorEditor: View {
             formTitle("Server name in your Claude Code")
             TextField("atlassian", text: Binding(get: { server }, set: { draft?.kind = .claudeConfigured(server: $0) }))
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12, design: .monospaced))
+                .themeFont(size: 12, design: .monospaced)
             formHint("As `claude mcp list` names it. For Atlassian: claude mcp add --transport sse atlassian https://mcp.atlassian.com/v1/sse, then /mcp in a session to sign in. Steps using it see your other servers too; only this one's tools are allowed.")
         }
     }
@@ -344,8 +345,8 @@ struct ConnectorEditor: View {
         formTitle("Secrets")
         formHint("Kept in the Keychain on this Mac, never in the workflow's file nor in an export.")
         ForEach(secretKeys(connector), id: \.self) { key in
-            HStack(spacing: 8) {
-                Text(key).font(.system(size: 12, design: .monospaced)).frame(width: 170, alignment: .leading)
+            HStack(spacing: DefaultTheme.space(8)) {
+                Text(key).themeFont(size: 12, design: .monospaced).frame(width: 170, alignment: .leading)
                 SecureField(workflows.hasSecret(key, of: connectorID) ? "•••••• (set — type to replace)" : "not set",
                             text: Binding(get: { secretValues[key] ?? "" }, set: { secretValues[key] = $0 }))
                     .textFieldStyle(.roundedBorder)
@@ -362,10 +363,10 @@ struct ConnectorEditor: View {
                 }
             }
         }
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             TextField("NEW_SECRET_NAME", text: $newSecretKey)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12, design: .monospaced))
+                .themeFont(size: 12, design: .monospaced)
                 .frame(width: 220)
             GhostButton("Add", systemImage: "plus") {
                 let key = newSecretKey.trimmingCharacters(in: .whitespaces)
@@ -434,19 +435,19 @@ struct WorkflowLaunchSheet: View {
         let workflow = workflows.workflow(workflowID)
         let asks = Asks(workflow)
         let problem = workflow.flatMap { model.workflowLaunchProblem($0, inputs: inputs) }
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(5)) {
                 Text(workflow.map { "Run «\($0.name)»" } ?? "Run a workflow")
-                    .font(.system(size: 17, weight: .bold))
+                    .themeFont(size: 17, weight: .bold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 if let workflow {
                     if !workflow.summary.isEmpty {
                         Text(workflow.summary)
-                            .font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
+                            .themeFont(size: 12).foregroundStyle(DefaultTheme.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Text(WorkflowOutline(workflow, experts: workflows.experts, blocks: workflows.blocks).oneLine)
-                        .font(.system(size: 10.5, design: .monospaced))
+                        .themeFont(size: 10.5, design: .monospaced)
                         .foregroundStyle(DefaultTheme.mutedText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -457,27 +458,28 @@ struct WorkflowLaunchSheet: View {
                 }
             }
             if asks.task {
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(5)) {
                     formTitle("The task")
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $task)
-                            .font(.system(size: 13))
+                            .themeFont(size: 13)
                             .foregroundStyle(DefaultTheme.primaryText)
                             .scrollContentBackground(.hidden)
                             .focused($taskFocused)
-                            .padding(8)
+                            .padding(DefaultTheme.space(8))
                         if task.isEmpty {
                             Text(taskPlaceholder(for: workflow))
-                                .font(.system(size: 13))
+                                .themeFont(size: 13)
                                 .foregroundStyle(DefaultTheme.mutedText)
-                                .padding(.horizontal, 13).padding(.vertical, 8)
+                                .padding(.horizontal, DefaultTheme.space(13)).padding(.vertical, DefaultTheme.space(8))
                                 .allowsHitTesting(false)
                         }
                     }
                     .frame(minHeight: 118, maxHeight: 220)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6)
-                        .stroke(taskFocused ? DefaultTheme.accent.opacity(0.7) : DefaultTheme.cardBorder, lineWidth: 1))
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
+                        .stroke(taskFocused ? DefaultTheme.accent.opacity(0.7) : DefaultTheme.fieldBorder, lineWidth: 1))
+                    .themeShadow(.xs, radius: 6)
                     formHint("As you would tell a colleague: what is wanted, where, and how to know it is done.")
                 }
             }
@@ -495,19 +497,19 @@ struct WorkflowLaunchSheet: View {
                 TextField("A note for the steps ({{run.note}})", text: $note)
             }
             if let workflow {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: DefaultTheme.space(8)) {
                     WorkspaceTag(workspace: workflow.workspace)
                     Text(workspaceLine(workflow))
-                        .font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                        .themeFont(size: 11).foregroundStyle(DefaultTheme.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 let estimate = CostEstimate.estimate(workflow, experts: workflows.experts,
                                                      defaultModel: workflows.defaultModel, blocks: workflows.blocks)
                 Text(estimateText(estimate))
-                    .font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                    .themeFont(size: 11).foregroundStyle(DefaultTheme.secondaryText)
             }
             if let problem {
-                Text(problem).font(.system(size: 11)).foregroundStyle(DefaultTheme.danger)
+                Text(problem).themeFont(size: 11).foregroundStyle(DefaultTheme.danger)
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
@@ -524,7 +526,7 @@ struct WorkflowLaunchSheet: View {
                 .help(asks.task ? "Run (⌘↵)" : "Run (↵)")
             }
         }
-        .padding(22)
+        .padding(DefaultTheme.space(22))
         .frame(width: 520)
         .onAppear {
             workflowID = request.workflowID ?? workflows.selectedWorkflowID ?? workflows.workflows.first?.id
@@ -579,17 +581,17 @@ struct RuleSetEditor: View {
     var body: some View {
         ScrollView {
             if let draft {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(18)) {
                     TextField("Name", text: Binding(get: { draft.name }, set: { self.draft?.name = $0 }))
                         .textFieldStyle(.plain)
-                        .font(.system(size: 21, weight: .bold))
+                        .themeFont(size: 21, weight: .bold)
                         .foregroundStyle(DefaultTheme.primaryText)
                     FormCard {
                         formTitle("Rules")
                         formHint("One rule per line. Tick this set on a block, a step or a link in the editor: its rules join that step's system prompt, under where they come from.")
                         ForEach(Array(draft.rules.enumerated()), id: \.offset) { index, _ in
-                            HStack(spacing: 8) {
-                                Text("\(index + 1).").font(.system(size: 12, design: .monospaced))
+                            HStack(spacing: DefaultTheme.space(8)) {
+                                Text("\(index + 1).").themeFont(size: 12, design: .monospaced)
                                     .foregroundStyle(DefaultTheme.mutedText)
                                 TextField("Cite path:line for every finding.", text: Binding(
                                     get: { self.draft?.rules[safe: index] ?? "" },
@@ -604,7 +606,7 @@ struct RuleSetEditor: View {
                     }
                 }
                 .frame(maxWidth: 760, alignment: .leading)
-                .padding(28)
+                .padding(DefaultTheme.space(28))
                 .frame(maxWidth: .infinity)
             }
         }
@@ -631,15 +633,15 @@ struct ApprovalBanner: View {
     @State private var comment = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 Image(systemName: "hand.raised.fill").foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
-                Text("\(approval.title) — your decision").font(.system(size: 12, weight: .semibold))
+                Text("\(approval.title) — your decision").themeFont(size: 12, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
             }
-            Text(approval.question).font(.system(size: 12)).foregroundStyle(DefaultTheme.primaryText)
+            Text(approval.question).themeFont(size: 12).foregroundStyle(DefaultTheme.primaryText)
                 .textSelection(.enabled)
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 TextField("A comment for the next steps (optional)", text: $comment)
                     .textFieldStyle(.roundedBorder)
                 ForEach(Array(approval.options.enumerated()), id: \.offset) { index, option in
@@ -655,9 +657,10 @@ struct ApprovalBanner: View {
                 }
             }
         }
-        .padding(12)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.badgeColor(for: .needsInput).opacity(0.6)))
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .padding(DefaultTheme.space(12))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.badgeColor(for: .needsInput).opacity(0.6)))
+        .themeShadow(.sm, radius: 10)
+        .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(8))
     }
 }

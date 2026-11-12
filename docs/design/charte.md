@@ -27,6 +27,22 @@ rien coder de plus.
   onglet ou une touche, 3 pour un tag.
 - Tableaux denses : lignes de 38 pt, cellules à 10 pt de marge (`FleetKit`).
 
+## Thème importé
+
+Un thème qui apporte son design (un import tweakcn, ADR-0022) remplace ces
+valeurs par les siennes, et les vues n'ont rien à savoir : elles écrivent la
+valeur de la charte dans `DefaultTheme.radius(6)`, `DefaultTheme.space(8)`,
+`.themeFont(size: 12)`, `.themeShadow(.sm, radius: 10)`, et le thème répond.
+
+- Rayons sur l'échelle de tweakcn : 10 → `--radius` + 4, 8 → `--radius`,
+  6 → `--radius` − 2, 4 → `--radius` − 4, 3 (un tag) → une pilule.
+- Marges, écarts, hauteurs de contrôles et de lignes × `--spacing` / 0,25rem.
+- Texte en `--font-sans`, mono en `--font-mono`, interlettrage `--letter-spacing`.
+- Bords en `--border` (contrôles : `--input`), cartes avec l'ombre du thème.
+
+Ne jamais écrire le nombre nu ni `.font(.system(size:))` dans une vue — sauf
+sur un symbole SF, que sa police système dimensionne.
+
 ## Icônes
 
 `AppIcon(nomSFSymbol, size:)` dessine le glyphe Lucide qui lui correspond (trait

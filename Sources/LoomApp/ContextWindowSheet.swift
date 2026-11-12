@@ -41,7 +41,7 @@ struct ContextWindowSheet: View {
             header
             Divider().overlay(DefaultTheme.cardBorder)
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(18)) {
                     if let usage {
                         usageSection(usage)
                         banner(usage)
@@ -50,35 +50,36 @@ struct ContextWindowSheet: View {
                         details(usage)
                     } else if loaded {
                         Text("No usage recorded yet — the agent has not answered in this session.")
-                            .font(.system(size: 12))
+                            .themeFont(size: 12)
                             .foregroundStyle(DefaultTheme.secondaryText)
                             .frame(maxWidth: .infinity, minHeight: 120)
                     } else {
-                        HStack(spacing: 8) {
+                        HStack(spacing: DefaultTheme.space(8)) {
                             ProgressView().controlSize(.small)
                             Text("Reading the session's records…")
-                                .font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
+                                .themeFont(size: 12).foregroundStyle(DefaultTheme.secondaryText)
                         }
                         .frame(maxWidth: .infinity, minHeight: 120)
                     }
                 }
-                .padding(24)
+                .padding(DefaultTheme.space(24))
             }
         }
         .frame(width: 620, height: 760)
         .background(DefaultTheme.surface)
         .preferredColorScheme(DefaultTheme.colorScheme)
+        .font(DefaultTheme.bodyFont)
         .task(id: state) { await refresh() }
     }
 
     // MARK: - Sections
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             AppIcon("cylinder", size: 17)
                 .foregroundStyle(DefaultTheme.accent)
             Text("Context Window")
-                .font(.system(size: 16, weight: .semibold))
+                .themeFont(size: 16, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
             Spacer()
             if refreshing {
@@ -91,18 +92,18 @@ struct ContextWindowSheet: View {
                 .help("Close")
                 .keyboardShortcut(.cancelAction)
         }
-        .padding(.horizontal, 20).padding(.vertical, 14)
+        .padding(.horizontal, DefaultTheme.space(20)).padding(.vertical, DefaultTheme.space(14))
     }
 
     private func usageSection(_ usage: SessionUsageSummary) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
             HStack {
                 Text("Usage")
-                    .font(.system(size: 13))
+                    .themeFont(size: 13)
                     .foregroundStyle(DefaultTheme.secondaryText)
                 Spacer()
                 Text(Self.percent(usage.fraction))
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .themeFont(size: 15, weight: .semibold, design: .rounded)
                     .foregroundStyle(usage.level.color)
             }
             ContextBar(fraction: usage.fraction, color: usage.level.color, height: 8)
@@ -111,7 +112,7 @@ struct ContextWindowSheet: View {
                 Spacer()
                 Text("\(UsageSheet.tokens(usage.windowTokens)) total")
             }
-            .font(.system(size: 11, design: .monospaced))
+            .themeFont(size: 11, design: .monospaced)
             .foregroundStyle(DefaultTheme.secondaryText)
         }
     }
@@ -133,27 +134,27 @@ struct ContextWindowSheet: View {
     private func banner(_ usage: SessionUsageSummary) -> some View {
         if let text = Self.bannerText(for: usage.level) {
             let color = usage.level.color
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: DefaultTheme.space(10)) {
                 AppIcon("exclamationmark.triangle", size: 15.5)
                     .foregroundStyle(color)
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
                     Text(text.title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .themeFont(size: 12, weight: .semibold)
                         .foregroundStyle(color)
                     Text(text.body)
-                        .font(.system(size: 12))
+                        .themeFont(size: 12)
                         .foregroundStyle(color.opacity(0.85))
                 }
             }
-            .padding(14)
+            .padding(DefaultTheme.space(14))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(color.opacity(0.35)))
+            .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(color.opacity(0.35)))
         }
     }
 
     private func tiles(_ usage: SessionUsageSummary) -> some View {
-        HStack(spacing: 14) {
+        HStack(spacing: DefaultTheme.space(14)) {
             tile("Input Tokens", icon: "arrow.down.to.line", value: UsageSheet.tokens(usage.inputTokens),
                  tint: DefaultTheme.badgeColor(for: .idle))
             tile("Output Tokens", icon: "arrow.up.to.line", value: UsageSheet.tokens(usage.outputTokens),
@@ -162,19 +163,20 @@ struct ContextWindowSheet: View {
     }
 
     private func tile(_ title: String, icon: String, value: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 AppIcon(icon, size: 13).foregroundStyle(tint)
-                Text(title).font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
+                Text(title).themeFont(size: 12).foregroundStyle(DefaultTheme.secondaryText)
             }
             Text(value)
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                .themeFont(size: 24, weight: .semibold, design: .rounded)
                 .foregroundStyle(DefaultTheme.primaryText)
         }
-        .padding(16)
+        .padding(DefaultTheme.space(16))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder))
+        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder))
+        .themeShadow(.sm, radius: 10)
     }
 
     private func breakdown(_ usage: SessionUsageSummary) -> some View {
@@ -182,18 +184,18 @@ struct ContextWindowSheet: View {
         let read = DefaultTheme.badgeColor(for: .idle)
         let write = DefaultTheme.accent
         let fresh = DefaultTheme.primaryText
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(12)) {
             Text("BREAKDOWN")
-                .font(.system(size: 11, weight: .semibold))
+                .themeFont(size: 11, weight: .semibold)
                 .foregroundStyle(DefaultTheme.secondaryText)
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
                 row("Context (latest turn)", UsageSheet.tokens(usage.contextTokens))
                 StackedBar(segments: [
                     (Double(usage.lastTurnCacheRead) / window, read),
                     (Double(usage.lastTurnCacheWrite) / window, write),
                     (Double(usage.lastTurnInput) / window, fresh),
                 ], height: 6)
-                HStack(spacing: 12) {
+                HStack(spacing: DefaultTheme.space(12)) {
                     legend("cache read \(UsageSheet.tokens(usage.lastTurnCacheRead))", read)
                     legend("cache write \(UsageSheet.tokens(usage.lastTurnCacheWrite))", write)
                     legend("fresh input \(UsageSheet.tokens(usage.lastTurnInput))", fresh)
@@ -207,7 +209,7 @@ struct ContextWindowSheet: View {
     }
 
     private func bar(_ title: String, _ count: Int, over window: Int, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
             row(title, UsageSheet.tokens(count))
             ContextBar(fraction: Double(count) / Double(max(window, 1)), color: color, height: 6)
         }
@@ -215,16 +217,16 @@ struct ContextWindowSheet: View {
 
     private func row(_ title: String, _ value: String) -> some View {
         HStack {
-            Text(title).font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
+            Text(title).themeFont(size: 12).foregroundStyle(DefaultTheme.secondaryText)
             Spacer()
-            Text(value).font(.system(size: 12, design: .monospaced)).foregroundStyle(DefaultTheme.primaryText)
+            Text(value).themeFont(size: 12, design: .monospaced).foregroundStyle(DefaultTheme.primaryText)
         }
     }
 
     private func legend(_ text: String, _ color: Color) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: DefaultTheme.space(5)) {
             Circle().fill(color).frame(width: 6, height: 6)
-            Text(text).font(.system(size: 10)).foregroundStyle(DefaultTheme.mutedText)
+            Text(text).themeFont(size: 10).foregroundStyle(DefaultTheme.mutedText)
         }
     }
 
@@ -243,28 +245,29 @@ struct ContextWindowSheet: View {
                 detail("Models used", usage.models.map { ModelPricing.family(for: $0) }.joined(separator: ", "))
             }
             Text("Cost is an estimate from public list prices (as of \(ModelPricing.asOf)); the window sizes date from \(ContextWindow.asOf).")
-                .font(.system(size: 10))
+                .themeFont(size: 10)
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14).padding(.vertical, 10)
+                .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(10))
         }
-        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder))
+        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder))
+        .themeShadow(.sm, radius: 10)
     }
 
     private func detail(_ label: String, _ value: String, icon: String? = nil) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             if let icon {
                 Image(systemName: icon).font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
             }
-            Text(label).font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
+            Text(label).themeFont(size: 12).foregroundStyle(DefaultTheme.secondaryText)
             Spacer()
             Text(value)
-                .font(.system(size: 12, design: .monospaced))
+                .themeFont(size: 12, design: .monospaced)
                 .foregroundStyle(DefaultTheme.primaryText)
                 .textSelection(.enabled)
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(8))
     }
 
     // MARK: - Work

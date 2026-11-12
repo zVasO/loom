@@ -92,8 +92,8 @@ struct ActionPaletteView: View {
         .frame(width: 640)
         .frame(maxHeight: 520)
         .background(DefaultTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
         .onChange(of: query, initial: true) { sections = computeSections() }
         .onChange(of: actions) { sections = computeSections() }
         .task(id: query) {
@@ -111,12 +111,12 @@ struct ActionPaletteView: View {
     }
 
     private var searchField: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             AppIcon("magnifyingglass", size: 15.5)
                 .foregroundStyle(DefaultTheme.secondaryText)
             TextField("Search commands, settings, projects, sessions…", text: $query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 15))
+                .themeFont(size: 15)
                 .foregroundStyle(DefaultTheme.primaryText)
                 .focused($searchFocused)
                 .onSubmit { runSelected() }
@@ -124,14 +124,14 @@ struct ActionPaletteView: View {
                 .onKeyPress(.downArrow) { move(1); return .handled }
             keyChip("esc")
         }
-        .padding(.horizontal, 16).padding(.vertical, 14)
+        .padding(.horizontal, DefaultTheme.space(16)).padding(.vertical, DefaultTheme.space(14))
         .onAppear { searchFocused = true }
     }
 
     private var results: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                LazyVStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                     let sections = self.sections
                     let actionCount = sections.reduce(0) { $0 + $1.actions.count }
                     ForEach(sections, id: \.section) { section, start, entries in
@@ -150,12 +150,12 @@ struct ActionPaletteView: View {
                     }
                     if totalCount == 0 {
                         Text("No result")
-                            .font(.system(size: 12))
+                            .themeFont(size: 12)
                             .foregroundStyle(DefaultTheme.secondaryText)
-                            .padding(16)
+                            .padding(DefaultTheme.space(16))
                     }
                 }
-                .padding(8)
+                .padding(DefaultTheme.space(8))
             }
             .frame(maxHeight: 400)
             .onChange(of: selection) {
@@ -166,29 +166,28 @@ struct ActionPaletteView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-            .kerning(0.53)
+            .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
             .foregroundStyle(DefaultTheme.secondaryText)
-            .padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 4)
+            .padding(.horizontal, DefaultTheme.space(10)).padding(.top, DefaultTheme.space(10)).padding(.bottom, DefaultTheme.space(4))
     }
 
     private func row(_ action: PaletteAction, index: Int) -> some View {
         let isSelected = index == selection
-        return HStack(spacing: 11) {
+        return HStack(spacing: DefaultTheme.space(11)) {
             AppIcon(action.icon, size: 15.5)
                 .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.secondaryText)
                 .frame(width: 20)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text(action.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .themeFont(size: 13, weight: .medium)
                     .foregroundStyle(DefaultTheme.primaryText)
-                HStack(spacing: 5) {
+                HStack(spacing: DefaultTheme.space(5)) {
                     Text(action.subtitle)
-                        .font(.system(size: 11))
+                        .themeFont(size: 11)
                         .foregroundStyle(DefaultTheme.secondaryText)
                     if let shortcut = action.shortcut {
                         Text("• \(shortcut)")
-                            .font(.system(size: 11))
+                            .themeFont(size: 11)
                             .foregroundStyle(DefaultTheme.mutedText)
                     }
                 }
@@ -196,9 +195,9 @@ struct ActionPaletteView: View {
             Spacer()
             if isSelected { keyChip("enter") }
         }
-        .padding(.horizontal, 10).padding(.vertical, 7)
+        .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(7))
         .background(isSelected ? DefaultTheme.surfaceRaised : .clear,
-                    in: RoundedRectangle(cornerRadius: 6))
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
         .contentShape(Rectangle())
         .onTapGesture {
             isPresented = false
@@ -209,25 +208,25 @@ struct ActionPaletteView: View {
 
     private func transcriptRow(_ hit: SessionStore.SearchHit, index: Int) -> some View {
         let isSelected = index == selection
-        return HStack(spacing: 11) {
+        return HStack(spacing: DefaultTheme.space(11)) {
             AppIcon("text.magnifyingglass", size: 15.5)
                 .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.secondaryText)
                 .frame(width: 20)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text(hit.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .themeFont(size: 13, weight: .medium)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Text(hit.snippet)
-                    .font(.system(size: 11, design: .monospaced))
+                    .themeFont(size: 11, design: .monospaced)
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .lineLimit(1)
             }
             Spacer()
             if isSelected { keyChip("enter") }
         }
-        .padding(.horizontal, 10).padding(.vertical, 7)
+        .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(7))
         .background(isSelected ? DefaultTheme.surfaceRaised : .clear,
-                    in: RoundedRectangle(cornerRadius: 6))
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
         .contentShape(Rectangle())
         .onTapGesture {
             isPresented = false
@@ -237,31 +236,31 @@ struct ActionPaletteView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 5) {
+        HStack(spacing: DefaultTheme.space(14)) {
+            HStack(spacing: DefaultTheme.space(5)) {
                 keyChip("↑↓")
-                Text("navigate").font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                Text("navigate").themeFont(size: 11).foregroundStyle(DefaultTheme.secondaryText)
             }
-            HStack(spacing: 5) {
+            HStack(spacing: DefaultTheme.space(5)) {
                 keyChip("enter")
-                Text("select").font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                Text("select").themeFont(size: 11).foregroundStyle(DefaultTheme.secondaryText)
             }
-            HStack(spacing: 5) {
+            HStack(spacing: DefaultTheme.space(5)) {
                 keyChip("esc")
-                Text("close").font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                Text("close").themeFont(size: 11).foregroundStyle(DefaultTheme.secondaryText)
             }
             Spacer()
         }
-        .padding(.horizontal, 14).padding(.vertical, 9)
+        .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(9))
     }
 
     private func keyChip(_ label: String) -> some View {
         Text(label)
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .themeFont(size: 10, weight: .medium, design: .monospaced)
             .foregroundStyle(DefaultTheme.secondaryText)
-            .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 5))
-            .overlay(RoundedRectangle(cornerRadius: 5)
+            .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(3))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(5)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(5))
                 .stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 

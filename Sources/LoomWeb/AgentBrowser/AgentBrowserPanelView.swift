@@ -35,20 +35,20 @@ public struct AgentBrowserPanelView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 Image(systemName: "lock.shield")
                     .font(.system(size: 9))
                     .foregroundStyle(DefaultTheme.mutedText)
                 Text(caption)
-                    .font(.system(size: 10))
+                    .themeFont(size: 10)
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
                 widthMenu
             }
-            .padding(.horizontal, 10)
-            .frame(height: 22)
+            .padding(.horizontal, DefaultTheme.space(10))
+            .frame(height: DefaultTheme.size(22))
             .background(DefaultTheme.background)
             page
         }
@@ -62,13 +62,13 @@ public struct AgentBrowserPanelView: View {
         case .webKit(let controller):
             BrowserPanelView(controller: controller, emptyHint: Self.emptyHint, newTabAddress: "about:blank")
                 .overlay(alignment: .top) {
-                    overlays.padding(.top, 52)   // below the address bar and the tab strip
+                    overlays.padding(.top, DefaultTheme.space(52))   // below the address bar and the tab strip
                 }
         case .chromium(let surface):
             // Laid over the page area itself: no chrome height to allow for.
             ChromiumBrowserPanelView(surface: surface, emptyHint: Self.emptyHint,
                                      agentBusy: browser.activity?.isRunning == true) {
-                overlays.padding(.top, 8)
+                overlays.padding(.top, DefaultTheme.space(8))
             }
         }
     }
@@ -104,7 +104,7 @@ public struct AgentBrowserPanelView: View {
             }
         } label: {
             Text(browser.viewportWidth == .fit ? "Fit" : browser.viewportWidth.label)
-                .font(.system(size: 10))
+                .themeFont(size: 10)
                 .foregroundStyle(DefaultTheme.secondaryText)
         }
         .menuStyle(.borderlessButton)
@@ -114,16 +114,16 @@ public struct AgentBrowserPanelView: View {
 
     @ViewBuilder
     private var overlays: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: DefaultTheme.space(6)) {
             if let activity = browser.activity, activity.isRunning {
-                HStack(spacing: 6) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     ProgressView().controlSize(.mini)
                     Text("claude: " + activity.summary)
-                        .font(.system(size: 11))
+                        .themeFont(size: 11)
                         .foregroundStyle(DefaultTheme.primaryText)
                         .lineLimit(1)
                 }
-                .padding(.horizontal, 10).padding(.vertical, 5)
+                .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(5))
                 .background(DefaultTheme.surfaceRaised, in: Capsule())
                 .overlay(Capsule().stroke(DefaultTheme.cardBorder, lineWidth: 1))
                 .allowsHitTesting(false)
@@ -132,11 +132,11 @@ public struct AgentBrowserPanelView: View {
                 dialogBanner(dialog)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, DefaultTheme.space(12))
     }
 
     /// Plain, page-like styling: the words are the page's, never Loom's —
-    /// "<host> says:" first.
+    /// "<host> says:" first. Not the theme's font, spacing or radius either.
     private func dialogBanner(_ dialog: AgentModalState) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("\(dialog.host) says:")

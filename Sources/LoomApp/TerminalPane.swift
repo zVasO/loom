@@ -153,13 +153,13 @@ struct TerminalPane: View {
                     // screen revision before the agent has printed a byte.
                     .overlay {
                         if !surface.hasOutput {
-                            VStack(spacing: 10) {
+                            VStack(spacing: DefaultTheme.space(10)) {
                                 ProgressView().controlSize(.small)
                                 Text("claude is starting…")
-                                    .font(.system(size: 12))
+                                    .themeFont(size: 12)
                                     .foregroundStyle(DefaultTheme.secondaryText)
                                 Text("Plugins and MCP servers load first — unauthenticated MCP servers slow this down (run /mcp).")
-                                    .font(.system(size: 10))
+                                    .themeFont(size: 10)
                                     .foregroundStyle(DefaultTheme.mutedText)
                                     .multilineTextAlignment(.center)
                                     .frame(maxWidth: 380)
@@ -169,12 +169,12 @@ struct TerminalPane: View {
                     .overlay(alignment: .topTrailing) {
                         if let badge {
                             Text(badge)
-                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .themeFont(size: 10, weight: .semibold, design: .monospaced)
                                 .foregroundStyle(DefaultTheme.secondaryText)
-                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .padding(.horizontal, DefaultTheme.space(7)).padding(.vertical, DefaultTheme.space(3))
                                 .background(DefaultTheme.surfaceRaised, in: Capsule())
                                 .overlay(Capsule().stroke(DefaultTheme.cardBorder, lineWidth: 1))
-                                .padding(10)
+                                .padding(DefaultTheme.space(10))
                                 .allowsHitTesting(false)
                                 .transition(.opacity)
                         }

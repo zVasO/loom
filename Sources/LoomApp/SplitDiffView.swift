@@ -267,7 +267,7 @@ struct SplitDiffView: View {
             // selection covering only collapsed files has nothing to act on.
             if selectionSettled, snippet != nil, let anchorY = barAnchorY {
                 quickActionBar
-                    .padding(.leading, 44)
+                    .padding(.leading, DefaultTheme.space(44))
                     .offset(x: barOffset.width, y: anchorY + 8 + barOffset.height)
                     .transition(.opacity)
             }
@@ -417,20 +417,20 @@ struct SplitDiffView: View {
     /// Floating bar over the diff: what is selected + what to do with it.
     /// Nothing leaves this bar without an explicit click.
     private var quickActionBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
             if let snippet {
-                HStack(spacing: 10) {
+                HStack(spacing: DefaultTheme.space(10)) {
                     // The grip: the bar must be movable off the very lines
                     // being discussed.
                     AppIcon("line.3.horizontal", size: 12)
                         .foregroundStyle(DefaultTheme.mutedText)
                         .help("Drag to move")
                     Text(snippet.label)
-                        .font(.system(size: 11, design: .monospaced))
+                        .themeFont(size: 11, design: .monospaced)
                         .foregroundStyle(DefaultTheme.secondaryText)
                         .lineLimit(1)
                     Text("\(snippet.lineCount) lines")
-                        .font(.system(size: 10))
+                        .themeFont(size: 10)
                         .foregroundStyle(DefaultTheme.mutedText)
                     Spacer(minLength: 8)
                     if barOffset != .zero {
@@ -453,7 +453,7 @@ struct SplitDiffView: View {
                     }
                     .onEnded { _ in barOffsetAtDragStart = barOffset })
                 if composer == .none {
-                    HStack(spacing: 8) {
+                    HStack(spacing: DefaultTheme.space(8)) {
                         if onAddToSession != nil {
                             AccentButton("Add to claude session", systemImage: "sparkles") {
                                 onAddToSession?(snippet)
@@ -500,13 +500,13 @@ struct SplitDiffView: View {
             }
         }
         .frame(maxWidth: 620)
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, DefaultTheme.space(12)).padding(.vertical, DefaultTheme.space(8))
         .contentShape(Rectangle())
         // The bar floats OVER the rows: without this absorber, a click on its
         // padding would fall through and reselect the line underneath.
         .gesture(DragGesture(minimumDistance: 0).onChanged { _ in }.onEnded { _ in })
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
             .stroke(DefaultTheme.accent.opacity(0.5), lineWidth: 1))
         .shadow(color: .black.opacity(0.5), radius: 14, y: 4)
     }
@@ -521,19 +521,19 @@ struct SplitDiffView: View {
         case .fileComment: "Leave a review comment on \(snippet.file)…"
         case .none: ""
         }
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
             TextField(placeholder, text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12,
-                              design: composer == .suggestion ? .monospaced : .default))
+                .themeFont(size: 12,
+                           design: composer == .suggestion ? .monospaced : .default)
                 .lineLimit(composer == .suggestion ? 3...10 : 1...5)
-                .padding(8)
-                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                .padding(DefaultTheme.space(8))
+                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                 .onSubmit { submitComposer(snippet) }
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 if composer == .suggestion {
                     Text("A GitHub suggestion — one click to apply.")
-                        .font(.system(size: 10))
+                        .themeFont(size: 10)
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
                 Spacer()
@@ -593,26 +593,27 @@ struct SplitDiffView: View {
     /// pinned, the code scrolls underneath it.
     private func fileHeader(_ entry: DiffFileRows, fileIndex: Int) -> some View {
         let file = entry.file
-        let radius: CGFloat = collapsed.contains(file.path) ? 9 : 0
-        let shape = UnevenRoundedRectangle(topLeadingRadius: 9, bottomLeadingRadius: radius,
-                                           bottomTrailingRadius: radius, topTrailingRadius: 9)
-        return HStack(spacing: 8) {
+        let top = DefaultTheme.radius(9)
+        let radius: CGFloat = collapsed.contains(file.path) ? top : 0
+        let shape = UnevenRoundedRectangle(topLeadingRadius: top, bottomLeadingRadius: radius,
+                                           bottomTrailingRadius: radius, topTrailingRadius: top)
+        return HStack(spacing: DefaultTheme.space(8)) {
             // The fold lives on the leading group (chevron, path, and the
             // empty run up to the controls), not on the whole header: the
             // checkbox and buttons on the right keep their own clicks.
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 Image(systemName: collapsed.contains(file.path) ? "chevron.right" : "chevron.down")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(DefaultTheme.secondaryText)
                 Text(file.path)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .themeFont(size: 12, weight: .semibold, design: .monospaced)
                     .foregroundStyle(DefaultTheme.primaryText)
                     .lineLimit(1)
                 if changedSinceViewed.contains(file.path) {
                     Text("changed since viewed")
-                        .font(.system(size: 9, weight: .semibold))
+                        .themeFont(size: 9, weight: .semibold)
                         .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(2))
                         .background(DefaultTheme.badgeColor(for: .needsInput).opacity(0.15),
                                     in: Capsule())
                 }
@@ -634,10 +635,10 @@ struct SplitDiffView: View {
                 selectFile(fileIndex, entry: entry)
             }
             Text("+\(file.additions)")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .themeFont(size: 11, weight: .semibold, design: .monospaced)
                 .foregroundStyle(DefaultTheme.groupHeader)
             Text("−\(file.deletions)")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .themeFont(size: 11, weight: .semibold, design: .monospaced)
                 .foregroundStyle(DefaultTheme.danger)
             if onToggleViewed != nil {
                 // GitHub's own checkbox: shared with the web, and what the
@@ -650,13 +651,13 @@ struct SplitDiffView: View {
                         onToggleViewed?(file.path, on)
                     }))
                 .toggleStyle(.checkbox)
-                .font(.system(size: 11))
+                .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)
                 .help(viewed.contains(file.path) ? "Viewed — uncheck to reopen"
                       : "Mark as viewed (folds the file)")
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 9)
+        .padding(.horizontal, DefaultTheme.space(12)).padding(.vertical, DefaultTheme.space(9))
         .background(DefaultTheme.surfaceRaised, in: shape)
         .overlay(shape.stroke(DefaultTheme.cardBorder, lineWidth: 1))
         // Pinned, the header floats over rows: a drag starting on it must not
@@ -670,7 +671,8 @@ struct SplitDiffView: View {
     /// file has scrolled away entirely.
     private func fileBody(_ entry: DiffFileRows, fileIndex: Int) -> some View {
         let file = entry.file
-        let shape = UnevenRoundedRectangle(bottomLeadingRadius: 9, bottomTrailingRadius: 9)
+        let shape = UnevenRoundedRectangle(bottomLeadingRadius: DefaultTheme.radius(9),
+                                           bottomTrailingRadius: DefaultTheme.radius(9))
         return VStack(alignment: .leading, spacing: 0) {
             if !collapsed.contains(file.path) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -696,9 +698,9 @@ struct SplitDiffView: View {
                           file: String, fileIndex: Int, hunkIndex: Int) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(hunk.header)
-                .font(.system(size: 10, design: .monospaced))
+                .themeFont(size: 10, design: .monospaced)
                 .foregroundStyle(DefaultTheme.branch)
-                .padding(.horizontal, 12).padding(.vertical, 5)
+                .padding(.horizontal, DefaultTheme.space(12)).padding(.vertical, DefaultTheme.space(5))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(DefaultTheme.surface)
             // Two EQUAL columns filling the available width — a nested
@@ -858,13 +860,13 @@ struct DiffRowView: View, Equatable {
         case .deletion: DefaultTheme.danger.opacity(0.12)
         case .context, nil: .clear
         }
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: DefaultTheme.space(8)) {
             Text(line.flatMap { isOld ? $0.oldNumber : $0.newNumber }.map(String.init) ?? "")
-                .font(.system(size: 10, design: .monospaced))
+                .themeFont(size: 10, design: .monospaced)
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(width: 34, alignment: .trailing)
             Text(line.map { Self.code($0, coloured: coloured) } ?? AttributedString())
-                .font(.system(size: 11, design: .monospaced))
+                .themeFont(size: 11, design: .monospaced)
                 .foregroundStyle(line?.kind == .context || line == nil
                                  ? DefaultTheme.primaryText.opacity(0.75)
                                  : DefaultTheme.primaryText)
@@ -872,7 +874,7 @@ struct DiffRowView: View, Equatable {
                 // press-and-drag line selection (Copy lives in the action bar).
                 .lineLimit(nil)
         }
-        .padding(.horizontal, 8).padding(.vertical, 1.5)
+        .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(1.5))
         // maxHeight so the tint fills the row: a wrapped line on one side
         // makes the pair taller than the other side's single line.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -887,23 +889,23 @@ struct DiffRowView: View, Equatable {
         case .deletion: DefaultTheme.danger.opacity(0.12)
         case .context: .clear
         }
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: DefaultTheme.space(8)) {
             Text(line.oldNumber.map(String.init) ?? "")
-                .font(.system(size: 10, design: .monospaced))
+                .themeFont(size: 10, design: .monospaced)
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(width: 34, alignment: .trailing)
             Text(line.newNumber.map(String.init) ?? "")
-                .font(.system(size: 10, design: .monospaced))
+                .themeFont(size: 10, design: .monospaced)
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(width: 34, alignment: .trailing)
             Text(Self.code(line, coloured: coloured))
-                .font(.system(size: 11, design: .monospaced))
+                .themeFont(size: 11, design: .monospaced)
                 .foregroundStyle(line.kind == .context
                                  ? DefaultTheme.primaryText.opacity(0.75)
                                  : DefaultTheme.primaryText)
                 .lineLimit(nil)
         }
-        .padding(.horizontal, 8).padding(.vertical, 1.5)
+        .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(1.5))
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(background)
     }
@@ -938,22 +940,22 @@ private struct DraftCommentView: View {
     private var pending: Color { DefaultTheme.badgeColor(for: .needsInput) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(5)) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 AppIcon("tray.and.arrow.down", size: 12)
                     .foregroundStyle(pending)
                 Text("pending")
-                    .font(.system(size: 9, weight: .semibold))
+                    .themeFont(size: 9, weight: .semibold)
                     .foregroundStyle(pending)
-                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(1))
                     .background(pending.opacity(0.15), in: Capsule())
                 if comment.firstLine < comment.lastLine {
                     Text("L\(comment.firstLine)–L\(comment.lastLine)")
-                        .font(.system(size: 9, design: .monospaced))
+                        .themeFont(size: 9, design: .monospaced)
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
                 Text("leaves with your verdict")
-                    .font(.system(size: 10))
+                    .themeFont(size: 10)
                     .foregroundStyle(DefaultTheme.mutedText)
                 Spacer()
                 if let onRemove {
@@ -965,7 +967,7 @@ private struct DraftCommentView: View {
             MarkdownBlockView(comment.body)
                 .textSelection(.enabled)
         }
-        .padding(10)
+        .padding(DefaultTheme.space(10))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DefaultTheme.surface)
         .overlay(alignment: .leading) {
@@ -983,23 +985,23 @@ private struct CommentThreadView: View {
     @State private var draft = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
             comment(thread.root)
             ForEach(thread.replies) { reply in
                 comment(reply)
-                    .padding(.leading, 18)
+                    .padding(.leading, DefaultTheme.space(18))
             }
             if let onReply {
                 if replying {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
                         TextField("Reply…", text: $draft, axis: .vertical)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 12))
+                            .themeFont(size: 12)
                             .lineLimit(1...5)
-                            .padding(8)
+                            .padding(DefaultTheme.space(8))
                             .background(DefaultTheme.surfaceRaised,
-                                        in: RoundedRectangle(cornerRadius: 6))
-                        HStack(spacing: 8) {
+                                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                        HStack(spacing: DefaultTheme.space(8)) {
                             Spacer()
                             GhostButton("Cancel") { replying = false; draft = "" }
                             AccentButton("Reply") {
@@ -1018,7 +1020,7 @@ private struct CommentThreadView: View {
                 }
             }
         }
-        .padding(10)
+        .padding(DefaultTheme.space(10))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DefaultTheme.surface)
         .overlay(alignment: .leading) {
@@ -1027,8 +1029,8 @@ private struct CommentThreadView: View {
     }
 
     private func comment(_ item: GitHubService.ReviewComment) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(5)) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 AsyncImage(url: URL(string: "https://github.com/\(item.author).png?size=48")) {
                     image in image.resizable()
                 } placeholder: {
@@ -1037,18 +1039,18 @@ private struct CommentThreadView: View {
                 .frame(width: 16, height: 16)
                 .clipShape(Circle())
                 Text("@" + item.author)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .themeFont(size: 11, weight: .semibold, design: .monospaced)
                     .foregroundStyle(DefaultTheme.branch)
                 if let start = item.startLine, start < item.line {
                     Text("L\(start)–L\(item.line)")
-                        .font(.system(size: 9, design: .monospaced))
+                        .themeFont(size: 9, design: .monospaced)
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
                 if item.isOutdated {
                     Text("outdated")
-                        .font(.system(size: 9, weight: .semibold))
+                        .themeFont(size: 9, weight: .semibold)
                         .foregroundStyle(DefaultTheme.mutedText)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(1))
                         .background(DefaultTheme.surfaceRaised, in: Capsule())
                 }
                 Spacer()

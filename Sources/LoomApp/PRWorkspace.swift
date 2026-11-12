@@ -19,8 +19,8 @@ struct ConversationRow: View {
     private var isLong: Bool { text.count > 220 || text.contains("\n") }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 AsyncImage(url: URL(string: "https://github.com/\(author).png?size=48")) { image in
                     image.resizable()
                 } placeholder: {
@@ -29,14 +29,14 @@ struct ConversationRow: View {
                 .frame(width: 16, height: 16)
                 .clipShape(Circle())
                 Text("@" + author)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .themeFont(size: 11, weight: .semibold, design: .monospaced)
                     .foregroundStyle(DefaultTheme.branch)
                 if let chip, !chip.isEmpty {
                     Text(chip)
-                        .font(.system(size: 9, weight: .semibold))
+                        .themeFont(size: 9, weight: .semibold)
                         .foregroundStyle(chip.contains("changes") ? DefaultTheme.danger
                                                                   : DefaultTheme.secondaryText)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(1))
                         .background(DefaultTheme.surfaceRaised, in: Capsule())
                 }
                 Spacer()
@@ -54,16 +54,16 @@ struct ConversationRow: View {
                         .textSelection(.enabled)
                 } else {
                     Text(PRWorkspaceView.markdown(text))
-                        .font(.system(size: 12))
+                        .themeFont(size: 12)
                         .foregroundStyle(DefaultTheme.primaryText.opacity(0.9))
                         .textSelection(.enabled)
                         .lineLimit(2)
                 }
             }
         }
-        .padding(10)
+        .padding(DefaultTheme.space(10))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
         .contentShape(Rectangle())
         .onTapGesture { if isLong { expanded.toggle() } }
     }
@@ -187,7 +187,7 @@ struct PRWorkspaceView: View {
 
     private var overviewPane: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(16)) {
                 identity
                 tourSection(pr, project: project)
                 if let detail = prDetail {
@@ -196,13 +196,14 @@ struct PRWorkspaceView: View {
                         // fences as structure — not literal ## and -.
                         MarkdownBlockView(detail.body)
                             .textSelection(.enabled)
-                            .padding(12)
+                            .padding(DefaultTheme.space(12))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(DefaultTheme.surface,
-                                        in: RoundedRectangle(cornerRadius: 10))
+                                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+                            .themeShadow(.sm, radius: 10)
                     }
                     if !detail.reviews.isEmpty || !detail.comments.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
                             sectionHeader("CONVERSATION",
                                           count: detail.reviews.count + detail.comments.count,
                                           color: DefaultTheme.secondaryText)
@@ -224,7 +225,7 @@ struct PRWorkspaceView: View {
                 }
             }
             .frame(maxWidth: 900, alignment: .leading)
-            .padding(20)
+            .padding(DefaultTheme.space(20))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -232,7 +233,7 @@ struct PRWorkspaceView: View {
     /// Who and where: author (GitHub avatar), head → base branches — then who
     /// it waits on, who owns it, how it is tagged, how big it is.
     private var identity: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
             authorLine
             peopleLine
             checksLine
@@ -245,33 +246,33 @@ struct PRWorkspaceView: View {
     @ViewBuilder
     private var checksLine: some View {
         if !pr.checks.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
                 Button {
                     withAnimation(.hover) { checksExpanded.toggle() }
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: DefaultTheme.space(6)) {
                         Image(systemName: checksExpanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 8, weight: .bold))
                             .foregroundStyle(DefaultTheme.secondaryText)
                         Circle().fill(PRChips.checksColor(pr)).frame(width: 7, height: 7)
                         Text(pr.checks.count == 1 ? "1 check" : "\(pr.checks.count) checks")
-                            .font(.system(size: 11, weight: .semibold))
+                            .themeFont(size: 11, weight: .semibold)
                             .foregroundStyle(DefaultTheme.primaryText)
                         Text(PRChips.checksSummary(pr))
-                            .font(.system(size: 10, design: .monospaced))
+                            .themeFont(size: 10, design: .monospaced)
                             .foregroundStyle(DefaultTheme.secondaryText)
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 if checksExpanded {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                         ForEach(pr.checks) { check in
                             checkRow(check)
                         }
                     }
-                    .padding(8)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                    .padding(DefaultTheme.space(8))
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                 }
             }
         }
@@ -284,21 +285,21 @@ struct PRWorkspaceView: View {
         case .pending: ("circle.dotted", DefaultTheme.badgeColor(for: .needsInput))
         case .skipped, .cancelled, .neutral: ("minus.circle", DefaultTheme.mutedText)
         }
-        return HStack(spacing: 8) {
+        return HStack(spacing: DefaultTheme.space(8)) {
             AppIcon(symbol, size: 13).foregroundStyle(color)
                 .frame(width: 14)
             Text(check.name.isEmpty ? "(unnamed)" : check.name)
-                .font(.system(size: 11, weight: .medium))
+                .themeFont(size: 11, weight: .medium)
                 .foregroundStyle(DefaultTheme.primaryText)
                 .lineLimit(1)
             if !check.workflow.isEmpty {
                 Text(check.workflow)
-                    .font(.system(size: 10))
+                    .themeFont(size: 10)
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
             }
             Text(check.state.rawValue)
-                .font(.system(size: 9, weight: .semibold))
+                .themeFont(size: 9, weight: .semibold)
                 .foregroundStyle(color)
             Spacer()
             if let url = URL(string: check.link), !check.link.isEmpty {
@@ -307,7 +308,7 @@ struct PRWorkspaceView: View {
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, DefaultTheme.space(2))
     }
 
     /// Reviewers with their last verdict, assignees, labels, size, conflicts.
@@ -320,9 +321,9 @@ struct PRWorkspaceView: View {
             .filter { !pr.reviewers.contains($0) }
         if !reviewers.isEmpty || !pr.assignees.isEmpty || !pr.labels.isEmpty
             || pr.changedFiles > 0 || pr.isConflicting {
-            HStack(spacing: 12) {
+            HStack(spacing: DefaultTheme.space(12)) {
                 if !reviewers.isEmpty {
-                    HStack(spacing: 6) {
+                    HStack(spacing: DefaultTheme.space(6)) {
                         AppIcon("person.2", size: 12)
                             .foregroundStyle(DefaultTheme.secondaryText)
                         ForEach(reviewers, id: \.self) { reviewer in
@@ -333,24 +334,24 @@ struct PRWorkspaceView: View {
                 if !pr.assignees.isEmpty {
                     Label(pr.assignees.map { "@" + $0 }.joined(separator: ", "),
                           systemImage: "person.crop.circle")
-                        .font(.system(size: 10, design: .monospaced))
+                        .themeFont(size: 10, design: .monospaced)
                         .foregroundStyle(DefaultTheme.secondaryText)
                         .lineLimit(1)
                         .help("Assigned")
                 }
                 ForEach(pr.labels, id: \.name) { PRChips.label($0) }
                 if pr.changedFiles > 0 {
-                    HStack(spacing: 6) {
+                    HStack(spacing: DefaultTheme.space(6)) {
                         PRChips.size(pr)
                         Text(pr.changedFiles == 1 ? "1 file" : "\(pr.changedFiles) files")
-                            .font(.system(size: 10))
+                            .themeFont(size: 10)
                             .foregroundStyle(DefaultTheme.mutedText)
                     }
                 }
                 if pr.isConflicting {
                     Label("Conflicts with \(pr.baseBranch.isEmpty ? "base" : pr.baseBranch)",
                           systemImage: "exclamationmark.triangle")
-                        .font(.system(size: 10, weight: .semibold))
+                        .themeFont(size: 10, weight: .semibold)
                         .foregroundStyle(DefaultTheme.danger)
                 }
                 Spacer()
@@ -366,33 +367,33 @@ struct PRWorkspaceView: View {
         case "COMMENTED": ("text.bubble", DefaultTheme.secondaryText)
         default: ("circle.dotted", DefaultTheme.mutedText)
         }
-        return HStack(spacing: 4) {
+        return HStack(spacing: DefaultTheme.space(4)) {
             AppIcon(symbol, size: 12).foregroundStyle(color)
             Text(reviewer.hasPrefix("team/") ? reviewer : "@" + reviewer)
-                .font(.system(size: 10, design: .monospaced))
+                .themeFont(size: 10, design: .monospaced)
                 .foregroundStyle(DefaultTheme.primaryText)
         }
-        .padding(.horizontal, 6).padding(.vertical, 2)
+        .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(2))
         .background(DefaultTheme.surfaceRaised, in: Capsule())
         .help(verdict.map { $0.replacingOccurrences(of: "_", with: " ").lowercased() }
               ?? "review requested")
     }
 
     private var authorLine: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             AsyncImage(url: URL(string: "https://github.com/\(pr.author).png?size=80")) { image in
                 image.resizable()
             } placeholder: {
                 Circle().fill(DefaultTheme.surfaceRaised)
             }
-            .frame(width: 26, height: 26)
+            .frame(width: DefaultTheme.size(26), height: DefaultTheme.size(26))
             .clipShape(Circle())
             .overlay(Circle().stroke(DefaultTheme.cardBorder, lineWidth: 1))
             Text("@" + pr.author)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .themeFont(size: 12, weight: .semibold, design: .monospaced)
                 .foregroundStyle(DefaultTheme.branch)
             Text("wants to merge")
-                .font(.system(size: 11))
+                .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)
             MonoTag(pr.branch, systemImage: "arrow.triangle.branch")
             AppIcon("arrow.right", size: 11)
@@ -402,9 +403,9 @@ struct PRWorkspaceView: View {
                     color: DefaultTheme.secondaryText)
             if pr.isDraft {
                 Text("draft")
-                    .font(.system(size: 9, weight: .semibold))
+                    .themeFont(size: 9, weight: .semibold)
                     .foregroundStyle(DefaultTheme.mutedText)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(2))
                     .background(DefaultTheme.surfaceRaised, in: Capsule())
             }
             Spacer()
@@ -415,20 +416,20 @@ struct PRWorkspaceView: View {
 
     private var filesPane: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: DefaultTheme.space(10)) {
                 sectionHeader("FILES", count: diffFiles.count,
                               color: DefaultTheme.secondaryText)
                 if diffLoading { ProgressView().controlSize(.mini) }
                 if progress.total > 0 {
                     // The recap: how much of the PR has been checked off,
                     // GitHub's own boxes behind it.
-                    HStack(spacing: 6) {
+                    HStack(spacing: DefaultTheme.space(6)) {
                         ProgressView(value: progress.fraction)
                             .progressViewStyle(.linear)
                             .frame(width: 90)
                             .tint(progress.isComplete ? DefaultTheme.groupHeader : DefaultTheme.accent)
                         Text(progress.label)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .themeFont(size: 10, weight: .medium, design: .monospaced)
                             .foregroundStyle(progress.isComplete ? DefaultTheme.groupHeader
                                                                  : DefaultTheme.secondaryText)
                     }
@@ -445,7 +446,7 @@ struct PRWorkspaceView: View {
                     UserDefaults.standard.set(unifiedDiff, forKey: "loom.diff.unified")
                 }
             }
-            .padding(.horizontal, 14).padding(.vertical, 6)
+            .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(6))
             .padding(.trailing, controlsInset)
             Divider().overlay(DefaultTheme.cardBorder)
             if diffFiles.isEmpty {
@@ -522,8 +523,8 @@ struct PRWorkspaceView: View {
                                           }
                                       }
                                   })
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
+                        .padding(.horizontal, DefaultTheme.space(12))
+                        .padding(.vertical, DefaultTheme.space(10))
                         // Identity tied to the PR: SwiftUI would otherwise
                         // reuse the view and carry a selection (and collapsed
                         // files, and the bar's position) over to the next PR.
@@ -536,17 +537,17 @@ struct PRWorkspaceView: View {
     /// The explorer never vanishes silently: loading shows a spinner, failure
     /// shows the reason and a way to retry.
     private var diffPlaceholder: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             if diffLoading {
                 ProgressView().controlSize(.small)
                 Text("Loading the diff…")
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
                     .foregroundStyle(DefaultTheme.secondaryText)
             } else {
                 AppIcon("exclamationmark.triangle", size: 13)
                     .foregroundStyle(DefaultTheme.danger)
                 Text(diffError ?? "This PR has no diff.")
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .textSelection(.enabled)
                 GhostButton("Retry", systemImage: "arrow.clockwise") {
@@ -554,34 +555,35 @@ struct PRWorkspaceView: View {
                 }
             }
         }
-        .padding(16)
+        .padding(DefaultTheme.space(16))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     // MARK: The verdict — docked, so it is never a scroll away
 
     private var verdictBar: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
             if let raw = model.prTabs.tab(PRTab.key(project.id, pr.number))?.suggestedVerdict,
                let suggested = AutoReviewReport.Verdict(rawValue: raw) {
                 Label("A scheduled review suggests: \(suggested.label) — the summary and the pending comments are claude's draft. Read, edit, then submit your verdict.",
                       systemImage: "sparkles")
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
             if let draft, !draft.isEmpty {
                 pendingStrip(draft)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 TextField(draft?.isEmpty == false ? "Review summary…" : "Review comment…",
                           text: $reviewSummary, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .lineLimit(1...4)
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6)
-                        .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(7))
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
+                        .stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                    .themeShadow(.xs, radius: 6)
                 AccentButton("Approve") { submitReview(pr, .approve, project) }
                 GhostButton("Request changes", systemImage: "exclamationmark.bubble") {
                     submitReview(pr, .requestChanges, project)
@@ -593,12 +595,12 @@ struct PRWorkspaceView: View {
             }
             if let prActionOutput {
                 Text(prActionOutput)
-                    .font(.system(size: 10, design: .monospaced))
+                    .themeFont(size: 10, design: .monospaced)
                     .foregroundStyle(prActionOutput.hasSuffix("✓") ? DefaultTheme.groupHeader
                                                                    : DefaultTheme.secondaryText)
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(8))
         .padding(.trailing, controlsInset)
         // Background after the inset: the strip still spans the window, only
         // its contents step out from under the drawer.
@@ -610,18 +612,18 @@ struct PRWorkspaceView: View {
     private func pendingStrip(_ draft: ReviewDraft) -> some View {
         let pending = DefaultTheme.badgeColor(for: .needsInput)
         let count = draft.comments.count
-        return HStack(spacing: 8) {
+        return HStack(spacing: DefaultTheme.space(8)) {
             AppIcon("tray.and.arrow.down", size: 12).foregroundStyle(pending)
             Text(count == 1 ? "1 pending comment" : "\(count) pending comments")
-                .font(.system(size: 11, weight: .semibold))
+                .themeFont(size: 11, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
             Text("— sent together with your verdict, as one review")
-                .font(.system(size: 11))
+                .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)
             if !pr.headSHA.isEmpty, !draft.headSHA.isEmpty, draft.headSHA != pr.headSHA {
                 Label("written against an older head — line numbers may have moved",
                       systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 10))
+                    .themeFont(size: 10)
                     .foregroundStyle(pending)
             }
             Spacer()
@@ -697,16 +699,15 @@ struct PRWorkspaceView: View {
     }
 
     private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             Text(title)
-                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                .kerning(0.53)
+                .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                 .foregroundStyle(DefaultTheme.secondaryText)
             Text("\(count)")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .themeFont(size: 10, weight: .semibold, design: .monospaced)
                 .foregroundStyle(color)
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(1))
+                .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
         }
     }
 
@@ -770,7 +771,7 @@ struct PRWorkspaceView: View {
                 }
             }
         } else {
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 GhostButton(tourLoading ? "The guide is reading the PR…" : "Explain this PR",
                             systemImage: "sparkles") {
                     guard !tourLoading else { return }

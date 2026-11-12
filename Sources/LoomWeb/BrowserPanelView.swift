@@ -28,7 +28,7 @@ public struct BrowserPanelView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 Button { controller.activeWebView?.goBack() } label: { Image(systemName: "chevron.left") }
                 Button { controller.activeWebView?.goForward() } label: { Image(systemName: "chevron.right") }
                 Button { controller.activeWebView?.reload() } label: { Image(systemName: "arrow.clockwise") }
@@ -49,11 +49,11 @@ public struct BrowserPanelView: View {
                     .help("Open in system browser")
                 }
             }
-            .padding(8)
+            .padding(DefaultTheme.space(8))
 
             if !controller.tabs.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 3) {
+                    HStack(spacing: DefaultTheme.space(3)) {
                         ForEach(controller.tabs, id: \.id) { tab in
                             BrowserTabButton(title: tab.title,
                                              isActive: controller.activeTab == tab.id,
@@ -61,7 +61,7 @@ public struct BrowserPanelView: View {
                                              onClose: { controller.close(tab.id) })
                         }
                     }
-                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(4))
                 }
                 .background(DefaultTheme.background)
             }
@@ -98,12 +98,12 @@ struct BrowserTabButton: View {
     @State private var hovered = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DefaultTheme.space(6)) {
             Image(systemName: "globe")
                 .font(.system(size: 9))
                 .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
             Text(title.isEmpty ? "New tab" : title)
-                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .themeFont(size: 11, weight: isActive ? .semibold : .regular)
                 .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
                                                      : DefaultTheme.secondaryText)
                 .lineLimit(1)
@@ -119,11 +119,11 @@ struct BrowserTabButton: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 9).padding(.vertical, 5)
+        .padding(.horizontal, DefaultTheme.space(9)).padding(.vertical, DefaultTheme.space(5))
         .background(isActive ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                    in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7)
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(7)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(7))
             .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)

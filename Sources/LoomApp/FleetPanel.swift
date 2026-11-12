@@ -78,7 +78,7 @@ struct FleetPanel: View {
     // MARK: - Bar
 
     private var bar: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: DefaultTheme.space(2)) {
             ForEach(Tab.allCases, id: \.self) { candidate in
                 NavTab(candidate.title, icon: candidate.icon, isActive: isOpen && tab == candidate) {
                     if isOpen && tab == candidate {
@@ -91,7 +91,7 @@ struct FleetPanel: View {
             }
             if !isOpen, let waiting = FleetFilter.counts(fleet)[.needsInput], waiting > 0 {
                 StatusTag("\(waiting) needs input", color: DefaultTheme.badgeColor(for: .needsInput))
-                    .padding(.leading, 8)
+                    .padding(.leading, DefaultTheme.space(8))
             }
             Spacer(minLength: 12)
             StatusTag(model.hooksOnline ? "Hooks online" : "Hooks offline",
@@ -100,10 +100,10 @@ struct FleetPanel: View {
                             help: isOpen ? "Fold the fleet panel (⌘J)" : "Unfold the fleet panel (⌘J)") {
                 isOpen.toggle()
             }
-            .padding(.leading, 6)
+            .padding(.leading, DefaultTheme.space(6))
         }
-        .padding(.horizontal, 12)
-        .frame(height: 38)
+        .padding(.horizontal, DefaultTheme.space(12))
+        .frame(height: DefaultTheme.size(38))
         .background(DefaultTheme.background)
     }
 
@@ -118,14 +118,14 @@ struct FleetPanel: View {
                 FleetFooter(model: model, items: fleet, hints: hints)
             }
         } else if fleet.isEmpty {
-            VStack(spacing: 6) {
+            VStack(spacing: DefaultTheme.space(6)) {
                 Text("No live session")
-                    .font(.system(size: 13, weight: .medium))
+                    .themeFont(size: 13, weight: .medium)
                     .foregroundStyle(DefaultTheme.primaryText)
-                HStack(spacing: 4) {
+                HStack(spacing: DefaultTheme.space(4)) {
                     KeyCap("⌘")
                     KeyCap("N")
-                    Text("starts one.").font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
+                    Text("starts one.").themeFont(size: 12).foregroundStyle(DefaultTheme.secondaryText)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -185,13 +185,13 @@ struct FleetPanel: View {
     }
 
     private var terminalHead: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             LucideIcon(.terminal, size: 14).foregroundStyle(DefaultTheme.secondaryText)
             MonoLabel("Terminal")
             if let parent = stackParent {
                 MonoLabel(parent.title, color: DefaultTheme.mutedText)
             }
-            HStack(spacing: 2) {
+            HStack(spacing: DefaultTheme.space(2)) {
                 ForEach(shells.filter { $0.id != currentSessionID }) { shell in
                     NavTab(shell.title, isActive: shell.id == shownShell?.id) {
                         if let parent = stackParent { shellByStack[parent.id] = shell.id }
@@ -201,37 +201,37 @@ struct FleetPanel: View {
                     HoverIconButton(systemImage: "plus", help: "New terminal in this worktree") {
                         Task { await openShell() }
                     }
-                    .padding(.leading, 4)
+                    .padding(.leading, DefaultTheme.space(4))
                 }
             }
             Spacer(minLength: 12)
             if let branch = stackParent?.branch {
                 Text(branch)
-                    .font(.system(size: 11.5, design: .monospaced))
+                    .themeFont(size: 11.5, design: .monospaced)
                     .foregroundStyle(DefaultTheme.branch)
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, 14)
-        .frame(height: 34)
+        .padding(.horizontal, DefaultTheme.space(14))
+        .frame(height: DefaultTheme.size(34))
         .background(DefaultTheme.background)
     }
 
     @ViewBuilder
     private var terminalPlaceholder: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: DefaultTheme.space(10)) {
             if stackParent == nil {
                 Text("Open a session: its terminal shows here, in its worktree.")
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
             } else if shells.contains(where: { $0.id == currentSessionID }) && shells.count == 1 {
                 Text("This stack's terminal is open above.")
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
                 FleetButton("New terminal", prominent: false) { Task { await openShell() } }
             } else {
                 Text("No terminal in this worktree.")
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
                 FleetButton("Open a terminal", prominent: true) { Task { await openShell() } }
             }

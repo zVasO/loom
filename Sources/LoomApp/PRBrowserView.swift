@@ -35,7 +35,7 @@ struct PRBrowserView: View {
                     PRModeSwitch(model: model)
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, DefaultTheme.space(12))
                 .frame(width: Self.railWidth)
                 Divider().overlay(DefaultTheme.cardBorder)
                 toolbar
@@ -107,7 +107,7 @@ struct PRBrowserView: View {
 
     private var rail: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(16)) {
                 railSection("REVIEW REQUESTS") {
                     PRScopeRow(systemImage: "tray", title: "Waiting on me",
                                count: model.inbox.count, loading: model.inboxLoading,
@@ -140,7 +140,7 @@ struct PRBrowserView: View {
                                    isSelected: scope == .project(project.id)) {
                             model.prBrowseScope = .project(project.id)
                         }
-                        .padding(.leading, 10)
+                        .padding(.leading, DefaultTheme.space(10))
                     }
                 }
                 railSection("GITHUB") {
@@ -151,20 +151,19 @@ struct PRBrowserView: View {
                 }
                 ScheduledReviewsSidebarSection(model: model, activeTabID: nil)
             }
-            .padding(10)
+            .padding(DefaultTheme.space(10))
         }
         .background(DefaultTheme.background)
     }
 
     private func railSection<Content: View>(_ title: String,
                                             @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(3)) {
             Text(title)
-                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                .kerning(0.53)
+                .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                 .foregroundStyle(DefaultTheme.mutedText)
-                .padding(.horizontal, 6)
-                .padding(.bottom, 2)
+                .padding(.horizontal, DefaultTheme.space(6))
+                .padding(.bottom, DefaultTheme.space(2))
             content()
         }
     }
@@ -172,14 +171,14 @@ struct PRBrowserView: View {
     // MARK: Toolbar — the scope, the search, the actions on the selection
 
     private var toolbar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(scopeTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                    .themeFont(size: 13, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                     .lineLimit(1)
                 Text(scopeCaption)
-                    .font(.system(size: 10))
+                    .themeFont(size: 10)
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
             }
@@ -201,7 +200,7 @@ struct PRBrowserView: View {
             }
             .popover(isPresented: $addRepoShown, arrowEdge: .bottom) { addRepoPopover }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, DefaultTheme.space(14))
         .frame(maxWidth: .infinity)
     }
 
@@ -274,14 +273,14 @@ struct PRBrowserView: View {
     }
 
     private var searchField: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DefaultTheme.space(6)) {
             AppIcon("magnifyingglass", size: 13)
                 .foregroundStyle(DefaultTheme.secondaryText)
             TextField(scope == .repositories ? "Filter repositories"
                       : "Filter — Return searches GitHub or opens a PR URL",
                       text: $query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .themeFont(size: 12)
                 .focused($searchFocused)
                 .onSubmit { submitSearch() }
                 .onExitCommand { query = "" }
@@ -296,12 +295,13 @@ struct PRBrowserView: View {
                 .frame(width: 0, height: 0)
                 .opacity(0)
         }
-        .padding(.horizontal, 10).padding(.vertical, 5)
+        .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(5))
         .frame(width: 300)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6)
-            .stroke(searchFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
+            .stroke(searchFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.fieldBorder,
                     lineWidth: 1))
+        .themeShadow(.xs, radius: 6)
     }
 
     /// Return: a PR reference opens in Review; any other text becomes a
@@ -420,7 +420,7 @@ struct PRBrowserView: View {
     /// Why the table is empty — and, when there is one, the way out.
     @ViewBuilder
     private var emptyState: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: DefaultTheme.space(8)) {
             switch scope {
             case .inbox:
                 if let error = model.inboxError {
@@ -460,20 +460,20 @@ struct PRBrowserView: View {
                 EmptyView()
             }
         }
-        .padding(24)
+        .padding(DefaultTheme.space(24))
         .frame(maxWidth: 420)
         .allowsHitTesting(true)
     }
 
     private func emptyTitle(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 14, weight: .semibold))
+            .themeFont(size: 14, weight: .semibold)
             .foregroundStyle(DefaultTheme.secondaryText)
     }
 
     private func emptyText(_ text: String, isError: Bool = false) -> some View {
         Text(text)
-            .font(.system(size: 12))
+            .themeFont(size: 12)
             .foregroundStyle(isError ? DefaultTheme.danger : DefaultTheme.mutedText)
             .multilineTextAlignment(.center)
             .textSelection(.enabled)
@@ -563,7 +563,7 @@ struct PRBrowserView: View {
 
     @ViewBuilder
     private var repositoriesEmptyState: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: DefaultTheme.space(8)) {
             if let error = model.catalogError {
                 emptyText(error, isError: true)
             } else if model.catalog == nil {
@@ -576,21 +576,21 @@ struct PRBrowserView: View {
                 emptyText("Every repository here is already a project.")
             }
         }
-        .padding(24)
+        .padding(DefaultTheme.space(24))
         .frame(maxWidth: 420)
     }
 
     @ViewBuilder
     private var repositoriesFooter: some View {
         if model.hiddenCount > 0 || model.catalogError != nil {
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 if model.hiddenCount > 0 {
                     Button {
                         model.unhideAll()
                     } label: {
                         Text(model.hiddenCount == 1 ? "1 hidden — show"
                              : "\(model.hiddenCount) hidden — show")
-                            .font(.system(size: 11))
+                            .themeFont(size: 11)
                             .foregroundStyle(DefaultTheme.secondaryText)
                             .underline()
                     }
@@ -598,7 +598,7 @@ struct PRBrowserView: View {
                 }
                 Spacer()
             }
-            .padding(.horizontal, 14).padding(.vertical, 6)
+            .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(6))
             .background(DefaultTheme.background)
         }
     }
@@ -608,19 +608,20 @@ struct PRBrowserView: View {
     /// `owner/name`, a repository URL, or a PR URL: the repository is cloned
     /// and added as a project; a PR URL opens the PR once it is.
     private var addRepoPopover: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
             Text("Add a repository")
-                .font(.system(size: 12, weight: .semibold))
+                .themeFont(size: 12, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
             TextField("owner/name, or a GitHub URL", text: $addRepoText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12, design: .monospaced))
-                .padding(.horizontal, 8).padding(.vertical, 6)
-                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .themeFont(size: 12, design: .monospaced)
+                .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                .themeShadow(.xs, radius: 6)
                 .onSubmit { submitAddRepo() }
             Text("Cloned with gh into your clone folder, then added as a project — its PRs appear with the others. A PR URL opens that PR right after.")
-                .font(.system(size: 10))
+                .themeFont(size: 10)
                 .foregroundStyle(DefaultTheme.mutedText)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -629,7 +630,7 @@ struct PRBrowserView: View {
                 AccentButton("Add") { submitAddRepo() }
             }
         }
-        .padding(14)
+        .padding(DefaultTheme.space(14))
         .frame(width: 340)
         .background(DefaultTheme.background)
     }
@@ -659,10 +660,10 @@ struct PRModeSwitch: View {
     let model: AppModel
 
     /// Both modes' top bars: the switch never moves when the mode changes.
-    static let barHeight: CGFloat = 44
+    static var barHeight: CGFloat { DefaultTheme.size(44) }
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: DefaultTheme.space(2)) {
             PRModeSegment(title: "Browse", systemImage: "tablecells",
                           isActive: model.prMode == .browse, count: nil, alert: false,
                           shortcut: "1") {
@@ -674,9 +675,9 @@ struct PRModeSwitch: View {
                 withAnimation(.hover) { model.prMode = .review }
             }
         }
-        .padding(2)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .padding(DefaultTheme.space(2))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
         .fixedSize()
     }
 }
@@ -693,18 +694,18 @@ private struct PRModeSegment: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 AppIcon(systemImage, size: 12)
                     .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
                 Text(title)
-                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                    .themeFont(size: 12, weight: isActive ? .semibold : .regular)
                     .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
                                                          : DefaultTheme.secondaryText)
                 if let count, count > 0 {
                     Text("\(count)")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .themeFont(size: 9, weight: .semibold, design: .monospaced)
                         .foregroundStyle(DefaultTheme.secondaryText)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .padding(.horizontal, DefaultTheme.space(5)).padding(.vertical, DefaultTheme.space(1))
                         .background(DefaultTheme.surfaceRaised, in: Capsule())
                 }
                 if alert {
@@ -713,10 +714,10 @@ private struct PRModeSegment: View {
                         .frame(width: 6, height: 6)
                 }
             }
-            .padding(.horizontal, 10).padding(.vertical, 5)
+            .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(5))
             .background(isActive ? DefaultTheme.surfaceRaised
                         : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                        in: RoundedRectangle(cornerRadius: 6))
+                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -745,19 +746,19 @@ private struct PRScopeRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 AppIcon(systemImage, size: 13)
                     .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.secondaryText)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
-                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .themeFont(size: 12, weight: isSelected ? .semibold : .regular)
                         .foregroundStyle(isSelected || hovered ? DefaultTheme.primaryText
                                                                : DefaultTheme.secondaryText)
                         .lineLimit(1)
                     if let subtitle {
                         Text(subtitle)
-                            .font(.system(size: 9, design: .monospaced))
+                            .themeFont(size: 9, design: .monospaced)
                             .foregroundStyle(DefaultTheme.mutedText)
                             .lineLimit(1)
                     }
@@ -769,14 +770,14 @@ private struct PRScopeRow: View {
                     HoverIconButton(systemImage: "xmark", help: "Close the results", action: onClose)
                 } else if let count, count > 0 {
                     Text("\(count)")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .themeFont(size: 10, weight: .semibold, design: .monospaced)
                         .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.mutedText)
                 }
             }
-            .padding(.horizontal, 6).padding(.vertical, 5)
+            .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(5))
             .background(isSelected ? DefaultTheme.surfaceRaised
                         : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                        in: RoundedRectangle(cornerRadius: 6))
+                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -795,7 +796,7 @@ enum PRBrowseCells {
 
     private static func unknown() -> some View {
         Text(dash)
-            .font(.system(size: 11))
+            .themeFont(size: 11)
             .foregroundStyle(DefaultTheme.mutedText)
     }
 
@@ -818,29 +819,29 @@ enum PRBrowseCells {
 
     static func number(_ row: PRBrowseRow) -> some View {
         Text("#\(row.number)")
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .themeFont(size: 11, weight: .bold, design: .monospaced)
             .foregroundStyle(DefaultTheme.accent)
     }
 
     static func title(_ row: PRBrowseRow) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DefaultTheme.space(6)) {
             if row.isDraft {
                 Text("draft")
-                    .font(.system(size: 9, weight: .semibold))
+                    .themeFont(size: 9, weight: .semibold)
                     .foregroundStyle(DefaultTheme.secondaryText)
-                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(1))
                     .background(DefaultTheme.surfaceRaised, in: Capsule())
                     .fixedSize()
             }
             Text(row.title)
-                .font(.system(size: 12, weight: .medium))
+                .themeFont(size: 12, weight: .medium)
                 .foregroundStyle(row.isDraft ? DefaultTheme.secondaryText : DefaultTheme.primaryText)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .help(row.title)
             if row.pr?.isConflicting == true {
                 Text("conflicts")
-                    .font(.system(size: 9, weight: .semibold))
+                    .themeFont(size: 9, weight: .semibold)
                     .foregroundStyle(DefaultTheme.danger)
                     .fixedSize()
             }
@@ -850,7 +851,7 @@ enum PRBrowseCells {
 
     static func place(_ row: PRBrowseRow) -> some View {
         Text(row.place)
-            .font(.system(size: 11, design: .monospaced))
+            .themeFont(size: 11, design: .monospaced)
             .foregroundStyle(DefaultTheme.secondaryText)
             .lineLimit(1)
             .truncationMode(.head)
@@ -859,7 +860,7 @@ enum PRBrowseCells {
 
     static func author(_ row: PRBrowseRow) -> some View {
         Text("@" + row.author)
-            .font(.system(size: 11, design: .monospaced))
+            .themeFont(size: 11, design: .monospaced)
             .foregroundStyle(DefaultTheme.secondaryText)
             .lineLimit(1)
     }
@@ -867,7 +868,7 @@ enum PRBrowseCells {
     @ViewBuilder
     static func review(_ row: PRBrowseRow) -> some View {
         if let pr = row.pr {
-            HStack(spacing: 6) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 switch pr.reviewDecision {
                 case "APPROVED":
                     Label("approved", systemImage: "checkmark.circle.fill")
@@ -883,12 +884,12 @@ enum PRBrowseCells {
                 }
                 if !pr.reviewers.isEmpty {
                     Text(PRChips.reviewers(pr, limit: 2))
-                        .font(.system(size: 10, design: .monospaced))
+                        .themeFont(size: 10, design: .monospaced)
                         .foregroundStyle(DefaultTheme.mutedText)
                         .lineLimit(1)
                 }
             }
-            .font(.system(size: 11))
+            .themeFont(size: 11)
             .labelStyle(.titleAndIcon)
             .help(pr.reviewers.isEmpty ? pr.reviewDecision.lowercased()
                   : "Waiting on " + PRChips.reviewers(pr, limit: 10))
@@ -909,7 +910,7 @@ enum PRBrowseCells {
 
     static func updated(_ row: PRBrowseRow) -> some View {
         Text(row.updatedAt.isEmpty ? dash : PRAge.text(row.updatedAt))
-            .font(.system(size: 11))
+            .themeFont(size: 11)
             .foregroundStyle(DefaultTheme.mutedText)
             .help(row.updatedAt)
     }
@@ -943,17 +944,17 @@ enum PRBrowseCells {
 @MainActor
 private enum CatalogCells {
     static func name(_ repo: GitHubService.Repository, cloning: Bool) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DefaultTheme.space(6)) {
             Image(systemName: repo.isPrivate ? "lock" : "globe")
                 .font(.system(size: 10))
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(width: 12)
             HStack(spacing: 0) {
                 Text(repo.owner + "/")
-                    .font(.system(size: 11, design: .monospaced))
+                    .themeFont(size: 11, design: .monospaced)
                     .foregroundStyle(DefaultTheme.mutedText)
                 Text(repo.name)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .themeFont(size: 11, weight: .semibold, design: .monospaced)
                     .foregroundStyle(DefaultTheme.primaryText)
             }
             if repo.isFork {
@@ -971,7 +972,7 @@ private enum CatalogCells {
 
     static func description(_ repo: GitHubService.Repository) -> some View {
         Text(repo.description)
-            .font(.system(size: 11))
+            .themeFont(size: 11)
             .foregroundStyle(DefaultTheme.secondaryText)
             .lineLimit(1)
             .help(repo.description)
@@ -979,13 +980,13 @@ private enum CatalogCells {
 
     static func visibility(_ repo: GitHubService.Repository) -> some View {
         Text(repo.visibility)
-            .font(.system(size: 10, weight: .medium))
+            .themeFont(size: 10, weight: .medium)
             .foregroundStyle(repo.isArchived ? DefaultTheme.mutedText : DefaultTheme.secondaryText)
     }
 
     static func pushed(_ repo: GitHubService.Repository) -> some View {
         Text(repo.pushedAt.isEmpty ? "—" : PRAge.text(repo.pushedAt))
-            .font(.system(size: 11))
+            .themeFont(size: 11)
             .foregroundStyle(DefaultTheme.mutedText)
     }
 }

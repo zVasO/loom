@@ -96,6 +96,29 @@ struct TweakcnImportTests {
         }
     }
 
+    @Test("a value wrapped onto the next lines is read whole")
+    func cssWrappedValues() throws {
+        let css = """
+        :root {
+          --background: #ffffff;
+          --font-sans:
+            Plus Jakarta Sans, ui-sans-serif,
+            sans-serif;
+          --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.10),
+            0 1px 2px -1px hsl(0 0% 0% / 0.10);
+          --radius: 0.5rem;
+          color: red;
+        }
+        """
+        let (light, _) = try TweakcnImport.parseCSS(css)
+        #expect(light["font-sans"] == "Plus Jakarta Sans, ui-sans-serif, sans-serif")
+        #expect(light["shadow-sm"] == "0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10)")
+        #expect(light["radius"] == "0.5rem" && light["background"] == "#ffffff")
+        #expect(light.count == 4, "a declaration that is no variable is not one")
+        let bare = TweakcnImport.variables(in: "--a: 1\ncolor: red\n--b: one,\n  two\n--c: 3")
+        #expect(bare == ["a": "1", "b": "one, two", "c": "3"], "only a wrapped value runs on")
+    }
+
     @Test("a @media (prefers-color-scheme: dark) wrapper is walked into")
     func cssMedia() throws {
         let css = """
@@ -173,6 +196,20 @@ struct TweakcnImportTests {
         #expect(tokens.surface == "#FFFFFF" && tokens.cardBorder == "#E5E5E5")
     }
 
+    @Test("aliases that multiply each other are dropped, not expanded")
+    func aliasExplosion() {
+        // Eight variables, each twelve times the next: under a kilobyte that
+        // would grow to hundreds of megabytes.
+        var vars: TweakcnImport.Variables = ["a7": "#fff", "background": "#ffffff"]
+        for index in 0..<7 {
+            vars["a\(index)"] = Array(repeating: "var(--a\(index + 1))", count: 12).joined(separator: " ")
+        }
+        let resolved = TweakcnImport.resolvingReferences(vars)
+        #expect(resolved.values.allSatisfy { $0.utf8.count <= 4_096 })
+        #expect(resolved["background"] == "#ffffff" && resolved["a7"] == "#fff")
+        #expect(TweakcnImport.tokens(from: vars, dark: false).contentBackground == "#FFFFFF")
+    }
+
     @Test("hex with alpha and colour keywords")
     func hexAlphaAndKeywords() {
         #expect(CSSColor.parse("#3b82f680") == "#3B82F6")
@@ -239,6 +276,7 @@ struct TweakcnImportTests {
         #expect(!family.isBuiltIn)
         #expect(family.variantLightName == "Twitter Light")
         #expect(family.document == nil, "no font, no radius: nothing for documents")
+        #expect(family.light.design == nil && family.dark.design == nil, "colours alone: the charter's design")
     }
 
     @Test("fonts and radius become the theme's document style, from CSS or from the registry's shared block")
@@ -253,5 +291,217 @@ struct TweakcnImportTests {
         #expect(family.document?.radius == "1rem", "the variant's own value wins")
         #expect(ThemeDocumentStyle.isAllowedFontsURL("https://fonts.googleapis.com/css2?family=Nunito"))
         #expect(!ThemeDocumentStyle.isAllowedFontsURL("https://evil.example/fonts.css"))
+    }
+
+    // MARK: Design — what the theme says beyond its colours (ADR-0022)
+
+    /// tweakcn's Code export of its "Neo Brutalism" preset (Tailwind v4,
+    /// oklch), as its generator writes it today — header, both blocks,
+    /// `@theme inline`, `@layer base` — with the colours not read here cut.
+    private static let neoBrutalism = """
+    @import "tailwindcss";
+
+    @custom-variant dark (&:is(.dark *));
+
+    :root {
+      --background: oklch(1.0000 0 0);
+      --foreground: oklch(0 0 0);
+      --card: oklch(1.0000 0 0);
+      --primary: oklch(0.6489 0.2370 26.9728);
+      --primary-foreground: oklch(1.0000 0 0);
+      --muted: oklch(0.9551 0 0);
+      --muted-foreground: oklch(0.3211 0 0);
+      --border: oklch(0 0 0);
+      --input: oklch(0 0 0);
+      --font-sans: DM Sans, sans-serif;
+      --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+      --font-mono: Space Mono, monospace;
+      --radius: 0px;
+      --shadow-x: 4px;
+      --shadow-y: 4px;
+      --shadow-blur: 0px;
+      --shadow-spread: 0px;
+      --shadow-opacity: 1;
+      --shadow-color: hsl(0 0% 0%);
+      --shadow-sm: 4px 4px 0px 0px hsl(0 0% 0% / 1.00), 4px 1px 2px -1px hsl(0 0% 0% / 1.00);
+      --tracking-normal: 0em;
+      --spacing: 0.25rem;
+    }
+
+    .dark {
+      --background: oklch(0 0 0);
+      --foreground: oklch(1.0000 0 0);
+      --card: oklch(0.3211 0 0);
+      --primary: oklch(0.7044 0.1872 23.1858);
+      --primary-foreground: oklch(0 0 0);
+      --muted: oklch(0.2178 0 0);
+      --muted-foreground: oklch(0.8452 0 0);
+      --border: oklch(1.0000 0 0);
+      --input: oklch(1.0000 0 0);
+      --font-sans: DM Sans, sans-serif;
+      --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+      --font-mono: Space Mono, monospace;
+      --radius: 0px;
+      --shadow-x: 4px;
+      --shadow-y: 4px;
+      --shadow-blur: 0px;
+      --shadow-spread: 0px;
+      --shadow-opacity: 1;
+      --shadow-color: hsl(0 0% 0%);
+      --shadow-sm: 4px 4px 0px 0px hsl(0 0% 0% / 1.00), 4px 1px 2px -1px hsl(0 0% 0% / 1.00);
+    }
+
+    @theme inline {
+      --color-background: var(--background);
+      --color-border: var(--border);
+
+      --font-sans: var(--font-sans);
+      --font-mono: var(--font-mono);
+      --font-serif: var(--font-serif);
+
+      --radius-sm: calc(var(--radius) - 4px);
+      --radius-md: calc(var(--radius) - 2px);
+      --radius-lg: var(--radius);
+      --radius-xl: calc(var(--radius) + 4px);
+
+      --shadow-sm: var(--shadow-sm);
+    }
+
+    @layer base {
+      * {
+        @apply border-border outline-ring/50;
+      }
+      body {
+        @apply bg-background text-foreground;
+      }
+    }
+    """
+
+    @Test("the whole Code export — header, @theme inline, @layer base — reads as its two blocks")
+    func cssWholeExport() throws {
+        let (light, dark) = try TweakcnImport.parseCSS(Self.neoBrutalism)
+        #expect(light["background"] == "oklch(1.0000 0 0)", "`@import …;` is a statement, not :root's selector")
+        #expect(dark["background"] == "oklch(0 0 0)")
+        #expect(light["font-sans"] == "DM Sans, sans-serif", "@theme inline's aliases overwrite nothing")
+        #expect(light["radius"] == "0px" && light["spacing"] == "0.25rem")
+        #expect(dark["spacing"] == nil, "tweakcn writes --spacing in :root only")
+        let family = TweakcnImport.family(named: "Neo Brutalism", light: light, dark: dark)
+        #expect(family.light.isLight && !family.dark.isLight)
+        #expect(family.light.contentBackground == "#FFFFFF" && family.dark.contentBackground == "#000000")
+    }
+
+    @Test("a theme's design is read to the letter: radius, spacing, fonts, edges, shadow")
+    func designFromCSS() throws {
+        let (light, dark) = try TweakcnImport.parseCSS(Self.neoBrutalism)
+        let family = TweakcnImport.family(named: "Neo Brutalism", light: light, dark: dark)
+        let day = try #require(family.light.design)
+        #expect(day.radius == 0)
+        #expect(day.spacing == 4)
+        #expect(day.letterSpacing == nil, "0em is no letter-spacing")
+        #expect(day.fontSans == "DM Sans, sans-serif")
+        #expect(day.fontMono == "Space Mono, monospace")
+        #expect(day.fontSerif == "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif")
+        #expect(day.border == "#000000" && day.input == "#000000")
+        #expect(day.shadow == ThemeShadow(color: "#000000", opacity: 1, blur: 0, spread: 0, x: 4, y: 4))
+
+        let night = try #require(family.dark.design)
+        #expect(night.border == "#FFFFFF" && night.input == "#FFFFFF", "each variant has its own edges")
+        #expect(night.radius == 0 && night.spacing == 4, ":root's --spacing serves .dark too")
+        #expect(night.fontSans == day.fontSans && night.shadow == day.shadow)
+
+        // What the app draws with it: square controls, tweakcn's 4 pt cards, black edges.
+        let palette = family.palette(dark: false)
+        #expect(palette.radius(6) == 0 && palette.radius(10) == 4)
+        #expect(palette.line == ThemePalette.color("#000000"))
+        #expect(palette.space(8) == 8)
+    }
+
+    @Test("the registry file carries the same design; the values tweakcn shares are the light variant's in both")
+    func designFromRegistry() throws {
+        // Violet Bloom: a wide radius, a negative letter-spacing, a spacing
+        // of 0.27rem. Graphite's dark block names another font (Inter).
+        let json = ##"""
+        {"name": "Violet Bloom", "type": "registry:style",
+         "css": {"@layer base": {"body": {"letter-spacing": "var(--tracking-normal)"}}},
+         "cssVars": {
+           "theme": {"font-sans": "Plus Jakarta Sans, sans-serif", "font-mono": "IBM Plex Mono, monospace",
+                     "radius": "1.4rem", "tracking-tight": "calc(var(--tracking-normal) - 0.025em)"},
+           "light": {"background": "oklch(0.9940 0 0)", "foreground": "oklch(0 0 0)",
+                     "border": "oklch(0.9300 0.0094 286.2156)", "input": "oklch(0.9401 0 0)",
+                     "radius": "1.4rem", "font-sans": "Montserrat, sans-serif", "font-mono": "IBM Plex Mono, monospace",
+                     "shadow-color": "hsl(0 0% 20% / 0.1)", "shadow-opacity": "0.16", "shadow-blur": "3px",
+                     "shadow-spread": "0px", "shadow-offset-x": "0px", "shadow-offset-y": "2px",
+                     "letter-spacing": "-0.025em", "spacing": "0.27rem", "tracking-normal": "-0.025em"},
+           "dark": {"background": "oklch(0.2223 0.0060 271.1393)", "foreground": "oklch(0.9551 0 0)",
+                    "border": "oklch(0.3289 0.0092 268.3843)", "input": "oklch(0.3289 0.0092 268.3843)",
+                    "radius": "0.35rem", "font-sans": "Inter, sans-serif", "font-mono": "IBM Plex Mono, monospace",
+                    "shadow-color": "#000000", "shadow-opacity": "0.4", "shadow-blur": "3px",
+                    "shadow-spread": "0px", "shadow-offset-x": "0px", "shadow-offset-y": "2px",
+                    "letter-spacing": "0em", "spacing": "0.25rem"}}}
+        """##
+        let parsed = try TweakcnImport.parseRegistry(Data(json.utf8))
+        let family = TweakcnImport.family(named: parsed.name, light: parsed.light, dark: parsed.dark)
+        let day = try #require(family.light.design)
+        #expect(abs((day.radius ?? 0) - 22.4) < 1e-9)
+        #expect(abs((day.spacing ?? 0) - 4.32) < 1e-9)
+        #expect(day.letterSpacing == -0.025)
+        #expect(day.fontSans == "Montserrat, sans-serif", "the variant's own value wins over the shared block")
+        #expect(day.shadow == ThemeShadow(color: "#333333", opacity: 0.16, blur: 3, spread: 0, x: 0, y: 2),
+                "the shadow colour's own alpha is not the shadow's opacity")
+        #expect(day.border == CSSColor.parse("oklch(0.9300 0.0094 286.2156)"))
+
+        let night = try #require(family.dark.design)
+        #expect(night.fontSans == "Montserrat, sans-serif", "fonts are shared: the light variant's")
+        #expect(night.radius == day.radius && night.spacing == day.spacing && night.letterSpacing == -0.025)
+        #expect(night.shadow?.opacity == 0.16 && night.shadow?.color == "#000000",
+                "the geometry and opacity are shared, the colour is the variant's")
+        #expect(night.border == CSSColor.parse("oklch(0.3289 0.0092 268.3843)"))
+        #expect(family.document?.radius == "1.4rem", "documents still get their style")
+    }
+
+    @Test("an older export has no shadow parameters: the first layer of --shadow-sm stands for them")
+    func composedShadows() throws {
+        let clay = TweakcnImport.composedShadow(
+            "2px 2px 10px 4px hsl(240 4% 60% / 0.18), 2px 1px 2px 3px hsl(240 4% 60% / 0.18)")
+        let lilac = try #require(CSSColor.parse("hsl(240 4% 60%)"))
+        #expect(clay == ThemeShadow(color: lilac, opacity: 0.18, blur: 10, spread: 4, x: 2, y: 2))
+        #expect(TweakcnImport.composedShadow("0 1px rgb(0 0 0 / 0.05)")
+                == ThemeShadow(color: "#000000", opacity: 0.05, blur: 0, spread: 0, x: 0, y: 1))
+        #expect(TweakcnImport.composedShadow("none") == nil)
+        let design = TweakcnImport.design(from: ["shadow-sm": "0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10)"],
+                                          background: "#FFFFFF")
+        #expect(design?.shadow == ThemeShadow(color: "#000000", opacity: 0.1, blur: 8, spread: -1, x: 0, y: 4))
+        #expect(TweakcnImport.design(from: ["background": "#fff", "primary": "#000"], background: "#FFFFFF") == nil,
+                "colours alone are no design")
+        #expect(TweakcnImport.design(from: ["spacing": "1rem"], background: "#FFFFFF")?.spacing == 8,
+                "a spacing far outside tweakcn's range is held back")
+        #expect(TweakcnImport.design(from: ["letter-spacing": "0.5px"], background: "#FFFFFF")?.letterSpacing == 0.03125)
+        #expect(TweakcnImport.design(from: ["shadow-opacity": "100%"], background: "#FFFFFF")?.shadow
+                == ThemeShadow(color: "#000000", opacity: 1, blur: 3, spread: 0, x: 0, y: 1),
+                "the parameters left out are tweakcn's defaults")
+    }
+
+    @Test("a translucent colour is what it looks like on the page: shadcn's dark border at 10 %")
+    func translucentColours() {
+        #expect(CSSColor.alpha("oklch(1 0 0 / 10%)") == 0.1)
+        #expect(CSSColor.alpha("hsl(0 0% 0% / 0.50)") == 0.5)
+        #expect(CSSColor.alpha("rgba(29, 161, 242, 0.15)") == 0.15)
+        #expect(CSSColor.alpha("#ffffff80") == 128.0 / 255)
+        #expect(CSSColor.alpha("#fff") == 1 && CSSColor.alpha("oklch(1 0 0)") == 1 && CSSColor.alpha("rgb(1, 2, 3)") == 1)
+        #expect(CSSColor.opaque("oklch(1 0 0 / 10%)", over: "#0A0A0A") == ThemeTokens.mix("#0A0A0A", with: "#FFFFFF", amount: 0.1))
+        #expect(CSSColor.opaque("#3b82f6", over: "#000000") == "#3B82F6")
+        #expect(CSSColor.opaque("nope", over: "#000000") == nil)
+
+        let vars: TweakcnImport.Variables = [
+            "background": "oklch(0.145 0 0)", "foreground": "oklch(0.985 0 0)",
+            "border": "oklch(1 0 0 / 10%)", "input": "oklch(1 0 0 / 15%)",
+        ]
+        let tokens = TweakcnImport.tokens(from: vars, dark: true)
+        let border = ThemeTokens.mix("#0A0A0A", with: "#FFFFFF", amount: 0.1)
+        #expect(tokens.contentBackground == "#0A0A0A")
+        #expect(tokens.cardBorder == border, "not a white edge")
+        let design = TweakcnImport.design(from: vars, background: tokens.contentBackground)
+        #expect(design?.border == border)
+        #expect(design?.input == ThemeTokens.mix("#0A0A0A", with: "#FFFFFF", amount: 0.15))
     }
 }

@@ -19,16 +19,16 @@ struct ExtensionLaunchSheet: View {
     @State private var launching = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 Image(systemName: "puzzlepiece.extension")
                     .foregroundStyle(DefaultTheme.accent)
                 Text("\(request.extensionName) wants to start a session")
-                    .font(.system(size: 15, weight: .semibold))
+                    .themeFont(size: 15, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
             }
             Text("Nothing starts until you press Launch. The prompt comes from the extension — read it before claude does.")
-                .font(.system(size: 11))
+                .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)
 
             field("PROJECT") {
@@ -59,17 +59,17 @@ struct ExtensionLaunchSheet: View {
 
             if !badges.isEmpty {
                 field("BADGES") {
-                    HStack(spacing: 6) {
+                    HStack(spacing: DefaultTheme.space(6)) {
                         ForEach(badges, id: \.self) { badge in
                             Button {
                                 badges.removeAll { $0 == badge }
                             } label: {
-                                HStack(spacing: 4) {
-                                    Text(badge).font(.system(size: 11, weight: .medium))
+                                HStack(spacing: DefaultTheme.space(4)) {
+                                    Text(badge).themeFont(size: 11, weight: .medium)
                                     Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
                                 }
                                 .foregroundStyle(DefaultTheme.primaryText)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(3))
                                 .background(DefaultTheme.surfaceRaised, in: Capsule())
                             }
                             .buttonStyle(.plain)
@@ -81,13 +81,14 @@ struct ExtensionLaunchSheet: View {
 
             field("PROMPT") {
                 TextEditor(text: $prompt)
-                    .font(.system(size: 12, design: .monospaced))
+                    .themeFont(size: 12, design: .monospaced)
                     .foregroundStyle(DefaultTheme.primaryText)
                     .frame(minHeight: 160, maxHeight: 280)
                     .scrollContentBackground(.hidden)
-                    .padding(6)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    .padding(DefaultTheme.space(6))
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                    .themeShadow(.xs, radius: 6)
             }
 
             HStack {
@@ -100,7 +101,7 @@ struct ExtensionLaunchSheet: View {
                     .opacity(canLaunch ? 1 : 0.5)
             }
         }
-        .padding(20)
+        .padding(DefaultTheme.space(20))
         .frame(width: 560)
         .background(DefaultTheme.background)
         .onAppear(perform: prefill)
@@ -150,10 +151,9 @@ struct ExtensionLaunchSheet: View {
     }
 
     private func field(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
             Text(title)
-                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                .kerning(0.53)
+                .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                 .foregroundStyle(DefaultTheme.secondaryText)
             content()
         }
@@ -169,48 +169,47 @@ struct ExtensionConsentSheet: View {
     let onCancel: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
+            HStack(spacing: DefaultTheme.space(10)) {
                 Image(systemName: request.manifest.icon ?? "puzzlepiece.extension")
                     .font(.system(size: 20))
                     .foregroundStyle(DefaultTheme.accent)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                     Text(heading)
-                        .font(.system(size: 15, weight: .semibold))
+                        .themeFont(size: 15, weight: .semibold)
                         .foregroundStyle(DefaultTheme.primaryText)
                     Text("\(request.manifest.id) · v\(request.manifest.version)"
                          + (request.manifest.author.map { " · \($0)" } ?? ""))
-                        .font(.system(size: 11, design: .monospaced))
+                        .themeFont(size: 11, design: .monospaced)
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
             }
             if let description = request.manifest.description {
                 Text(description)
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
                 Text(request.permissions.isEmpty ? "IT ASKS FOR NOTHING BEYOND ITS OWN PAGE" : "IT WILL BE ABLE TO")
-                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                    .kerning(0.53)
+                    .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                     .foregroundStyle(DefaultTheme.secondaryText)
                 ForEach(request.permissions.summary, id: \.self) { line in
                     Label(line, systemImage: "checkmark.shield")
-                        .font(.system(size: 12))
+                        .themeFont(size: 12)
                         .foregroundStyle(DefaultTheme.primaryText)
                 }
                 Label("Keep its own settings, and secrets in your Keychain", systemImage: "key")
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
-            .padding(12)
+            .padding(DefaultTheme.space(12))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
 
             Text("An extension runs in its own sandboxed web view: it cannot read your files, your terminals or your browser's cookies, and it reaches the network only through the hosts above.")
-                .font(.system(size: 11))
+                .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)
 
             HStack {
@@ -220,7 +219,7 @@ struct ExtensionConsentSheet: View {
                 AccentButton(approveTitle, systemImage: "checkmark", action: onApprove)
             }
         }
-        .padding(20)
+        .padding(DefaultTheme.space(20))
         .frame(width: 480)
         .background(DefaultTheme.background)
     }
@@ -252,35 +251,35 @@ struct ExtensionHostsSheet: View {
     @State private var chosen: Set<String> = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 Image(systemName: "network")
                     .foregroundStyle(DefaultTheme.accent)
                 Text(request.hosts.count == 1
                      ? "\(request.extensionName) wants to connect to a new site"
                      : "\(request.extensionName) wants to connect to new sites")
-                    .font(.system(size: 15, weight: .semibold))
+                    .themeFont(size: 15, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
                 ForEach(request.hosts, id: \.self) { host in
                     Toggle(isOn: Binding(get: { chosen.contains(host) },
                                          set: { on in if on { chosen.insert(host) } else { chosen.remove(host) } })) {
                         Text("https://\(host)")
-                            .font(.system(size: 12, design: .monospaced))
+                            .themeFont(size: 12, design: .monospaced)
                             .foregroundStyle(DefaultTheme.primaryText)
                     }
                     .toggleStyle(.checkbox)
                 }
             }
-            .padding(12)
+            .padding(DefaultTheme.space(12))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
 
             Text("HTTPS only. The extension can send and receive anything with these sites. Revoke them any time in Settings › Extensions.")
-                .font(.system(size: 11))
+                .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)
 
             HStack {
@@ -294,7 +293,7 @@ struct ExtensionHostsSheet: View {
                 .opacity(chosen.isEmpty ? 0.5 : 1)
             }
         }
-        .padding(20)
+        .padding(DefaultTheme.space(20))
         .frame(width: 460)
         .background(DefaultTheme.background)
         .onAppear { chosen = Set(request.hosts) }

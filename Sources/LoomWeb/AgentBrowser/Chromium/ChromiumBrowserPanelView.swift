@@ -67,8 +67,9 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
     @State private var address = ""
     @FocusState private var addressFocused: Bool
 
-    static var toolbarHeight: CGFloat { 38 }
-    static var tabStripHeight: CGFloat { 29 }
+    // In the theme's spacing, like the paddings of what they hold.
+    static var toolbarHeight: CGFloat { DefaultTheme.size(38) }
+    static var tabStripHeight: CGFloat { DefaultTheme.size(29) }
 
     init(surface: any ChromiumPanelSurface, emptyHint: String, agentBusy: Bool,
          @ViewBuilder pageOverlay: @escaping () -> PageOverlay) {
@@ -128,7 +129,7 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
     // MARK: - Toolbar
 
     private var toolbar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             Button { surface.goBack() } label: { Image(systemName: "chevron.left") }
                 .disabled(agentBusy || surface.activeTab == nil || !surface.canGoBack)
                 .help("Back")
@@ -165,7 +166,7 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
                 .help("Open in system browser")
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, DefaultTheme.space(8))
     }
 
     /// The engine checks the address and refuses it while the agent runs a
@@ -184,7 +185,7 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
     /// the agent opens its first tab.
     private var tabStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 3) {
+            HStack(spacing: DefaultTheme.space(3)) {
                 ForEach(surface.tabs, id: \.id) { tab in
                     BrowserTabButton(title: tab.title,
                                      isActive: surface.activeTab == tab.id,
@@ -192,7 +193,7 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
                                      onClose: { if !agentBusy { surface.close(tab.id) } })
                 }
             }
-            .padding(.horizontal, 8).padding(.vertical, 2)
+            .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(2))
         }
     }
 
@@ -211,18 +212,18 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
                 })
             if let status = notice {
                 Text(status)
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .padding(.horizontal, DefaultTheme.space(12)).padding(.vertical, DefaultTheme.space(6))
                     .background(DefaultTheme.surfaceRaised, in: Capsule())
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, DefaultTheme.space(16))
                     .allowsHitTesting(false)
             } else if surface.activeTab == nil {
                 Text(emptyHint)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, DefaultTheme.space(16))
                     .allowsHitTesting(false)
             }
         }

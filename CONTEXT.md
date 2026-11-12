@@ -135,6 +135,10 @@ Situation où un skill projet porte le même nom qu'un skill global et le rempla
 **Thème** :
 Ensemble de couleurs couvrant deux espaces : UI et Terminal. Résolu en cascade : thème global → override projet → hérité par les sessions.
 
+**Design (d'un thème)** :
+Ce qu'un thème dit au-delà de ses couleurs : rayon, espacement, polices, interlettrage, bords et ombre. Seul un thème qui l'apporte en a un (un import tweakcn, ADR-0022) ; sans lui, c'est la charte qui s'applique. Les vues lui passent la valeur de la charte et reçoivent la sienne.
+_Avoid_ : style (le « style de document » est celui des rapports), skin, look
+
 **Override projet** :
 Choix d'un projet de dévier du thème global — soit thème complet, soit accent seul.
 

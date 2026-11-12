@@ -16,8 +16,7 @@ import SwiftUI
 @MainActor
 private func caption(_ text: String, color: Color? = nil) -> some View {
     Text(text.uppercased())
-        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-        .kerning(0.53)
+        .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
         .foregroundStyle(color ?? DefaultTheme.mutedText)
         .lineLimit(1)
 }
@@ -52,30 +51,30 @@ struct WorkflowGalleryView: View {
     let onCustomize: (WorkflowTemplate) -> Void
     let onImport: () -> Void
 
-    private let columns = [GridItem(.adaptive(minimum: 320, maximum: 460), spacing: 14, alignment: .top)]
+    private let columns = [GridItem(.adaptive(minimum: 320, maximum: 460), spacing: DefaultTheme.space(14), alignment: .top)]
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(22)) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
                     Text("Workflows")
-                        .font(.system(size: 21, weight: .bold))
+                        .themeFont(size: 21, weight: .bold)
                         .foregroundStyle(DefaultTheme.primaryText)
                     Text("Give a task, get it done in steps: agents that plan, write, check each other, and stop where you decide. Start from one of these — each becomes yours to change.")
-                        .font(.system(size: 13))
+                        .themeFont(size: 13)
                         .foregroundStyle(DefaultTheme.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: DefaultTheme.space(14)) {
                     ForEach(WorkflowTemplates.all) { template in
                         TemplateCard(template: template,
                                      inLibrary: model.workflows.workflows.contains { $0.name == template.name },
                                      onRun: { onRun(template) }, onCustomize: { onCustomize(template) })
                     }
                 }
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
                     caption("Or build your own")
-                    HStack(spacing: 10) {
+                    HStack(spacing: DefaultTheme.space(10)) {
                         GhostButton("✦ Create with AI", systemImage: nil) { Task { await model.startWorkflowBuilder() } }
                             .help("A session asks what the workflow is for, then builds it: you validate what it proposes")
                         GhostButton("Blank workflow", systemImage: "plus") {
@@ -87,7 +86,7 @@ struct WorkflowGalleryView: View {
                 }
             }
             .frame(maxWidth: 980, alignment: .leading)
-            .padding(28)
+            .padding(DefaultTheme.space(28))
             .frame(maxWidth: .infinity, alignment: .center)
         }
     }
@@ -104,49 +103,50 @@ private struct TemplateCard: View {
         // Built once per body: a template's workflow is a value, cheap to make.
         let bundle = template.bundle()
         let outline = WorkflowOutline(bundle.workflow, experts: bundle.experts)
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 9) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
+            HStack(spacing: DefaultTheme.space(9)) {
                 AppIcon(template.icon, size: 16)
                     .foregroundStyle(AppModel.color(hex: bundle.workflow.color))
                 Text(template.name)
-                    .font(.system(size: 14, weight: .semibold))
+                    .themeFont(size: 14, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Spacer(minLength: 6)
                 WorkspaceTag(workspace: bundle.workflow.workspace)
             }
             Text(template.tagline)
-                .font(.system(size: 12.5, weight: .medium))
+                .themeFont(size: 12.5, weight: .medium)
                 .foregroundStyle(DefaultTheme.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(5)) {
                 ForEach(Array(template.highlights.enumerated()), id: \.offset) { _, line in
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    HStack(alignment: .firstTextBaseline, spacing: DefaultTheme.space(7)) {
                         Text("·").foregroundStyle(DefaultTheme.mutedText)
                         Text(line)
                             .foregroundStyle(DefaultTheme.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .font(.system(size: 11.5))
+                    .themeFont(size: 11.5)
                 }
             }
             Text(outline.oneLine)
-                .font(.system(size: 10.5, design: .monospaced))
+                .themeFont(size: 10.5, design: .monospaced)
                 .foregroundStyle(DefaultTheme.mutedText)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 AccentButton("Run…", systemImage: "play.fill", action: onRun)
                 GhostButton(inLibrary ? "Open" : "Customize", systemImage: "slider.horizontal.3", action: onCustomize)
                     .help(inLibrary ? "Already in your library: open it in the editor"
                           : "Copy it into your library and open it in the editor")
                 Spacer()
             }
-            .padding(.top, 2)
+            .padding(.top, DefaultTheme.space(2))
         }
-        .padding(16)
+        .padding(DefaultTheme.space(16))
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
             .stroke(hovered ? DefaultTheme.line3 : DefaultTheme.cardBorder, lineWidth: 1))
+        .themeShadow(.sm, radius: 10)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
     }
@@ -172,12 +172,12 @@ struct RunTimelineView: View {
         let steps = outline.steps
         let latest = latestSettled(steps)
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
                 if !run.inputs.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
                         caption("Task")
                         Text(run.inputs.task.trimmingCharacters(in: .whitespacesAndNewlines))
-                            .font(.system(size: 13))
+                            .themeFont(size: 13)
                             .foregroundStyle(DefaultTheme.primaryText)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
@@ -195,11 +195,12 @@ struct RunTimelineView: View {
                         }
                     }
                 }
-                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .themeShadow(.sm, radius: 10)
             }
             .frame(maxWidth: 980, alignment: .leading)
-            .padding(.horizontal, 28).padding(.vertical, 20)
+            .padding(.horizontal, DefaultTheme.space(28)).padding(.vertical, DefaultTheme.space(20))
             .frame(maxWidth: .infinity, alignment: .center)
         }
     }
@@ -241,36 +242,36 @@ private struct RunOutcomeCard: View {
 
     var body: some View {
         if let worktree = run.worktree {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
+                HStack(spacing: DefaultTheme.space(10)) {
                     caption(run.status.isActive ? "Working on" : "Left on")
                     MonoTag(worktree.branch, systemImage: "arrow.triangle.branch")
                     if let changes = run.changes {
                         Text(changes.summary)
-                            .font(.system(size: 11.5, design: .monospaced))
+                            .themeFont(size: 11.5, design: .monospaced)
                             .foregroundStyle(changes.isEmpty ? DefaultTheme.mutedText : DefaultTheme.primaryText)
                     } else if run.status.isActive {
                         Text("changes are counted when the run ends")
-                            .font(.system(size: 11)).foregroundStyle(DefaultTheme.mutedText)
+                            .themeFont(size: 11).foregroundStyle(DefaultTheme.mutedText)
                     }
                     Spacer(minLength: 8)
                 }
                 if let changes = run.changes, !changes.paths.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                         ForEach(changes.paths.prefix(8), id: \.self) { path in
                             Text(path)
-                                .font(.system(size: 11, design: .monospaced))
+                                .themeFont(size: 11, design: .monospaced)
                                 .foregroundStyle(DefaultTheme.secondaryText)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
                         if changes.files > 8 {
                             Text("… \(changes.files - 8) more")
-                                .font(.system(size: 11)).foregroundStyle(DefaultTheme.mutedText)
+                                .themeFont(size: 11).foregroundStyle(DefaultTheme.mutedText)
                         }
                     }
                 }
-                HStack(spacing: 8) {
+                HStack(spacing: DefaultTheme.space(8)) {
                     AccentButton(opening ? "Opening…" : "Open a session there", systemImage: "terminal") {
                         guard !opening else { return }
                         opening = true
@@ -294,10 +295,11 @@ private struct RunOutcomeCard: View {
                     Spacer()
                 }
             }
-            .padding(14)
+            .padding(DefaultTheme.space(14))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .themeShadow(.sm, radius: 10)
             .task(id: copied) {
                 guard copied else { return }
                 try? await Task.sleep(for: .seconds(1.4))
@@ -342,11 +344,11 @@ private struct RunStepRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: DefaultTheme.space(10)) {
                 statusIcon.frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(step.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .themeFont(size: 13, weight: .medium)
                         .foregroundStyle(record.status == .pending || record.status == .skipped
                                          ? DefaultTheme.secondaryText : DefaultTheme.primaryText)
                         .lineLimit(1)
@@ -361,12 +363,12 @@ private struct RunStepRow: View {
                 }
                 if let duration {
                     Text(duration)
-                        .font(.system(size: 11, design: .monospaced)).monospacedDigit()
+                        .themeFont(size: 11, design: .monospaced).monospacedDigit()
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
                 if let cost = record.costUSD, cost > 0 {
                     Text(String(format: "%.2f $", cost))
-                        .font(.system(size: 11, design: .monospaced)).monospacedDigit()
+                        .themeFont(size: 11, design: .monospaced).monospacedDigit()
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
                 if let sessionID {
@@ -384,8 +386,8 @@ private struct RunStepRow: View {
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
             }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 44)
+            .padding(.horizontal, DefaultTheme.space(14))
+            .frame(minHeight: DefaultTheme.size(44))
             .background(hovered && answer != nil ? DefaultTheme.wash : .clear)
             .contentShape(Rectangle())
             .onTapGesture { if answer != nil { onToggle() } }
@@ -393,12 +395,12 @@ private struct RunStepRow: View {
             if isOpen, let text = answer, !text.isEmpty {
                 ScrollView {
                     Text(text)
-                        .font(.system(size: 12))
+                        .themeFont(size: 12)
                         .foregroundStyle(record.status == .failed ? DefaultTheme.danger : DefaultTheme.primaryText)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(10))
                 }
                 .frame(maxHeight: 340)
                 .background(DefaultTheme.contentBackground)

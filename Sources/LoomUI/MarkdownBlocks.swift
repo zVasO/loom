@@ -206,7 +206,7 @@ public struct MarkdownBlockView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 render(block)
             }
@@ -222,25 +222,25 @@ public struct MarkdownBlockView: View {
         switch block {
         case .heading(let level, let text):
             Text(Self.inline(text))
-                .font(.system(size: level == 1 ? 15 : level == 2 ? 13.5 : 12.5,
-                              weight: .semibold))
+                .themeFont(size: level == 1 ? 15 : level == 2 ? 13.5 : 12.5,
+                           weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
-                .padding(.top, 4)
+                .padding(.top, DefaultTheme.space(4))
         case .paragraph(let text):
             Text(Self.inline(text))
-                .font(.system(size: 12))
+                .themeFont(size: 12)
                 .foregroundStyle(DefaultTheme.primaryText.opacity(0.85))
         case .bullets(let items):
             list(items, marker: { _ in "•" })
         case .ordered(let start, let items):
             list(items, marker: { "\(start + $0)." })
         case .quote(let text):
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: DefaultTheme.space(8)) {
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(DefaultTheme.accent.opacity(0.6))
                     .frame(width: 3)
                 Text(Self.inline(text))
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -250,36 +250,35 @@ public struct MarkdownBlockView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if isSuggestion {
                     Text("SUGGESTED CHANGE")
-                        .font(.system(size: 9, weight: .semibold))
-                        .kerning(0.7)
+                        .themeFont(size: 9, weight: .semibold, kerning: 0.7)
                         .foregroundStyle(DefaultTheme.groupHeader)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(5))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(DefaultTheme.groupHeader.opacity(0.12))
                 }
                 Text(text)
-                    .font(.system(size: 11.5, design: .monospaced))
+                    .themeFont(size: 11.5, design: .monospaced)
                     .foregroundStyle(DefaultTheme.primaryText.opacity(0.9))
-                    .padding(10)
+                    .padding(DefaultTheme.space(10))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(isSuggestion ? DefaultTheme.groupHeader.opacity(0.06)
                                              : DefaultTheme.surfaceRaised)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .clipShape(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
         case .rule:
             Rectangle().fill(DefaultTheme.cardBorder).frame(height: 1)
         }
     }
 
     private func list(_ items: [String], marker: @escaping (Int) -> String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                HStack(alignment: .top, spacing: 7) {
+                HStack(alignment: .top, spacing: DefaultTheme.space(7)) {
                     Text(marker(index))
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .themeFont(size: 12, weight: .semibold, design: .monospaced)
                         .foregroundStyle(DefaultTheme.secondaryText)
                     Text(Self.inline(item))
-                        .font(.system(size: 12))
+                        .themeFont(size: 12)
                         .foregroundStyle(DefaultTheme.primaryText.opacity(0.85))
                 }
             }
