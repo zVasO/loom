@@ -208,13 +208,30 @@ struct SettingsPage: View {
     /// never the page's seven groups.
     @State private var navigation = SettingsNavigation()
 
-    /// How many of the page's groups are built. Opening the Settings makes
-    /// the first two — more than a window shows before it scrolls — and the
-    /// others one per frame after that: the page is there at once, instead
-    /// of once every switch, picker, editor and theme card of its seven
-    /// groups has been made in a single pass.
-    @State private var builtGroups = 2
-    private static let groupCount = 7
+    /// How much of the page is built. Opening the Settings makes General
+    /// and the top of Sessions — all a window shows before it scrolls — and
+    /// the rest one stage per frame after that: the page is there at once,
+    /// instead of once every switch, picker, editor and theme card of its
+    /// seven groups has been made in a single pass. The stages: 2 at open,
+    /// 3 the rest of Sessions, then one per group.
+    @State private var builtGroups: Int
+    private static let groupCount = 8
+    /// A jump asked for a section that was not built yet: made once it is.
+    @State private var pendingJump: PendingJump?
+
+    private struct PendingJump: Equatable {
+        let anchor: SettingsAnchor
+        let animated: Bool
+    }
+
+    init(model: AppModel, focus: Binding<SettingsAnchor?>) {
+        self.model = model
+        _focus = focus
+        // Opened on a section (a schedule to review): the jump needs the
+        // whole page, so it is built with the first frame — not in a second,
+        // heavier pass under a frame that shows the top.
+        _builtGroups = State(initialValue: focus.wrappedValue == nil ? 2 : Self.groupCount)
+    }
 
     @AppStorage("loom.terminal.fps") private var fps = 60
     @AppStorage("loom.terminal.copyOnSelect") private var copyOnSelect = false
@@ -261,12 +278,14 @@ struct SettingsPage: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: DefaultTheme.space(44)) {
                             generalGroup
-                            sessionsGroup
-                            if builtGroups > 2 { agentsGroup }
-                            if builtGroups > 3 { reviewGroup }
-                            if builtGroups > 4 { appearanceGroup }
-                            if builtGroups > 5 { projectsGroup }
-                            if builtGroups > 6 { extensionsGroup }
+                            // Instructions and Badges start some 1 150 pt
+                            // down: a window that tall gets them at once.
+                            sessionsGroup(whole: builtGroups > 2 || viewport.size.height > 1_100)
+                            if builtGroups > 3 { agentsGroup }
+                            if builtGroups > 4 { reviewGroup }
+                            if builtGroups > 5 { appearanceGroup }
+                            if builtGroups > 6 { projectsGroup }
+                            if builtGroups > 7 { extensionsGroup }
                         }
                         .frame(maxWidth: 760, alignment: .leading)
                         .padding(.horizontal, DefaultTheme.space(36)).padding(.top, DefaultTheme.space(28))
@@ -280,6 +299,15 @@ struct SettingsPage: View {
                         follow(offsets)
                     }
                     .task { await buildRemainingGroups() }
+                    .onChange(of: builtGroups) {
+                        guard builtGroups >= Self.groupCount, let pending = pendingJump else { return }
+                        pendingJump = nil
+                        // Asked from the pass that builds the groups: they
+                        // are laid out when this runs.
+                        DispatchQueue.main.async {
+                            jump(to: pending.anchor, with: proxy, animated: pending.animated)
+                        }
+                    }
                 }
             }
             .onChange(of: focus, initial: true) {
@@ -302,17 +330,20 @@ struct SettingsPage: View {
     private func buildRemainingGroups() async {
         while builtGroups < Self.groupCount {
             try? await Task.sleep(for: .milliseconds(16))
-            if Task.isCancelled { return }
+            // A jump may have built them all meanwhile.
+            if Task.isCancelled || builtGroups >= Self.groupCount { return }
             builtGroups += 1
         }
     }
 
     private func jump(to anchor: SettingsAnchor, with proxy: ScrollViewProxy, animated: Bool = true) {
-        // A section of a group not built yet: build them all, and scroll
-        // once they are laid out.
+        // A section not built yet: build the whole page, and scroll once it
+        // is laid out (the page's onChange of `builtGroups`).
         if builtGroups < Self.groupCount {
+            navigation.active = anchor
+            navigation.followScrollAfter = Date().addingTimeInterval(0.6)
+            pendingJump = PendingJump(anchor: anchor, animated: animated)
             builtGroups = Self.groupCount
-            DispatchQueue.main.async { jump(to: anchor, with: proxy, animated: animated) }
             return
         }
         navigation.active = anchor
@@ -489,7 +520,10 @@ struct SettingsPage: View {
 
     // MARK: Sessions
 
-    private var sessionsGroup: some View {
+    /// `whole` false: the first section only — Instructions (a prompt
+    /// editor) and Badges (a colour well, a row per badge) sit below what a
+    /// window shows on opening, and come a frame later.
+    private func sessionsGroup(whole: Bool) -> some View {
         group(.sessions) {
             section(.sessionLaunch) {
                 card {
@@ -503,8 +537,10 @@ struct SettingsPage: View {
                               detail: "A workflow run's orchestrator and its visible steps gather in their own foldable section, one group per run, the orchestrator first. Off, they stay with their project's sessions.")
                 }
             }
-            section(.instructions) { instructionsCard }
-            section(.badges) { badgesCard }
+            if whole {
+                section(.instructions) { instructionsCard }
+                section(.badges) { badgesCard }
+            }
         }
     }
 
@@ -1238,7 +1274,13 @@ private struct ThemeGallery: View {
     /// The family under the pointer in the grid — what the preview shows.
     @State private var hoveredFamily: String?
     /// Which variant the preview shows; starts on the app's, switchable.
-    @State private var previewDark = false
+    @State private var previewDark: Bool
+
+    init() {
+        // The app's own variant from the first pass: no light preview drawn
+        // only to be redrawn dark.
+        _previewDark = State(initialValue: ThemeStore.shared.isDark)
+    }
 
     var body: some View {
         let store = ThemeStore.shared
@@ -1255,8 +1297,9 @@ private struct ThemeGallery: View {
                                   NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
                               },
                               onHover: { inside in
+                                  // Kept on leaving the card: the pointer can
+                                  // reach the preview's switch and button.
                                   if inside { hoveredFamily = family.name }
-                                  else if hoveredFamily == family.name { hoveredFamily = nil }
                               })
                     .contextMenu {
                         if !family.isBuiltIn {
@@ -1275,7 +1318,11 @@ private struct ThemeGallery: View {
             }
             ThemePreview(family: previewFamily, dark: $previewDark, onUse: usePreviewAction(previewFamily),
                          onWholeTheme: wholeThemeAction(previewFamily))
-                .onAppear { previewDark = store.isDark }
+        }
+        // The preview goes back to the theme in use once the pointer has
+        // left the gallery — cards and preview.
+        .onHover { inside in
+            if !inside { hoveredFamily = nil }
         }
     }
 
@@ -1289,9 +1336,7 @@ private struct ThemeGallery: View {
     /// The whole theme, or its colours only: the family is saved with the
     /// choice — its design is kept either way — and the app redraws.
     private static func setWholeTheme(_ whole: Bool, for family: ThemeFamily) {
-        var updated = family
-        updated.colorsOnly = !whole
-        try? ThemeStore.shared.addFamily(updated)
+        try? ThemeStore.shared.setColorsOnly(!whole, for: family)
         NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
     }
 

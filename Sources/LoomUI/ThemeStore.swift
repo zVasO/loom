@@ -331,6 +331,13 @@ public struct ThemeDocumentStyle: Codable, Equatable, Sendable, Hashable {
             .allSatisfy { ($0 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
+    /// What a family followed for its colours only keeps of its document
+    /// style: the logo and the extra CSS. The fonts and the radius are the
+    /// theme's design: a report keeps Loom's own, like the app.
+    public var colorsOnly: ThemeDocumentStyle {
+        ThemeDocumentStyle(logoSVG: logoSVG, extraCSS: extraCSS)
+    }
+
     /// Only Google Fonts' stylesheet host is accepted for `fontsURL`.
     public static func isAllowedFontsURL(_ text: String) -> Bool {
         guard let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
@@ -500,14 +507,35 @@ public final class ThemeStore {
         var stored = family
         stored.isBuiltIn = false
         try familyStore?.save(stored)
-        customFamilies.removeAll { $0.name == stored.name }
-        customFamilies.append(stored)
+        // In place: a family saved again keeps its card where it was.
+        if let index = customFamilies.firstIndex(where: { $0.name == stored.name }) {
+            customFamilies[index] = stored
+        } else {
+            customFamilies.append(stored)
+        }
         apply(projectID: contextProjectID)
         onInputsChanged?()
         // A theme file may name fonts this Mac does not have.
         let stacks = Self.fontStacks(of: stored)
         if !stacks.isEmpty {
             Task { await ThemeFonts.shared.ensure(stacks: stacks) }
+        }
+    }
+
+    /// A family of the user's followed whole, or for its colours only
+    /// (ADR-0022), saved with the choice. Turned whole, it gets what an
+    /// import gives a whole theme: its fonts, and its reports' stylesheet.
+    public func setColorsOnly(_ colorsOnly: Bool, for family: ThemeFamily) throws {
+        var updated = family
+        updated.colorsOnly = colorsOnly
+        try addFamily(updated)
+        guard !colorsOnly else { return }
+        Task {
+            let fetched = await withFonts(updated)
+            // Unless it changed again meanwhile.
+            guard fetched != updated,
+                  customFamilies.first(where: { $0.name == updated.name }) == updated else { return }
+            try? addFamily(fetched)
         }
     }
 

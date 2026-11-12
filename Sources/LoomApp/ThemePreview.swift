@@ -349,7 +349,7 @@ struct ThemeImportSheet: View {
     /// to the next.
     @AppStorage("loom.theme.import.wholeTheme") private var wholeTheme = true
 
-    static let wholeThemeHelp = "On: the theme is followed to the letter — colours, borders, radius, spacing, fonts, letter-spacing and shadows. Off: its colours only; Loom keeps its own shapes and fonts, and fetches no font."
+    static let wholeThemeHelp = "On: the theme is followed to the letter — colours, borders, radius, spacing, fonts, letter-spacing and shadows. Off: its colours only; Loom keeps its own radius, spacing and fonts, and fetches no font."
 
     var body: some View {
         VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
@@ -398,7 +398,7 @@ struct ThemeImportSheet: View {
             }
             Text(wholeTheme
                  ? "Whole theme: its colours, borders, radius, spacing, fonts, letter-spacing and shadows, to the letter. The fonts it names are fetched from Google Fonts when this Mac does not have them."
-                 : "Colours only: its colours, borders included; Loom keeps its own radius, spacing and fonts, and fetches nothing. The switch stays in Settings › Themes: the rest of the theme is kept.")
+                 : "Colours only: its colours, borders included; Loom keeps its own radius, spacing and fonts, and fetches no font. The rest of the theme is kept: switch back in Settings › Themes — the preview's header, or a right-click on the theme's card.")
                 .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -446,9 +446,14 @@ struct ThemeImportSheet: View {
         error = nil
         Task {
             do {
-                var imported = try await ThemeStore.shared.importTweakcn(input, colorsOnly: !wholeTheme)
-                // The switch may have moved while the theme was fetched.
-                imported.colorsOnly = !wholeTheme
+                let asked = !wholeTheme
+                var imported = try await ThemeStore.shared.importTweakcn(input, colorsOnly: asked)
+                // The switch may have moved while the theme was fetched: a
+                // theme turned whole meanwhile still needs its fonts.
+                if asked != !wholeTheme {
+                    imported.colorsOnly = !wholeTheme
+                    if wholeTheme { imported = await ThemeStore.shared.withFonts(imported) }
+                }
                 family = imported
                 name = imported.name
             } catch {

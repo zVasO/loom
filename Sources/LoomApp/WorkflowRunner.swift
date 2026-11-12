@@ -806,7 +806,10 @@ extension AppModel {
 
     static func artifactPalette(family resolved: ThemeFamily, dark: Bool) -> ArtifactPalette {
         let tokens = dark ? resolved.dark : resolved.light
-        let document = resolved.document
+        // Followed for its colours only (ADR-0022): the report keeps its logo
+        // and extra CSS; the fonts and the radius are Loom's own, like the app's.
+        let document = resolved.colorsOnly && resolved.hasDesign
+            ? resolved.document?.colorsOnly : resolved.document
         func nonEmpty(_ value: String?) -> String? {
             value.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
         }

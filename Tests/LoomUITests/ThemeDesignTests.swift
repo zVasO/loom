@@ -202,6 +202,11 @@ struct ThemeDesignTests {
         edges.light.design = ThemeDesign(border: "#E5E5E5")
         #expect(!edges.hasDesign)
         #expect(ThemeDesign(radius: 8).colors == nil && ThemeDesign(input: "#111111").colors == ThemeDesign(input: "#111111"))
+
+        // A report follows the same choice: the logo and the extra CSS stay, the fonts and the radius go.
+        let document = ThemeDocumentStyle(fontSans: "DM Sans, sans-serif", fontsURL: "https://fonts.googleapis.com/css2?family=DM+Sans",
+                                          radius: "0px", logoSVG: "<svg></svg>", extraCSS: "h1 { margin: 0 }")
+        #expect(document.colorsOnly == ThemeDocumentStyle(logoSVG: "<svg></svg>", extraCSS: "h1 { margin: 0 }"))
     }
 
     // MARK: CSS lengths

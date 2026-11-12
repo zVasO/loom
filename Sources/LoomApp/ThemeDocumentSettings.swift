@@ -46,6 +46,13 @@ struct ThemeDocumentSettings: View {
                     GhostButton("Preview the report", systemImage: "eye") { preview() }
                     AccentButton("Save") { save() }
                 }
+                if let family = store.customFamilies.first(where: { $0.name == familyName }),
+                   family.colorsOnly, family.hasDesign {
+                    Text("“\(family.name)” is followed for its colours only: its reports keep Loom's fonts and corner radius, whatever the fields below say. The logo and the extra CSS still apply.")
+                        .themeFont(size: 11)
+                        .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Grid(alignment: .leading, horizontalSpacing: DefaultTheme.space(10), verticalSpacing: DefaultTheme.space(8)) {
                     row("Text font", text: binding(\.fontSans), placeholder: ArtifactPalette.defaultSans)
                     row("Code font", text: binding(\.fontMono), placeholder: ArtifactPalette.defaultMono)
