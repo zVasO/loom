@@ -59,7 +59,7 @@ struct SessionSidePanelView: View {
             }
         }
         .padding(.horizontal, DefaultTheme.space(10))
-        .frame(height: DefaultTheme.space(34))
+        .frame(height: DefaultTheme.size(34))
         .background(DefaultTheme.background)
     }
 

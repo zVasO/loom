@@ -313,6 +313,13 @@ public enum TweakcnImport {
             var changed = false
             for (name, value) in resolved where value.contains("var(") {
                 let substituted = substitute(value, in: resolved)
+                // No value of a theme is long: aliases that multiply each
+                // other (a few hundred bytes grow to gigabytes) are dropped.
+                guard substituted.utf8.count <= 4_096 else {
+                    resolved[name] = nil
+                    changed = true
+                    continue
+                }
                 if substituted != value {
                     resolved[name] = substituted
                     changed = true

@@ -134,7 +134,7 @@ struct ExtensionsView: View {
                     .help("Reload the extension")
             }
             .padding(.horizontal, DefaultTheme.space(14))
-            .frame(height: DefaultTheme.space(38))
+            .frame(height: DefaultTheme.size(38))
             .background(DefaultTheme.background)
             Divider().overlay(DefaultTheme.cardBorder)
             if let host = extensions.hosts[installed.id] {
@@ -312,7 +312,7 @@ struct ExtensionOverlayView: View {
                     .keyboardShortcut(.cancelAction)
             }
             .padding(.horizontal, DefaultTheme.space(16))
-            .frame(height: DefaultTheme.space(44))
+            .frame(height: DefaultTheme.size(44))
             .background(DefaultTheme.background)
             Divider().overlay(DefaultTheme.cardBorder)
             if let error = overlay.host.loadError {

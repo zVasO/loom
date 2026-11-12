@@ -48,7 +48,7 @@ public struct AgentBrowserPanelView: View {
                 widthMenu
             }
             .padding(.horizontal, DefaultTheme.space(10))
-            .frame(height: DefaultTheme.space(22))
+            .frame(height: DefaultTheme.size(22))
             .background(DefaultTheme.background)
             page
         }

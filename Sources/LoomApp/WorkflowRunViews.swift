@@ -387,7 +387,7 @@ private struct RunStepRow: View {
                 }
             }
             .padding(.horizontal, DefaultTheme.space(14))
-            .frame(minHeight: DefaultTheme.space(44))
+            .frame(minHeight: DefaultTheme.size(44))
             .background(hovered && answer != nil ? DefaultTheme.wash : .clear)
             .contentShape(Rectangle())
             .onTapGesture { if answer != nil { onToggle() } }

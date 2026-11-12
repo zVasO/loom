@@ -73,7 +73,7 @@ public struct NavTab: View {
             }
             .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText : DefaultTheme.mutedText)
             .padding(.horizontal, DefaultTheme.space(8))
-            .frame(height: DefaultTheme.space(24))
+            .frame(height: DefaultTheme.size(24))
             .background(isActive ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
             .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4))
                 .strokeBorder(isActive ? DefaultTheme.line : .clear, lineWidth: 1))
@@ -106,7 +106,7 @@ public struct StatusTag: View {
         }
         .foregroundStyle(color)
         .padding(.horizontal, DefaultTheme.space(6))
-        .frame(height: DefaultTheme.space(20))
+        .frame(height: DefaultTheme.size(20))
         .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: DefaultTheme.radius(3)))
         .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(3)).strokeBorder(color.opacity(0.32), lineWidth: 1))
         .fixedSize()
@@ -135,7 +135,7 @@ public struct AccentButton: View {
             }
             .foregroundStyle(DefaultTheme.accentText)
             .padding(.horizontal, DefaultTheme.space(14))
-            .frame(height: DefaultTheme.space(32))
+            .frame(height: DefaultTheme.size(32))
             .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             .brightness(hovered ? 0.06 : 0)
             .contentShape(Rectangle())
@@ -172,7 +172,7 @@ public struct GhostButton: View {
             .foregroundStyle(role == .destructive ? DefaultTheme.danger
                              : hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
             .padding(.horizontal, DefaultTheme.space(10))
-            .frame(height: DefaultTheme.space(28))
+            .frame(height: DefaultTheme.size(28))
             .background(hovered ? (role == .destructive ? DefaultTheme.danger.opacity(0.12)
                                                         : DefaultTheme.surfaceRaised)
                                 : .clear,
@@ -208,7 +208,7 @@ public struct BarIconButton: View {
             AppIcon(systemImage, size: 15)
                 .foregroundStyle(isActive ? DefaultTheme.accent
                                  : hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
-                .frame(width: DefaultTheme.space(28), height: DefaultTheme.space(26))
+                .frame(width: DefaultTheme.size(28), height: DefaultTheme.size(26))
                 .background(isActive ? DefaultTheme.surfaceRaised
                             : hovered ? DefaultTheme.surfaceRaised.opacity(0.7) : .clear,
                             in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
@@ -277,7 +277,7 @@ public struct KeyCap: View {
             .themeFont(size: 10.5, weight: .medium, design: .monospaced)
             .foregroundStyle(DefaultTheme.secondaryText)
             .padding(.horizontal, DefaultTheme.space(4))
-            .frame(minWidth: DefaultTheme.space(18), minHeight: DefaultTheme.space(18))
+            .frame(minWidth: DefaultTheme.size(18), minHeight: DefaultTheme.size(18))
             .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
             .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4)).strokeBorder(DefaultTheme.line2, lineWidth: 1))
             .fixedSize()

@@ -660,7 +660,7 @@ struct PRModeSwitch: View {
     let model: AppModel
 
     /// Both modes' top bars: the switch never moves when the mode changes.
-    static var barHeight: CGFloat { DefaultTheme.space(44) }
+    static var barHeight: CGFloat { DefaultTheme.size(44) }
 
     var body: some View {
         HStack(spacing: DefaultTheme.space(2)) {

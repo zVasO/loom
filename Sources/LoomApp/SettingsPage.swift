@@ -369,7 +369,7 @@ struct SettingsPage: View {
         HStack(spacing: DefaultTheme.space(12)) {
             AppIcon(anchor.icon, size: 16)
                 .foregroundStyle(DefaultTheme.primaryText)
-                .frame(width: DefaultTheme.space(32), height: DefaultTheme.space(32))
+                .frame(width: DefaultTheme.size(32), height: DefaultTheme.size(32))
                 .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                 .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).strokeBorder(DefaultTheme.line2, lineWidth: 1))
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
@@ -508,7 +508,7 @@ struct SettingsPage: View {
                 .textFieldStyle(.plain)
                 .themeFont(size: 13, weight: .semibold, design: .monospaced)
                 .multilineTextAlignment(.center)
-                .frame(width: DefaultTheme.space(36), height: DefaultTheme.space(28))
+                .frame(width: DefaultTheme.size(36), height: DefaultTheme.size(28))
                 .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                 .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
                     .stroke(DefaultTheme.fieldBorder, lineWidth: 1))

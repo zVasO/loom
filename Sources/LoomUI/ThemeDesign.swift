@@ -80,15 +80,27 @@ public struct ThemeDesign: Codable, Equatable, Sendable, Hashable {
     /// `calc(var(--spacing) * n)`, so the whole layout scales with it. On
     /// the half-point grid, like the charter's own values.
     public func space(_ charter: Double) -> Double {
-        guard let spacing, spacing > 0, spacing != Self.charterSpacing else { return charter }
-        return (charter * spacing / Self.charterSpacing * 2).rounded() / 2
+        guard let spacing, spacing > 0 else { return charter }
+        // 0.125–0.5rem, whoever wrote the value (tweakcn's slider runs from
+        // 0.15 to 0.35): beyond, a theme file would take the layout apart.
+        let unit = min(max(spacing, 2), 8)
+        guard unit != Self.charterSpacing else { return charter }
+        return (charter * unit / Self.charterSpacing * 2).rounded() / 2
+    }
+
+    /// The height or width of a control or a row. It follows `--spacing`
+    /// like any length, but never under four fifths of the charter's: text
+    /// sizes do not follow `--spacing`, and a row must still hold its text.
+    public func size(_ charter: Double) -> Double {
+        max(space(charter), (charter * 0.8 * 2).rounded() / 2)
     }
 
     /// The letter-spacing of every text, in points. tweakcn writes
     /// `letter-spacing: var(--tracking-normal)` on `body`: CSS resolves the
     /// em against the body's own 16 px and hands that length down, the same
     /// for every text whatever its size.
-    public var tracking: Double { (letterSpacing ?? 0) * 16 }
+    /// Within tweakcn's own range, ±0.5em, whoever wrote the value.
+    public var tracking: Double { min(max(letterSpacing ?? 0, -0.5), 0.5) * 16 }
 }
 
 /// A theme's shadow, as tweakcn's six controls set it. The levels shadcn's
@@ -136,7 +148,7 @@ public struct ThemeShadow: Codable, Equatable, Sendable, Hashable {
     public func layers(_ level: Level) -> [Layer] {
         func first(_ multiplier: Double) -> Layer {
             Layer(color: color, opacity: min(1, max(0, opacity * multiplier)),
-                  blur: blur, spread: spread, x: x, y: y)
+                  blur: max(blur, 0), spread: spread, x: x, y: y)
         }
         func second(y fixedY: Double, blur fixedBlur: Double) -> Layer {
             Layer(color: color, opacity: min(1, max(0, opacity)),

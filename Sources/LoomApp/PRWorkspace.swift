@@ -386,7 +386,7 @@ struct PRWorkspaceView: View {
             } placeholder: {
                 Circle().fill(DefaultTheme.surfaceRaised)
             }
-            .frame(width: DefaultTheme.space(26), height: DefaultTheme.space(26))
+            .frame(width: DefaultTheme.size(26), height: DefaultTheme.size(26))
             .clipShape(Circle())
             .overlay(Circle().stroke(DefaultTheme.cardBorder, lineWidth: 1))
             Text("@" + pr.author)

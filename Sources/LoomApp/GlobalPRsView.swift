@@ -312,7 +312,7 @@ struct GlobalPRsView: View {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(DefaultTheme.accentText)
-                            .frame(width: DefaultTheme.space(22), height: DefaultTheme.space(30))
+                            .frame(width: DefaultTheme.size(22), height: DefaultTheme.size(30))
                             .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                     }
                     .menuStyle(.borderlessButton)

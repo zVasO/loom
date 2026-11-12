@@ -147,7 +147,7 @@ struct FleetButton: View {
                 .themeFont(size: 11.5, weight: .medium)
                 .foregroundStyle(prominent ? DefaultTheme.accentText : DefaultTheme.primaryText)
                 .padding(.horizontal, DefaultTheme.space(8))
-                .frame(height: DefaultTheme.space(24))
+                .frame(height: DefaultTheme.size(24))
                 .background(prominent ? DefaultTheme.accent : DefaultTheme.surfaceRaised,
                             in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                 .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
@@ -228,7 +228,7 @@ struct FleetFilterBar: View {
                 .themeFont(size: 11, weight: .medium, design: .monospaced, tracking: 0.55)
                 .monospacedDigit()
                 .padding(.horizontal, DefaultTheme.space(8))
-                .frame(height: DefaultTheme.space(22))
+                .frame(height: DefaultTheme.size(22))
                 .background(isOn ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
                 .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4))
                     .strokeBorder(isOn ? DefaultTheme.line2 : .clear, lineWidth: 1))
@@ -299,8 +299,8 @@ struct FleetTable: View {
 
     /// The measures a host sizes the table with (Mission Control gives it a
     /// whole number of rows) — in the theme's spacing, like every length.
-    static var rowHeight: CGFloat { DefaultTheme.space(38) }
-    static var headerHeight: CGFloat { DefaultTheme.space(30) }
+    static var rowHeight: CGFloat { DefaultTheme.size(38) }
+    static var headerHeight: CGFloat { DefaultTheme.size(30) }
 
     var body: some View {
         ScrollViewReader { proxy in

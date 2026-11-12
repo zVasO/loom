@@ -196,6 +196,20 @@ struct TweakcnImportTests {
         #expect(tokens.surface == "#FFFFFF" && tokens.cardBorder == "#E5E5E5")
     }
 
+    @Test("aliases that multiply each other are dropped, not expanded")
+    func aliasExplosion() {
+        // Eight variables, each twelve times the next: under a kilobyte that
+        // would grow to hundreds of megabytes.
+        var vars: TweakcnImport.Variables = ["a7": "#fff", "background": "#ffffff"]
+        for index in 0..<7 {
+            vars["a\(index)"] = Array(repeating: "var(--a\(index + 1))", count: 12).joined(separator: " ")
+        }
+        let resolved = TweakcnImport.resolvingReferences(vars)
+        #expect(resolved.values.allSatisfy { $0.utf8.count <= 4_096 })
+        #expect(resolved["background"] == "#ffffff" && resolved["a7"] == "#fff")
+        #expect(TweakcnImport.tokens(from: vars, dark: false).contentBackground == "#FFFFFF")
+    }
+
     @Test("hex with alpha and colour keywords")
     func hexAlphaAndKeywords() {
         #expect(CSSColor.parse("#3b82f680") == "#3B82F6")

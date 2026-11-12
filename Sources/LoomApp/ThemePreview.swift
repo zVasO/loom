@@ -350,6 +350,8 @@ struct ThemeImportSheet: View {
     /// The whole theme, or its colours only — remembered from one import
     /// to the next.
     @AppStorage("loom.theme.import.wholeTheme") private var wholeTheme = true
+    /// Font fetches on their way: the preview redraws as they land.
+    @State private var fetchingFonts = 0
 
     static let wholeThemeHelp = "On: the theme is followed to the letter — colours, borders, radius, spacing, fonts, letter-spacing and shadows. Off: its colours only; Loom keeps its own radius, spacing and fonts, and fetches no font."
 
@@ -416,6 +418,12 @@ struct ThemeImportSheet: View {
                         .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.fieldBorder, lineWidth: 1))
                         .themeShadow(.xs, radius: 6)
                     Spacer()
+                    if fetchingFonts > 0 {
+                        ProgressView().controlSize(.small)
+                        Text("Fetching its fonts…")
+                            .themeFont(size: 11)
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                    }
                     AccentButton("Save and use", systemImage: "checkmark") { save(family) }
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
@@ -448,16 +456,12 @@ struct ThemeImportSheet: View {
         error = nil
         Task {
             do {
-                let asked = !wholeTheme
-                var imported = try await ThemeStore.shared.importTweakcn(input, colorsOnly: asked)
-                // The switch may have moved while the theme was fetched: a
-                // theme turned whole meanwhile still needs its fonts.
-                if asked != !wholeTheme {
-                    imported.colorsOnly = !wholeTheme
-                    if wholeTheme { imported = await ThemeStore.shared.withFonts(imported) }
-                }
+                let imported = try await ThemeStore.shared.importTweakcn(input, colorsOnly: !wholeTheme)
                 family = imported
                 name = imported.name
+                // The theme shows at once; the switch as it stands now, and
+                // the fonts of a whole theme, follow.
+                applyMode()
             } catch {
                 family = nil
                 self.error = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
@@ -466,15 +470,18 @@ struct ThemeImportSheet: View {
         }
     }
 
-    /// The switch moved with a theme already read: the preview follows,
-    /// and a whole theme gets its fonts.
+    /// A theme was read, or the switch moved: the preview follows, and a
+    /// whole theme gets its fonts — fetched behind the preview, which
+    /// redraws as they arrive.
     private func applyMode() {
         guard var current = family else { return }
         current.colorsOnly = !wholeTheme
         family = current
         guard wholeTheme else { return }
+        fetchingFonts += 1
         Task {
             let fetched = await ThemeStore.shared.withFonts(current)
+            fetchingFonts -= 1
             // Unless the theme or the switch changed meanwhile.
             if family == current { family = fetched }
         }
@@ -483,7 +490,10 @@ struct ThemeImportSheet: View {
     private func save(_ family: ThemeFamily) {
         let final = named(family)
         do {
-            try ThemeStore.shared.addFamily(final)
+            // Saved with the switch as it stands: a whole theme gets its
+            // fonts and its reports' stylesheet even if they were still on
+            // their way.
+            try ThemeStore.shared.setColorsOnly(final.colorsOnly, for: final)
             ThemeStore.shared.setGlobalTheme(final.name)
             NotificationCenter.default.post(name: .loomThemeChanged, object: nil)
             dismiss()

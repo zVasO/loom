@@ -355,7 +355,7 @@ struct ContentView: View {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(DefaultTheme.accentText)
-                    .frame(width: DefaultTheme.space(26), height: DefaultTheme.space(26))
+                    .frame(width: DefaultTheme.size(26), height: DefaultTheme.size(26))
                     .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                     .hoverBrightness()
             }
@@ -419,7 +419,7 @@ struct ContentView: View {
                 }
                 .foregroundStyle(DefaultTheme.secondaryText)
                 .padding(.leading, DefaultTheme.space(9)).padding(.trailing, DefaultTheme.space(5))
-                .frame(width: 168, height: DefaultTheme.space(26))
+                .frame(width: 168, height: DefaultTheme.size(26))
                 .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                 .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).strokeBorder(DefaultTheme.line2, lineWidth: 1))
                 .hoverBrightness(0.04)
@@ -1322,7 +1322,7 @@ struct StackTab: View {
                 .allowsHitTesting(hovered || isActive)
         }
         .padding(.horizontal, DefaultTheme.space(8))
-        .frame(height: DefaultTheme.space(24))
+        .frame(height: DefaultTheme.size(24))
         .background(isActive ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
                     in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
@@ -1399,7 +1399,7 @@ struct SkillCard: View {
         HStack(alignment: .top, spacing: DefaultTheme.space(10)) {
             AppIcon("sparkles", size: 15.5)
                 .foregroundStyle(Color(red: 0.62, green: 0.55, blue: 0.95))
-                .frame(width: DefaultTheme.space(30), height: DefaultTheme.space(30))
+                .frame(width: DefaultTheme.size(30), height: DefaultTheme.size(30))
                 .background(Color(red: 0.62, green: 0.55, blue: 0.95).opacity(0.14),
                             in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             VStack(alignment: .leading, spacing: DefaultTheme.space(5)) {
@@ -1451,7 +1451,7 @@ struct RuleCard: View {
         HStack(alignment: .top, spacing: DefaultTheme.space(10)) {
             AppIcon("doc.text", size: 15.5)
                 .foregroundStyle(DefaultTheme.accent)
-                .frame(width: DefaultTheme.space(30), height: DefaultTheme.space(30))
+                .frame(width: DefaultTheme.size(30), height: DefaultTheme.size(30))
                 .background(DefaultTheme.accent.opacity(0.12),
                             in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             VStack(alignment: .leading, spacing: DefaultTheme.space(5)) {
@@ -3118,7 +3118,7 @@ struct SessionDetailView: View {
             }
         }
         .padding(.horizontal, DefaultTheme.space(14))
-        .frame(height: DefaultTheme.space(42))
+        .frame(height: DefaultTheme.size(42))
         .background(DefaultTheme.background)
         .task(id: UsageKey(state: item?.state, native: nativeID)) { await watchUsage() }
     }
@@ -3678,7 +3678,7 @@ struct GoalFieldView: View {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(DefaultTheme.accentText)
-                        .frame(width: DefaultTheme.space(22), height: DefaultTheme.space(30))
+                        .frame(width: DefaultTheme.size(22), height: DefaultTheme.size(30))
                         .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                 }
                 .menuStyle(.borderlessButton)

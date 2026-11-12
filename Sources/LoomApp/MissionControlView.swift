@@ -147,7 +147,7 @@ struct MissionControlView: View {
                 .help("Open this session in the Sessions tab (↵)")
         }
         .padding(.horizontal, DefaultTheme.space(14))
-        .frame(height: DefaultTheme.space(38))
+        .frame(height: DefaultTheme.size(38))
         .background(DefaultTheme.background)
     }
 

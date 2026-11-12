@@ -148,9 +148,10 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
     /// `tracking(_:)` answer from; nil draws the charter.
     public let design: ThemeDesign?
     /// Edges. The charter's hairlines — the text colour at 8, 13 and 21 % —
-    /// unless the theme has a border of its own: then `--border` as is,
-    /// `--input` for a control's edge, and that one a step towards the text
-    /// for a hovered edge.
+    /// unless the theme has a border of its own: then `--border` as is, and
+    /// for the two stronger ones that border one and two steps towards the
+    /// text. (`--input` is a field's edge, `fieldLine`: in real themes it
+    /// can be the card's own colour, no edge for anything else.)
     public let line: Color
     public let line2: Color
     public let line3: Color
@@ -192,8 +193,9 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
         let edge = border.map(Self.color) ?? text.opacity(0.08)
         line = edge
         fieldLine = input.map(Self.color) ?? edge
-        line2 = input.map(Self.color) ?? text.opacity(0.13)
-        line3 = input.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.3)) }
+        line2 = border.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.15)) }
+            ?? text.opacity(0.13)
+        line3 = border.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.3)) }
             ?? text.opacity(0.21)
         wash = tokens.design == nil ? text.opacity(0.025) : raised.opacity(0.5)
         wash2 = tokens.design == nil ? text.opacity(0.045) : raised
@@ -458,21 +460,29 @@ public final class ThemeStore {
         familyStore = store
         customFamilies = store.load()
         apply(projectID: contextProjectID)
-        // A theme file brought from another Mac names fonts this one may
-        // not have yet: fetched in the background, drawn when they arrive.
-        let stacks = customFamilies.flatMap(Self.fontStacks)
-        if !stacks.isEmpty {
-            Task { await ThemeFonts.shared.ensure(stacks: stacks) }
-        }
+        // The theme in use may name fonts this Mac does not have (a theme
+        // file brought from another one): fetched in the background, drawn
+        // when they arrive. Only the theme in use — the others ask nothing.
+        ensureFonts(ofFamilyNamed: globalFamilyName)
     }
 
-    /// The font stacks a family's two designs name — none for a family
+    /// The font stacks a family draws with: the sans and the mono of its
+    /// two designs (no view writes in the serif) — none for a family
     /// followed for its colours only: nothing is fetched for it.
     nonisolated static func fontStacks(of family: ThemeFamily) -> [String] {
         guard !family.colorsOnly else { return [] }
         return [family.light.design, family.dark.design].flatMap { design in
-            [design?.fontSans, design?.fontSerif, design?.fontMono].compactMap { $0 }
+            [design?.fontSans, design?.fontMono].compactMap { $0 }
         }
+    }
+
+    /// Fetches, in the background, the fonts a family of the user's names
+    /// and this Mac does not have.
+    private func ensureFonts(ofFamilyNamed name: String) {
+        guard let family = customFamilies.first(where: { $0.name == name }) else { return }
+        let stacks = Self.fontStacks(of: family)
+        guard !stacks.isEmpty else { return }
+        Task { await ThemeFonts.shared.ensure(stacks: stacks) }
     }
 
     /// Makes a family's fonts drawable — installed, or fetched from Google
@@ -515,11 +525,8 @@ public final class ThemeStore {
         }
         apply(projectID: contextProjectID)
         onInputsChanged?()
-        // A theme file may name fonts this Mac does not have.
-        let stacks = Self.fontStacks(of: stored)
-        if !stacks.isEmpty {
-            Task { await ThemeFonts.shared.ensure(stacks: stacks) }
-        }
+        // The theme in use, saved again: it may name fonts this Mac lacks.
+        if stored.name == globalFamilyName { ensureFonts(ofFamilyNamed: stored.name) }
     }
 
     /// A family of the user's followed whole, or for its colours only
@@ -555,14 +562,14 @@ public final class ThemeStore {
 
     /// A tweakcn theme, from what the user pasted: its CSS export, parsed
     /// here; or a name / URL, fetched from tweakcn's registry. The whole
-    /// theme, or — `colorsOnly` — its colours alone. The fonts a whole
-    /// theme names are made available before it comes back, so the preview
-    /// shows them. The family comes back unsaved — the caller previews it,
-    /// then `addFamily`.
+    /// theme, or — `colorsOnly` — its colours alone. The family comes back
+    /// as soon as it is read, unsaved and without its fonts: the caller
+    /// previews it, asks `withFonts` for them — they redraw the preview as
+    /// they arrive — then saves it.
     public func importTweakcn(_ input: String, colorsOnly: Bool = false) async throws -> ThemeFamily {
         var family = try await readTweakcn(input)
         family.colorsOnly = colorsOnly
-        return await withFonts(family)
+        return family
     }
 
     private func readTweakcn(_ input: String) async throws -> ThemeFamily {
@@ -616,6 +623,7 @@ public final class ThemeStore {
     public func setGlobalTheme(_ name: String) {
         UserDefaults.standard.set(family(named: name)?.name ?? name, forKey: Self.globalKey)
         onInputsChanged?()
+        ensureFonts(ofFamilyNamed: globalFamilyName)
     }
 
     public func setAppearanceMode(_ mode: AppearanceMode) {
@@ -675,10 +683,32 @@ public final class ThemeStore {
         if next != palette { palette = next }
     }
 
-    /// The palette a context resolves to, without making it the active one.
+    /// The palette a context resolves to, without making it the active one:
+    /// the global theme, or a project's own colours on the global theme's
+    /// shapes.
     public func palette(for projectID: ProjectID?) -> ThemePalette {
-        let name = projectID.flatMap(projectThemeName) ?? globalFamilyName
-        return (family(named: name) ?? .loom).palette(dark: isDark)
+        let global = family(named: globalFamilyName) ?? .loom
+        guard let name = projectID.flatMap(projectThemeName), name != global.name,
+              let project = family(named: name) else { return global.palette(dark: isDark) }
+        return Self.palette(of: project, shapedBy: global, dark: isDark)
+    }
+
+    /// A project's theme over the global one (ADR-0022): the project
+    /// brings its colours, edges included — the repère « which project am I
+    /// in » — and the radius, spacing, fonts, letter-spacing and shadow
+    /// stay the global theme's. Going from a session of one project to a
+    /// session of another recolours the window; it never re-lays it out,
+    /// refits a terminal or takes the focus from a field.
+    nonisolated public static func palette(of project: ThemeFamily, shapedBy global: ThemeFamily,
+                                           dark: Bool) -> ThemePalette {
+        var tokens = (dark ? project.dark : project.light).colorsOnly
+        if !global.colorsOnly, var shape = (dark ? global.dark : global.light).design {
+            shape.border = tokens.design?.border
+            shape.input = tokens.design?.input
+            tokens.design = shape
+        }
+        return ThemePalette(name: dark ? project.variantDarkName : project.variantLightName,
+                            isLight: !dark, tokens: tokens)
     }
 }
 

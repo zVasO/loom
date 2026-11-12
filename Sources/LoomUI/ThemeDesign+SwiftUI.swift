@@ -17,6 +17,13 @@ public extension ThemePalette {
         return CGFloat(design.space(Double(charter)))
     }
 
+    /// The height or width of a control or a row of the charter: in the
+    /// theme's spacing, never under four fifths of the charter's.
+    func size(_ charter: CGFloat) -> CGFloat {
+        guard let design else { return charter }
+        return CGFloat(design.size(Double(charter)))
+    }
+
     /// The theme's letter-spacing, in points: the same for every text,
     /// 0 without one.
     var tracking: CGFloat {
@@ -118,8 +125,9 @@ struct ThemeFontModifier: ViewModifier {
 }
 
 /// CSS's `box-shadow` behind a view: each layer a filled rounded rectangle,
-/// grown by its spread, blurred and offset — drawn under the view's own
-/// background, so only what sticks out shows.
+/// grown by its spread, blurred and offset, with the box itself cut out —
+/// CSS never paints a shadow under its box, so a view that lets things
+/// through (dimmed, dragged) does not show its shadow through itself.
 struct ThemeShadowModifier: ViewModifier {
     let level: ThemeShadow.Level
     let radius: CGFloat
@@ -131,9 +139,12 @@ struct ThemeShadowModifier: ViewModifier {
         // switching theme never resets what it holds.
         content.background {
             if let shadow = palette.design?.shadow, !shadow.isInvisible {
+                let layers = shadow.layers(level)
+                // How far the shadow can reach past the box, for the cut-out.
+                let reach = layers.map { abs($0.x) + abs($0.y) + $0.blur + max($0.spread, 0) }.max() ?? 0
                 ZStack {
                     // The first layer is the top one: drawn last.
-                    ForEach(Array(shadow.layers(level).enumerated().reversed()), id: \.offset) { _, layer in
+                    ForEach(Array(layers.enumerated().reversed()), id: \.offset) { _, layer in
                         RoundedRectangle(cornerRadius: palette.radius(radius))
                             .fill(ThemePalette.color(layer.color).opacity(layer.opacity))
                             .padding(-layer.spread)
@@ -141,6 +152,15 @@ struct ThemeShadowModifier: ViewModifier {
                             .blur(radius: layer.blur / 2)
                             .offset(x: layer.x, y: layer.y)
                     }
+                }
+                .mask {
+                    Rectangle()
+                        .padding(-(reach + 8))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: palette.radius(radius))
+                                .blendMode(.destinationOut)
+                        }
+                        .compositingGroup()
                 }
                 .allowsHitTesting(false)
             }

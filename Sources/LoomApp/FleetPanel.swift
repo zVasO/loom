@@ -103,7 +103,7 @@ struct FleetPanel: View {
             .padding(.leading, DefaultTheme.space(6))
         }
         .padding(.horizontal, DefaultTheme.space(12))
-        .frame(height: DefaultTheme.space(38))
+        .frame(height: DefaultTheme.size(38))
         .background(DefaultTheme.background)
     }
 
@@ -213,7 +213,7 @@ struct FleetPanel: View {
             }
         }
         .padding(.horizontal, DefaultTheme.space(14))
-        .frame(height: DefaultTheme.space(34))
+        .frame(height: DefaultTheme.size(34))
         .background(DefaultTheme.background)
     }
 

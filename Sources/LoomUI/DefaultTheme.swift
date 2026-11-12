@@ -52,6 +52,10 @@ public enum DefaultTheme {
     /// A padding, a gap or a control's height of the charter.
     public static func space(_ charter: CGFloat) -> CGFloat { palette.space(charter) }
 
+    /// The height or width of a control or a row of the charter: like
+    /// `space`, but never under four fifths — a row still holds its text.
+    public static func size(_ charter: CGFloat) -> CGFloat { palette.size(charter) }
+
     /// The theme's letter-spacing, in points — the same for every text; 0
     /// without one. A text with a tracking of its own adds it to this.
     public static var tracking: CGFloat { palette.tracking }

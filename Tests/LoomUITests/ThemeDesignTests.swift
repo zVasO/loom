@@ -106,6 +106,45 @@ struct ThemeDesignTests {
         #expect(ThemeDesign().space(13.5) == 13.5)
     }
 
+    @Test("a control's size follows --spacing but still holds its text; a value out of range is held back")
+    func sizes() {
+        let tight = ThemeDesign(spacing: 2.4)      // 0.15rem, the slider's minimum
+        #expect(tight.space(38) == 23)
+        #expect(tight.size(38) == 30.5, "a row is never under four fifths of the charter's")
+        #expect(tight.size(20) == 16)
+        #expect(ThemeDesign(spacing: 4.32).size(38) == 41)
+        #expect(ThemeDesign().size(38) == 38 && ThemeDesign(spacing: 4).size(26) == 26)
+        // A theme file written by hand: 0.25 (rem, where points are meant), or 16.
+        #expect(ThemeDesign(spacing: 0.25).space(38) == 19, "held at 0.125rem")
+        #expect(ThemeDesign(spacing: 16).space(10) == 20, "held at 0.5rem")
+        #expect(near(ThemeDesign(letterSpacing: 3).tracking, 8), "held at 0.5em")
+        var tokens = ThemeFamily.loom.light
+        tokens.design = ThemeDesign(spacing: 2.4)
+        #expect(ThemePalette(name: "T", isLight: true, tokens: tokens).size(38) == 30.5)
+        #expect(ThemeFamily.loom.palette(dark: false).size(38) == 38)
+    }
+
+    @Test("a project's theme recolours; the shapes, spacing and fonts stay the global theme's")
+    func projectOverGlobal() {
+        var imported = ThemeFamily(name: "Imported", light: ThemeFamily.nord.light, dark: ThemeFamily.nord.dark)
+        imported.light.design = ThemeDesign(radius: 0, spacing: 4.32, fontSans: "DM Sans, sans-serif", border: "#111111")
+        // A built-in global theme: an imported project theme brings its colours and its edges, no geometry.
+        let overCharter = ThemeStore.palette(of: imported, shapedBy: .loom, dark: false)
+        #expect(overCharter.primaryText == imported.palette(dark: false).primaryText)
+        #expect(overCharter.radius(6) == 6 && overCharter.space(8) == 8)
+        #expect(overCharter.design == ThemeDesign(border: "#111111"))
+        // An imported global theme: a built-in project theme is drawn in its shapes, with its own hairline.
+        let overImported = ThemeStore.palette(of: .dracula, shapedBy: imported, dark: false)
+        #expect(overImported.accent == ThemeFamily.dracula.palette(dark: false).accent)
+        #expect(overImported.radius(6) == 0 && overImported.space(8) == 8.5)
+        #expect(overImported.design?.fontSans == "DM Sans, sans-serif" && overImported.design?.border == nil)
+        #expect(overImported.line == overImported.primaryText.opacity(0.08))
+        #expect(overImported.name == "Alucard")
+        // A global theme followed for its colours only shapes nothing.
+        imported.colorsOnly = true
+        #expect(ThemeStore.palette(of: .dracula, shapedBy: imported, dark: false).design == nil)
+    }
+
     @Test("the letter-spacing is one length for every text: the em of the body's 16 px")
     func tracking() {
         #expect(near(ThemeDesign(letterSpacing: 0.025).tracking, 0.4))
@@ -145,22 +184,22 @@ struct ThemeDesignTests {
 
     // MARK: Edges
 
-    @Test("a theme with a border of its own is drawn with it; the control's edge is --input")
+    @Test("a theme with a border of its own is drawn with it; a field's edge is --input")
     func edges() {
         var tokens = ThemeFamily.loom.light
         tokens.design = ThemeDesign(border: "#E5E5E5", input: "#D4D4D4")
         let palette = ThemePalette(name: "T", isLight: true, tokens: tokens)
         #expect(palette.line == ThemePalette.color("#E5E5E5"))
-        #expect(palette.line2 == ThemePalette.color("#D4D4D4"))
         #expect(palette.fieldLine == ThemePalette.color("#D4D4D4"), "shadcn's Input: border-input")
-        #expect(palette.line3 == ThemePalette.color(ThemeTokens.mix("#D4D4D4", with: tokens.primaryText, amount: 0.3)))
+        #expect(palette.line2 == ThemePalette.color(ThemeTokens.mix("#E5E5E5", with: tokens.primaryText, amount: 0.15)),
+                "the stronger hairlines are the border, a step towards the text — never --input")
+        #expect(palette.line3 == ThemePalette.color(ThemeTokens.mix("#E5E5E5", with: tokens.primaryText, amount: 0.3)))
         #expect(palette.wash == palette.surfaceRaised.opacity(0.5), "shadcn's hover:bg-muted/50")
         #expect(palette.wash2 == palette.surfaceRaised, "and its selected bg-muted")
 
         tokens.design = ThemeDesign(border: "#E5E5E5")
         let borderOnly = ThemePalette(name: "T", isLight: true, tokens: tokens)
-        #expect(borderOnly.line2 == ThemePalette.color("#E5E5E5") && borderOnly.fieldLine == borderOnly.line,
-                "no --input: the border")
+        #expect(borderOnly.fieldLine == borderOnly.line, "no --input: the border")
 
         tokens.design = ThemeDesign(radius: 8, border: "not a colour")
         let fallback = ThemePalette(name: "T", isLight: true, tokens: tokens)

@@ -112,9 +112,19 @@ public final class ThemeFonts {
     public private(set) var revision = 0
 
     @ObservationIgnored private var directory: URL?
+    /// Font requests have their own session: no cookie, no shared cache,
+    /// and a wait counted in seconds — a network that swallows them must
+    /// not hold an import for minutes.
+    private let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 8
+        configuration.timeoutIntervalForResource = 30
+        return URLSession(configuration: configuration)
+    }()
     /// Fetched families, by lowercased name.
     @ObservationIgnored private var fetched: [String: FetchedFamily] = [:]
-    /// Families Google does not have — not asked again until the next launch.
+    /// Families Google does not have (it answered 400): never asked again,
+    /// this launch or the next — kept in `unknown.json` beside the fonts.
     @ObservationIgnored private var unknown: Set<String> = []
     @ObservationIgnored private var inFlight: [String: Task<Bool, Never>] = [:]
     /// The Mac's own families, lowercased name → name; built on first use.
@@ -293,6 +303,10 @@ public final class ThemeFonts {
     /// called once at launch, before the first frame asks for a font.
     public func configure(directory: URL) {
         self.directory = directory
+        if let data = try? Data(contentsOf: directory.appendingPathComponent("unknown.json")),
+           let names = try? JSONDecoder().decode([String].self, from: data) {
+            unknown = Set(names)
+        }
         let folders = (try? FileManager.default.contentsOfDirectory(at: directory,
                                                                      includingPropertiesForKeys: nil)) ?? []
         for folder in folders {
@@ -319,7 +333,9 @@ public final class ThemeFonts {
         for stack in Set(stacks).sorted() {
             var tried: [String] = []
             var found = false
-            for family in FontStack.namedFamilies(stack) {
+            // A stack names a few families; a file that names hundreds
+            // is not asking for a font.
+            for family in FontStack.namedFamilies(stack).prefix(4) {
                 if isAvailable(family) { found = true; break }
                 if await fetch(family) { found = true; break }
                 tried.append(family)
@@ -359,12 +375,12 @@ public final class ThemeFonts {
         guard let directory, !unknown.contains(key),
               let stylesheet = GoogleFonts.stylesheetURL(family: family) else { return false }
         do {
-            let (body, response) = try await URLSession.shared.data(from: stylesheet)
+            let (body, response) = try await session.data(from: stylesheet)
             let status = (response as? HTTPURLResponse)?.statusCode
             guard status == 200 else {
                 // 400: no such family — asking again would say the same.
                 // Anything else (a rate limit, a proxy) is worth another try.
-                if status == 400 { unknown.insert(key) }
+                if status == 400 { rememberUnknown(key) }
                 return false
             }
             // A page that is not Google's stylesheet (a captive portal) has
@@ -375,7 +391,7 @@ public final class ThemeFonts {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             var entry = FetchedFamily(name: family, faces: [:])
             for face in faces {
-                let (data, fileResponse) = try await URLSession.shared.data(from: face.url)
+                let (data, fileResponse) = try await session.data(from: face.url)
                 guard (fileResponse as? HTTPURLResponse)?.statusCode == 200 else { continue }
                 let file = folder.appendingPathComponent("\(face.weight).ttf")
                 try data.write(to: file, options: .atomic)
@@ -390,6 +406,16 @@ public final class ThemeFonts {
         } catch {
             return false
         }
+    }
+
+    /// A family Google does not have: written down, so that no launch asks
+    /// for it again.
+    private func rememberUnknown(_ key: String) {
+        unknown.insert(key)
+        guard let directory else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? JSONEncoder().encode(unknown.sorted())
+            .write(to: directory.appendingPathComponent("unknown.json"), options: .atomic)
     }
 
     /// Registers a font file for this process and returns its PostScript

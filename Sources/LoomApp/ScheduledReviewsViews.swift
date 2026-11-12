@@ -210,7 +210,7 @@ private struct ReviewScheduleEditor: View {
         } label: {
             Text(label)
                 .themeFont(size: 10, weight: .semibold)
-                .frame(width: DefaultTheme.space(22), height: DefaultTheme.space(22))
+                .frame(width: DefaultTheme.size(22), height: DefaultTheme.size(22))
                 .foregroundStyle(on ? DefaultTheme.accentText : DefaultTheme.secondaryText)
                 .background(on ? DefaultTheme.accent : DefaultTheme.surfaceRaised, in: Circle())
         }
