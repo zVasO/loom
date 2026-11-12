@@ -299,8 +299,9 @@ struct PRBrowserView: View {
         .frame(width: 300)
         .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
         .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
-            .stroke(searchFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
+            .stroke(searchFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.fieldBorder,
                     lineWidth: 1))
+        .themeShadow(.xs, radius: 6)
     }
 
     /// Return: a PR reference opens in Review; any other text becomes a

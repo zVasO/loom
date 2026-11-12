@@ -36,6 +36,34 @@ struct ThemeDesignTests {
         }
     }
 
+    @Test("without a design, a text's font is the system font the views wrote, and its kerning stays a kerning")
+    @MainActor
+    func charterType() {
+        let palette = ThemeFamily.loom.palette(dark: true)
+        let none: Font.Weight? = nil
+        let medium: Font.Weight? = .medium
+        let plain: Font.Design? = nil
+        let mono: Font.Design? = .monospaced
+        #expect(palette.font(size: 12) == Font.system(size: 12, weight: none, design: plain))
+        #expect(palette.font(size: 10.5, weight: .medium, design: .monospaced)
+                == Font.system(size: 10.5, weight: medium, design: mono))
+        // Passing the palette keeps the active theme out of the test.
+        #expect(Text("a").themeFont(size: 12, palette: palette)
+                == Text("a").font(.system(size: 12, weight: none, design: plain)))
+        #expect(Text("a").themeFont(size: 9, weight: .medium, kerning: 0.53, palette: palette)
+                == Text("a").font(.system(size: 9, weight: medium, design: plain)).kerning(0.53),
+                "the mono capitals' 5 % is still a kerning, not a tracking")
+        #expect(Text("a").themeFont(size: 11, tracking: 0.22, palette: palette)
+                == Text("a").font(.system(size: 11, weight: none, design: plain)).tracking(0.22))
+
+        // With a letter-spacing, the text's own kerning joins it as one tracking.
+        var tokens = ThemeFamily.loom.dark
+        tokens.design = ThemeDesign(letterSpacing: 0.025)
+        let spaced = ThemePalette(name: "T", isLight: false, tokens: tokens)
+        #expect(Text("a").themeFont(size: 9, kerning: 0.5, palette: spaced)
+                == Text("a").font(.system(size: 9, weight: none, design: plain)).tracking(spaced.tracking + 0.5))
+    }
+
     // MARK: Geometry
 
     @Test("a radius follows tweakcn's scale: xl a card, lg, md a control, sm a tab, a pill a tag")

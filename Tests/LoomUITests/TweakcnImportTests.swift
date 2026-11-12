@@ -96,6 +96,29 @@ struct TweakcnImportTests {
         }
     }
 
+    @Test("a value wrapped onto the next lines is read whole")
+    func cssWrappedValues() throws {
+        let css = """
+        :root {
+          --background: #ffffff;
+          --font-sans:
+            Plus Jakarta Sans, ui-sans-serif,
+            sans-serif;
+          --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.10),
+            0 1px 2px -1px hsl(0 0% 0% / 0.10);
+          --radius: 0.5rem;
+          color: red;
+        }
+        """
+        let (light, _) = try TweakcnImport.parseCSS(css)
+        #expect(light["font-sans"] == "Plus Jakarta Sans, ui-sans-serif, sans-serif")
+        #expect(light["shadow-sm"] == "0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10)")
+        #expect(light["radius"] == "0.5rem" && light["background"] == "#ffffff")
+        #expect(light.count == 4, "a declaration that is no variable is not one")
+        let bare = TweakcnImport.variables(in: "--a: 1\ncolor: red\n--b: one,\n  two\n--c: 3")
+        #expect(bare == ["a": "1", "b": "one, two", "c": "3"], "only a wrapped value runs on")
+    }
+
     @Test("a @media (prefers-color-scheme: dark) wrapper is walked into")
     func cssMedia() throws {
         let css = """

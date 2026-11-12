@@ -92,7 +92,7 @@ public struct ThemeDesign: Codable, Equatable, Sendable, Hashable {
 }
 
 /// A theme's shadow, as tweakcn's six controls set it. The levels shadcn's
-/// components ask for (`shadow-xs` a button, `shadow-sm` a card…) are all
+/// components ask for (`shadow-xs` a field, `shadow-sm` a card…) are all
 /// made from these, exactly as tweakcn composes `--shadow-2xs … --shadow-2xl`.
 public struct ThemeShadow: Codable, Equatable, Sendable, Hashable {
     /// `--shadow-color`, `#RRGGBB`.

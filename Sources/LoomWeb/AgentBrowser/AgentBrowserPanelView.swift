@@ -136,19 +136,19 @@ public struct AgentBrowserPanelView: View {
     }
 
     /// Plain, page-like styling: the words are the page's, never Loom's —
-    /// "<host> says:" first.
+    /// "<host> says:" first. Not the theme's font, spacing or radius either.
     private func dialogBanner(_ dialog: AgentModalState) -> some View {
-        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("\(dialog.host) says:")
-                .themeFont(size: 11, weight: .semibold)
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color.black.opacity(0.8))
             if case .fileChooser = dialog.kind {
                 Text("The page asks for a file.")
-                    .themeFont(size: 12)
+                    .font(.system(size: 12))
                     .foregroundStyle(Color.black)
             } else {
                 Text(String(dialog.message.prefix(400)))
-                    .themeFont(size: 12)
+                    .font(.system(size: 12))
                     .foregroundStyle(Color.black)
                     .lineLimit(6)
             }
@@ -168,10 +168,10 @@ public struct AgentBrowserPanelView: View {
                 Button("OK") { browser.answerDialog(accept: true, text: promptText) }
             }
         }
-        .padding(DefaultTheme.space(12))
+        .padding(12)
         .frame(maxWidth: 360, alignment: .leading)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(8)))
-        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(8)).stroke(Color.black.opacity(0.15), lineWidth: 1))
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.black.opacity(0.15), lineWidth: 1))
         .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
     }
 }

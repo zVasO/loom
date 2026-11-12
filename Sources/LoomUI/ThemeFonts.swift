@@ -360,16 +360,17 @@ public final class ThemeFonts {
               let stylesheet = GoogleFonts.stylesheetURL(family: family) else { return false }
         do {
             let (body, response) = try await URLSession.shared.data(from: stylesheet)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-                // 400: no such family. Asking again would say the same.
-                unknown.insert(key)
+            let status = (response as? HTTPURLResponse)?.statusCode
+            guard status == 200 else {
+                // 400: no such family — asking again would say the same.
+                // Anything else (a rate limit, a proxy) is worth another try.
+                if status == 400 { unknown.insert(key) }
                 return false
             }
+            // A page that is not Google's stylesheet (a captive portal) has
+            // no face to give: not remembered either.
             let faces = GoogleFonts.faces(inStylesheet: String(decoding: body, as: UTF8.self))
-            guard !faces.isEmpty else {
-                unknown.insert(key)
-                return false
-            }
+            guard !faces.isEmpty else { return false }
             let folder = directory.appendingPathComponent(Self.slug(family))
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             var entry = FetchedFamily(name: family, faces: [:])

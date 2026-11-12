@@ -243,7 +243,8 @@ struct ThemePreview: View {
                     .padding(.horizontal, palette.space(8)).padding(.vertical, palette.space(5))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(palette.surface, in: RoundedRectangle(cornerRadius: palette.radius(6)))
-                    .overlay(RoundedRectangle(cornerRadius: palette.radius(6)).stroke(palette.line, lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: palette.radius(6)).stroke(palette.fieldLine, lineWidth: 1))
+                    .themeShadow(.xs, radius: 6, palette: palette)
                 Text("Approve")
                     .themeFont(size: 10, weight: .semibold, palette: palette)
                     .foregroundStyle(palette.accentText)
@@ -326,7 +327,8 @@ struct ThemePreview: View {
                 }
             }
         }
-        .themeFont(size: 9, design: .monospaced, palette: palette)
+        // The terminal keeps its own font, whatever the theme's.
+        .font(.system(size: 9, design: .monospaced))
         .padding(palette.space(8))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.background, in: RoundedRectangle(cornerRadius: palette.radius(6)))
@@ -397,7 +399,7 @@ struct ThemeImportSheet: View {
                 Spacer()
             }
             Text(wholeTheme
-                 ? "Whole theme: its colours, borders, radius, spacing, fonts, letter-spacing and shadows, to the letter. The fonts it names are fetched from Google Fonts when this Mac does not have them."
+                 ? "Whole theme: its colours, borders, radius, spacing, fonts, letter-spacing and shadows, to the letter. The fonts it names are fetched from Google Fonts when this Mac does not have them. Text sizes, the terminal's font and the controls macOS draws (menus, switches) stay as they are."
                  : "Colours only: its colours, borders included; Loom keeps its own radius, spacing and fonts, and fetches no font. The rest of the theme is kept: switch back in Settings › Themes — the preview's header, or a right-click on the theme's card.")
                 .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)

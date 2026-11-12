@@ -82,7 +82,7 @@ public extension View {
     }
 
     /// The theme's shadow at a level of Tailwind's scale (`shadow-xs` a
-    /// button, `shadow-sm` a card), cast by a rounded rectangle of the
+    /// field, `shadow-sm` a card), cast by a rounded rectangle of the
     /// charter's `radius` behind this view. Nothing for a theme without one.
     @MainActor
     func themeShadow(_ level: ThemeShadow.Level, radius: CGFloat,

@@ -107,18 +107,33 @@ public enum TweakcnImport {
         return result
     }
 
-    /// `--name: value;` pairs. The value runs to the `;` or the end of line.
+    /// `--name: value;` pairs. The value runs to the `;` or the end of the
+    /// line — and on to the next lines when a formatter wrapped it there: a
+    /// value that starts on the line below its name, or a list cut after a
+    /// comma (a long font stack, a two-layer shadow).
     static func variables(in body: String) -> Variables {
         var result: Variables = [:]
-        for statement in body.split(whereSeparator: { $0 == ";" || $0.isNewline }) {
-            let trimmed = statement.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("--"), let colon = trimmed.firstIndex(of: ":") else { continue }
-            let name = String(trimmed[trimmed.index(trimmed.startIndex, offsetBy: 2)..<colon])
-                .trimmingCharacters(in: .whitespaces)
-            let value = String(trimmed[trimmed.index(after: colon)...])
-                .trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty, !value.isEmpty else { continue }
-            result[name] = value
+        for statement in body.split(separator: ";") {
+            var name: String?
+            var value = ""
+            func keep() {
+                let text = value.trimmingCharacters(in: .whitespaces)
+                if let name, !name.isEmpty, !text.isEmpty { result[name] = text }
+            }
+            for line in statement.split(whereSeparator: \.isNewline) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("--"), let colon = trimmed.firstIndex(of: ":") {
+                    keep()
+                    name = String(trimmed[trimmed.index(trimmed.startIndex, offsetBy: 2)..<colon])
+                        .trimmingCharacters(in: .whitespaces)
+                    value = String(trimmed[trimmed.index(after: colon)...])
+                } else if name != nil, !trimmed.isEmpty {
+                    let soFar = value.trimmingCharacters(in: .whitespaces)
+                    guard soFar.isEmpty || soFar.hasSuffix(",") || trimmed.hasPrefix(",") else { continue }
+                    value += " " + trimmed
+                }
+            }
+            keep()
         }
         return result
     }

@@ -148,7 +148,8 @@ struct NewSessionSheet: View {
         .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(8))
         .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
         .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
-            .stroke(searchFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
+            .stroke(searchFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.fieldBorder, lineWidth: 1))
+        .themeShadow(.xs, radius: 6)
     }
 
     /// ↑↓ through the projects shown, stopping at either end.

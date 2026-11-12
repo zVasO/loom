@@ -67,8 +67,9 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
     @State private var address = ""
     @FocusState private var addressFocused: Bool
 
-    static var toolbarHeight: CGFloat { 38 }
-    static var tabStripHeight: CGFloat { 29 }
+    // In the theme's spacing, like the paddings of what they hold.
+    static var toolbarHeight: CGFloat { DefaultTheme.space(38) }
+    static var tabStripHeight: CGFloat { DefaultTheme.space(29) }
 
     init(surface: any ChromiumPanelSurface, emptyHint: String, agentBusy: Bool,
          @ViewBuilder pageOverlay: @escaping () -> PageOverlay) {

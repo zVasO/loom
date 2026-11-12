@@ -478,7 +478,8 @@ struct WorkflowLaunchSheet: View {
                     .frame(minHeight: 118, maxHeight: 220)
                     .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                     .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
-                        .stroke(taskFocused ? DefaultTheme.accent.opacity(0.7) : DefaultTheme.cardBorder, lineWidth: 1))
+                        .stroke(taskFocused ? DefaultTheme.accent.opacity(0.7) : DefaultTheme.fieldBorder, lineWidth: 1))
+                    .themeShadow(.xs, radius: 6)
                     formHint("As you would tell a colleague: what is wanted, where, and how to know it is done.")
                 }
             }
@@ -659,6 +660,7 @@ struct ApprovalBanner: View {
         .padding(DefaultTheme.space(12))
         .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
         .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.badgeColor(for: .needsInput).opacity(0.6)))
+        .themeShadow(.sm, radius: 10)
         .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(8))
     }
 }

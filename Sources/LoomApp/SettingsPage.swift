@@ -511,7 +511,8 @@ struct SettingsPage: View {
                 .frame(width: DefaultTheme.space(36), height: DefaultTheme.space(28))
                 .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                 .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
-                    .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    .stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                .themeShadow(.xs, radius: 6)
                 // The ⇧ row follows ⌘N's letter: shown, not edited apart.
                 .disabled(shift)
                 .opacity(shift ? 0.6 : 1)

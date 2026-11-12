@@ -200,6 +200,7 @@ struct PRWorkspaceView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(DefaultTheme.surface,
                                         in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+                            .themeShadow(.sm, radius: 10)
                     }
                     if !detail.reviews.isEmpty || !detail.comments.isEmpty {
                         VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {

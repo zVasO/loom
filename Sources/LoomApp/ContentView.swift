@@ -902,6 +902,7 @@ struct ProjectsView: View {
                     }
                     .padding(DefaultTheme.space(12))
                     .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+                    .themeShadow(.sm, radius: 10)
                 }
             }
         } else {
@@ -952,6 +953,7 @@ struct ProjectsView: View {
                 }
             }
             .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+            .themeShadow(.sm, radius: 10)
         }
     }
 
@@ -1061,6 +1063,7 @@ struct ProjectsView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, DefaultTheme.space(60))
                 .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+                .themeShadow(.sm, radius: 10)
             }
         }
     }
