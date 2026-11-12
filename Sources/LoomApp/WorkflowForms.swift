@@ -40,7 +40,8 @@ private struct MonoEditor: View {
             .padding(DefaultTheme.space(8))
             .frame(minHeight: minHeight)
             .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
-            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+            .themeShadow(.xs, radius: 6)
     }
 }
 

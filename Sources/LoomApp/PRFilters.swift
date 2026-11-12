@@ -232,7 +232,8 @@ struct PRFilterEditorSheet: View {
                 .themeFont(size: 12, design: mono ? .monospaced : .default)
                 .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
                 .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
-                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                .themeShadow(.xs, radius: 6)
         }
     }
 

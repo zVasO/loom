@@ -35,6 +35,8 @@ public enum DefaultTheme {
     public static var line: Color { palette.line }
     public static var line2: Color { palette.line2 }
     public static var line3: Color { palette.line3 }
+    /// The edge of a text field: the hairline, or the theme's `--input`.
+    public static var fieldBorder: Color { palette.fieldLine }
     /// Row washes: hover, then selection.
     public static var wash: Color { palette.wash }
     public static var wash2: Color { palette.wash2 }

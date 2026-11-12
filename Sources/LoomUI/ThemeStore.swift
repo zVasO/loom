@@ -146,6 +146,9 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
     public let line: Color
     public let line2: Color
     public let line3: Color
+    /// The edge of a text field: the charter's hairline, or the theme's
+    /// `--input` — what shadcn's Input is bordered with.
+    public let fieldLine: Color
     /// Row washes, hover then selection: 2.5 and 4.5 % of the text colour,
     /// or — a theme with a design — shadcn's own `muted/50` and `muted`.
     public let wash: Color
@@ -178,7 +181,9 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
         let raised = Self.color(tokens.surfaceRaised)
         let border = tokens.design?.border.flatMap(Self.validHex)
         let input = tokens.design?.input.flatMap(Self.validHex) ?? border
-        line = border.map(Self.color) ?? text.opacity(0.08)
+        let edge = border.map(Self.color) ?? text.opacity(0.08)
+        line = edge
+        fieldLine = input.map(Self.color) ?? edge
         line2 = input.map(Self.color) ?? text.opacity(0.13)
         line3 = input.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.3)) }
             ?? text.opacity(0.21)

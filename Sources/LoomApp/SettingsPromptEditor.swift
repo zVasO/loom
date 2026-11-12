@@ -65,7 +65,8 @@ struct PromptEditor: View {
                     .padding(DefaultTheme.space(8))
                     .frame(minHeight: minHeight, maxHeight: 520)
                     .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
-                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                    .themeShadow(.xs, radius: 6)
                     // Saved once typing pauses: a new task per change, the
                     // previous one cancelled before it writes.
                     .task(id: draft) {

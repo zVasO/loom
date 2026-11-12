@@ -87,7 +87,8 @@ struct ExtensionLaunchSheet: View {
                     .scrollContentBackground(.hidden)
                     .padding(DefaultTheme.space(6))
                     .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
-                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                    .themeShadow(.xs, radius: 6)
             }
 
             HStack {

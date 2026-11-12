@@ -350,7 +350,8 @@ struct ThemeImportSheet: View {
                 .padding(DefaultTheme.space(8))
                 .frame(height: family == nil ? 160 : 72)
                 .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
-                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                .themeShadow(.xs, radius: 6)
             HStack(spacing: DefaultTheme.space(8)) {
                 AccentButton(importing ? "Importing…" : "Import", systemImage: "square.and.arrow.down") {
                     runImport()
@@ -374,7 +375,8 @@ struct ThemeImportSheet: View {
                         .themeFont(size: 12)
                         .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
                         .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
-                        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                        .themeShadow(.xs, radius: 6)
                     Spacer()
                     AccentButton("Save and use", systemImage: "checkmark") { save(family) }
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)

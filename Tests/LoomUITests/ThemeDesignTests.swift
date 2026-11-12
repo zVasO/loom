@@ -29,6 +29,7 @@ struct ThemeDesignTests {
                 #expect(palette.line == palette.primaryText.opacity(0.08))
                 #expect(palette.line2 == palette.primaryText.opacity(0.13))
                 #expect(palette.line3 == palette.primaryText.opacity(0.21))
+                #expect(palette.fieldLine == palette.line, "a field's edge is the hairline")
                 #expect(palette.wash == palette.primaryText.opacity(0.025))
                 #expect(palette.wash2 == palette.primaryText.opacity(0.045))
             }
@@ -123,12 +124,14 @@ struct ThemeDesignTests {
         let palette = ThemePalette(name: "T", isLight: true, tokens: tokens)
         #expect(palette.line == ThemePalette.color("#E5E5E5"))
         #expect(palette.line2 == ThemePalette.color("#D4D4D4"))
+        #expect(palette.fieldLine == ThemePalette.color("#D4D4D4"), "shadcn's Input: border-input")
         #expect(palette.line3 == ThemePalette.color(ThemeTokens.mix("#D4D4D4", with: tokens.primaryText, amount: 0.3)))
         #expect(palette.wash == palette.surfaceRaised.opacity(0.5), "shadcn's hover:bg-muted/50")
         #expect(palette.wash2 == palette.surfaceRaised, "and its selected bg-muted")
 
         tokens.design = ThemeDesign(border: "#E5E5E5")
-        #expect(ThemePalette(name: "T", isLight: true, tokens: tokens).line2 == ThemePalette.color("#E5E5E5"),
+        let borderOnly = ThemePalette(name: "T", isLight: true, tokens: tokens)
+        #expect(borderOnly.line2 == ThemePalette.color("#E5E5E5") && borderOnly.fieldLine == borderOnly.line,
                 "no --input: the border")
 
         tokens.design = ThemeDesign(radius: 8, border: "not a colour")

@@ -616,7 +616,8 @@ struct PRBrowserView: View {
                 .themeFont(size: 12, design: .monospaced)
                 .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
                 .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
-                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                .themeShadow(.xs, radius: 6)
                 .onSubmit { submitAddRepo() }
             Text("Cloned with gh into your clone folder, then added as a project — its PRs appear with the others. A PR URL opens that PR right after.")
                 .themeFont(size: 10)

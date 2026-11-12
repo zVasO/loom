@@ -581,7 +581,8 @@ struct PRWorkspaceView: View {
                     .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(7))
                     .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                     .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
-                        .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                        .stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                    .themeShadow(.xs, radius: 6)
                 AccentButton("Approve") { submitReview(pr, .approve, project) }
                 GhostButton("Request changes", systemImage: "exclamationmark.bubble") {
                     submitReview(pr, .requestChanges, project)
