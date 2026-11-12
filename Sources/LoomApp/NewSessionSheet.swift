@@ -30,17 +30,17 @@ struct NewSessionSheet: View {
 
     var body: some View {
         let matches = self.matches
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(16)) {
             Text("New session")
-                .font(.system(size: 15, weight: .semibold))
+                .themeFont(size: 15, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
                 sectionTitle("PROJECT")
                 searchField(matches)
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(spacing: 4) {
+                        VStack(spacing: DefaultTheme.space(4)) {
                             ForEach(matches, id: \.id) { project in
                                 projectRow(project)
                                     .id(project.id)
@@ -49,10 +49,10 @@ struct NewSessionSheet: View {
                                 Text(model.projects.isEmpty
                                      ? "No project yet — choose a folder to start in."
                                      : "No project matches “\(query)”.")
-                                    .font(.system(size: 12))
+                                    .themeFont(size: 12)
                                     .foregroundStyle(DefaultTheme.secondaryText)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 10).padding(.vertical, 8)
+                                    .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(8))
                             }
                         }
                     }
@@ -75,7 +75,7 @@ struct NewSessionSheet: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
                 sectionTitle("WHERE IT WORKS")
                 Picker("", selection: $placement) {
                     Label("Project folder", systemImage: "folder").tag(AppModel.LaunchPlacement.projectFolder)
@@ -89,7 +89,7 @@ struct NewSessionSheet: View {
                         ? "An isolated checkout on its own loom/<slug> branch — the project folder stays untouched."
                         : "The session works directly in the project folder, on its current branch.")
                      : "Not a git repository: the session works in the folder.")
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
 
@@ -98,14 +98,14 @@ struct NewSessionSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Text("↑↓ to choose · ↩ to launch")
-                    .font(.system(size: 10))
+                    .themeFont(size: 10)
                     .foregroundStyle(DefaultTheme.mutedText)
                 AccentButton("Launch", systemImage: "play.fill") { launch() }
                     .disabled(projectID == nil)
                     .opacity(projectID == nil ? 0.5 : 1)
             }
         }
-        .padding(20)
+        .padding(DefaultTheme.space(20))
         .frame(width: 480)
         .background(DefaultTheme.background)
         .onAppear {
@@ -122,12 +122,12 @@ struct NewSessionSheet: View {
     }
 
     private func searchField(_ matches: [ProjectRecord]) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             AppIcon("magnifyingglass", size: 14.5)
                 .foregroundStyle(DefaultTheme.secondaryText)
             TextField("Search projects…", text: $query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .themeFont(size: 13)
                 .foregroundStyle(DefaultTheme.primaryText)
                 .focused($searchFocused)
                 .onSubmit { launch() }
@@ -145,9 +145,9 @@ struct NewSessionSheet: View {
                 .help("Clear the search")
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6)
+        .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(8))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
             .stroke(searchFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
     }
 
@@ -172,8 +172,7 @@ struct NewSessionSheet: View {
 
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-            .kerning(0.53)
+            .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
             .foregroundStyle(DefaultTheme.secondaryText)
     }
 
@@ -182,16 +181,16 @@ struct NewSessionSheet: View {
         return Button {
             select(project.id)
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: DefaultTheme.space(10)) {
                 Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 12))
                     .foregroundStyle(selected ? DefaultTheme.accent : DefaultTheme.mutedText)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                     Text(project.name)
-                        .font(.system(size: 12, weight: .medium))
+                        .themeFont(size: 12, weight: .medium)
                         .foregroundStyle(DefaultTheme.primaryText)
                     Text(project.path)
-                        .font(.system(size: 10, design: .monospaced))
+                        .themeFont(size: 10, design: .monospaced)
                         .foregroundStyle(DefaultTheme.mutedText)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -201,10 +200,10 @@ struct NewSessionSheet: View {
                     MonoTag(branch, systemImage: "arrow.triangle.branch", color: DefaultTheme.mutedText)
                 }
             }
-            .padding(.horizontal, 10).padding(.vertical, 7)
+            .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(7))
             .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface,
-                        in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6)
+                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
                 .stroke(selected ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
             .contentShape(Rectangle())
         }

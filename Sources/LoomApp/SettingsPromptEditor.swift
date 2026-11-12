@@ -55,17 +55,17 @@ struct PromptEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
             header
             if expanded {
                 TextEditor(text: $draft)
-                    .font(.system(size: 11, design: .monospaced))
+                    .themeFont(size: 11, design: .monospaced)
                     .foregroundStyle(DefaultTheme.primaryText)
                     .scrollContentBackground(.hidden)
-                    .padding(8)
+                    .padding(DefaultTheme.space(8))
                     .frame(minHeight: minHeight, maxHeight: 520)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
                     // Saved once typing pauses: a new task per change, the
                     // previous one cancelled before it writes.
                     .task(id: draft) {
@@ -80,15 +80,15 @@ struct PromptEditor: View {
                     withAnimation(.easeInOut(duration: 0.15)) { expanded = true }
                 } label: {
                     Text(preview.isEmpty ? "Empty" : preview)
-                        .font(.system(size: 11, design: .monospaced))
+                        .themeFont(size: 11, design: .monospaced)
                         .foregroundStyle(DefaultTheme.secondaryText)
                         .lineLimit(2)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(8))
                         .background(DefaultTheme.surfaceRaised.opacity(0.6),
-                                    in: RoundedRectangle(cornerRadius: 6))
-                        .overlay(RoundedRectangle(cornerRadius: 6)
+                                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
                             .stroke(DefaultTheme.cardBorder, lineWidth: 1))
                         .contentShape(Rectangle())
                 }
@@ -101,29 +101,29 @@ struct PromptEditor: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             Button {
                 withAnimation(.easeInOut(duration: 0.15)) {
                     if expanded { commit() }
                     expanded.toggle()
                 }
             } label: {
-                HStack(spacing: 7) {
+                HStack(spacing: DefaultTheme.space(7)) {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(DefaultTheme.secondaryText)
                         .rotationEffect(.degrees(expanded ? 0 : -90))
                     Text(title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .themeFont(size: 12, weight: .semibold)
                         .foregroundStyle(DefaultTheme.primaryText)
                     Text(isDefault ? "default" : "customized")
-                        .font(.system(size: 9, weight: .semibold))
+                        .themeFont(size: 9, weight: .semibold)
                         .foregroundStyle(isDefault ? DefaultTheme.secondaryText : DefaultTheme.accent)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(1))
                         .background(isDefault ? DefaultTheme.surfaceRaised : DefaultTheme.accent.opacity(0.14),
                                     in: Capsule())
                     Text(lineCount == 1 ? "1 line" : "\(lineCount) lines")
-                        .font(.system(size: 10))
+                        .themeFont(size: 10)
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
                 .contentShape(Rectangle())

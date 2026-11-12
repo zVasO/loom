@@ -139,12 +139,12 @@ private struct SettingsSidebar: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
                 Text("Settings")
-                    .font(.system(size: 17, weight: .bold))
+                    .themeFont(size: 17, weight: .bold)
                     .foregroundStyle(DefaultTheme.primaryText)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 2)
+                    .padding(.horizontal, DefaultTheme.space(8))
+                    .padding(.bottom, DefaultTheme.space(2))
                 ForEach(SettingsAnchor.groups) { entry in
                     VStack(alignment: .leading, spacing: 1) {
                         row(entry.id)
@@ -154,7 +154,7 @@ private struct SettingsSidebar: View {
                     }
                 }
             }
-            .padding(.horizontal, 10).padding(.vertical, 22)
+            .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(22))
         }
     }
 
@@ -166,7 +166,7 @@ private struct SettingsSidebar: View {
         return Button {
             onJump(anchor)
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 if isGroup {
                     Image(systemName: anchor.icon)
                         .font(.system(size: 11, weight: .semibold))
@@ -174,21 +174,21 @@ private struct SettingsSidebar: View {
                         .frame(width: 16)
                 }
                 Text(anchor.title)
-                    .font(.system(size: isGroup ? 12.5 : 12, weight: isGroup ? .semibold : .regular))
+                    .themeFont(size: isGroup ? 12.5 : 12, weight: isGroup ? .semibold : .regular)
                     .foregroundStyle(isActive ? DefaultTheme.accent
                                      : (isGroup ? DefaultTheme.primaryText : DefaultTheme.secondaryText))
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.leading, isGroup ? 8 : 32).padding(.trailing, 8)
-            .padding(.vertical, isGroup ? 6 : 4)
+            .padding(.leading, DefaultTheme.space(isGroup ? 8 : 32)).padding(.trailing, DefaultTheme.space(8))
+            .padding(.vertical, DefaultTheme.space(isGroup ? 6 : 4))
             .background(isActive ? DefaultTheme.accent.opacity(0.12) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 6))
+                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .hoverSurface()
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
     }
 }
 
@@ -251,7 +251,7 @@ struct SettingsPage: View {
                 Divider().overlay(DefaultTheme.cardBorder)
                 GeometryReader { viewport in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 44) {
+                        VStack(alignment: .leading, spacing: DefaultTheme.space(44)) {
                             generalGroup
                             sessionsGroup
                             agentsGroup
@@ -261,7 +261,7 @@ struct SettingsPage: View {
                             extensionsGroup
                         }
                         .frame(maxWidth: 760, alignment: .leading)
-                        .padding(.horizontal, 36).padding(.top, 28)
+                        .padding(.horizontal, DefaultTheme.space(36)).padding(.top, DefaultTheme.space(28))
                         // Room for the last sections to reach the top when
                         // the sidebar scrolls to them.
                         .padding(.bottom, max(44, viewport.size.height * 0.5))
@@ -309,18 +309,18 @@ struct SettingsPage: View {
 
     /// A group's heading: its icon, its title, what is in it.
     private func groupHeader(_ anchor: SettingsAnchor) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DefaultTheme.space(12)) {
             AppIcon(anchor.icon, size: 16)
                 .foregroundStyle(DefaultTheme.primaryText)
-                .frame(width: 32, height: 32)
-                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(DefaultTheme.line2, lineWidth: 1))
-            VStack(alignment: .leading, spacing: 2) {
+                .frame(width: DefaultTheme.space(32), height: DefaultTheme.space(32))
+                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).strokeBorder(DefaultTheme.line2, lineWidth: 1))
+            VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text(anchor.title)
-                    .font(.system(size: 19, weight: .bold))
+                    .themeFont(size: 19, weight: .bold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Text(anchor.blurb)
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
         }
@@ -329,7 +329,7 @@ struct SettingsPage: View {
 
     /// A group: its heading, then its sections.
     private func group(_ anchor: SettingsAnchor, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(22)) {
             groupHeader(anchor)
             content()
         }
@@ -337,7 +337,7 @@ struct SettingsPage: View {
 
     /// A section of a group: its title, then what it holds.
     private func section(_ anchor: SettingsAnchor, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
             sectionTitle(anchor.title)
             content()
         }
@@ -346,18 +346,18 @@ struct SettingsPage: View {
 
     private func sectionTitle(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-            .kerning(0.53)
+            .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
             .foregroundStyle(DefaultTheme.secondaryText)
     }
 
     private func card(@ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 12, content: content)
-            .padding(16)
+        VStack(alignment: .leading, spacing: DefaultTheme.space(12), content: content)
+            .padding(DefaultTheme.space(16))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10)
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
                 .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .themeShadow(.sm, radius: 10)
     }
 
     private var cardDivider: some View {
@@ -367,20 +367,20 @@ struct SettingsPage: View {
     /// The explanation under a setting.
     private func detail(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11))
+            .themeFont(size: 11)
             .foregroundStyle(DefaultTheme.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
     }
 
     private func label(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 13))
+            .themeFont(size: 13)
             .foregroundStyle(DefaultTheme.primaryText)
     }
 
     /// A switch, and what it does underneath.
     private func toggleRow(_ title: String, isOn: Binding<Bool>, detail text: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(5)) {
             Toggle(isOn: isOn) { label(title) }
                 .toggleStyle(.switch)
             detail(text)
@@ -393,7 +393,7 @@ struct SettingsPage: View {
         group(.general) {
             section(.terminal) {
                 card {
-                    HStack(spacing: 12) {
+                    HStack(spacing: DefaultTheme.space(12)) {
                         label("Terminal refresh rate")
                         Spacer()
                         Picker("", selection: $fps) {
@@ -434,11 +434,11 @@ struct SettingsPage: View {
     }
 
     private func shortcutRow(_ title: String, key: Binding<String>, shift: Bool = false) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DefaultTheme.space(12)) {
             label(title)
             Spacer()
             Text(shift ? "⌘⇧" : "⌘")
-                .font(.system(size: 13, weight: .semibold))
+                .themeFont(size: 13, weight: .semibold)
                 .foregroundStyle(DefaultTheme.secondaryText)
             TextField("", text: Binding(
                 get: { key.wrappedValue.uppercased() },
@@ -449,11 +449,11 @@ struct SettingsPage: View {
                     }
                 }))
                 .textFieldStyle(.plain)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .themeFont(size: 13, weight: .semibold, design: .monospaced)
                 .multilineTextAlignment(.center)
-                .frame(width: 36, height: 28)
-                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6)
+                .frame(width: DefaultTheme.space(36), height: DefaultTheme.space(28))
+                .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
                     .stroke(DefaultTheme.cardBorder, lineWidth: 1))
                 // The ⇧ row follows ⌘N's letter: shown, not edited apart.
                 .disabled(shift)
@@ -516,7 +516,7 @@ struct SettingsPage: View {
                     if localOnlyOn {
                         TextField("api.example.com, *.staging.example.com", text: $hostsDraft)
                             .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12))
+                            .themeFont(size: 12)
                             .onAppear { hostsDraft = model.agentBrowsersAllowedHosts }
                             .onSubmit { commitHosts() }
                             .onDisappear { commitHosts() }
@@ -524,14 +524,14 @@ struct SettingsPage: View {
                         Text(invalid.isEmpty
                              ? "Hosts the app under test needs (its API, its login), comma-separated; Return applies them."
                              : "Not a host name, ignored: " + invalid.joined(separator: ", "))
-                            .font(.system(size: 11))
+                            .themeFont(size: 11)
                             .foregroundStyle(invalid.isEmpty ? DefaultTheme.secondaryText : DefaultTheme.danger)
                     }
                 }
             }
             section(.agentPage) {
                 card {
-                    HStack(spacing: 12) {
+                    HStack(spacing: DefaultTheme.space(12)) {
                         label("Agent browser page width")
                         Spacer()
                         Picker("", selection: Binding<Int>(
@@ -546,7 +546,7 @@ struct SettingsPage: View {
                     }
                     detail("The width an agent's page opens at in new sessions, unless its project sets its own (Projects, below). A width wider than the panel is scaled into it. The agent's browser_resize and the panel's menu change one session only.")
                     cardDivider
-                    HStack(spacing: 10) {
+                    HStack(spacing: DefaultTheme.space(10)) {
                         GhostButton("Clear agent browser data", systemImage: "trash") {
                             clearingAgentData = true
                             Task {
@@ -559,7 +559,7 @@ struct SettingsPage: View {
                         if clearingAgentData { ProgressView().controlSize(.small) }
                         if agentDataCleared {
                             Text("Cleared ✓")
-                                .font(.system(size: 11))
+                                .themeFont(size: 11)
                                 .foregroundStyle(DefaultTheme.secondaryText)
                         }
                     }
@@ -572,7 +572,7 @@ struct SettingsPage: View {
     /// ADR-0016: which engine drives the agents' pages, and the Chromium found.
     @ViewBuilder
     private var agentEngineRows: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DefaultTheme.space(12)) {
             label("Agent browser engine")
             Spacer()
             Picker("", selection: $engineChoice) {
@@ -592,13 +592,13 @@ struct SettingsPage: View {
             refreshChromiumStatus()
         }
         if let status = chromiumStatus {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(3)) {
                 Text(status.summary)
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.primaryText)
                 if let path = status.path {
                     Text(path)
-                        .font(.system(size: 10, design: .monospaced))
+                        .themeFont(size: 10, design: .monospaced)
                         .foregroundStyle(DefaultTheme.secondaryText)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -606,18 +606,18 @@ struct SettingsPage: View {
                 }
                 if let warning = status.warning {
                     Text(warning)
-                        .font(.system(size: 11))
+                        .themeFont(size: 11)
                         .foregroundStyle(DefaultTheme.danger)
                 }
                 if let hint = status.hint {
                     Text(hint)
-                        .font(.system(size: 11))
+                        .themeFont(size: 11)
                         .foregroundStyle(DefaultTheme.secondaryText)
                 }
             }
         }
         chromiumDownloadRows
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             GhostButton("Choose…", systemImage: "folder") { chooseChromium() }
             if chromiumStatus?.hasChoice == true {
                 GhostButton("Use automatic search", systemImage: "arrow.uturn.backward") {
@@ -627,7 +627,7 @@ struct SettingsPage: View {
             }
         }
         Text("Chromium runs the agent's pages headless, panel shown or not, with real clicks and keys (isTrusted, :hover); WebKit stays the fallback. Automatic picks Chromium when Loom finds chrome-headless-shell (its own download or Playwright's) or the browser chosen here; a full Chrome, Chromium or Edge is used only once chosen. Loom downloads chrome-headless-shell only when you click, from Google's Chrome for Testing, checks it against the checksum built into this version of Loom, and never updates it on its own. Each engine keeps its own logins. Applies to sessions started or resumed after the change.")
-            .font(.system(size: 11))
+            .themeFont(size: 11)
             .foregroundStyle(DefaultTheme.secondaryText)
     }
 
@@ -644,28 +644,28 @@ struct SettingsPage: View {
         Group {
             switch setup.phase {
             case .downloading(let received, let total):
-                HStack(spacing: 10) {
+                HStack(spacing: DefaultTheme.space(10)) {
                     ProgressView(value: Double(received), total: Double(max(total, 1)))
                         .frame(maxWidth: 240)
                     Text("\(received / 1_000_000) of \(max(total, 1) / 1_000_000) MB")
-                        .font(.system(size: 11).monospacedDigit())
+                        .themeFont(size: 11).monospacedDigit()
                         .foregroundStyle(DefaultTheme.secondaryText)
                     GhostButton("Cancel", systemImage: "xmark") { setup.cancel() }
                 }
             case .verifying, .unpacking, .warming:
-                HStack(spacing: 8) {
+                HStack(spacing: DefaultTheme.space(8)) {
                     ProgressView().controlSize(.small)
                     Text(setup.phase == .verifying ? "Checking the download (SHA-256)…"
                          : setup.phase == .unpacking ? "Unpacking…" : "Starting it once…")
-                        .font(.system(size: 11))
+                        .themeFont(size: 11)
                         .foregroundStyle(DefaultTheme.secondaryText)
                 }
             case .idle, .failed:
                 if let record = chromiumStatus?.downloaded {
-                    HStack(spacing: 10) {
+                    HStack(spacing: DefaultTheme.space(10)) {
                         Text("chrome-headless-shell \(record.version) · SHA-256 verified"
                              + (record.signature.map { " · " + $0 } ?? ""))
-                            .font(.system(size: 11))
+                            .themeFont(size: 11)
                             .foregroundStyle(DefaultTheme.secondaryText)
                         Spacer()
                         GhostButton("Remove", systemImage: "trash") {
@@ -683,12 +683,12 @@ struct SettingsPage: View {
                 }
                 if case .failed(let message) = setup.phase {
                     Text(message)
-                        .font(.system(size: 11))
+                        .themeFont(size: 11)
                         .foregroundStyle(DefaultTheme.danger)
                 }
                 if let chromiumRemoveError {
                     Text(chromiumRemoveError)
-                        .font(.system(size: 11))
+                        .themeFont(size: 11)
                         .foregroundStyle(DefaultTheme.danger)
                 }
             }
@@ -746,11 +746,11 @@ struct SettingsPage: View {
                         set: { model.reviewWorktreesReadOnly = $0 }),
                               detail: "Guard hooks block commit/push in PR review worktrees — the session can build and test but never lands work on someone else's branch. Applies at the next checkout of each PR.")
                     cardDivider
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: DefaultTheme.space(10)) {
+                        VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                             label("Clone repositories into")
                             Text(model.cloneDirectory?.path ?? "Not chosen yet — asked at the first clone")
-                                .font(.system(size: 11, design: .monospaced))
+                                .themeFont(size: 11, design: .monospaced)
                                 .foregroundStyle(DefaultTheme.secondaryText)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
@@ -769,7 +769,7 @@ struct SettingsPage: View {
                             Text(model.hiddenCount == 1
                                  ? "1 organization or repository hidden in the PRs tab"
                                  : "\(model.hiddenCount) organizations or repositories hidden in the PRs tab")
-                                .font(.system(size: 12))
+                                .themeFont(size: 12)
                                 .foregroundStyle(DefaultTheme.primaryText)
                             Spacer()
                             GhostButton("Show all", systemImage: "eye") { model.unhideAll() }
@@ -808,12 +808,12 @@ struct SettingsPage: View {
         card {
             detail("Right-click a session card (sidebar or Mission Control) to assign badges — a session wears as many as you like.")
             ForEach(model.badgeDefinitions) { definition in
-                HStack(spacing: 10) {
+                HStack(spacing: DefaultTheme.space(10)) {
                     BadgeChip(label: definition.name,
                               color: AppModel.color(hex: definition.colorHex))
                     Spacer()
                     Text(definition.colorHex)
-                        .font(.system(size: 10, design: .monospaced))
+                        .themeFont(size: 10, design: .monospaced)
                         .foregroundStyle(DefaultTheme.mutedText)
                     HoverIconButton(systemImage: "xmark", help: "Delete this badge") {
                         model.saveBadgeDefinitions(
@@ -822,12 +822,12 @@ struct SettingsPage: View {
                 }
             }
             cardDivider
-            HStack(spacing: 10) {
+            HStack(spacing: DefaultTheme.space(10)) {
                 TextField("New badge name…", text: $newBadgeName)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                    .themeFont(size: 12)
+                    .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                     .frame(maxWidth: 220)
                 ColorPicker("", selection: $newBadgeColor, supportsOpacity: false)
                     .labelsHidden()
@@ -859,13 +859,13 @@ struct SettingsPage: View {
         return group(.appearance) {
             section(.appearanceMode) {
                 card {
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: DefaultTheme.space(12)) {
+                        VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                             label("Appearance")
                             Text(store.appearanceMode == .system
                                  ? "Following macOS — \(store.systemIsDark ? "dark" : "light") right now."
                                  : "Forced \(store.appearanceMode.label.lowercased()), whatever macOS says.")
-                                .font(.system(size: 11))
+                                .themeFont(size: 11)
                                 .foregroundStyle(DefaultTheme.secondaryText)
                         }
                         Spacer()
@@ -949,16 +949,16 @@ struct SettingsPage: View {
             card {
                 if model.projects.isEmpty {
                     Text("No project yet.")
-                        .font(.system(size: 12))
+                        .themeFont(size: 12)
                         .foregroundStyle(DefaultTheme.secondaryText)
                 }
                 ForEach(Array(model.projects.enumerated()), id: \.element.id) { index, project in
                     if index > 0 { cardDivider }
-                    HStack(spacing: 12) {
+                    HStack(spacing: DefaultTheme.space(12)) {
                         AppIcon("folder.fill", size: 13)
                             .foregroundStyle(DefaultTheme.accent)
                         Text(project.name)
-                            .font(.system(size: 13))
+                            .themeFont(size: 13)
                             .foregroundStyle(DefaultTheme.primaryText)
                         Spacer()
                         Picker("", selection: Binding<String>(
@@ -993,7 +993,7 @@ struct SettingsPage: View {
         return group(.extensions) {
             card {
                 detail("Web pages that plug into Loom — a Jira board, an inbox, your own tools. Each runs in its own sandboxed web view and reaches only what you approve. See docs/extensions.md to write one.")
-                HStack(spacing: 8) {
+                HStack(spacing: DefaultTheme.space(8)) {
                     GhostButton("Install from folder…", systemImage: "square.and.arrow.down") {
                         guard let url = AppModel.pickFolder(title: "Choose an extension folder") else { return }
                         extensions.requestInstall(from: url, linking: false)
@@ -1005,7 +1005,7 @@ struct SettingsPage: View {
                     Spacer()
                 }
                 if let error = extensions.lastError {
-                    HStack(alignment: .top, spacing: 6) {
+                    HStack(alignment: .top, spacing: DefaultTheme.space(6)) {
                         Image(systemName: "exclamationmark.triangle")
                         Text(error).textSelection(.enabled)
                         Spacer()
@@ -1013,7 +1013,7 @@ struct SettingsPage: View {
                             .buttonStyle(.plain)
                             .foregroundStyle(DefaultTheme.secondaryText)
                     }
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
                     .foregroundStyle(DefaultTheme.danger)
                 }
                 ForEach(extensions.extensions) { installed in
@@ -1022,15 +1022,15 @@ struct SettingsPage: View {
                 }
                 ForEach(extensions.problems) { problem in
                     cardDivider
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .top, spacing: DefaultTheme.space(8)) {
                         Image(systemName: "exclamationmark.triangle")
                             .foregroundStyle(DefaultTheme.danger)
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                             Text(problem.location.lastPathComponent)
-                                .font(.system(size: 12, weight: .medium))
+                                .themeFont(size: 12, weight: .medium)
                                 .foregroundStyle(DefaultTheme.primaryText)
                             Text(problem.message)
-                                .font(.system(size: 11))
+                                .themeFont(size: 11)
                                 .foregroundStyle(DefaultTheme.secondaryText)
                                 .textSelection(.enabled)
                         }
@@ -1054,22 +1054,22 @@ struct SettingsPage: View {
 
     private func extensionRow(_ installed: InstalledExtension) -> some View {
         let extensions = model.extensions
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
+            HStack(spacing: DefaultTheme.space(10)) {
                 Image(systemName: installed.manifest.icon ?? "puzzlepiece.extension")
                     .font(.system(size: 13))
                     .foregroundStyle(DefaultTheme.accent)
                     .frame(width: 18)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
+                    HStack(spacing: DefaultTheme.space(6)) {
                         Text(installed.manifest.name)
-                            .font(.system(size: 13, weight: .medium))
+                            .themeFont(size: 13, weight: .medium)
                             .foregroundStyle(DefaultTheme.primaryText)
                         MonoTag("v\(installed.manifest.version)", color: DefaultTheme.mutedText)
                         if installed.isLinked { MonoTag("linked", systemImage: "link", color: DefaultTheme.mutedText) }
                     }
                     Text(installed.id)
-                        .font(.system(size: 10, design: .monospaced))
+                        .themeFont(size: 10, design: .monospaced)
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
                 Spacer()
@@ -1079,9 +1079,9 @@ struct SettingsPage: View {
                     .labelsHidden()
             }
             if case .needsConsent(let missing) = installed.status {
-                HStack(spacing: 8) {
+                HStack(spacing: DefaultTheme.space(8)) {
                     Text("Now asks for: " + missing.summary.joined(separator: "; "))
-                        .font(.system(size: 11))
+                        .themeFont(size: 11)
                         .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
                     Spacer()
                     GhostButton("Review…") { extensions.requestApproval(of: installed.id) }
@@ -1089,24 +1089,23 @@ struct SettingsPage: View {
             }
             let granted = installed.effectivePermissions.summary
             Text(granted.isEmpty ? "No permission beyond its own page." : granted.joined(separator: " · "))
-                .font(.system(size: 11))
+                .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)
             // ADR-0015: the sites the user granted at use, each revocable.
             if installed.effectivePermissions.optionalNetwork,
                let hosts = extensions.grantedHosts[installed.id], !hosts.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
                     HStack {
                         Text("SITES YOU ADDED")
-                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                            .kerning(0.53)
+                            .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                             .foregroundStyle(DefaultTheme.secondaryText)
                         Spacer()
                         GhostButton("Revoke All") { extensions.revokeHosts(nil, for: installed.id) }
                     }
                     ForEach(hosts, id: \.self) { host in
-                        HStack(spacing: 6) {
+                        HStack(spacing: DefaultTheme.space(6)) {
                             Text("https://\(host)")
-                                .font(.system(size: 11, design: .monospaced))
+                                .themeFont(size: 11, design: .monospaced)
                                 .foregroundStyle(DefaultTheme.primaryText)
                             Spacer()
                             Button {
@@ -1122,7 +1121,7 @@ struct SettingsPage: View {
                     }
                 }
             }
-            HStack(spacing: 4) {
+            HStack(spacing: DefaultTheme.space(4)) {
                 GhostButton("Reload", systemImage: "arrow.clockwise") { extensions.reload(installed.id) }
                 GhostButton("Show in Finder", systemImage: "folder") { extensions.revealInFinder(installed.id) }
                 Spacer()
@@ -1148,15 +1147,15 @@ private struct ThemeCard: View {
                 half(family.palette(dark: false))
                 half(family.palette(dark: true))
             }
-            HStack(spacing: 6) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 Text(family.name)
-                    .font(.system(size: 12, weight: .semibold))
+                    .themeFont(size: 12, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 if !family.isBuiltIn {
                     Text("yours")
-                        .font(.system(size: 9, weight: .semibold))
+                        .themeFont(size: 9, weight: .semibold)
                         .foregroundStyle(DefaultTheme.secondaryText)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(1))
                         .background(DefaultTheme.surfaceRaised, in: Capsule())
                 }
                 Spacer()
@@ -1165,14 +1164,15 @@ private struct ThemeCard: View {
                         .foregroundStyle(DefaultTheme.accent)
                 }
             }
-            .padding(.horizontal, 10).padding(.vertical, 8)
+            .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(8))
             .background(DefaultTheme.surface)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10)
+        .clipShape(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
             .stroke(isActive ? DefaultTheme.accent : (hovered ? DefaultTheme.accent.opacity(0.5)
                                                               : DefaultTheme.cardBorder),
                     lineWidth: isActive ? 1.5 : 1))
+        .themeShadow(.sm, radius: 10)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { inside in
@@ -1183,22 +1183,23 @@ private struct ThemeCard: View {
     }
 
     private func half(_ palette: ThemePalette) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
+            HStack(spacing: DefaultTheme.space(4)) {
                 ForEach(Array([palette.accent, palette.groupHeader, palette.stateNeedsInput,
                                palette.branch, palette.danger].enumerated()), id: \.offset) { _, swatch in
                     Circle().fill(swatch).frame(width: 9, height: 9)
                 }
             }
+            // In the theme's own fonts: the card shows what it writes in.
             Text(palette.isLight ? family.variantLightName : family.variantDarkName)
-                .font(.system(size: 10, weight: .medium))
+                .themeFont(size: 10, weight: .medium, palette: palette)
                 .foregroundStyle(palette.primaryText)
                 .lineLimit(1)
             Text("Aa 0123")
-                .font(.system(size: 9, design: .monospaced))
+                .themeFont(size: 9, design: .monospaced, palette: palette)
                 .foregroundStyle(palette.secondaryText)
         }
-        .padding(10)
+        .padding(DefaultTheme.space(10))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.background)
     }
@@ -1217,9 +1218,9 @@ private struct ThemeGallery: View {
         let store = ThemeStore.shared
         let previewFamily = hoveredFamily.flatMap { store.family(named: $0) }
             ?? store.family(named: store.globalFamilyName) ?? .loom
-        return VStack(alignment: .leading, spacing: 8) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 12)],
-                      alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: DefaultTheme.space(12))],
+                      alignment: .leading, spacing: DefaultTheme.space(12)) {
                 ForEach(store.families) { family in
                     ThemeCard(family: family,
                               isActive: store.globalFamilyName == family.name,

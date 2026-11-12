@@ -35,23 +35,22 @@ struct ExtensionsView: View {
     // MARK: Sidebar
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
             Text("EXTENSIONS")
-                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                .kerning(0.53)
+                .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                 .foregroundStyle(DefaultTheme.mutedText)
-                .padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 6)
+                .padding(.horizontal, DefaultTheme.space(12)).padding(.top, DefaultTheme.space(14)).padding(.bottom, DefaultTheme.space(6))
             ScrollView {
-                VStack(spacing: 2) {
+                VStack(spacing: DefaultTheme.space(2)) {
                     ForEach(extensions.extensions) { installed in
                         row(installed)
                     }
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, DefaultTheme.space(8))
             }
             Spacer(minLength: 0)
             GhostButton("Manage in Settings", systemImage: "gearshape") { onOpenSettings() }
-                .padding(8)
+                .padding(DefaultTheme.space(8))
         }
         .background(DefaultTheme.background)
     }
@@ -61,25 +60,25 @@ struct ExtensionsView: View {
         return Button {
             extensions.selectedID = installed.id
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: DefaultTheme.space(10)) {
                 Image(systemName: installed.manifest.icon ?? "puzzlepiece.extension")
                     .font(.system(size: 13))
                     .foregroundStyle(selected ? DefaultTheme.accent : DefaultTheme.secondaryText)
                     .frame(width: 18)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                     Text(installed.manifest.name)
-                        .font(.system(size: 12, weight: .medium))
+                        .themeFont(size: 12, weight: .medium)
                         .foregroundStyle(DefaultTheme.primaryText)
                         .lineLimit(1)
                     Text(statusLine(installed))
-                        .font(.system(size: 10))
+                        .themeFont(size: 10)
                         .foregroundStyle(installed.isReady ? DefaultTheme.mutedText : DefaultTheme.badgeColor(for: .needsInput))
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(selected ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(7))
+            .background(selected ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -121,11 +120,11 @@ struct ExtensionsView: View {
     @ViewBuilder
     private func page(_ installed: InstalledExtension) -> some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 Image(systemName: installed.manifest.icon ?? "puzzlepiece.extension")
                     .foregroundStyle(DefaultTheme.accent)
                 Text(installed.manifest.name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .themeFont(size: 13, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 if installed.isLinked {
                     MonoTag("dev", color: DefaultTheme.mutedText)
@@ -134,8 +133,8 @@ struct ExtensionsView: View {
                 BarIconButton(systemImage: "arrow.clockwise") { extensions.reload(installed.id) }
                     .help("Reload the extension")
             }
-            .padding(.horizontal, 14)
-            .frame(height: 38)
+            .padding(.horizontal, DefaultTheme.space(14))
+            .frame(height: DefaultTheme.space(38))
             .background(DefaultTheme.background)
             Divider().overlay(DefaultTheme.cardBorder)
             if let host = extensions.hosts[installed.id] {
@@ -154,26 +153,26 @@ struct ExtensionsView: View {
 
     private func notice(icon: String, title: String, lines: [String],
                         action: (String, () -> Void)?) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: DefaultTheme.space(12)) {
             AppIcon(icon, size: 33.5)
                 .foregroundStyle(DefaultTheme.mutedText)
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .themeFont(size: 15, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
                 .multilineTextAlignment(.center)
             ForEach(lines, id: \.self) { line in
                 Text(line)
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .multilineTextAlignment(.center)
             }
             if let action {
                 AccentButton(action.0, action: action.1)
-                    .padding(.top, 4)
+                    .padding(.top, DefaultTheme.space(4))
             }
         }
         .frame(maxWidth: 420)
-        .padding(32)
+        .padding(DefaultTheme.space(32))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -253,7 +252,7 @@ struct ExtensionStatusChip: View {
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(spacing: 5) {
+            HStack(spacing: DefaultTheme.space(5)) {
                 if !item.text.isEmpty {
                     Text(item.text)
                 } else {
@@ -266,10 +265,10 @@ struct ExtensionStatusChip: View {
                     }
                 }
             }
-            .font(.system(size: 11, weight: .medium))
+            .themeFont(size: 11, weight: .medium)
             .foregroundStyle(DefaultTheme.primaryText)
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(5))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             .hoverBrightness(0.1)
         }
         .buttonStyle(.plain)
@@ -295,30 +294,30 @@ struct ExtensionOverlayView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: DefaultTheme.space(10)) {
                 // The traffic lights float over this corner (hidden title bar).
                 Spacer().frame(width: 70)
                 Image(systemName: "puzzlepiece.extension")
                     .foregroundStyle(DefaultTheme.accent)
                 Text(overlay.extensionName)
-                    .font(.system(size: 12, weight: .semibold))
+                    .themeFont(size: 12, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Spacer()
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(ExtensionStatusChip.format(overlay.until.timeIntervalSince(context.date)) + " left")
-                        .font(.system(size: 11).monospacedDigit())
+                        .themeFont(size: 11).monospacedDigit()
                         .foregroundStyle(DefaultTheme.secondaryText)
                 }
                 GhostButton(overlay.dismissLabel, systemImage: "xmark", action: onDismiss)
                     .keyboardShortcut(.cancelAction)
             }
-            .padding(.horizontal, 16)
-            .frame(height: 44)
+            .padding(.horizontal, DefaultTheme.space(16))
+            .frame(height: DefaultTheme.space(44))
             .background(DefaultTheme.background)
             Divider().overlay(DefaultTheme.cardBorder)
             if let error = overlay.host.loadError {
                 Text(error)
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {

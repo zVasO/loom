@@ -13,7 +13,7 @@ struct PRTabStrip: View {
     var body: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
+                HStack(spacing: DefaultTheme.space(4)) {
                     ForEach(model.prTabs.tabs) { tab in
                         PRTabButton(tab: tab,
                                     isActive: tab.id == model.prTabs.activeID,
@@ -24,7 +24,7 @@ struct PRTabStrip: View {
                                     onCloseOthers: { model.closeOtherPRTabs(tab.id) })
                     }
                 }
-                .padding(.horizontal, 8).padding(.vertical, 6)
+                .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
             }
         }
         .background(DefaultTheme.background)
@@ -83,7 +83,7 @@ struct PRTabButton: View {
     @State private var hovered = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DefaultTheme.space(6)) {
             AppIcon("arrow.triangle.pull", size: 11)
                 .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
             if let sessionState {
@@ -91,10 +91,10 @@ struct PRTabButton: View {
                     .help("Review session: " + DefaultTheme.label(for: sessionState))
             }
             Text("#\(tab.pr.number)")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .themeFont(size: 10, weight: .bold, design: .monospaced)
                 .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
             Text(tab.pr.title)
-                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .themeFont(size: 11, weight: isActive ? .semibold : .regular)
                 .italic(tab.isPreview)
                 .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
                                                      : DefaultTheme.secondaryText)
@@ -108,11 +108,11 @@ struct PRTabButton: View {
                 HoverIconButton(systemImage: "xmark", help: "Close (⌘W)", action: onClose)
             }
         }
-        .padding(.horizontal, 9).padding(.vertical, 5)
+        .padding(.horizontal, DefaultTheme.space(9)).padding(.vertical, DefaultTheme.space(5))
         .background(isActive ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                    in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6)
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
             .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
         .contentShape(Rectangle())
         .help(tab.isPreview ? "Preview — the next click in the list replaces it; double-click or pin to keep"

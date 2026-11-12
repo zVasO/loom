@@ -3,8 +3,11 @@ import Foundation
 /// A tweakcn (shadcn/ui) theme read into a Loom family. tweakcn hands out
 /// two things: the "Code" export — CSS with a `:root` block and a `.dark`
 /// block of `--variables` — and a registry JSON (`cssVars.light` /
-/// `cssVars.dark`). Both are ~20 variables in oklch, hsl or hex; Loom's 16
-/// tokens are projected from them. Pure: the network call lives in the store.
+/// `cssVars.dark`). Both carry some thirty colours in oklch, hsl or hex,
+/// projected onto Loom's 16 tokens, and the theme's design — `--radius`,
+/// `--spacing`, `--letter-spacing`, `--font-*`, `--shadow-*`, the exact
+/// `--border` and `--input` — kept as written on each variant (ADR-0022).
+/// Pure: the network calls live in the store.
 public enum TweakcnImport {
 
     public enum ImportError: Error, LocalizedError, Equatable {
@@ -93,6 +96,10 @@ public enum TweakcnImport {
                 } else if depth > 0 {
                     body.append(character)
                 }
+            case ";" where depth == 0:
+                // `@import "tailwindcss";`, `@custom-variant dark (…);`: a
+                // statement of its own, not the start of the next selector.
+                selector = ""
             default:
                 if depth == 0 { selector.append(character) } else { body.append(character) }
             }
@@ -246,13 +253,17 @@ public enum TweakcnImport {
     public static func tokens(from vars: Variables, dark: Bool) -> ThemeTokens {
         let vars = resolvingReferences(vars)
         let base = dark ? ThemeFamily.loom.dark : ThemeFamily.loom.light
+        // A translucent colour (shadcn's own dark `--border` is white at
+        // 10 %) is what it looks like on the page: laid over the background.
+        var backdrop = dark ? "#000000" : "#FFFFFF"
         func color(_ names: String..., fallback: String) -> String {
             for name in names {
-                if let value = vars[name], let hex = CSSColor.parse(value) { return hex }
+                if let value = vars[name], let hex = CSSColor.opaque(value, over: backdrop) { return hex }
             }
             return fallback
         }
         let background = color("background", fallback: base.contentBackground)
+        backdrop = background
         let mutedForeground = color("muted-foreground", fallback: base.secondaryText)
         let accent = color("primary", fallback: base.accent)
         return ThemeTokens(
@@ -329,12 +340,116 @@ public enum TweakcnImport {
         return result + rest
     }
 
-    /// A family from the two variable sets.
+    /// A family from the two variable sets: each variant's colours and its
+    /// design. The values tweakcn shares between the two modes — fonts,
+    /// radius, spacing, letter-spacing, the shadow's geometry and opacity —
+    /// are the light variant's in both: its own rule (`COMMON_STYLES`), what
+    /// its preview shows, and why `--spacing` and `--tracking-normal` are
+    /// only written in `:root`. A dark block that disagrees does not win.
     public static func family(named name: String, light: Variables, dark: Variables) -> ThemeFamily {
-        ThemeFamily(name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                    light: tokens(from: light, dark: false),
-                    dark: tokens(from: dark, dark: true),
-                    document: document(from: light))
+        var lightTokens = tokens(from: light, dark: false)
+        var darkTokens = tokens(from: dark, dark: true)
+        lightTokens.design = design(from: light, background: lightTokens.contentBackground)
+        darkTokens.design = design(from: dark, sharedWith: light, background: darkTokens.contentBackground)
+        return ThemeFamily(name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                           light: lightTokens, dark: darkTokens,
+                           document: document(from: light))
+    }
+
+    /// The design a variant's variables carry: nil when they carry none.
+    /// `light` is the set the values shared between modes are read from
+    /// first (for the dark variant); the edges and the shadow's colour are
+    /// the variant's own.
+    static func design(from vars: Variables, sharedWith light: Variables? = nil,
+                       background: String) -> ThemeDesign? {
+        let own = resolvingReferences(vars)
+        let common = light.map(resolvingReferences) ?? own
+        func value(_ names: [String], in sources: [Variables]) -> String? {
+            for source in sources {
+                for name in names {
+                    guard let text = source[name]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                          !text.isEmpty else { continue }
+                    return text
+                }
+            }
+            return nil
+        }
+        func shared(_ names: String...) -> String? { value(names, in: [common, own]) }
+        func mine(_ names: String...) -> String? { value(names, in: [own, common]) }
+
+        var design = ThemeDesign()
+        design.radius = shared("radius").flatMap(CSSLength.points).flatMap { $0 >= 0 ? $0 : nil }
+        // tweakcn's slider runs from 0.15 to 0.35rem; a value far outside
+        // (a hand-written `1rem`) would take the layout apart.
+        design.spacing = shared("spacing").flatMap(CSSLength.points)
+            .flatMap { $0 > 0 ? min(max($0, 2), 8) : nil }
+        // `--tracking-normal` in the CSS export, `letter-spacing` in the registry.
+        design.letterSpacing = shared("tracking-normal", "letter-spacing").flatMap(CSSLength.em)
+            .flatMap { $0 == 0 ? nil : $0 }
+        design.fontSans = shared("font-sans")
+        design.fontSerif = shared("font-serif")
+        design.fontMono = shared("font-mono")
+        design.border = own["border"].flatMap { CSSColor.opaque($0, over: background) }
+        design.input = own["input"].flatMap { CSSColor.opaque($0, over: background) }
+
+        // The shadow: its six parameters (`--shadow-x`/`-y` in the CSS
+        // export, `shadow-offset-x`/`-y` in the registry), the ones left
+        // out being tweakcn's defaults; or, from an export that only has the
+        // composed shadows (before autumn 2025), the first layer of `--shadow-sm`.
+        let color = mine("shadow-color").flatMap(CSSColor.parse)
+        let opacity = shared("shadow-opacity").flatMap(CSSLength.number)
+        let blur = shared("shadow-blur").flatMap(CSSLength.points)
+        let spread = shared("shadow-spread").flatMap(CSSLength.points)
+        let x = shared("shadow-x", "shadow-offset-x").flatMap(CSSLength.points)
+        let y = shared("shadow-y", "shadow-offset-y").flatMap(CSSLength.points)
+        if color == nil, opacity == nil, blur == nil, spread == nil, x == nil, y == nil {
+            design.shadow = mine("shadow-sm", "shadow").flatMap(composedShadow)
+        } else {
+            design.shadow = ThemeShadow(color: color ?? "#000000", opacity: min(max(opacity ?? 0.1, 0), 1),
+                                        blur: max(blur ?? 3, 0), spread: spread ?? 0, x: x ?? 0, y: y ?? 1)
+        }
+        return design.isEmpty ? nil : design
+    }
+
+    /// The first layer of a CSS `box-shadow` list — `x y blur spread colour`,
+    /// blur and spread optional — as a theme's shadow.
+    static func composedShadow(_ text: String) -> ThemeShadow? {
+        guard let layer = splitTopLevel(text, at: ",").first else { return nil }
+        var lengths: [Double] = []
+        var colour: [String] = []
+        for token in splitTopLevel(layer, at: " ") {
+            if colour.isEmpty, lengths.count < 4, let length = CSSLength.points(token) {
+                lengths.append(length)
+            } else {
+                colour.append(token)
+            }
+        }
+        guard lengths.count >= 2 else { return nil }
+        let paint = colour.joined(separator: " ")
+        return ThemeShadow(color: CSSColor.parse(paint) ?? "#000000",
+                           opacity: colour.isEmpty ? 1 : CSSColor.alpha(paint),
+                           blur: lengths.count > 2 ? max(lengths[2], 0) : 0,
+                           spread: lengths.count > 3 ? lengths[3] : 0,
+                           x: lengths[0], y: lengths[1])
+    }
+
+    /// `text` cut at a separator, parentheses kept whole (`hsl(0 0% 0% / 0.1)`).
+    static func splitTopLevel(_ text: String, at separator: Character) -> [String] {
+        var parts: [String] = []
+        var current = ""
+        var depth = 0
+        for character in text {
+            if character == "(" { depth += 1 }
+            if character == ")" { depth = max(0, depth - 1) }
+            if character == separator, depth == 0 {
+                parts.append(current)
+                current = ""
+            } else {
+                current.append(character)
+            }
+        }
+        parts.append(current)
+        return parts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
 
     /// Fonts and radius a tweakcn theme carries, for documents (ADR-0017).
@@ -357,8 +472,44 @@ public enum TweakcnImport {
 
 /// The colour notations tweakcn and shadcn write: hex, `rgb()`, `hsl()`,
 /// the bare `H S% L%` triplet of shadcn v3, `oklch()` and `oklab()`.
-/// Everything lands as sRGB `#RRGGBB`; alpha is dropped.
+/// Everything lands as sRGB `#RRGGBB`; `parse` drops the alpha, `alpha`
+/// reads it and `opaque` lays the colour over a backdrop with it.
 public enum CSSColor {
+
+    /// The alpha a colour is written with, 0…1: `#RRGGBBAA`, `… / 50%`,
+    /// `rgba(…, 0.5)`. 1 when it has none.
+    public static func alpha(_ text: String) -> Double {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        func fraction(_ number: Number) -> Double {
+            min(max(number.isPercent ? number.value / 100 : number.value, 0), 1)
+        }
+        if value.hasPrefix("#") {
+            let digits = value.dropFirst()
+            guard digits.count == 4 || digits.count == 8 else { return 1 }
+            let pair = digits.count == 4 ? String(repeating: String(digits.suffix(1)), count: 2)
+                                         : String(digits.suffix(2))
+            return UInt8(pair, radix: 16).map { Double($0) / 255 } ?? 1
+        }
+        if let slash = value.lastIndex(of: "/") {
+            let after = value[value.index(after: slash)...].replacingOccurrences(of: ")", with: "")
+            return numbers(in: after).first.map(fraction) ?? 1
+        }
+        // The legacy comma syntax: the fourth argument.
+        if value.hasPrefix("rgb") || value.hasPrefix("hsl"), value.contains(","),
+           let open = value.firstIndex(of: "("), value.hasSuffix(")") {
+            let arguments = numbers(in: String(value[value.index(after: open)...].dropLast()))
+            if arguments.count == 4 { return fraction(arguments[3]) }
+        }
+        return 1
+    }
+
+    /// The colour as it looks over `backdrop`: itself when opaque, blended
+    /// by its alpha otherwise. nil when the text is no colour.
+    public static func opaque(_ text: String, over backdrop: String) -> String? {
+        guard let hex = parse(text) else { return nil }
+        let amount = alpha(text)
+        return amount >= 1 ? hex : ThemeTokens.mix(backdrop, with: hex, amount: amount)
+    }
 
     public static func parse(_ text: String) -> String? {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

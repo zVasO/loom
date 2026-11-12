@@ -17,23 +17,23 @@ struct ThemeDocumentSettings: View {
     private var store: ThemeStore { ThemeStore.shared }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
             HStack {
                 Text("Reports")
-                    .font(.system(size: 13, weight: .semibold))
+                    .themeFont(size: 13, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Spacer()
                 GhostButton("Import a theme file…", systemImage: "doc.badge.plus") { importFile() }
             }
             Text("A workflow's report wears a Loom theme: its colours by role — the accent for links and buttons, the group headers' colour for the brand's accent, the content background for the header band. A theme of your own also sets the report's fonts, corner radius and logo here.")
-                .font(.system(size: 11))
+                .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)
             if let message {
-                Text(message).font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                Text(message).themeFont(size: 11).foregroundStyle(DefaultTheme.secondaryText)
             }
             if store.customFamilies.isEmpty {
                 Text("No theme of your own yet: import one from tweakcn or from a file (docs/themes/homeserve.json is ready).")
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
                     .foregroundStyle(DefaultTheme.mutedText)
             } else {
                 HStack {
@@ -46,7 +46,7 @@ struct ThemeDocumentSettings: View {
                     GhostButton("Preview the report", systemImage: "eye") { preview() }
                     AccentButton("Save") { save() }
                 }
-                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
+                Grid(alignment: .leading, horizontalSpacing: DefaultTheme.space(10), verticalSpacing: DefaultTheme.space(8)) {
                     row("Text font", text: binding(\.fontSans), placeholder: ArtifactPalette.defaultSans)
                     row("Code font", text: binding(\.fontMono), placeholder: ArtifactPalette.defaultMono)
                     row("Fonts stylesheet", text: binding(\.fontsURL), placeholder: "https://fonts.googleapis.com/css2?family=…")
@@ -54,17 +54,17 @@ struct ThemeDocumentSettings: View {
                 }
                 if let url = draft.fontsURL, !url.isEmpty, !ThemeDocumentStyle.isAllowedFontsURL(url) {
                     Text("Only a fonts.googleapis.com stylesheet is loaded; this one would be ignored.")
-                        .font(.system(size: 11)).foregroundStyle(DefaultTheme.danger)
+                        .themeFont(size: 11).foregroundStyle(DefaultTheme.danger)
                 }
-                Text("Logo — inline SVG markup").font(.system(size: 11, weight: .semibold)).foregroundStyle(DefaultTheme.secondaryText)
+                Text("Logo — inline SVG markup").themeFont(size: 11, weight: .semibold).foregroundStyle(DefaultTheme.secondaryText)
                 code(binding(\.logoSVG), minHeight: 70)
-                Text("Extra CSS — after the report's own").font(.system(size: 11, weight: .semibold)).foregroundStyle(DefaultTheme.secondaryText)
+                Text("Extra CSS — after the report's own").themeFont(size: 11, weight: .semibold).foregroundStyle(DefaultTheme.secondaryText)
                 code(binding(\.extraCSS), minHeight: 60)
                 if let previewURL {
                     ArtifactWebView(url: previewURL)
                         .frame(height: 520)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+                        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
                 }
             }
         }
@@ -79,21 +79,21 @@ struct ThemeDocumentSettings: View {
 
     private func row(_ label: String, text: Binding<String>, placeholder: String) -> some View {
         GridRow {
-            Text(label).font(.system(size: 12)).foregroundStyle(DefaultTheme.primaryText)
+            Text(label).themeFont(size: 12).foregroundStyle(DefaultTheme.primaryText)
             TextField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11, design: .monospaced))
+                .themeFont(size: 11, design: .monospaced)
         }
     }
 
     private func code(_ text: Binding<String>, minHeight: CGFloat) -> some View {
         TextEditor(text: text)
-            .font(.system(size: 11, design: .monospaced))
+            .themeFont(size: 11, design: .monospaced)
             .scrollContentBackground(.hidden)
-            .padding(6)
+            .padding(DefaultTheme.space(6))
             .frame(minHeight: minHeight)
-            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
     }
 
     private func select(_ name: String) {

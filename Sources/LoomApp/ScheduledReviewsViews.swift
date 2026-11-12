@@ -14,16 +14,16 @@ struct ScheduledReviewsSettings: View {
 
     var body: some View {
         // Its title is the Settings page's: the sidebar scrolls to it.
-        VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(12)) {
                 Text("At the time you choose, Loom opens a tab for each pull request a schedule picks, starts its review session (/\(PRReviewCommand.name) first, when it is on), then asks claude for the full review. Claude's summary lands in the verdict bar and its line comments in the pending review: you read, edit, and submit. A PR is reviewed again only once someone pushed to it. Loom has to be open — a run slept through starts on wake, up to four hours late.")
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
                     .foregroundStyle(DefaultTheme.secondaryText)
                 ForEach(model.reviewSchedules.schedules) { schedule in
                     ReviewScheduleEditor(model: model, scheduleID: schedule.id)
                     Divider().overlay(DefaultTheme.cardBorder)
                 }
-                HStack(spacing: 12) {
+                HStack(spacing: DefaultTheme.space(12)) {
                     GhostButton("Add a schedule", systemImage: "plus") { model.addReviewSchedule() }
                         .disabled(model.projects.isEmpty)
                     Spacer()
@@ -31,7 +31,7 @@ struct ScheduledReviewsSettings: View {
                                            set: { model.setAutoReviewConcurrency($0) }),
                             in: 1...ReviewScheduleState.maxConcurrency) {
                         Text("\(model.reviewSchedules.maxConcurrent) at a time")
-                            .font(.system(size: 12))
+                            .themeFont(size: 12)
                             .foregroundStyle(DefaultTheme.primaryText)
                     }
                     .fixedSize()
@@ -39,11 +39,11 @@ struct ScheduledReviewsSettings: View {
                 }
                 if model.projects.isEmpty {
                     Text("Add a project first: a schedule reviews the pull requests of your projects.")
-                        .font(.system(size: 11))
+                        .themeFont(size: 11)
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
                 Text("A review that stops on a permission prompt or a question waits for you; the others go on. To keep runs unattended, allow the read-only commands a review uses (gh pr view, gh pr diff, gh api) in your Claude Code settings.")
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
                     .foregroundStyle(DefaultTheme.secondaryText)
                 Divider().overlay(DefaultTheme.cardBorder)
                 PromptEditor(id: "autoReviewPrompt", title: "Review prompt",
@@ -53,14 +53,14 @@ struct ScheduledReviewsSettings: View {
                     model.autoReviewPromptTemplate = text
                 }
                 Text("Typed into the review session once the PR is loaded. Placeholders: \(AutoReviewPrompt.placeholders.joined(separator: ", ")). Keep the report part: it is what Loom imports — {{report}} is where claude writes it.")
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
                     .foregroundStyle(DefaultTheme.secondaryText)
                 if !model.reviewSchedules.reviewedHeads.isEmpty {
                     HStack {
                         Text(model.reviewSchedules.reviewedHeads.count == 1
                              ? "1 pull request reviewed at its current head"
                              : "\(model.reviewSchedules.reviewedHeads.count) pull requests reviewed at their current head")
-                            .font(.system(size: 12))
+                            .themeFont(size: 12)
                             .foregroundStyle(DefaultTheme.primaryText)
                         Spacer()
                         GhostButton("Review them again", systemImage: "arrow.counterclockwise") {
@@ -70,10 +70,11 @@ struct ScheduledReviewsSettings: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(DefaultTheme.space(16))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .themeShadow(.sm, radius: 10)
         }
     }
 }
@@ -93,12 +94,12 @@ private struct ReviewScheduleEditor: View {
 
     var body: some View {
         if let schedule {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
+                HStack(spacing: DefaultTheme.space(10)) {
                     Toggle("", isOn: field(\.enabled, of: schedule)).labelsHidden().toggleStyle(.switch)
                     TextField("Name", text: field(\.name, of: schedule))
                         .textFieldStyle(.plain)
-                        .font(.system(size: 13, weight: .semibold))
+                        .themeFont(size: 13, weight: .semibold)
                         .foregroundStyle(DefaultTheme.primaryText)
                     Spacer()
                     GhostButton("Run now", systemImage: "play") { model.runReviewScheduleNow(schedule.id) }
@@ -110,42 +111,42 @@ private struct ReviewScheduleEditor: View {
                     }
                 }
                 if let proposal = schedule.proposal {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
                         Text("Proposed by \(proposal.by) — it does not run until you validate it"
                              + (proposal.previous != nil ? "; the version before runs meanwhile." : "."))
-                            .font(.system(size: 11, weight: .semibold))
+                            .themeFont(size: 11, weight: .semibold)
                             .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
                         ForEach(Array(model.scheduleChanges(schedule, previous: proposal.previous).enumerated()),
                                 id: \.offset) { _, change in
-                            Text("· " + change.text).font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                            Text("· " + change.text).themeFont(size: 11).foregroundStyle(DefaultTheme.secondaryText)
                         }
-                        HStack(spacing: 8) {
+                        HStack(spacing: DefaultTheme.space(8)) {
                             AccentButton("Validate", systemImage: "checkmark") { model.validateReviewSchedule(schedule.id) }
                             GhostButton(proposal.previous == nil ? "Delete" : "Revert", systemImage: "arrow.uturn.backward") {
                                 model.revertReviewSchedule(schedule.id)
                             }
                         }
                     }
-                    .padding(10)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                    .padding(DefaultTheme.space(10))
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                 }
-                HStack(spacing: 10) {
+                HStack(spacing: DefaultTheme.space(10)) {
                     DatePicker("", selection: time(of: schedule), displayedComponents: .hourAndMinute)
                         .labelsHidden()
                         .fixedSize()
-                    HStack(spacing: 4) {
+                    HStack(spacing: DefaultTheme.space(4)) {
                         ForEach(Self.weekdayOrder, id: \.self) { day in
                             dayChip(day, in: schedule)
                         }
                     }
                     Spacer()
                     Text(nextRunText(schedule))
-                        .font(.system(size: 11))
+                        .themeFont(size: 11)
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
-                HStack(spacing: 8) {
+                HStack(spacing: DefaultTheme.space(8)) {
                     Text("Review with")
-                        .font(.system(size: 12))
+                        .themeFont(size: 12)
                         .foregroundStyle(DefaultTheme.secondaryText)
                     Picker("", selection: field(\.workflowID, of: schedule)) {
                         Text("Claude's full review (built-in)").tag(UUID?.none)
@@ -208,8 +209,8 @@ private struct ReviewScheduleEditor: View {
             model.updateReviewSchedule(updated)
         } label: {
             Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .frame(width: 22, height: 22)
+                .themeFont(size: 10, weight: .semibold)
+                .frame(width: DefaultTheme.space(22), height: DefaultTheme.space(22))
                 .foregroundStyle(on ? DefaultTheme.accentText : DefaultTheme.secondaryText)
                 .background(on ? DefaultTheme.accent : DefaultTheme.surfaceRaised, in: Circle())
         }
@@ -230,8 +231,8 @@ private struct ReviewScheduleEditor: View {
     private func targetRow(_ target: ReviewScheduleTarget, in schedule: ReviewSchedule) -> some View {
         let error = target.query.trimmingCharacters(in: .whitespaces).isEmpty
             ? nil : PRFilter.validate(name: "slice", query: target.query)
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 Picker("", selection: targetField(target.id, \.projectID, fallback: target.projectID, in: schedule)) {
                     ForEach(model.projects, id: \.id) { project in
                         Text(project.name).tag(project.id)
@@ -242,7 +243,7 @@ private struct ReviewScheduleEditor: View {
                 TextField("GitHub search — empty: every open PR",
                           text: targetField(target.id, \.query, fallback: target.query, in: schedule))
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11, design: .monospaced))
+                    .themeFont(size: 11, design: .monospaced)
                 Menu {
                     ForEach(model.prFilters) { filter in
                         Button(filter.name) {
@@ -258,7 +259,7 @@ private struct ReviewScheduleEditor: View {
                 Stepper(value: targetField(target.id, \.limit, fallback: target.limit, in: schedule),
                         in: 1...ReviewScheduleTarget.maxLimit) {
                     Text("max \(target.limit)")
-                        .font(.system(size: 11, design: .monospaced))
+                        .themeFont(size: 11, design: .monospaced)
                         .foregroundStyle(DefaultTheme.primaryText)
                 }
                 .fixedSize()
@@ -271,7 +272,7 @@ private struct ReviewScheduleEditor: View {
             }
             if let error {
                 Text(error)
-                    .font(.system(size: 10))
+                    .themeFont(size: 10)
                     .foregroundStyle(DefaultTheme.danger)
             }
         }
@@ -308,19 +309,18 @@ struct ScheduledReviewsSidebarSection: View {
 
     var body: some View {
         if !model.reviewSchedules.schedules.isEmpty || model.autoReviewRun != nil {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     Button {
                         withAnimation(.hover) { folded.toggle() }
                     } label: {
-                        HStack(spacing: 6) {
+                        HStack(spacing: DefaultTheme.space(6)) {
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 8, weight: .bold))
                                 .rotationEffect(.degrees(folded ? -90 : 0))
                             AppIcon("calendar.badge.clock", size: 11)
                             Text("SCHEDULED REVIEWS")
-                                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                                .kerning(0.53)
+                                .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                         }
                         .foregroundStyle(DefaultTheme.mutedText)
                         .contentShape(Rectangle())
@@ -350,16 +350,16 @@ struct ScheduledReviewsSidebarSection: View {
                         .help("Run a schedule now")
                     }
                 }
-                .padding(.horizontal, 2)
+                .padding(.horizontal, DefaultTheme.space(2))
                 if !folded {
                     if let run = model.autoReviewRun {
                         Text(runCaption(run))
-                            .font(.system(size: 10))
+                            .themeFont(size: 10)
                             .foregroundStyle(DefaultTheme.mutedText)
-                            .padding(.leading, 2)
+                            .padding(.leading, DefaultTheme.space(2))
                         ForEach(run.errors, id: \.self) { error in
                             Text(error)
-                                .font(.system(size: 10))
+                                .themeFont(size: 10)
                                 .foregroundStyle(DefaultTheme.danger)
                                 .textSelection(.enabled)
                         }
@@ -385,18 +385,18 @@ struct ScheduledReviewsSidebarSection: View {
                             model.workflows.settingsRequest = UUID()
                         } label: {
                             Text(proposed == 1 ? "1 schedule to review" : "\(proposed) schedules to review")
-                                .font(.system(size: 10, weight: .semibold))
+                                .themeFont(size: 10, weight: .semibold)
                                 .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
                         }
                         .buttonStyle(.plain)
-                        .padding(.leading, 2)
+                        .padding(.leading, DefaultTheme.space(2))
                         .help("Proposed by an agent: they do not run until you validate them in Settings")
                     }
                     if let next = model.nextAutoReviewDate() {
                         Text("Next run " + next.formatted(.dateTime.weekday(.abbreviated).hour().minute()))
-                            .font(.system(size: 10))
+                            .themeFont(size: 10)
                             .foregroundStyle(DefaultTheme.mutedText)
-                            .padding(.leading, 2)
+                            .padding(.leading, DefaultTheme.space(2))
                     }
                 }
             }
@@ -435,33 +435,33 @@ private struct AutoReviewRow: View {
 
     var body: some View {
         let described = Self.describe(item.status)
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: DefaultTheme.space(8)) {
             AppIcon(described.symbol, size: 13)
                 .foregroundStyle(described.color)
                 .frame(width: 14)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
+                .padding(.top, DefaultTheme.space(1))
+            VStack(alignment: .leading, spacing: DefaultTheme.space(3)) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     Text("#\(item.pr.number)")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .themeFont(size: 11, weight: .bold, design: .monospaced)
                         .foregroundStyle(DefaultTheme.accent)
                     Text(item.pr.title)
-                        .font(.system(size: 12, weight: .semibold))
+                        .themeFont(size: 12, weight: .semibold)
                         .foregroundStyle(DefaultTheme.primaryText)
                         .lineLimit(1)
                 }
                 Text(described.text)
-                    .font(.system(size: 10))
+                    .themeFont(size: 10)
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .lineLimit(2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 9).padding(.vertical, 7)
+        .padding(.horizontal, DefaultTheme.space(9)).padding(.vertical, DefaultTheme.space(7))
         .background(isSelected ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : DefaultTheme.surface,
-                    in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6)
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
             .stroke(isSelected ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)

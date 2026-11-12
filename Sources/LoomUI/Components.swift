@@ -67,15 +67,15 @@ public struct NavTab: View {
 
     public var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 if let icon { LucideIcon(icon, size: 14) }
-                Text(title).font(.system(size: 12))
+                Text(title).themeFont(size: 12)
             }
             .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText : DefaultTheme.mutedText)
-            .padding(.horizontal, 8)
-            .frame(height: 24)
-            .background(isActive ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4)
+            .padding(.horizontal, DefaultTheme.space(8))
+            .frame(height: DefaultTheme.space(24))
+            .background(isActive ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4))
                 .strokeBorder(isActive ? DefaultTheme.line : .clear, lineWidth: 1))
             .contentShape(Rectangle())
         }
@@ -99,17 +99,16 @@ public struct StatusTag: View {
     }
 
     public var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DefaultTheme.space(6)) {
             if showsDot { Circle().fill(color).frame(width: 6, height: 6) }
             Text(text.uppercased())
-                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                .tracking(0.5)
+                .themeFont(size: 10.5, weight: .medium, design: .monospaced, tracking: 0.5)
         }
         .foregroundStyle(color)
-        .padding(.horizontal, 6)
-        .frame(height: 20)
-        .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: 3))
-        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(color.opacity(0.32), lineWidth: 1))
+        .padding(.horizontal, DefaultTheme.space(6))
+        .frame(height: DefaultTheme.space(20))
+        .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: DefaultTheme.radius(3)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(3)).strokeBorder(color.opacity(0.32), lineWidth: 1))
         .fixedSize()
     }
 }
@@ -130,14 +129,14 @@ public struct AccentButton: View {
 
     public var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 if let systemImage { AppIcon(systemImage, size: 14) }
-                Text(title).font(.system(size: 13, weight: .medium))
+                Text(title).themeFont(size: 13, weight: .medium)
             }
             .foregroundStyle(DefaultTheme.accentText)
-            .padding(.horizontal, 14)
-            .frame(height: 32)
-            .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, DefaultTheme.space(14))
+            .frame(height: DefaultTheme.space(32))
+            .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             .brightness(hovered ? 0.06 : 0)
             .contentShape(Rectangle())
         }
@@ -166,19 +165,19 @@ public struct GhostButton: View {
 
     public var body: some View {
         Button(role: role, action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 if let systemImage { AppIcon(systemImage, size: 14) }
-                if let title { Text(title).font(.system(size: 12.5)) }
+                if let title { Text(title).themeFont(size: 12.5) }
             }
             .foregroundStyle(role == .destructive ? DefaultTheme.danger
                              : hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
-            .padding(.horizontal, 10)
-            .frame(height: 28)
+            .padding(.horizontal, DefaultTheme.space(10))
+            .frame(height: DefaultTheme.space(28))
             .background(hovered ? (role == .destructive ? DefaultTheme.danger.opacity(0.12)
                                                         : DefaultTheme.surfaceRaised)
                                 : .clear,
-                        in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6)
+                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
                 .strokeBorder(hovered ? DefaultTheme.line : .clear, lineWidth: 1))
             .contentShape(Rectangle())
         }
@@ -209,11 +208,11 @@ public struct BarIconButton: View {
             AppIcon(systemImage, size: 15)
                 .foregroundStyle(isActive ? DefaultTheme.accent
                                  : hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
-                .frame(width: 28, height: 26)
+                .frame(width: DefaultTheme.space(28), height: DefaultTheme.space(26))
                 .background(isActive ? DefaultTheme.surfaceRaised
                             : hovered ? DefaultTheme.surfaceRaised.opacity(0.7) : .clear,
-                            in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6)
+                            in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
                     .strokeBorder(isActive ? DefaultTheme.line2 : hovered ? DefaultTheme.line : .clear, lineWidth: 1))
                 .contentShape(Rectangle())
         }
@@ -232,11 +231,10 @@ public struct StatusLabel: View {
     }
 
     public var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             Circle().fill(DefaultTheme.badgeColor(for: state)).frame(width: 6, height: 6)
             Text(DefaultTheme.label(for: state))
-                .font(.system(size: 11, design: .monospaced))
-                .tracking(0.22)
+                .themeFont(size: 11, design: .monospaced, tracking: 0.22)
                 .foregroundStyle(DefaultTheme.badgeColor(for: state))
         }
     }
@@ -257,9 +255,9 @@ public struct MonoTag: View {
     }
 
     public var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: DefaultTheme.space(5)) {
             if let systemImage { AppIcon(systemImage, size: 12) }
-            Text(text).font(.system(size: 11.5, design: .monospaced))
+            Text(text).themeFont(size: 11.5, design: .monospaced)
         }
         .foregroundStyle(color ?? DefaultTheme.branch)
         .lineLimit(1)
@@ -276,12 +274,12 @@ public struct KeyCap: View {
 
     public var body: some View {
         Text(key)
-            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+            .themeFont(size: 10.5, weight: .medium, design: .monospaced)
             .foregroundStyle(DefaultTheme.secondaryText)
-            .padding(.horizontal, 4)
-            .frame(minWidth: 18, minHeight: 18)
-            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(DefaultTheme.line2, lineWidth: 1))
+            .padding(.horizontal, DefaultTheme.space(4))
+            .frame(minWidth: DefaultTheme.space(18), minHeight: DefaultTheme.space(18))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4)).strokeBorder(DefaultTheme.line2, lineWidth: 1))
             .fixedSize()
     }
 }

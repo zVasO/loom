@@ -31,27 +31,27 @@ struct UsageSheet: View {
             header
             Divider().overlay(DefaultTheme.cardBorder)
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(18)) {
                     Text("Cost values are estimates based on public list prices (as of \(ModelPricing.asOf)). Usage data stays in your local database.")
-                        .font(.system(size: 12))
+                        .themeFont(size: 12)
                         .foregroundStyle(DefaultTheme.secondaryText)
                     if let error {
-                        Text(error).font(.system(size: 12)).foregroundStyle(DefaultTheme.danger)
+                        Text(error).themeFont(size: 12).foregroundStyle(DefaultTheme.danger)
                     }
                     if let report {
                         tiles(report)
                         chartCard(report)
                         byModel(report)
                     } else if refreshing {
-                        HStack(spacing: 8) {
+                        HStack(spacing: DefaultTheme.space(8)) {
                             ProgressView().controlSize(.small)
                             Text("Indexing local session records…")
-                                .font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
+                                .themeFont(size: 12).foregroundStyle(DefaultTheme.secondaryText)
                         }
                         .frame(maxWidth: .infinity, minHeight: 200)
                     }
                 }
-                .padding(24)
+                .padding(DefaultTheme.space(24))
             }
             Divider().overlay(DefaultTheme.cardBorder)
             footer
@@ -59,17 +59,18 @@ struct UsageSheet: View {
         .frame(width: 1000, height: 880)
         .background(DefaultTheme.surface)
         .preferredColorScheme(DefaultTheme.colorScheme)
+        .font(DefaultTheme.bodyFont)
         .task { await refresh() }
     }
 
     // MARK: - Sections
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             AppIcon("dollarsign", size: 17)
                 .foregroundStyle(DefaultTheme.accent)
             Text("Usage & Estimated Costs")
-                .font(.system(size: 16, weight: .semibold))
+                .themeFont(size: 16, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
             Spacer()
             if refreshing {
@@ -82,11 +83,11 @@ struct UsageSheet: View {
                 .help("Close")
                 .keyboardShortcut(.cancelAction)
         }
-        .padding(.horizontal, 20).padding(.vertical, 14)
+        .padding(.horizontal, DefaultTheme.space(20)).padding(.vertical, DefaultTheme.space(14))
     }
 
     private func tiles(_ report: UsageReport) -> some View {
-        HStack(spacing: 14) {
+        HStack(spacing: DefaultTheme.space(14)) {
             tile("Today", icon: "dollarsign", value: report.today)
             tile("Last 7 days", icon: "chart.line.uptrend.xyaxis", value: report.last7Days)
             tile("Last 30 days", icon: "calendar", value: report.last30Days)
@@ -94,45 +95,46 @@ struct UsageSheet: View {
     }
 
     private func tile(_ title: String, icon: String, value: Decimal) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
             Label(title, systemImage: icon)
-                .font(.system(size: 12))
+                .themeFont(size: 12)
                 .foregroundStyle(DefaultTheme.secondaryText)
             Text(Self.money(value))
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                .themeFont(size: 24, weight: .semibold, design: .rounded)
                 .foregroundStyle(DefaultTheme.primaryText)
         }
-        .padding(16)
+        .padding(DefaultTheme.space(16))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder))
+        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder))
+        .themeShadow(.sm, radius: 10)
     }
 
     private func chartCard(_ report: UsageReport) -> some View {
         let points = report.points(lastDays: window.rawValue)
         let families = Array(Set(points.map(\.family))).sorted()
         let palette = Self.palette(for: families)
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
                     Text(metric == .cost ? "DAILY COST" : "DAILY TOKENS")
-                        .font(.system(size: 11, weight: .semibold))
+                        .themeFont(size: 11, weight: .semibold)
                         .foregroundStyle(DefaultTheme.secondaryText)
                     Text(metric == .cost
                          ? "\(Self.money(report.total(lastDays: window.rawValue))) over \(window.rawValue) days"
                          : "\(Self.tokens(points.reduce(0) { $0 + $1.tokens })) tokens over \(window.rawValue) days")
-                        .font(.system(size: 14))
+                        .themeFont(size: 14)
                         .foregroundStyle(DefaultTheme.primaryText)
                 }
                 Spacer()
                 segmented(Metric.allCases, selected: $metric, label: \.rawValue)
                 segmented(Window.allCases, selected: $window, label: \.label)
             }
-            HStack(spacing: 12) {
+            HStack(spacing: DefaultTheme.space(12)) {
                 ForEach(families, id: \.self) { family in
-                    HStack(spacing: 5) {
+                    HStack(spacing: DefaultTheme.space(5)) {
                         Circle().fill(palette[family] ?? DefaultTheme.mutedText).frame(width: 7, height: 7)
-                        Text(family).font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                        Text(family).themeFont(size: 11).foregroundStyle(DefaultTheme.secondaryText)
                     }
                 }
             }
@@ -151,7 +153,7 @@ struct UsageSheet: View {
                     AxisValueLabel {
                         if let v = value.as(Double.self) {
                             Text(metric == .cost ? "$\(Int(v))" : Self.tokens(Int(v)))
-                                .font(.system(size: 10)).foregroundStyle(DefaultTheme.secondaryText)
+                                .themeFont(size: 10).foregroundStyle(DefaultTheme.secondaryText)
                         }
                     }
                 }
@@ -159,41 +161,42 @@ struct UsageSheet: View {
             .chartXAxis {
                 AxisMarks(values: .stride(by: .day, count: window == .week ? 1 : window == .month ? 5 : 15)) { _ in
                     AxisValueLabel(format: .dateTime.month(.abbreviated).day().locale(Locale(identifier: "en_US")))
-                        .font(.system(size: 10)).foregroundStyle(DefaultTheme.secondaryText)
+                        .themeFont(size: 10).foregroundStyle(DefaultTheme.secondaryText)
                 }
             }
             .frame(height: 240)
         }
-        .padding(16)
-        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder))
+        .padding(DefaultTheme.space(16))
+        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder))
+        .themeShadow(.sm, radius: 10)
     }
 
     private func byModel(_ report: UsageReport) -> some View {
         let lines = report.byModel(lastDays: window.rawValue)
         let max = lines.compactMap(\.cost).max() ?? 0
         let palette = Self.palette(for: lines.map(\.family))
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
             HStack {
                 Text("COST BY MODEL")
-                    .font(.system(size: 11, weight: .semibold))
+                    .themeFont(size: 11, weight: .semibold)
                     .foregroundStyle(DefaultTheme.secondaryText)
                 Spacer()
                 Text(Self.money(report.total(lastDays: window.rawValue)))
-                    .font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
+                    .themeFont(size: 12).foregroundStyle(DefaultTheme.secondaryText)
             }
             if lines.isEmpty {
                 Text("No usage records found under \(ClaudeNativeSessions.defaultProjectsDirectory.path)")
-                    .font(.system(size: 12)).foregroundStyle(DefaultTheme.mutedText)
+                    .themeFont(size: 12).foregroundStyle(DefaultTheme.mutedText)
             }
             ForEach(lines, id: \.family) { line in
-                HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: DefaultTheme.space(14)) {
+                    VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
                         Text(line.family)
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .themeFont(size: 13, weight: .medium, design: .monospaced)
                             .foregroundStyle(DefaultTheme.primaryText)
                         Text("\(Self.tokens(line.input)) in / \(Self.tokens(line.output)) out / \(Self.tokens(line.cacheWrite5m + line.cacheWrite1h)) cache-w / \(Self.tokens(line.cacheRead)) cache-r")
-                            .font(.system(size: 11))
+                            .themeFont(size: 11)
                             .foregroundStyle(DefaultTheme.secondaryText)
                     }
                     Spacer()
@@ -204,17 +207,17 @@ struct UsageSheet: View {
                         }
                         .frame(width: 140, height: 6)
                         Text(Self.money(cost))
-                            .font(.system(size: 13, weight: .medium))
+                            .themeFont(size: 13, weight: .medium)
                             .foregroundStyle(DefaultTheme.primaryText)
                             .frame(width: 80, alignment: .trailing)
                     } else {
                         Text("unpriced")
-                            .font(.system(size: 11))
+                            .themeFont(size: 11)
                             .foregroundStyle(DefaultTheme.mutedText)
                             .frame(width: 228, alignment: .trailing)
                     }
                 }
-                .padding(.vertical, 8)
+                .padding(.vertical, DefaultTheme.space(8))
                 Divider().overlay(DefaultTheme.cardBorder)
             }
         }
@@ -225,30 +228,30 @@ struct UsageSheet: View {
             Spacer()
             Text(updatedAt.map { "Data from local per-turn session records, updated \(Self.clock.string(from: $0))" }
                  ?? "Data from local per-turn session records")
-                .font(.system(size: 11))
+                .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.mutedText)
             Spacer()
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, DefaultTheme.space(12))
     }
 
     private func segmented<T: Hashable>(_ options: [T], selected: Binding<T>,
                                         label: @escaping (T) -> String) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: DefaultTheme.space(2)) {
             ForEach(options, id: \.self) { option in
                 Button { selected.wrappedValue = option } label: {
                     Text(label(option))
-                        .font(.system(size: 11, weight: selected.wrappedValue == option ? .semibold : .regular))
+                        .themeFont(size: 11, weight: selected.wrappedValue == option ? .semibold : .regular)
                         .foregroundStyle(selected.wrappedValue == option ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(5))
                         .background(selected.wrappedValue == option ? DefaultTheme.surface : .clear,
-                                    in: RoundedRectangle(cornerRadius: 6))
+                                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(3)
-        .background(DefaultTheme.background, in: RoundedRectangle(cornerRadius: 6))
+        .padding(DefaultTheme.space(3))
+        .background(DefaultTheme.background, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
     }
 
     // MARK: - Work

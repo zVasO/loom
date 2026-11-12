@@ -65,24 +65,24 @@ struct WorkflowsView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 AppIcon("magnifyingglass", size: 13).foregroundStyle(DefaultTheme.mutedText)
                 TextField("Filter", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
             }
-            .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-            .padding(12)
+            .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(7))
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .padding(DefaultTheme.space(12))
             Divider().overlay(DefaultTheme.cardBorder)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: DefaultTheme.space(16)) {
                     proposalsSection
                     workflowsSection
                     runsSection
                     librarySection
                 }
-                .padding(12)
+                .padding(DefaultTheme.space(12))
             }
             Divider().overlay(DefaultTheme.cardBorder)
             settingsFooter
@@ -91,14 +91,14 @@ struct WorkflowsView: View {
 
     private func header<Trailing: View>(_ title: String, systemImage: String,
                                         @ViewBuilder trailing: () -> Trailing) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DefaultTheme.space(6)) {
             AppIcon(systemImage, size: 11)
-            Text(title).font(.system(size: 10.5, weight: .medium, design: .monospaced)).kerning(0.53)
+            Text(title).themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
             Spacer()
             trailing()
         }
         .foregroundStyle(DefaultTheme.mutedText)
-        .padding(.horizontal, 2)
+        .padding(.horizontal, DefaultTheme.space(2))
     }
 
     private func matches(_ text: String...) -> Bool {
@@ -111,10 +111,10 @@ struct WorkflowsView: View {
     private var proposalsSection: some View {
         let items = model.pendingProposals
         if !items.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
                 header("TO REVIEW · \(items.count)", systemImage: "checkmark.seal") { EmptyView() }
                 Text("Proposed by agents: none of it runs or fires before you validate it.")
-                    .font(.system(size: 10)).foregroundStyle(DefaultTheme.mutedText)
+                    .themeFont(size: 10).foregroundStyle(DefaultTheme.mutedText)
                 ForEach(items) { item in
                     proposalRow(item)
                 }
@@ -123,27 +123,27 @@ struct WorkflowsView: View {
     }
 
     private func proposalRow(_ item: AppModel.ProposalItem) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 Text(item.kind.uppercased())
-                    .font(.system(size: 9, weight: .bold)).kerning(0.6)
+                    .themeFont(size: 9, weight: .bold, kerning: 0.6)
                     .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
-                Text(item.title).font(.system(size: 12, weight: .semibold))
+                Text(item.title).themeFont(size: 12, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText).lineLimit(1)
             }
             Text("by \(item.by) · " + item.at.formatted(.relative(presentation: .named)))
-                .font(.system(size: 10)).foregroundStyle(DefaultTheme.mutedText).lineLimit(1)
+                .themeFont(size: 10).foregroundStyle(DefaultTheme.mutedText).lineLimit(1)
             ForEach(Array(item.changes.prefix(5).enumerated()), id: \.offset) { _, change in
                 Text((change.flagged ? "⚠︎ " : "· ") + change.text)
-                    .font(.system(size: 10))
+                    .themeFont(size: 10)
                     .foregroundStyle(change.flagged ? DefaultTheme.danger : DefaultTheme.secondaryText)
                     .lineLimit(3)
                     .textSelection(.enabled)
             }
             if item.changes.count > 5 {
-                Text("… \(item.changes.count - 5) more").font(.system(size: 10)).foregroundStyle(DefaultTheme.mutedText)
+                Text("… \(item.changes.count - 5) more").themeFont(size: 10).foregroundStyle(DefaultTheme.mutedText)
             }
-            HStack(spacing: 6) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 AccentButton("Validate", systemImage: "checkmark") { model.validateProposal(item.ref) }
                 GhostButton("Revert", systemImage: "arrow.uturn.backward") { model.revertProposal(item.ref) }
                     .help("Back to the version you validated — or delete what the agent created")
@@ -151,13 +151,13 @@ struct WorkflowsView: View {
             }
             .controlSize(.small)
         }
-        .padding(9)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.badgeColor(for: .needsInput).opacity(0.5), lineWidth: 1))
+        .padding(DefaultTheme.space(9))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.badgeColor(for: .needsInput).opacity(0.5), lineWidth: 1))
     }
 
     private var workflowsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
             header("WORKFLOWS", systemImage: "point.3.connected.trianglepath.dotted") {
                 Menu {
                     Section("From a template") {
@@ -182,12 +182,12 @@ struct WorkflowsView: View {
                 .help("New workflow: from a template, with AI, blank, or imported")
             }
             if let message {
-                Text(message).font(.system(size: 11)).foregroundStyle(DefaultTheme.danger)
+                Text(message).themeFont(size: 11).foregroundStyle(DefaultTheme.danger)
             }
             if workflows.workflows.isEmpty {
                 Button { workflows.detail = .gallery } label: {
                     Text("No workflow yet — start from a template.")
-                        .font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                        .themeFont(size: 11).foregroundStyle(DefaultTheme.secondaryText)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                 }
@@ -202,42 +202,42 @@ struct WorkflowsView: View {
     private func workflowRow(_ workflow: Workflow) -> some View {
         let selected = workflows.selectedWorkflowID == workflow.id && workflows.detail == .workflow
         let last = workflows.lastRun(of: workflow.id)
-        return HStack(alignment: .top, spacing: 8) {
-            Circle().fill(AppModel.color(hex: workflow.color)).frame(width: 8, height: 8).padding(.top, 5)
-            VStack(alignment: .leading, spacing: 2) {
+        return HStack(alignment: .top, spacing: DefaultTheme.space(8)) {
+            Circle().fill(AppModel.color(hex: workflow.color)).frame(width: 8, height: 8).padding(.top, DefaultTheme.space(5))
+            VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 if renaming == workflow.id {
                     TextField("Name", text: $renameText)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 12, weight: .semibold))
+                        .themeFont(size: 12, weight: .semibold)
                         .onSubmit { commitRename(workflow.id) }
                         .onExitCommand { renaming = nil }
                 } else {
-                    HStack(spacing: 6) {
+                    HStack(spacing: DefaultTheme.space(6)) {
                         Text(workflow.name)
-                            .font(.system(size: 12, weight: .semibold))
+                            .themeFont(size: 12, weight: .semibold)
                             .foregroundStyle(DefaultTheme.primaryText)
                             .lineLimit(1)
                         if workflow.isProposed { ProposedTag() }
                     }
                 }
                 if !workflow.summary.isEmpty {
-                    Text(workflow.summary).font(.system(size: 10)).foregroundStyle(DefaultTheme.secondaryText).lineLimit(2)
+                    Text(workflow.summary).themeFont(size: 10).foregroundStyle(DefaultTheme.secondaryText).lineLimit(2)
                 }
-                HStack(spacing: 6) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     Text(workflow.workspace == .worktree ? "own branch" : "\(max(0, workflow.nodes.count - 1)) steps")
                     if let last {
                         Text("·")
                         Text(RunStatusLabel.text(last.status) + " " + last.startedAt.formatted(.relative(presentation: .named)))
                     }
                 }
-                .font(.system(size: 10))
+                .themeFont(size: 10)
                 .foregroundStyle(DefaultTheme.mutedText)
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 9).padding(.vertical, 7)
-        .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6)
+        .padding(.horizontal, DefaultTheme.space(9)).padding(.vertical, DefaultTheme.space(7))
+        .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
             .stroke(selected ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { startRename(workflow) }
@@ -287,17 +287,17 @@ struct WorkflowsView: View {
     /// What workflows are made of — experts, rule sets, connectors — behind
     /// one fold: a template brings its own, most people never open it.
     private var librarySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(12)) {
             Button { libraryOpen.toggle() } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     AppIcon(libraryOpen ? "chevron.down" : "chevron.right", size: 10)
-                    Text("LIBRARY").font(.system(size: 10.5, weight: .medium, design: .monospaced)).kerning(0.53)
+                    Text("LIBRARY").themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                     Text("\(workflows.experts.count) experts · \(workflows.ruleSets.count) rules · \(workflows.connectors.count) connectors")
-                        .font(.system(size: 10))
+                        .themeFont(size: 10)
                     Spacer()
                 }
                 .foregroundStyle(DefaultTheme.mutedText)
-                .padding(.horizontal, 2)
+                .padding(.horizontal, DefaultTheme.space(2))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -311,7 +311,7 @@ struct WorkflowsView: View {
     }
 
     private var expertsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
             header("EXPERTS", systemImage: "person.crop.circle.badge.checkmark") {
                 HoverIconButton(systemImage: "plus", help: "New expert") {
                     let expert = workflows.createExpert()
@@ -335,7 +335,7 @@ struct WorkflowsView: View {
 
     /// Rule sets to tick on blocks, steps and links (ADR-0019).
     private var rulesSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
             header("RULES", systemImage: "list.bullet.rectangle") {
                 HoverIconButton(systemImage: "plus", help: "New rule set") {
                     let ruleSet = workflows.createRuleSet()
@@ -360,7 +360,7 @@ struct WorkflowsView: View {
     }
 
     private var connectorsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
             header("CONNECTORS", systemImage: "cable.connector") {
                 Menu {
                     Button("Atlassian — the server in your Claude Code") { addConnector(.atlassianRemote()) }
@@ -404,10 +404,10 @@ struct WorkflowsView: View {
     }
 
     private var runsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
             header("RUNS", systemImage: "clock.arrow.circlepath") { EmptyView() }
             if workflows.runs.isEmpty {
-                Text("No run yet.").font(.system(size: 11)).foregroundStyle(DefaultTheme.mutedText)
+                Text("No run yet.").themeFont(size: 11).foregroundStyle(DefaultTheme.mutedText)
             }
             ForEach(workflows.runs.prefix(40).filter { matches($0.workflow.name, $0.subject) }) { run in
                 runRow(run)
@@ -422,39 +422,39 @@ struct WorkflowsView: View {
             default: return false
             }
         }()
-        return HStack(alignment: .top, spacing: 8) {
+        return HStack(alignment: .top, spacing: DefaultTheme.space(8)) {
             Image(systemName: RunStatusLabel.symbol(run.status))
                 .font(.system(size: 11))
                 .foregroundStyle(RunStatusLabel.color(run.status))
                 .frame(width: 14)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 2) {
+                .padding(.top, DefaultTheme.space(1))
+            VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 // What it was about first: two runs of one workflow differ by their task.
                 Text(run.subject == "Manual run" ? run.workflow.name : run.subject)
-                    .font(.system(size: 12, weight: .semibold))
+                    .themeFont(size: 12, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText).lineLimit(1)
                 Text(run.subject == "Manual run" ? run.subject : run.workflow.name)
-                    .font(.system(size: 10)).foregroundStyle(DefaultTheme.secondaryText).lineLimit(1)
+                    .themeFont(size: 10).foregroundStyle(DefaultTheme.secondaryText).lineLimit(1)
                 if let worktree = run.worktree {
                     Text(worktree.branch + (run.changes.map { " · " + $0.summary } ?? ""))
-                        .font(.system(size: 10, design: .monospaced))
+                        .themeFont(size: 10, design: .monospaced)
                         .foregroundStyle(DefaultTheme.branch).lineLimit(1).truncationMode(.middle)
                 }
-                HStack(spacing: 6) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     Text(run.startedAt.formatted(.relative(presentation: .named)))
                     if run.costUSD > 0 { Text(String(format: "%.2f $", run.costUSD)) }
                     if !workflows.approvals(of: run.id).isEmpty {
                         Text("· your decision").foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
                     }
                 }
-                .font(.system(size: 10))
+                .themeFont(size: 10)
                 .foregroundStyle(DefaultTheme.mutedText)
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 9).padding(.vertical, 7)
-        .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6)
+        .padding(.horizontal, DefaultTheme.space(9)).padding(.vertical, DefaultTheme.space(7))
+        .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
             .stroke(selected ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture { workflows.detail = .run(run.id) }
@@ -474,28 +474,28 @@ struct WorkflowsView: View {
 
     private func simpleRow(title: String, subtitle: String, color: String?, selected: Bool,
                            action: @escaping () -> Void) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             if let color { Circle().fill(AppModel.color(hex: color)).frame(width: 8, height: 8) }
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(DefaultTheme.primaryText).lineLimit(1)
+                Text(title).themeFont(size: 12, weight: .semibold).foregroundStyle(DefaultTheme.primaryText).lineLimit(1)
                 if !subtitle.isEmpty {
-                    Text(subtitle).font(.system(size: 10)).foregroundStyle(DefaultTheme.secondaryText).lineLimit(1)
+                    Text(subtitle).themeFont(size: 10).foregroundStyle(DefaultTheme.secondaryText).lineLimit(1)
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 9).padding(.vertical, 6)
-        .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6)
+        .padding(.horizontal, DefaultTheme.space(9)).padding(.vertical, DefaultTheme.space(6))
+        .background(selected ? DefaultTheme.surfaceRaised : DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
             .stroke(selected ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: action)
     }
 
     private var settingsFooter: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             Stepper(value: Binding(get: { workflows.maxConcurrent }, set: { workflows.maxConcurrent = $0 }), in: 1...8) {
-                Text("\(workflows.maxConcurrent) at once").font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText)
+                Text("\(workflows.maxConcurrent) at once").themeFont(size: 11).foregroundStyle(DefaultTheme.secondaryText)
             }
             .fixedSize()
             .help("Steps of one run running at the same time")
@@ -509,7 +509,7 @@ struct WorkflowsView: View {
             .fixedSize()
             .help("The model of a step whose expert names none")
         }
-        .padding(12)
+        .padding(DefaultTheme.space(12))
     }
 
     // MARK: Import / export
@@ -641,17 +641,17 @@ private struct RunHeader: View {
 
     var body: some View {
         let workflows = model.workflows
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             Image(systemName: RunStatusLabel.symbol(run.status)).foregroundStyle(RunStatusLabel.color(run.status))
             VStack(alignment: .leading, spacing: 1) {
                 Text("\(run.workflow.name) · \(run.subject)")
-                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(DefaultTheme.primaryText)
-                Text(subtitle).font(.system(size: 11)).foregroundStyle(DefaultTheme.secondaryText).lineLimit(2)
+                    .themeFont(size: 13, weight: .semibold).foregroundStyle(DefaultTheme.primaryText)
+                Text(subtitle).themeFont(size: 11).foregroundStyle(DefaultTheme.secondaryText).lineLimit(2)
             }
             Spacer()
             if workflows.holding.contains(run.id) {
                 Text("Waiting for the orchestrator")
-                    .font(.system(size: 11, weight: .medium)).foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
+                    .themeFont(size: 11, weight: .medium).foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
             }
             if run.status.isActive {
                 ProgressView().controlSize(.small)
@@ -684,9 +684,9 @@ private struct RunHeader: View {
                     ScrollView {
                         Text((try? String(contentsOf: workflows.folder(for: run.id).appendingPathComponent("log.txt"),
                                           encoding: .utf8)) ?? "No log yet.")
-                            .font(.system(size: 11, design: .monospaced))
+                            .themeFont(size: 11, design: .monospaced)
                             .textSelection(.enabled)
-                            .padding(12)
+                            .padding(DefaultTheme.space(12))
                     }
                     .frame(width: 560, height: 360)
                 }
@@ -694,7 +694,7 @@ private struct RunHeader: View {
                 NSWorkspace.shared.activateFileViewerSelecting([workflows.folder(for: run.id)])
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 9)
+        .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(9))
         .background(DefaultTheme.background)
     }
 
@@ -736,9 +736,9 @@ struct ArtifactWebView: NSViewRepresentable {
 struct ProposedTag: View {
     var body: some View {
         Text("proposed")
-            .font(.system(size: 9, weight: .bold))
+            .themeFont(size: 9, weight: .bold)
             .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
-            .padding(.horizontal, 5).padding(.vertical, 1)
+            .padding(.horizontal, DefaultTheme.space(5)).padding(.vertical, DefaultTheme.space(1))
             .overlay(Capsule().stroke(DefaultTheme.badgeColor(for: .needsInput).opacity(0.6), lineWidth: 1))
             .help("Proposed by an agent: validate it in To review before it can run")
     }

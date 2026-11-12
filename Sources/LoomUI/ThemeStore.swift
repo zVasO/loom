@@ -6,7 +6,9 @@ import SwiftUI
 // MARK: - Tokens
 
 /// The 16 colours a palette is made of, as `#RRGGBB` — what a theme file
-/// carries, what an import produces, what a palette is built from.
+/// carries, what an import produces, what a palette is built from. And,
+/// for a theme that brings its own (a tweakcn import), the variant's
+/// design: radius, spacing, fonts, edges and shadow (ADR-0022).
 public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
     public var background: String
     public var contentBackground: String
@@ -24,12 +26,14 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
     public var stateWorking: String
     public var stateNeedsInput: String
     public var stateIdle: String
+    /// What the variant says beyond its colours; nil draws the charter.
+    public var design: ThemeDesign?
 
     public init(background: String, contentBackground: String, surface: String,
                 surfaceRaised: String, cardBorder: String, accent: String, accentText: String,
                 primaryText: String, secondaryText: String, mutedText: String, branch: String,
                 danger: String, groupHeader: String, stateWorking: String,
-                stateNeedsInput: String, stateIdle: String) {
+                stateNeedsInput: String, stateIdle: String, design: ThemeDesign? = nil) {
         self.background = background
         self.contentBackground = contentBackground
         self.surface = surface
@@ -46,6 +50,7 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
         self.stateWorking = stateWorking
         self.stateNeedsInput = stateNeedsInput
         self.stateIdle = stateIdle
+        self.design = design
     }
 
     /// Every token, in a stable order — for validation and previews.
@@ -131,6 +136,21 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
     public let stateNeedsInput: Color
     public let stateIdle: Color
 
+    /// The variant's design — what `radius(_:)`, `space(_:)`, `font(…)` and
+    /// `tracking(_:)` answer from; nil draws the charter.
+    public let design: ThemeDesign?
+    /// Edges. The charter's hairlines — the text colour at 8, 13 and 21 % —
+    /// unless the theme has a border of its own: then `--border` as is,
+    /// `--input` for a control's edge, and that one a step towards the text
+    /// for a hovered edge.
+    public let line: Color
+    public let line2: Color
+    public let line3: Color
+    /// Row washes, hover then selection: 2.5 and 4.5 % of the text colour,
+    /// or — a theme with a design — shadcn's own `muted/50` and `muted`.
+    public let wash: Color
+    public let wash2: Color
+
     public init(name: String, isLight: Bool, tokens: ThemeTokens) {
         let tokens = tokens.sanitized
         self.name = name
@@ -152,6 +172,23 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
         stateWorking = Self.color(tokens.stateWorking)
         stateNeedsInput = Self.color(tokens.stateNeedsInput)
         stateIdle = Self.color(tokens.stateIdle)
+
+        design = tokens.design
+        let text = Self.color(tokens.primaryText)
+        let raised = Self.color(tokens.surfaceRaised)
+        let border = tokens.design?.border.flatMap(Self.validHex)
+        let input = tokens.design?.input.flatMap(Self.validHex) ?? border
+        line = border.map(Self.color) ?? text.opacity(0.08)
+        line2 = input.map(Self.color) ?? text.opacity(0.13)
+        line3 = input.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.3)) }
+            ?? text.opacity(0.21)
+        wash = tokens.design == nil ? text.opacity(0.025) : raised.opacity(0.5)
+        wash2 = tokens.design == nil ? text.opacity(0.045) : raised
+    }
+
+    /// A `#RRGGBB` that reads as one, else nil: a hand-written file may hold anything.
+    private static func validHex(_ hex: String) -> String? {
+        ThemeTokens.rgb(hex) == nil ? nil : hex
     }
 
     public static func color(_ hex: String) -> Color {
@@ -380,10 +417,45 @@ public final class ThemeStore {
     /// Where the user's families live. Called once, at launch, by the app —
     /// the store itself has no idea where the support directory is.
     public func configure(themesDirectory: URL) {
+        // The fonts fetched for imported themes are registered first: the
+        // first frame of a theme that names one is drawn with it.
+        ThemeFonts.shared.configure(directory: themesDirectory.appendingPathComponent("fonts"))
         let store = ThemeFamilyStore(directory: themesDirectory)
         familyStore = store
         customFamilies = store.load()
         apply(projectID: contextProjectID)
+        // A theme file brought from another Mac names fonts this one may
+        // not have yet: fetched in the background, drawn when they arrive.
+        let stacks = customFamilies.flatMap(Self.fontStacks)
+        if !stacks.isEmpty {
+            Task { await ThemeFonts.shared.ensure(stacks: stacks) }
+        }
+    }
+
+    /// The font stacks a family's two designs name.
+    nonisolated static func fontStacks(of family: ThemeFamily) -> [String] {
+        [family.light.design, family.dark.design].flatMap { design in
+            [design?.fontSans, design?.fontSerif, design?.fontMono].compactMap { $0 }
+        }
+    }
+
+    /// Makes a family's fonts drawable — installed, or fetched from Google
+    /// Fonts as tweakcn's editor does — and, for a family whose document
+    /// style names fonts without saying where to load them, points its
+    /// reports at the same families on Google Fonts.
+    public func withFonts(_ family: ThemeFamily) async -> ThemeFamily {
+        let fonts = ThemeFonts.shared
+        await fonts.ensure(stacks: Self.fontStacks(of: family))
+        var family = family
+        if var document = family.document, (document.fontsURL ?? "").isEmpty {
+            let stacks = [document.fontSans, document.fontMono].compactMap { $0 }
+            let fetched = fonts.fetchedFamilies(in: stacks)
+            if !fetched.isEmpty, let url = GoogleFonts.stylesheetURL(families: fetched) {
+                document.fontsURL = url.absoluteString
+                family.document = document
+            }
+        }
+        return family
     }
 
     // MARK: Families
@@ -403,6 +475,11 @@ public final class ThemeStore {
         customFamilies.append(stored)
         apply(projectID: contextProjectID)
         onInputsChanged?()
+        // A theme file may name fonts this Mac does not have.
+        let stacks = Self.fontStacks(of: stored)
+        if !stacks.isEmpty {
+            Task { await ThemeFonts.shared.ensure(stacks: stacks) }
+        }
     }
 
     /// Removes a user family; the global theme and any project pointing at it
@@ -420,9 +497,16 @@ public final class ThemeStore {
     }
 
     /// A tweakcn theme, from what the user pasted: its CSS export, parsed
-    /// here; or a name / URL, fetched from tweakcn's registry. The family
-    /// comes back unsaved — the caller previews it, then `addFamily`.
+    /// here; or a name / URL, fetched from tweakcn's registry. The fonts it
+    /// names are made available before it comes back, so the preview shows
+    /// them. The family comes back unsaved — the caller previews it, then
+    /// `addFamily`.
     public func importTweakcn(_ input: String) async throws -> ThemeFamily {
+        let family = try await readTweakcn(input)
+        return await withFonts(family)
+    }
+
+    private func readTweakcn(_ input: String) async throws -> ThemeFamily {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if TweakcnImport.looksLikeCSS(text) {
             let (light, dark) = try TweakcnImport.parseCSS(text)

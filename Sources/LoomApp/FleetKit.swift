@@ -37,8 +37,7 @@ struct MonoLabel: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: size, weight: .medium, design: .monospaced))
-            .tracking(size * 0.05)
+            .themeFont(size: size, weight: .medium, design: .monospaced, tracking: size * 0.05)
             .monospacedDigit()
             .foregroundStyle(color ?? DefaultTheme.secondaryText)
             .lineLimit(1)
@@ -52,9 +51,9 @@ struct KeyHint: View {
     let label: String
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: DefaultTheme.space(4)) {
             ForEach(keys, id: \.self) { KeyCap($0) }
-            MonoLabel(label, color: DefaultTheme.mutedText).padding(.leading, 2)
+            MonoLabel(label, color: DefaultTheme.mutedText).padding(.leading, DefaultTheme.space(2))
         }
     }
 }
@@ -145,13 +144,13 @@ struct FleetButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 11.5, weight: .medium))
+                .themeFont(size: 11.5, weight: .medium)
                 .foregroundStyle(prominent ? DefaultTheme.accentText : DefaultTheme.primaryText)
-                .padding(.horizontal, 8)
-                .frame(height: 24)
+                .padding(.horizontal, DefaultTheme.space(8))
+                .frame(height: DefaultTheme.space(24))
                 .background(prominent ? DefaultTheme.accent : DefaultTheme.surfaceRaised,
-                            in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6)
+                            in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
                     .strokeBorder(prominent ? Color.clear : (hovered ? DefaultTheme.line3 : DefaultTheme.line2), lineWidth: 1))
                 .brightness(prominent && hovered ? 0.06 : 0)
                 .contentShape(Rectangle())
@@ -199,16 +198,16 @@ struct FleetFilterBar: View {
     let counts: [FleetFilter: Int]
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: DefaultTheme.space(2)) {
             ForEach(FleetFilter.allCases, id: \.self) { filter in
                 Segment(title: filter.title, count: counts[filter] ?? 0, isOn: selection == filter) {
                     selection = filter
                 }
             }
         }
-        .padding(2)
-        .background(DefaultTheme.background, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(DefaultTheme.line, lineWidth: 1))
+        .padding(DefaultTheme.space(2))
+        .background(DefaultTheme.background, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).strokeBorder(DefaultTheme.line, lineWidth: 1))
         .fixedSize()
     }
 
@@ -221,18 +220,17 @@ struct FleetFilterBar: View {
 
         var body: some View {
             Button(action: action) {
-                HStack(spacing: 6) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     Text(title.uppercased())
                         .foregroundStyle(isOn || hovered ? DefaultTheme.primaryText : DefaultTheme.mutedText)
                     Text("\(count)").foregroundStyle(DefaultTheme.secondaryText)
                 }
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .tracking(0.55)
+                .themeFont(size: 11, weight: .medium, design: .monospaced, tracking: 0.55)
                 .monospacedDigit()
-                .padding(.horizontal, 8)
-                .frame(height: 22)
-                .background(isOn ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4)
+                .padding(.horizontal, DefaultTheme.space(8))
+                .frame(height: DefaultTheme.space(22))
+                .background(isOn ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4))
                     .strokeBorder(isOn ? DefaultTheme.line2 : .clear, lineWidth: 1))
                 .contentShape(Rectangle())
             }
@@ -259,17 +257,16 @@ struct FleetHead: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DefaultTheme.space(12)) {
             Text("Mission control")
-                .font(.system(size: 13, weight: .medium))
-                .tracking(-0.13)
+                .themeFont(size: 13, weight: .medium, tracking: -0.13)
                 .foregroundStyle(DefaultTheme.primaryText)
             if let location { MonoLabel(location, color: DefaultTheme.mutedText) }
             Spacer(minLength: 12)
             FleetFilterBar(selection: $filter, counts: counts)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, DefaultTheme.space(14))
+        .padding(.vertical, DefaultTheme.space(12))
     }
 }
 
@@ -301,9 +298,9 @@ struct FleetTable: View {
     @FocusState private var focused: Bool
 
     /// The measures a host sizes the table with (Mission Control gives it a
-    /// whole number of rows).
-    static let rowHeight: CGFloat = 38
-    static let headerHeight: CGFloat = 30
+    /// whole number of rows) — in the theme's spacing, like every length.
+    static var rowHeight: CGFloat { DefaultTheme.space(38) }
+    static var headerHeight: CGFloat { DefaultTheme.space(30) }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -321,10 +318,10 @@ struct FleetTable: View {
                         }
                         if items.isEmpty {
                             Text("No session matches this filter.")
-                                .font(.system(size: 12))
+                                .themeFont(size: 12)
                                 .foregroundStyle(DefaultTheme.secondaryText)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 24)
+                                .padding(.vertical, DefaultTheme.space(24))
                         }
                     } header: {
                         header
@@ -378,7 +375,7 @@ struct FleetTable: View {
 
     private func title(_ text: String) -> some View {
         MonoLabel(text, size: 10.5, color: DefaultTheme.mutedText)
-            .padding(.horizontal, FleetColumns.pad)
+            .padding(.horizontal, DefaultTheme.space(FleetColumns.pad))
     }
 
     private func move(_ delta: Int) {
@@ -456,57 +453,55 @@ private struct FleetRow: View {
     }
 
     private var stateCell: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             Circle().fill(FleetState.color(item)).frame(width: 6, height: 6)
             Text(FleetState.label(item))
-                .font(.system(size: 11, design: .monospaced))
-                .tracking(0.22)
+                .themeFont(size: 11, design: .monospaced, tracking: 0.22)
                 .foregroundStyle(FleetState.color(item))
                 .lineLimit(1)
         }
-        .padding(.horizontal, FleetColumns.pad)
+        .padding(.horizontal, DefaultTheme.space(FleetColumns.pad))
     }
 
     private var titleCell: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 Text(item.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .themeFont(size: 13, weight: .medium)
                     .foregroundStyle(DefaultTheme.primaryText)
                     .lineLimit(1)
                 BadgeRow(model: model, badges: item.badges)
             }
             if let agent {
                 Text(agent.uppercased())
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .tracking(0.52)
+                    .themeFont(size: 10.5, design: .monospaced, tracking: 0.52)
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, FleetColumns.pad)
+        .padding(.horizontal, DefaultTheme.space(FleetColumns.pad))
     }
 
     private var branchCell: some View {
         Text(item.branch ?? "—")
-            .font(.system(size: 11.5, design: .monospaced))
+            .themeFont(size: 11.5, design: .monospaced)
             .foregroundStyle(item.branch == nil ? DefaultTheme.mutedText : DefaultTheme.branch)
             .lineLimit(1)
             .truncationMode(.middle)
-            .padding(.horizontal, FleetColumns.pad)
+            .padding(.horizontal, DefaultTheme.space(FleetColumns.pad))
     }
 
     private var contextCell: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             FleetRing(fraction: usage?.fraction,
                       color: usage.map { $0.level == .normal ? DefaultTheme.secondaryText : $0.level.color }
                           ?? DefaultTheme.secondaryText)
             Text(usage.map { "\(Int(($0.fraction * 100).rounded()))%" } ?? "—")
-                .font(.system(size: 11, design: .monospaced))
+                .themeFont(size: 11, design: .monospaced)
                 .monospacedDigit()
                 .foregroundStyle(DefaultTheme.secondaryText)
         }
-        .padding(.horizontal, FleetColumns.pad)
+        .padding(.horizontal, DefaultTheme.space(FleetColumns.pad))
     }
 
     private var durationCell: some View {
@@ -517,11 +512,11 @@ private struct FleetRow: View {
                 Text("—")
             }
         }
-        .font(.system(size: 11.5, design: .monospaced))
+        .themeFont(size: 11.5, design: .monospaced)
         .monospacedDigit()
         .foregroundStyle(DefaultTheme.secondaryText)
         .lineLimit(1)
-        .padding(.horizontal, FleetColumns.pad)
+        .padding(.horizontal, DefaultTheme.space(FleetColumns.pad))
     }
 
     @ViewBuilder
@@ -535,7 +530,7 @@ private struct FleetRow: View {
                 }
             }
         }
-        .padding(.horizontal, FleetColumns.pad)
+        .padding(.horizontal, DefaultTheme.space(FleetColumns.pad))
     }
 }
 
@@ -550,8 +545,8 @@ struct FleetFooter: View {
 
     var body: some View {
         let counts = FleetFilter.counts(items)
-        HStack(spacing: 14) {
-            HStack(spacing: 6) {
+        HStack(spacing: DefaultTheme.space(14)) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 Circle()
                     .fill(model.hooksOnline ? DefaultTheme.badgeColor(for: .working) : DefaultTheme.danger)
                     .frame(width: 6, height: 6)
@@ -564,8 +559,8 @@ struct FleetFooter: View {
                 KeyHint(keys: hint.keys, label: hint.label)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, DefaultTheme.space(14))
+        .padding(.vertical, DefaultTheme.space(8))
         .background(DefaultTheme.surface)
     }
 }
@@ -590,13 +585,13 @@ struct TransitionJournalView: View {
     var body: some View {
         VStack(spacing: 0) {
             if showsHeader {
-                HStack(spacing: 8) {
+                HStack(spacing: DefaultTheme.space(8)) {
                     MonoLabel("Transition journal", color: DefaultTheme.mutedText)
                     Spacer()
                     StatusTag("Live", color: DefaultTheme.badgeColor(for: .working))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
+                .padding(.horizontal, DefaultTheme.space(10))
+                .padding(.vertical, DefaultTheme.space(7))
                 Hairline()
             }
             ScrollViewReader { proxy in
@@ -604,15 +599,15 @@ struct TransitionJournalView: View {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if rows.isEmpty {
                             Text("No transition yet — they appear here as sessions change state.")
-                                .font(.system(size: 11.5, design: .monospaced))
+                                .themeFont(size: 11.5, design: .monospaced)
                                 .foregroundStyle(DefaultTheme.mutedText)
-                                .padding(10)
+                                .padding(DefaultTheme.space(10))
                         }
                         ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                             line(row).id(index)
                         }
                     }
-                    .padding(.vertical, 6)
+                    .padding(.vertical, DefaultTheme.space(6))
                 }
                 .defaultScrollAnchor(.bottom)
                 .onChange(of: rows.count) { _, count in
@@ -628,7 +623,7 @@ struct TransitionJournalView: View {
     }
 
     private func line(_ row: TransitionRecord) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             Text(Self.time.string(from: row.at))
                 .foregroundStyle(DefaultTheme.mutedText)
                 .frame(width: 92, alignment: .leading)
@@ -645,13 +640,13 @@ struct TransitionJournalView: View {
             .truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .leading)
             Text("→ \(row.to.rawValue)")
-                .font(.system(size: 10.5, design: .monospaced))
+                .themeFont(size: 10.5, design: .monospaced)
                 .foregroundStyle(FleetState.color(row.to))
         }
-        .font(.system(size: 11.5, design: .monospaced))
+        .themeFont(size: 11.5, design: .monospaced)
         .monospacedDigit()
-        .padding(.horizontal, 10)
-        .padding(.vertical, 3)
+        .padding(.horizontal, DefaultTheme.space(10))
+        .padding(.vertical, DefaultTheme.space(3))
     }
 
     private static func source(_ source: TransitionSource) -> String {

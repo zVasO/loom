@@ -71,14 +71,14 @@ struct GlobalPRsView: View {
 
     var body: some View {
         if !GitHubService.isAvailable {
-            VStack(spacing: 10) {
+            VStack(spacing: DefaultTheme.space(10)) {
                 AppIcon("arrow.triangle.pull", size: 41)
                     .foregroundStyle(DefaultTheme.secondaryText)
                 Text("GitHub CLI required")
-                    .font(.system(size: 15, weight: .semibold))
+                    .themeFont(size: 15, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Text("brew install gh — then gh auth login")
-                    .font(.system(size: 12, design: .monospaced))
+                    .themeFont(size: 12, design: .monospaced)
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -177,7 +177,7 @@ struct GlobalPRsView: View {
                 }
             } label: {
                 Label("Workflow", systemImage: "point.3.connected.trianglepath.dotted")
-                    .font(.system(size: 12, weight: .medium))
+                    .themeFont(size: 12, weight: .medium)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -191,7 +191,7 @@ struct GlobalPRsView: View {
     private var reviewBar: some View {
         HStack(spacing: 0) {
             PRModeSwitch(model: model)
-                .padding(.horizontal, 12)
+                .padding(.horizontal, DefaultTheme.space(12))
             Divider().overlay(DefaultTheme.cardBorder)
             PRTabStrip(model: model)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -240,21 +240,21 @@ struct GlobalPRsView: View {
 
     /// No PR open: Review has nothing of its own — the way to Browse is here.
     private var reviewEmptyState: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: DefaultTheme.space(10)) {
             AppIcon("sparkles", size: 31)
                 .foregroundStyle(DefaultTheme.mutedText)
             Text("No pull request open for review")
-                .font(.system(size: 14, weight: .semibold))
+                .themeFont(size: 14, weight: .semibold)
                 .foregroundStyle(DefaultTheme.secondaryText)
             Text("Pick one in Browse: double-click a row, press Return, or select several and open them together.")
-                .font(.system(size: 12))
+                .themeFont(size: 12)
                 .foregroundStyle(DefaultTheme.mutedText)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
             AccentButton("Browse pull requests", systemImage: "tablecells") {
                 withAnimation(.hover) { model.prMode = .browse }
             }
-            .padding(.top, 4)
+            .padding(.top, DefaultTheme.space(4))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DefaultTheme.contentBackground)
@@ -262,19 +262,19 @@ struct GlobalPRsView: View {
 
     private func toolbar(_ pr: GitHubService.PullRequest,
                          project: ProjectRecord) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             Text("#\(pr.number)")
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .themeFont(size: 13, weight: .bold, design: .monospaced)
                 .foregroundStyle(DefaultTheme.accent)
             Text(pr.title)
-                .font(.system(size: 13, weight: .semibold))
+                .themeFont(size: 13, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
                 .lineLimit(1)
             if !pr.checks.isEmpty {
                 PRChips.checksChip(pr)
             }
             Spacer(minLength: 12)
-            HStack(spacing: 4) {
+            HStack(spacing: DefaultTheme.space(4)) {
                 ForEach(PRPane.allCases) { candidate in
                     NavTab(candidate.rawValue, isActive: pane == candidate) {
                         pane = candidate
@@ -289,16 +289,16 @@ struct GlobalPRsView: View {
             if model.isLaunchingReview(forPR: pr.number, in: project.id) {
                 // The checkout fetches from the network: without this the
                 // click felt like a frozen app.
-                HStack(spacing: 6) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     ProgressView().controlSize(.small)
                     Text("Preparing the review worktree…")
-                        .font(.system(size: 11))
+                        .themeFont(size: 11)
                         .foregroundStyle(DefaultTheme.secondaryText)
                 }
             } else if model.reviewSession(forPR: pr.number, in: project.id) != nil {
                 // Reopens the PR's session; the chevron starts over in a new
                 // one (new brief, Settings' /setup-pr-review, empty context).
-                HStack(spacing: 2) {
+                HStack(spacing: DefaultTheme.space(2)) {
                     AccentButton("Review session", systemImage: "sparkles") {
                         model.startPRReview(pr, in: project.id)
                     }
@@ -312,8 +312,8 @@ struct GlobalPRsView: View {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(DefaultTheme.accentText)
-                            .frame(width: 22, height: 30)
-                            .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 6))
+                            .frame(width: DefaultTheme.space(22), height: DefaultTheme.space(30))
+                            .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
@@ -339,7 +339,7 @@ struct GlobalPRsView: View {
                 }
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(8))
         .background(DefaultTheme.background)
     }
 
@@ -400,7 +400,7 @@ struct GlobalPRsView: View {
         return Button {
             withAnimation(.hover) { setPaneOpen(!paneOpen) }
         } label: {
-            VStack(spacing: 5) {
+            VStack(spacing: DefaultTheme.space(5)) {
                 Image(systemName: paneOpen ? "chevron.right" : "chevron.left")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(DefaultTheme.secondaryText)
@@ -412,7 +412,7 @@ struct GlobalPRsView: View {
                         .frame(width: 5, height: 5)
                 }
             }
-            .padding(.horizontal, 8).padding(.vertical, 11)
+            .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(11))
             .background(DefaultTheme.surfaceRaised, in: Capsule())
             .overlay(Capsule().stroke(DefaultTheme.cardBorder, lineWidth: 1))
             .shadow(color: .black.opacity(0.4), radius: 10, y: 2)
@@ -470,14 +470,14 @@ extension GlobalPRsView {
         let project = tab.flatMap { tab in gitProjects.first { $0.id == tab.projectID } }
         let reviews = tab.map { model.reviewSessions(forPR: $0.pr.number, in: $0.projectID) } ?? []
         return VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 AppIcon("sparkles", size: 12)
                     .foregroundStyle(DefaultTheme.accent)
                 if reviews.count > 1, let tab {
                     // One tab per review of this PR: the fresh ones and the
                     // ones before them, a click away.
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: DefaultTheme.space(4)) {
                             ForEach(Array(reviews.enumerated()), id: \.element) { index, id in
                                 ReviewSessionTab(
                                     label: "Review \(index + 1)",
@@ -494,7 +494,7 @@ extension GlobalPRsView {
                     }
                 } else {
                     Text(sessionTitle(sessionID))
-                        .font(.system(size: 12, weight: .semibold))
+                        .themeFont(size: 12, weight: .semibold)
                         .foregroundStyle(DefaultTheme.primaryText)
                         .lineLimit(1)
                     if let state = model.sessions.first(where: { $0.id == sessionID })?.state {
@@ -521,7 +521,7 @@ extension GlobalPRsView {
                     onOpenSession(sessionID)
                 }
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
+            .padding(.horizontal, DefaultTheme.space(12)).padding(.vertical, DefaultTheme.space(8))
             .background(DefaultTheme.background)
             Divider().overlay(DefaultTheme.cardBorder)
             TerminalPane(model: model, sessionID: sessionID, role: .review)
@@ -548,24 +548,24 @@ private struct ReviewSessionTab: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
+            HStack(spacing: DefaultTheme.space(5)) {
                 Circle()
                     .fill(state.map { DefaultTheme.badgeColor(for: $0) } ?? .clear)
                     .overlay(Circle().stroke(state == nil ? DefaultTheme.mutedText : .clear,
                                              lineWidth: 1))
                     .frame(width: 6, height: 6)
                 Text(label)
-                    .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                    .themeFont(size: 11, weight: isActive ? .semibold : .regular)
                     .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
                                                          : DefaultTheme.secondaryText)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
+            .padding(.horizontal, DefaultTheme.space(9))
+            .padding(.vertical, DefaultTheme.space(4))
             .background(isActive ? DefaultTheme.surfaceRaised
                         : hovered ? DefaultTheme.surfaceRaised.opacity(0.6) : .clear,
-                        in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6)
+                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
                 .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
         }
         .buttonStyle(.plain)

@@ -26,20 +26,20 @@ struct PRFilterMenu: View {
             Divider()
             Button("Edit filters…") { editorShown = true }
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: DefaultTheme.space(5)) {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                     .font(.system(size: 11))
                 if !compact {
                     Text(model.selectedPRFilter.name)
-                        .font(.system(size: 11, weight: .medium))
+                        .themeFont(size: 11, weight: .medium)
                         .lineLimit(1)
                 }
             }
             .foregroundStyle(model.selectedPRFilterID == PRFilter.all.id
                              ? DefaultTheme.secondaryText : DefaultTheme.accent)
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(5))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -89,34 +89,33 @@ struct PRFilterEditorSheet: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(16)) {
             HStack {
                 Text("PR filters")
-                    .font(.system(size: 15, weight: .semibold))
+                    .themeFont(size: 15, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Spacer()
                 GhostButton("Done") { dismiss() }
             }
-            HStack(alignment: .top, spacing: 16) {
+            HStack(alignment: .top, spacing: DefaultTheme.space(16)) {
                 filterList.frame(width: 220)
                 Divider().overlay(DefaultTheme.cardBorder)
                 form
             }
         }
-        .padding(20)
+        .padding(DefaultTheme.space(20))
         .frame(width: 720, height: 440)
         .background(DefaultTheme.background)
         .onAppear { testProjectID = model.selectedProject ?? model.projects.first?.id }
     }
 
     private var filterList: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
             Text("YOUR FILTERS")
-                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                .kerning(0.53)
+                .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                 .foregroundStyle(DefaultTheme.secondaryText)
             ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
                     ForEach(model.customPRFilters) { filter in
                         Button {
                             editingID = filter.id
@@ -125,27 +124,27 @@ struct PRFilterEditorSheet: View {
                             validation = nil
                             testResult = nil
                         } label: {
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                                 Text(filter.name)
-                                    .font(.system(size: 12, weight: .medium))
+                                    .themeFont(size: 12, weight: .medium)
                                     .foregroundStyle(DefaultTheme.primaryText)
                                 Text(filter.query)
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .themeFont(size: 10, design: .monospaced)
                                     .foregroundStyle(DefaultTheme.mutedText)
                                     .lineLimit(1)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
+                            .padding(DefaultTheme.space(8))
                             .background(editingID == filter.id ? DefaultTheme.surfaceRaised
                                         : DefaultTheme.surface,
-                                        in: RoundedRectangle(cornerRadius: 6))
+                                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
                     if model.customPRFilters.isEmpty {
                         Text("None yet — the built-ins cover the usual questions; write your own for a team, a label, a base branch.")
-                            .font(.system(size: 11))
+                            .themeFont(size: 11)
                             .foregroundStyle(DefaultTheme.mutedText)
                     }
                 }
@@ -161,26 +160,25 @@ struct PRFilterEditorSheet: View {
     }
 
     private var form: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
             Text(editingID == nil ? "NEW FILTER" : "EDIT FILTER")
-                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                .kerning(0.53)
+                .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                 .foregroundStyle(DefaultTheme.secondaryText)
             field("Name", text: $name, mono: false)
             field("Query", text: $query, mono: true)
             Text("GitHub's search qualifiers, the ones the search box on github.com takes. is:pr and the repository are implied — keep them or leave them out; name a state (is:merged…) to look beyond open PRs.")
-                .font(.system(size: 11))
+                .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(3)) {
                 ForEach(Self.examples, id: \.1) { example in
                     Button {
                         if name.isEmpty { name = example.0 }
                         query = example.1
                     } label: {
-                        HStack(spacing: 6) {
-                            Text(example.0).font(.system(size: 11))
+                        HStack(spacing: DefaultTheme.space(6)) {
+                            Text(example.0).themeFont(size: 11)
                                 .foregroundStyle(DefaultTheme.secondaryText)
-                            Text(example.1).font(.system(size: 11, design: .monospaced))
+                            Text(example.1).themeFont(size: 11, design: .monospaced)
                                 .foregroundStyle(DefaultTheme.accent)
                         }
                     }
@@ -188,18 +186,18 @@ struct PRFilterEditorSheet: View {
                 }
                 Link("Search syntax reference",
                      destination: URL(string: "https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests")!)
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
             }
             if let validation {
-                Text(validation).font(.system(size: 11)).foregroundStyle(DefaultTheme.danger)
+                Text(validation).themeFont(size: 11).foregroundStyle(DefaultTheme.danger)
             }
             if let testResult {
-                Text(testResult).font(.system(size: 11, design: .monospaced))
+                Text(testResult).themeFont(size: 11, design: .monospaced)
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .textSelection(.enabled)
             }
             Spacer()
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 if !model.projects.isEmpty {
                     Picker("", selection: $testProjectID) {
                         ForEach(model.projects, id: \.id) { project in
@@ -226,15 +224,15 @@ struct PRFilterEditorSheet: View {
     }
 
     private func field(_ label: String, text: Binding<String>, mono: Bool) -> some View {
-        HStack(spacing: 10) {
-            Text(label).font(.system(size: 12)).foregroundStyle(DefaultTheme.secondaryText)
+        HStack(spacing: DefaultTheme.space(10)) {
+            Text(label).themeFont(size: 12).foregroundStyle(DefaultTheme.secondaryText)
                 .frame(width: 44, alignment: .trailing)
             TextField("", text: text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12, design: mono ? .monospaced : .default))
-                .padding(.horizontal, 8).padding(.vertical, 6)
-                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                .themeFont(size: 12, design: mono ? .monospaced : .default)
+                .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
         }
     }
 
@@ -290,27 +288,27 @@ enum PRChips {
     private static let labelWidth: CGFloat = 64
 
     static func label(_ label: GitHubService.Label) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: DefaultTheme.space(4)) {
             Circle()
                 .fill(AppModel.color(hex: label.colorHex))
                 .frame(width: 6, height: 6)
             Text(label.name)
-                .font(.system(size: 9, weight: .medium))
+                .themeFont(size: 9, weight: .medium)
                 .frame(maxWidth: labelWidth, alignment: .leading)
         }
         .foregroundStyle(DefaultTheme.secondaryText)
-        .padding(.horizontal, 6).padding(.vertical, 2)
+        .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(2))
         .background(DefaultTheme.surfaceRaised, in: Capsule())
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
     }
 
     static func size(_ pr: GitHubService.PullRequest) -> some View {
-        HStack(spacing: 3) {
+        HStack(spacing: DefaultTheme.space(3)) {
             Text("+\(pr.additions)").foregroundStyle(DefaultTheme.groupHeader)
             Text("−\(pr.deletions)").foregroundStyle(DefaultTheme.danger)
         }
-        .font(.system(size: 10, weight: .medium, design: .monospaced))
+        .themeFont(size: 10, weight: .medium, design: .monospaced)
         .fixedSize(horizontal: true, vertical: false)
     }
 
@@ -340,13 +338,13 @@ enum PRChips {
         let text = pr.failingChecks > 0 ? "\(pr.failingChecks) failing"
                  : pr.pendingChecks > 0 ? "\(pr.pendingChecks) pending"
                  : "CI ✓"
-        return HStack(spacing: 5) {
+        return HStack(spacing: DefaultTheme.space(5)) {
             Circle().fill(checksColor(pr)).frame(width: 6, height: 6)
             Text(text)
-                .font(.system(size: 10, weight: .semibold))
+                .themeFont(size: 10, weight: .semibold)
                 .foregroundStyle(checksColor(pr))
         }
-        .padding(.horizontal, 7).padding(.vertical, 2)
+        .padding(.horizontal, DefaultTheme.space(7)).padding(.vertical, DefaultTheme.space(2))
         .background(DefaultTheme.surfaceRaised, in: Capsule())
         .fixedSize()
         .help(checksSummary(pr))

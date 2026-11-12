@@ -23,7 +23,7 @@ struct SessionSidePanelView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             Menu {
                 if model.hasAgentBrowser(parentID) || canHaveAgentBrowser {
                     Button { model.showAgentBrowser(for: parentID) } label: {
@@ -41,12 +41,12 @@ struct SessionSidePanelView: View {
                     Label("New browser pane", systemImage: "plus")
                 }
             } label: {
-                HStack(spacing: 5) {
+                HStack(spacing: DefaultTheme.space(5)) {
                     Image(systemName: sourceIcon)
                         .font(.system(size: 10))
                         .foregroundStyle(DefaultTheme.accent)
                     Text(sourceTitle)
-                        .font(.system(size: 11, weight: .semibold))
+                        .themeFont(size: 11, weight: .semibold)
                         .foregroundStyle(DefaultTheme.primaryText)
                 }
             }
@@ -58,8 +58,8 @@ struct SessionSidePanelView: View {
                 model.closeSidePanel(for: parentID)
             }
         }
-        .padding(.horizontal, 10)
-        .frame(height: 34)
+        .padding(.horizontal, DefaultTheme.space(10))
+        .frame(height: DefaultTheme.space(34))
         .background(DefaultTheme.background)
     }
 
@@ -95,11 +95,11 @@ struct SessionSidePanelView: View {
                                   defaultWidth: model.agentDefaultWidth(for: parentID))
                 .id(ObjectIdentifier(browser))
         } else {
-            VStack(spacing: 8) {
+            VStack(spacing: DefaultTheme.space(8)) {
                 Text("The agent's browser")
                     .foregroundStyle(DefaultTheme.secondaryText)
                 Text("It opens the first time claude uses it — or pick it in the menu above to sign in to your app first.")
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.mutedText)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 300)
@@ -109,11 +109,11 @@ struct SessionSidePanelView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: DefaultTheme.space(8)) {
             Text("Nothing to show")
                 .foregroundStyle(DefaultTheme.secondaryText)
             Text("Pick a browser in the menu above")
-                .font(.system(size: 12))
+                .themeFont(size: 12)
                 .foregroundStyle(DefaultTheme.mutedText)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
