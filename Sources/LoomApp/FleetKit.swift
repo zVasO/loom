@@ -91,7 +91,10 @@ struct FleetRing: View {
 
     var body: some View {
         ZStack {
-            Circle().stroke(DefaultTheme.line2, lineWidth: 3)
+            // The text at 13 % — the charter's marked hairline, by its
+            // formula: a theme's own edge can be a full black line, and an
+            // empty gauge then read as a full one.
+            Circle().stroke(DefaultTheme.primaryText.opacity(0.13), lineWidth: 3)
             Circle()
                 .trim(from: 0, to: min(1, max(0, fraction ?? 0)))
                 .stroke(color, lineWidth: 3)
