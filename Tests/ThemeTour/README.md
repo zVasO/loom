@@ -32,7 +32,8 @@ swift run --skip-build LoomApp
   diff à montrer. Il écrit aussi une conversation inventée (deux échanges, du Markdown avec
   liste imbriquée, tableau et bloc de code, deux appels d'outils) dans
   `~/.claude/projects/loom-theme-tour/<id de la session>.jsonl`, là où Loom cherche celle
-  d'une session native (ADR-0023) : c'est ce que montre l'écran `chat`. C'est le seul fichier
+  d'une session native (ADR-0023) : c'est ce que montrent les écrans `chat` et `chat-narrow` (le
+  même, à côté du navigateur : la demi-largeur où un tableau doit passer à la ligne). C'est le seul fichier
   que la tournée laisse hors de `LOOM_SUPPORT_DIR` ; le dossier se supprime sans rien casser.
 - Les images vont dans `LOOM_TOUR_OUT`, un dossier par arrêt, avec `tour.json` (le design de
   chaque arrêt, ses écrans, les échecs). `screencapture` lit l'écran : il faut que le terminal
