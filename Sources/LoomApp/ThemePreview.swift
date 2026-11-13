@@ -107,7 +107,11 @@ struct ThemePreview: View {
         if let shadow = design.shadow, !shadow.isInvisible {
             parts.append("Shadow " + String(format: "%g %g %g %g", shadow.x, shadow.y, shadow.blur, shadow.spread))
         }
-        return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
+        // A no-break space inside each part: a narrow column breaks the
+        // line between two parts, never in the middle of one.
+        return parts.isEmpty ? nil : parts
+            .map { $0.replacingOccurrences(of: " ", with: "\u{00A0}") }
+            .joined(separator: "  ·  ")
     }
 
     /// The family a stack comes down to here; says so when the one the

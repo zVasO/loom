@@ -166,6 +166,7 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
                 .help("Open in system browser")
             }
         }
+        .themedBarButtons()
         .padding(.horizontal, DefaultTheme.space(8))
     }
 

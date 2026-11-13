@@ -349,3 +349,39 @@ public extension View {
             .themeShadow(.xs, radius: radius)
     }
 }
+
+// MARK: - Toolbar buttons
+
+/// A toolbar's button as the theme draws one: its raised surface, its
+/// radius, its edge.
+struct ThemedBarButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(DefaultTheme.secondaryText)
+            .frame(minWidth: DefaultTheme.size(28), minHeight: DefaultTheme.size(22))
+            .padding(.horizontal, DefaultTheme.space(3))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
+                .strokeBorder(DefaultTheme.line, lineWidth: 1))
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .contentShape(Rectangle())
+    }
+}
+
+struct ThemedBarButtons: ViewModifier {
+    func body(content: Content) -> some View {
+        if DefaultTheme.redraws {
+            content.buttonStyle(ThemedBarButtonStyle())
+        } else {
+            content
+        }
+    }
+}
+
+public extension View {
+    /// For the buttons of a toolbar the charter leaves to macOS (a web
+    /// panel's back, forward, reload): macOS's under the charter, the
+    /// theme's own under an imported theme followed whole — beside a
+    /// field the theme draws, they no longer look like another app's.
+    func themedBarButtons() -> some View { modifier(ThemedBarButtons()) }
+}

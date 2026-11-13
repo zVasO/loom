@@ -49,6 +49,7 @@ public struct BrowserPanelView: View {
                     .help("Open in system browser")
                 }
             }
+            .themedBarButtons()
             .padding(DefaultTheme.space(8))
 
             if !controller.tabs.isEmpty {
