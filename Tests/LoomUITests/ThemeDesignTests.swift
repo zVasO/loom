@@ -25,7 +25,7 @@ struct ThemeDesignTests {
                     #expect(palette.radius(value) == value)
                     #expect(palette.space(value) == value)
                 }
-                #expect(palette.tracking == 0)
+                #expect(palette.tracking(at: 13) == 0)
                 #expect(palette.line == palette.primaryText.opacity(0.08))
                 #expect(palette.line2 == palette.primaryText.opacity(0.13))
                 #expect(palette.line3 == palette.primaryText.opacity(0.21))
@@ -61,19 +61,20 @@ struct ThemeDesignTests {
         tokens.design = ThemeDesign(letterSpacing: 0.025)
         let spaced = ThemePalette(name: "T", isLight: false, tokens: tokens)
         #expect(Text("a").themeFont(size: 9, kerning: 0.5, palette: spaced)
-                == Text("a").font(.system(size: 9, weight: none, design: plain)).tracking(spaced.tracking + 0.5))
+                == Text("a").font(.system(size: 9, weight: none, design: plain)).tracking(spaced.tracking(at: 9) + 0.5))
     }
 
     // MARK: Geometry
 
-    @Test("a radius follows tweakcn's scale: xl a card, lg, md a control, sm a tab, a pill a tag")
+    @Test("a radius follows tweakcn's scale: xl a card, lg, md a control, sm a tab, a tag one step under")
     func radiusScale() {
         let design = ThemeDesign(radius: 10)
         #expect(design.radius(10) == 14, "rounded-xl: --radius + 4")
         #expect(design.radius(8) == 10, "rounded-lg: --radius")
         #expect(design.radius(6) == 8, "rounded-md: --radius - 2")
         #expect(design.radius(4) == 6, "rounded-sm: --radius - 4")
-        #expect(design.radius(3) == ThemeDesign.pill, "a tag is a Badge: rounded-full")
+        #expect(design.radius(3) == 5, "a tag stays one step under a key, as in the charter")
+        #expect(ThemeDesign(radius: 8).radius(3) == 3, "the charter's own tag at shadcn's usual 0.5rem")
         #expect(design.radius(9) == 13 && design.radius(7) == 9 && design.radius(5) == 7,
                 "in between, the distance to the nearest step is kept")
 
@@ -81,10 +82,11 @@ struct ThemeDesignTests {
         #expect(square.radius(10) == 4, "rounded-xl of a square theme is 4, as on tweakcn")
         #expect(square.radius(8) == 0 && square.radius(6) == 0 && square.radius(4) == 0,
                 "calc(0px - 2px) clamps to 0")
-        #expect(square.radius(3) == ThemeDesign.pill)
+        #expect(square.radius(3) == 0, "a square theme has square tags")
 
         let round = ThemeDesign(radius: 22.4)
         #expect(near(round.radius(10), 26.4) && near(round.radius(6), 20.4) && near(round.radius(4), 18.4))
+        #expect(near(round.radius(3), 17.4), "a round theme's tag is taller than its radius: a pill")
 
         #expect(ThemeDesign().radius(6) == 6, "no --radius: the charter's")
         #expect(ThemeDesign(spacing: 5).radius(10) == 10)
@@ -117,7 +119,7 @@ struct ThemeDesignTests {
         // A theme file written by hand: 0.25 (rem, where points are meant), or 16.
         #expect(ThemeDesign(spacing: 0.25).space(38) == 19, "held at 0.125rem")
         #expect(ThemeDesign(spacing: 16).space(10) == 20, "held at 0.5rem")
-        #expect(near(ThemeDesign(letterSpacing: 3).tracking, 8), "held at 0.5em")
+        #expect(near(ThemeDesign(letterSpacing: 3).tracking(at: 14), 8), "held at 0.5em")
         var tokens = ThemeFamily.loom.light
         tokens.design = ThemeDesign(spacing: 2.4)
         #expect(ThemePalette(name: "T", isLight: true, tokens: tokens).size(38) == 30.5)
@@ -145,15 +147,24 @@ struct ThemeDesignTests {
         #expect(ThemeStore.palette(of: .dracula, shapedBy: imported, dark: false).design == nil)
     }
 
-    @Test("the letter-spacing is one length for every text: the em of the body's 16 px")
+    @Test("the letter-spacing is the body's length from tweakcn's 14 px up; under it, looser in proportion, tighter less and less")
     func tracking() {
-        #expect(near(ThemeDesign(letterSpacing: 0.025).tracking, 0.4))
-        #expect(near(ThemeDesign(letterSpacing: -0.025).tracking, -0.4))
-        #expect(ThemeDesign().tracking == 0)
+        // CSS: 0.025em of the body's 16 px = 0.4 px, on a preview written at 14 px.
+        #expect(near(ThemeDesign(letterSpacing: 0.025).tracking(at: 14), 0.4))
+        #expect(near(ThemeDesign(letterSpacing: -0.025).tracking(at: 14), -0.4))
+        #expect(near(ThemeDesign(letterSpacing: -0.025).tracking(at: 21), -0.4), "never more than CSS gives")
+        // A looser theme keeps its proportion to smaller text.
+        #expect(near(ThemeDesign(letterSpacing: 0.025).tracking(at: 10.5), 0.3))
+        // A tighter one lets go: half at 12 pt, nothing at 10 — words stay apart.
+        #expect(near(ThemeDesign(letterSpacing: -0.025).tracking(at: 12), -0.2))
+        #expect(near(ThemeDesign(letterSpacing: -0.025).tracking(at: 13), -0.3))
+        #expect(ThemeDesign(letterSpacing: -0.025).tracking(at: 10) == 0)
+        #expect(ThemeDesign(letterSpacing: -0.025).tracking(at: 9) == 0)
+        #expect(ThemeDesign().tracking(at: 13) == 0)
         var tokens = ThemeFamily.loom.dark
         tokens.design = ThemeDesign(radius: 8, spacing: 5, letterSpacing: 0.05)
         let palette = ThemePalette(name: "T", isLight: false, tokens: tokens)
-        #expect(abs(palette.tracking - 0.8) < 1e-9)
+        #expect(abs(palette.tracking(at: 14) - 0.8) < 1e-9)
         #expect(palette.radius(6) == 6 && palette.radius(10) == 12)
         #expect(palette.space(8) == 10)
     }
@@ -182,6 +193,100 @@ struct ThemeDesignTests {
         #expect(ThemeShadow(color: "#000000", opacity: 0, blur: 3, spread: 0, x: 0, y: 1).isInvisible)
     }
 
+    // MARK: Legibility
+
+    @Test("an imported theme's labels and selection fills are told from their grounds")
+    func legibility() {
+        // tweakcn's neo-brutalism, light: a chart's yellow for branch names,
+        // and a muted fill that is the very colour of the sidebar.
+        var tokens = ThemeFamily.loom.light
+        tokens.background = "#F0F0F0"
+        tokens.contentBackground = "#FFFFFF"
+        tokens.surface = "#FFFFFF"
+        tokens.surfaceRaised = "#F0F0F0"
+        tokens.primaryText = "#000000"
+        tokens.secondaryText = "#333333"
+        tokens.mutedText = "#ABABAB"
+        tokens.branch = "#FFFF00"
+        tokens.danger = "#000000"
+        tokens.design = ThemeDesign(radius: 0, border: "#000000")
+        let grounds = [tokens.background, tokens.contentBackground, tokens.surface]
+        let read = tokens.sanitized
+        for ground in grounds {
+            #expect(ThemeTokens.contrast(read.branch, ground) >= 4.5, "a yellow label on white is moved toward the text")
+            #expect(ThemeTokens.contrast(read.mutedText, ground) >= 3)
+            #expect(ThemeTokens.contrast(read.surfaceRaised, ground) >= 1.06, "a selection is seen on the sidebar")
+        }
+        #expect(ThemeTokens.contrast(read.branch, "#FFFFFF") < 7, "no further than it takes")
+        #expect(read.secondaryText == "#333333" && read.danger == "#000000", "what is read already is left alone")
+        #expect(read.accent == tokens.accent && read.accentText == tokens.accentText, "fills are the theme's")
+        #expect(read.background == tokens.background && read.surface == tokens.surface)
+
+        #expect(read.cardBorder == tokens.cardBorder && read.design?.border == "#000000", "an edge that shows is the theme's")
+
+        // tweakcn's mono: a mid-grey primary. Filled with, it is the theme's;
+        // written with, it is never dimmer than the secondary text beside it.
+        var mono = ThemeFamily.loom.dark
+        mono.background = "#171717"
+        mono.contentBackground = "#0A0A0A"
+        mono.surface = "#191919"
+        mono.primaryText = "#FAFAFA"
+        mono.secondaryText = "#A1A1A1"
+        mono.accent = "#737373"
+        mono.design = ThemeDesign(radius: 0)
+        #expect(mono.sanitized.accentInk == "#FAFAFA", "a primary without a hue is written in the text colour")
+        #expect(mono.sanitized.accent == "#737373", "the fill is untouched")
+        // A primary with a hue keeps it, lightened no further than it takes to be read.
+        mono.accent = "#5B3FA8"
+        let ink = mono.sanitized.accentInk
+        let channels = ThemeTokens.rgb(ink)
+        #expect((channels?.blue ?? 0) > 1.2 * (channels?.green ?? 1), "still a violet")
+        for ground in [mono.background, mono.contentBackground, mono.surface] {
+            #expect(ThemeTokens.contrast(ink, ground) >= 4.5)
+        }
+        #expect(ThemeTokens.contrast(ink, mono.surface) < 5.5, "no paler than it takes")
+        #expect(ThemeFamily.loom.dark.accentInk == ThemeFamily.loom.dark.accent, "the charter writes in its accent")
+
+        // A pale red on a pastel page (pastel-dreams) is darkened, not drawn
+        // toward the mauve of the text: it still reads as red.
+        var pastel = ThemeFamily.loom.light
+        pastel.background = "#E9D8FD"
+        pastel.contentBackground = "#F5EEFE"
+        pastel.surface = "#FFFFFF"
+        pastel.primaryText = "#4B3A5C"
+        pastel.danger = "#F87171"
+        pastel.design = ThemeDesign(radius: 24)
+        let danger = ThemeTokens.rgb(pastel.sanitized.danger)
+        #expect(ThemeTokens.contrast(pastel.sanitized.danger, "#E9D8FD") >= 4.5)
+        #expect((danger?.red ?? 0) > 2 * (danger?.green ?? 1), "a signal keeps its hue")
+
+        // tweakcn's claymorphism: a border the colour of the sidebar it should part from the page.
+        tokens.cardBorder = "#F0F0F0"
+        tokens.design = ThemeDesign(radius: 20, border: "#F0F0F0", input: "#F0F0F0")
+        let parted = tokens.sanitized
+        for ground in grounds {
+            #expect(ThemeTokens.contrast(parted.cardBorder, ground) >= 1.12)
+            #expect(ThemeTokens.contrast(parted.design?.border ?? "", ground) >= 1.12)
+        }
+        #expect(parted.design?.radius == 20, "the rest of the design is untouched")
+        // A faint edge that can be seen is the theme's own.
+        tokens.cardBorder = "#E4E4E4"
+        tokens.design = ThemeDesign(radius: 20, border: "#E4E4E4")
+        #expect(tokens.sanitized.cardBorder == "#E4E4E4" && tokens.sanitized.design?.border == "#E4E4E4")
+
+        // Without a design — the charter's palettes, a hand-written theme — nothing moves.
+        tokens.design = nil
+        #expect(tokens.sanitized == tokens)
+        #expect(near(ThemeTokens.contrast("#000000", "#FFFFFF"), 21) && ThemeTokens.contrast("#777777", "#777777") == 1)
+    }
+
+    @Test("a design that only names edges recolours; any other value redraws")
+    func redraws() {
+        #expect(!ThemeDesign().redraws && !ThemeDesign(border: "#000000", input: "#111111").redraws)
+        #expect(ThemeDesign(radius: 0).redraws && ThemeDesign(fontSans: "Inter").redraws)
+        #expect(ThemeDesign(spacing: 4, border: "#000000").redraws)
+    }
+
     // MARK: Edges
 
     @Test("a theme with a border of its own is drawn with it; a field's edge is --input")
@@ -191,9 +296,9 @@ struct ThemeDesignTests {
         let palette = ThemePalette(name: "T", isLight: true, tokens: tokens)
         #expect(palette.line == ThemePalette.color("#E5E5E5"))
         #expect(palette.fieldLine == ThemePalette.color("#D4D4D4"), "shadcn's Input: border-input")
-        #expect(palette.line2 == ThemePalette.color(ThemeTokens.mix("#E5E5E5", with: tokens.primaryText, amount: 0.15)),
-                "the stronger hairlines are the border, a step towards the text — never --input")
-        #expect(palette.line3 == ThemePalette.color(ThemeTokens.mix("#E5E5E5", with: tokens.primaryText, amount: 0.3)))
+        #expect(palette.line2 == ThemePalette.color(ThemeTokens.mix("#E5E5E5", with: tokens.primaryText, amount: 0.06)),
+                "the stronger hairlines are the border, the charter's step towards the text — never --input")
+        #expect(palette.line3 == ThemePalette.color(ThemeTokens.mix("#E5E5E5", with: tokens.primaryText, amount: 0.14)))
         #expect(palette.wash == palette.surfaceRaised.opacity(0.5), "shadcn's hover:bg-muted/50")
         #expect(palette.wash2 == palette.surfaceRaised, "and its selected bg-muted")
 
@@ -245,7 +350,7 @@ struct ThemeDesignTests {
         family.colorsOnly = true
         let colours = family.palette(dark: false)
         #expect(colours.radius(6) == 6 && colours.radius(10) == 10 && colours.radius(3) == 3)
-        #expect(colours.space(8) == 8 && colours.tracking == 0)
+        #expect(colours.space(8) == 8 && colours.tracking(at: 13) == 0)
         #expect(colours.design == ThemeDesign(border: "#000000", input: "#111111"), "only the edges are left")
         #expect(colours.line == ThemePalette.color("#000000") && colours.fieldLine == ThemePalette.color("#111111"))
         #expect(family.palette(dark: true).line == ThemePalette.color("#FFFFFF"))

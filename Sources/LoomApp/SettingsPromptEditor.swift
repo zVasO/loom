@@ -119,7 +119,7 @@ struct PromptEditor: View {
                         .foregroundStyle(DefaultTheme.primaryText)
                     Text(isDefault ? "default" : "customized")
                         .themeFont(size: 9, weight: .semibold)
-                        .foregroundStyle(isDefault ? DefaultTheme.secondaryText : DefaultTheme.accent)
+                        .foregroundStyle(isDefault ? DefaultTheme.secondaryText : DefaultTheme.accentInk)
                         .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(1))
                         .background(isDefault ? DefaultTheme.surfaceRaised : DefaultTheme.accent.opacity(0.14),
                                     in: Capsule())

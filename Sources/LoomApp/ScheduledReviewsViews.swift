@@ -242,7 +242,7 @@ private struct ReviewScheduleEditor: View {
                 .frame(width: 150)
                 TextField("GitHub search — empty: every open PR",
                           text: targetField(target.id, \.query, fallback: target.query, in: schedule))
-                    .textFieldStyle(.roundedBorder)
+                    .themedField()
                     .themeFont(size: 11, design: .monospaced)
                 Menu {
                     ForEach(model.prFilters) { filter in
@@ -444,7 +444,7 @@ private struct AutoReviewRow: View {
                 HStack(spacing: DefaultTheme.space(6)) {
                     Text("#\(item.pr.number)")
                         .themeFont(size: 11, weight: .bold, design: .monospaced)
-                        .foregroundStyle(DefaultTheme.accent)
+                        .foregroundStyle(DefaultTheme.accentInk)
                     Text(item.pr.title)
                         .themeFont(size: 12, weight: .semibold)
                         .foregroundStyle(DefaultTheme.primaryText)

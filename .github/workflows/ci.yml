@@ -12,6 +12,14 @@ on:
         description: "Also run the agent browser self-test (LOOM_AUTOTEST) on both engines"
         type: boolean
         default: false
+      themes:
+        description: "Run the theme tour instead of the suites: Loom under each theme, a picture per screen"
+        type: boolean
+        default: false
+      themes_plan:
+        description: "The tour's stops (LOOM_TOUR_PLAN, see ThemeTour.swift); the usual ones when empty"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -29,6 +37,8 @@ env:
 jobs:
   swift:
     name: swift build + test (macOS)
+    # A run started for the theme tour is about pictures: the suites ran on the push.
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.themes) }}
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -93,6 +103,7 @@ jobs:
 
   node:
     name: node tests (${{ matrix.os }})
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.themes) }}
     strategy:
       fail-fast: false
       matrix:
@@ -187,4 +198,64 @@ jobs:
         with:
           name: agent-browser-report-${{ matrix.engine }}
           path: /tmp/loom-agent-browser-report.json
+          if-no-files-found: warn
+
+  # Loom on a real display under each theme of a plan — the built-in ones and
+  # tweakcn exports followed whole — with a picture of every screen: what no
+  # unit test sees of a theme's radius, spacing, fonts and shadows.
+  themes:
+    name: theme tour
+    if: github.event_name == 'workflow_dispatch' && inputs.themes
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -v beta | sort -V | tail -1)"
+      # The test job's build, when it left one: read, never written.
+      - uses: actions/cache/restore@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}-${{ github.sha }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}-
+            spm-${{ runner.os }}-
+      - name: Build
+        run: swift build
+      # A runner's display is 1024x768: the largest mode it offers, so the
+      # window is a laptop's and nothing is truncated for lack of room.
+      - name: Display
+        continue-on-error: true
+        run: |
+          system_profiler SPDisplaysDataType | grep -E "Resolution|UI Looks like" || true
+          brew install displayplacer >/dev/null 2>&1 || { echo "displayplacer not installed"; exit 0; }
+          mkdir -p "$RUNNER_TEMP/theme-tour" && displayplacer list > "$RUNNER_TEMP/theme-tour/display.txt" || true
+          id="$(displayplacer list | awk -F': ' '/Persistent screen id/ { print $2; exit }')"
+          line="$(displayplacer list | grep -E '^ *mode [0-9]+: res:' | grep -v 'scaling:on' \
+            | sed -E 's/^ *mode ([0-9]+): res:([0-9]+)x([0-9]+).*/\1 \2 \3/' \
+            | awk '$2 <= 1920 && $3 <= 1200 { print $2 * $3, $1 }' | sort -n | tail -1)"
+          if [ -n "$id" ] && [ -n "$line" ]; then displayplacer "id:$id mode:${line#* }" || true; fi
+          system_profiler SPDisplaysDataType | grep -E "Resolution|UI Looks like" || true
+      # No claude on a runner: a stand-in on PATH paints the sessions' screens.
+      - name: Tour
+        timeout-minutes: 15
+        env:
+          LOOM_AUTOTEST: themes
+          LOOM_SUPPORT_DIR: ${{ runner.temp }}/loom-tour
+          LOOM_TOUR_THEMES: ${{ github.workspace }}/Tests/ThemeTour/themes
+          LOOM_TOUR_PROJECT: ${{ github.workspace }}
+          LOOM_TOUR_OUT: ${{ runner.temp }}/theme-tour
+          LOOM_TOUR_PLAN: ${{ inputs.themes_plan || 'loom:dark,loom:light:core,default:light:core,neo-brutalism:light,claymorphism:light:core,violet-bloom:dark,notebook:light:core,mono:dark:core,kodama-grove:dark:core,pastel-dreams:light:core,neo-brutalism:dark:colours:core' }}
+        run: |
+          export PATH="$PWD/Tests/ThemeTour/bin:$PATH"
+          swift run --skip-build LoomApp
+      - name: Index (log)
+        if: always()
+        run: cat "$RUNNER_TEMP/theme-tour/tour.json" 2>/dev/null || echo "no index"
+      - name: Pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-tour
+          path: ${{ runner.temp }}/theme-tour
           if-no-files-found: warn

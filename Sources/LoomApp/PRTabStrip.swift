@@ -85,14 +85,14 @@ struct PRTabButton: View {
     var body: some View {
         HStack(spacing: DefaultTheme.space(6)) {
             AppIcon("arrow.triangle.pull", size: 11)
-                .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isActive ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
             if let sessionState {
                 Circle().fill(DefaultTheme.badgeColor(for: sessionState)).frame(width: 5, height: 5)
                     .help("Review session: " + DefaultTheme.label(for: sessionState))
             }
             Text("#\(tab.pr.number)")
                 .themeFont(size: 10, weight: .bold, design: .monospaced)
-                .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isActive ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
             Text(tab.pr.title)
                 .themeFont(size: 11, weight: isActive ? .semibold : .regular)
                 .italic(tab.isPreview)

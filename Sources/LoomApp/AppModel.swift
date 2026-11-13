@@ -2127,6 +2127,10 @@ public final class AppModel {
     /// (SidePanelModel.swift).
     var sidePanels: [SessionID: SidePanelState] = [:]
 
+    /// How each session shows — its terminal or its conversation — once the
+    /// user has chosen (SessionViewMode.swift).
+    var sessionViewModes: [SessionID: SessionViewMode] = [:]
+
     /// Each session agent's own browser (ADR-0014), created on its first use
     /// (AgentBrowserAPI.swift).
     var agentBrowsers: [SessionID: any AgentBrowserEngine] = [:]
@@ -2425,6 +2429,7 @@ public final class AppModel {
         await manager?.archive(id)
         sessions.removeAll { $0.id == id }
         forgetSidePanel(id)
+        forgetViewMode(id)
         forgetAgentBrowser(id)
         // A live session archived from its card exits through `.archived`, a
         // terminal state the reducer never leaves: no `.completed` follows,
@@ -2468,6 +2473,43 @@ public final class AppModel {
         return await Task.detached(priority: .utility) {
             (try? store.recentTransitions(limit: limit)) ?? []
         }.value
+    }
+
+    /// What the journal says a session waits on.
+    enum SessionWait: Equatable {
+        /// Nothing the agent announced.
+        case nothing
+        /// Its turn ended on a question: claude's input field is free, and
+        /// the next line typed there is the answer.
+        case question
+        /// A permission prompt is the last thing the agent announced: a line
+        /// typed now could answer it.
+        case permission
+    }
+
+    /// Why a session waits, if it does — asked before typing into it. A
+    /// question and a permission prompt are both `needsInput`, and a prompt
+    /// left unanswered does not even stay so: on the terminal's silence the
+    /// heuristic takes the state to `idle`. So what was guessed from a still
+    /// screen is passed over, and the last thing the agent said itself is
+    /// what counts.
+    func sessionWait(_ session: SessionID) async -> SessionWait {
+        let id = session.rawValue.uuidString
+        let rows = await recentTransitions(limit: 1_000).filter { $0.sessionID == id }
+        guard let last = rows.last else { return .nothing }
+        if last.to == .needsInput, last.event == SessionManager.stopOnQuestionLabel { return .question }
+        let said = rows.last { $0.source != .heuristic || $0.to == .working }
+        if let said, said.source == .hook, said.to == .needsInput,
+           said.event != SessionManager.stopOnQuestionLabel {
+            return .permission
+        }
+        return .nothing
+    }
+
+    /// Whether the session waits because its turn ended on a question (the
+    /// journal says so) rather than on a permission prompt.
+    func endedOnQuestion(_ session: SessionID) async -> Bool {
+        await sessionWait(session) == .question
     }
 
     private func observeStates(of manager: SessionManager) async {

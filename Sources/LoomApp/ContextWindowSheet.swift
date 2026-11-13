@@ -69,6 +69,7 @@ struct ContextWindowSheet: View {
         .background(DefaultTheme.surface)
         .preferredColorScheme(DefaultTheme.colorScheme)
         .font(DefaultTheme.bodyFont)
+        .tint(DefaultTheme.controlTint)
         .task(id: state) { await refresh() }
     }
 
@@ -77,7 +78,7 @@ struct ContextWindowSheet: View {
     private var header: some View {
         HStack(spacing: DefaultTheme.space(10)) {
             AppIcon("cylinder", size: 17)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
             Text("Context Window")
                 .themeFont(size: 16, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)

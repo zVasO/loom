@@ -154,7 +154,7 @@ public struct AgentBrowserPanelView: View {
             }
             if case .prompt(let defaultText) = dialog.kind {
                 TextField("", text: $promptText)
-                    .textFieldStyle(.roundedBorder)
+                    .themedField()
                     .onAppear { promptText = defaultText ?? "" }
                     // Return answers only from the banner's own field: a
                     // window-wide default button would take claude's Return.

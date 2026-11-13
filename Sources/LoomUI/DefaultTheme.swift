@@ -56,9 +56,26 @@ public enum DefaultTheme {
     /// `space`, but never under four fifths — a row still holds its text.
     public static func size(_ charter: CGFloat) -> CGFloat { palette.size(charter) }
 
-    /// The theme's letter-spacing, in points — the same for every text; 0
+    /// The theme's letter-spacing for a text of this size, in points; 0
     /// without one. A text with a tracking of its own adds it to this.
-    public static var tracking: CGFloat { palette.tracking }
+    public static func tracking(at size: CGFloat) -> CGFloat { palette.tracking(at: size) }
+
+    /// True under an imported theme followed whole: the views that the
+    /// charter leaves to macOS (a bordered text field) are drawn in the
+    /// theme instead.
+    public static var redraws: Bool { palette.design?.redraws ?? false }
+
+    /// The empty part of a ring or a gauge: the card's edge in the
+    /// charter; the text at 14 % under an imported theme, whose edge can
+    /// be a full black line.
+    public static var track: Color {
+        palette.design == nil ? palette.cardBorder : palette.primaryText.opacity(0.14)
+    }
+
+    /// The colour of the controls macOS draws — switches, segmented
+    /// pickers, progress bars: an imported theme's accent (shadcn's Switch
+    /// is `bg-primary`), macOS's own for a built-in theme.
+    public static var controlTint: Color? { palette.design == nil ? nil : palette.accent }
 
     /// The theme's font for this size, weight and design — the system's
     /// when the theme names none. Text takes it through `themeFont(…)`,
@@ -76,8 +93,18 @@ public enum DefaultTheme {
         return palette.font(size: 13)
     }
 
+    /// The font of a table's header, which macOS draws: the theme's sans
+    /// at the header's own small size — it would otherwise take the body
+    /// font, larger than the rows under it. nil when the theme names no
+    /// family of its own: the system's header stays what it is.
+    public static var tableHeaderFont: Font? {
+        bodyFont == nil ? nil : palette.font(size: 11, weight: .medium)
+    }
+
     // Accent (filled buttons: contrasting text on top, like the reference)
     public static var accent: Color { palette.accent }
+    /// The accent as a text or an icon colour — a fill keeps `accent`.
+    public static var accentInk: Color { palette.accentInk }
     public static var accentText: Color { palette.accentText }
 
     // Text

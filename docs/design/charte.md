@@ -35,9 +35,16 @@ valeur de la charte dans `DefaultTheme.radius(6)`, `DefaultTheme.space(8)`,
 `.themeFont(size: 12)`, `.themeShadow(.sm, radius: 10)`, et le thème répond.
 
 - Rayons sur l'échelle de tweakcn : 10 → `--radius` + 4, 8 → `--radius`,
-  6 → `--radius` − 2, 4 → `--radius` − 4, 3 (un tag) → une pilule.
+  6 → `--radius` − 2, 4 → `--radius` − 4, 3 (un tag) → `--radius` − 5.
 - Marges, écarts, hauteurs de contrôles et de lignes × `--spacing` / 0,25rem.
-- Texte en `--font-sans`, mono en `--font-mono`, interlettrage `--letter-spacing`.
+- Texte en `--font-sans`, mono en `--font-mono`, interlettrage `--letter-spacing`
+  (sa longueur CSS à partir de 14 pt ; en dessous, sa proportion — et de moins
+  en moins quand il resserre, jusqu'à rien à 10 pt).
+- Interrupteurs et sélecteurs de macOS à l'accent du thème (`DefaultTheme.controlTint`).
+- Un champ de saisie : `.themedField()` (jamais `.textFieldStyle(.roundedBorder)`), ou
+  `.fieldEdge()` sur un champ dessiné à la main.
+- L'accent qui écrit (libellé actif, icône, lien) : `DefaultTheme.accentInk` ; l'accent qui
+  remplit : `DefaultTheme.accent`. La piste vide d'un anneau : `DefaultTheme.track`.
 - Bords en `--border` (contrôles : `--input`), cartes avec l'ombre du thème.
 
 Ne jamais écrire le nombre nu ni `.font(.system(size:))` dans une vue — sauf

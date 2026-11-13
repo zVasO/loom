@@ -22,7 +22,7 @@ struct ExtensionLaunchSheet: View {
         VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
             HStack(spacing: DefaultTheme.space(8)) {
                 Image(systemName: "puzzlepiece.extension")
-                    .foregroundStyle(DefaultTheme.accent)
+                    .foregroundStyle(DefaultTheme.accentInk)
                 Text("\(request.extensionName) wants to start a session")
                     .themeFont(size: 15, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
@@ -54,7 +54,7 @@ struct ExtensionLaunchSheet: View {
 
             field("TITLE") {
                 TextField("Session title", text: $title)
-                    .textFieldStyle(.roundedBorder)
+                    .themedField()
             }
 
             if !badges.isEmpty {
@@ -173,7 +173,7 @@ struct ExtensionConsentSheet: View {
             HStack(spacing: DefaultTheme.space(10)) {
                 Image(systemName: request.manifest.icon ?? "puzzlepiece.extension")
                     .font(.system(size: 20))
-                    .foregroundStyle(DefaultTheme.accent)
+                    .foregroundStyle(DefaultTheme.accentInk)
                 VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                     Text(heading)
                         .themeFont(size: 15, weight: .semibold)
@@ -254,7 +254,7 @@ struct ExtensionHostsSheet: View {
         VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
             HStack(spacing: DefaultTheme.space(8)) {
                 Image(systemName: "network")
-                    .foregroundStyle(DefaultTheme.accent)
+                    .foregroundStyle(DefaultTheme.accentInk)
                 Text(request.hosts.count == 1
                      ? "\(request.extensionName) wants to connect to a new site"
                      : "\(request.extensionName) wants to connect to new sites")

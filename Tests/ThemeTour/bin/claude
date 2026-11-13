@@ -1,0 +1,69 @@
+#!/bin/bash
+# A stand-in for claude where the theme tour runs (CI has none): it paints a
+# session's screen in the terminal's sixteen colours, writes the conversation
+# the chat view shows, and waits, like an agent that has just answered. Of
+# Loom's own flags only --session-id is read: it names the conversation's file.
+esc=$'\033'
+dim="${esc}[2m"; bold="${esc}[1m"; off="${esc}[0m"
+orange="${esc}[38;5;208m"; green="${esc}[32m"; red="${esc}[31m"; cyan="${esc}[36m"; grey="${esc}[90m"
+printf '%s\n' \
+  "${orange}╭──────────────────────────────────────────────╮${off}" \
+  "${orange}│${off} ${bold}✻ Welcome to Claude Code${off}                     ${orange}│${off}" \
+  "${orange}│${off}   ${dim}/help for help, /status for your setup${off}     ${orange}│${off}" \
+  "${orange}╰──────────────────────────────────────────────╯${off}" \
+  "" \
+  "${grey}>${off} make the imported theme follow tweakcn to the letter" \
+  "" \
+  "${green}⏺${off} I'll read how a theme reaches the views first." \
+  "" \
+  "${green}⏺${off} ${bold}Read${off}(Sources/LoomUI/ThemeStore.swift)" \
+  "  ${dim}⎿  Read 912 lines${off}" \
+  "" \
+  "${green}⏺${off} ${bold}Update${off}(Sources/LoomUI/ThemeDesign.swift)" \
+  "  ${dim}⎿  Updated with 4 additions and 2 removals${off}" \
+  "     ${grey}41${off} ${red}-        if charter <= 3 { return Self.pill }${off}" \
+  "     ${grey}41${off} ${green}+        if charter <= 3 { return min(charter, radius) }${off}" \
+  "" \
+  "${green}⏺${off} ${bold}Bash${off}(swift test --filter ThemeDesignTests)" \
+  "  ${dim}⎿  ${off}${cyan}✔ Test run with 38 tests passed after 0.412 seconds.${off}" \
+  "" \
+  "${green}⏺${off} The radius scale now follows the theme. ${dim}(12s · ↓ 2.1k tokens)${off}" \
+  "" \
+  "${grey}╭──────────────────────────────────────────────────────────────╮${off}" \
+  "${grey}│${off} >                                                            ${grey}│${off}" \
+  "${grey}╰──────────────────────────────────────────────────────────────╯${off}" \
+  "  ${dim}? for shortcuts${off}"
+# In a worktree of its own (a linked worktree's .git is a file), the agent
+# has changed something: the session's Git panel has a diff to show.
+if [ -f .git ] && [ -f README.md ]; then
+  printf '\n## Themes\n\nAn imported theme is followed to the letter.\n' >> README.md
+  printf 'struct Radius {\n    let card = 14\n    let control = 8\n}\n' > Radius.swift
+fi
+# The conversation of the session, where claude keeps it and where the chat
+# view looks for it: one file per native session, named after the id Loom
+# imposed. No usage figures in it: nothing for Usage & costs to count.
+session=""; previous=""
+for argument in "$@"; do
+  if [ "$previous" = "--session-id" ]; then session="$argument"; fi
+  previous="$argument"
+done
+if [ -n "$session" ]; then
+  # claude names the file in lowercase; macOS's bash 3.2 has no ${session,,}.
+  id=$(printf '%s' "$session" | tr '[:upper:]' '[:lower:]')
+  folder="$HOME/.claude/projects/loom-theme-tour"
+  mkdir -p "$folder"
+  # Quoted: nothing in the JSON is the shell's. sed writes the session's id.
+  sed "s/@SESSION@/$id/g" > "$folder/$id.jsonl" <<'JSONL'
+{"parentUuid":null,"isSidechain":false,"sessionId":"@SESSION@","type":"user","message":{"role":"user","content":"Make the imported theme follow tweakcn to the letter."},"uuid":"00000000-0000-4000-8000-000000000001","timestamp":"2026-09-02T18:13:02.118Z"}
+{"parentUuid":"00000000-0000-4000-8000-000000000001","isSidechain":false,"sessionId":"@SESSION@","type":"assistant","message":{"id":"msg_tour_01","type":"message","role":"assistant","content":[{"type":"text","text":"I'll read how a theme reaches the views first."}]},"uuid":"00000000-0000-4000-8000-000000000002","timestamp":"2026-09-02T18:13:04.302Z"}
+{"parentUuid":"00000000-0000-4000-8000-000000000002","isSidechain":false,"sessionId":"@SESSION@","type":"assistant","message":{"id":"msg_tour_01","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_tour_read","name":"Read","input":{"file_path":"/Users/ada/loom/Sources/LoomUI/ThemeDesign.swift"}}]},"uuid":"00000000-0000-4000-8000-000000000003","timestamp":"2026-09-02T18:13:04.911Z"}
+{"parentUuid":"00000000-0000-4000-8000-000000000003","isSidechain":false,"sessionId":"@SESSION@","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_tour_read","type":"tool_result","content":"     1\timport SwiftUI\n     2\t\n     3\t/// What an imported theme brings beyond its colours (ADR-0022).\n     4\tpublic struct ThemeDesign: Equatable, Sendable {\n     5\t    public var radius: CGFloat?\n     6\t    public var spacing: CGFloat?\n     7\t}"}]},"uuid":"00000000-0000-4000-8000-000000000004","timestamp":"2026-09-02T18:13:05.040Z"}
+{"parentUuid":"00000000-0000-4000-8000-000000000004","isSidechain":false,"sessionId":"@SESSION@","type":"assistant","message":{"id":"msg_tour_02","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_tour_bash","name":"Bash","input":{"command":"swift test --filter ThemeDesignTests","description":"Run the theme design tests"}}]},"uuid":"00000000-0000-4000-8000-000000000005","timestamp":"2026-09-02T18:13:09.527Z"}
+{"parentUuid":"00000000-0000-4000-8000-000000000005","isSidechain":false,"sessionId":"@SESSION@","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_tour_bash","type":"tool_result","content":"✔ Test run with 38 tests passed after 0.412 seconds.","is_error":false}]},"uuid":"00000000-0000-4000-8000-000000000006","timestamp":"2026-09-02T18:13:12.660Z"}
+{"parentUuid":"00000000-0000-4000-8000-000000000006","isSidechain":false,"sessionId":"@SESSION@","type":"assistant","message":{"id":"msg_tour_03","type":"message","role":"assistant","content":[{"type":"text","text":"## The radius follows the theme\n\nAn imported theme is now followed **to the letter**: `DefaultTheme.radius(6)` hands back the theme's own `--radius`, as [tweakcn](https://tweakcn.com) exports it.\n\n- Geometry\n  - radius, from `--radius`\n  - spacing, from `--spacing`\n- Type\n  - fonts, from `--font-sans` and `--font-mono`\n  - letter-spacing, from `--tracking-normal`\n\n| Token | Charter | neo-brutalism |\n| --- | --- | --- |\n| Card radius | 10 | 0 |\n| Control radius | 6 | 0 |\n| Tag radius | 3 | 0 |\n\n```swift\nfunc radius(_ charter: CGFloat) -> CGFloat {\n    guard let radius = design?.radius else { return charter }\n    return charter <= 3 ? min(charter, radius) : radius * charter / 10\n}\n```"}]},"uuid":"00000000-0000-4000-8000-000000000007","timestamp":"2026-09-02T18:13:16.073Z"}
+{"parentUuid":"00000000-0000-4000-8000-000000000007","isSidechain":false,"sessionId":"@SESSION@","type":"user","message":{"role":"user","content":"Does a built-in theme still draw as before?"},"uuid":"00000000-0000-4000-8000-000000000008","timestamp":"2026-09-02T18:13:41.950Z"}
+{"parentUuid":"00000000-0000-4000-8000-000000000008","isSidechain":false,"sessionId":"@SESSION@","type":"assistant","message":{"id":"msg_tour_04","type":"message","role":"assistant","content":[{"type":"text","text":"Yes. A theme without a design of its own hands every charter value back unchanged, and the tour pictures it beside the imported ones."}]},"uuid":"00000000-0000-4000-8000-000000000009","timestamp":"2026-09-02T18:13:44.281Z"}
+JSONL
+fi
+# Until the session is closed.
+exec cat > /dev/null

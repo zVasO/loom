@@ -24,6 +24,10 @@ Chromium, par le protocole DevTools : `node --test --test-concurrency=1 Tests/Ag
 (et `LOOM_CHROMIUM=<chrome-headless-shell> swift test` pour les tests Swift de bout en bout) ;
 l'app entière : `LOOM_AUTOTEST=agent-browser LOOM_AUTOTEST_ENGINE=chromium|webkit swift run LoomApp`
 (rapport et latences p50/p90 dans `/tmp/loom-agent-browser-report.json`).
+Affichage sous les thèmes : `LOOM_AUTOTEST=themes` promène l'app sous chaque thème d'un plan
+— les intégrés, et les exports tweakcn de `Tests/ThemeTour/themes` suivis en entier ou pour
+leurs couleurs — et enregistre une image par écran (`Tests/ThemeTour/README.md`) ; en CI,
+le job « theme tour » (lancé à la main, entrée `themes`) rend les images en artefact.
 
 Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 étapes).
 
@@ -42,6 +46,15 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   (sa doc ment sur la thread-safety — voir ADR-0007), `TerminalSurface` `@Observable`
   dont l'écran n'est jamais vide, transcripts bruts + dé-ANSI-isés en continu,
   rotation 10 Mo.
+- **Vue conversation** (ADR-0023) : dans l'onglet Sessions, le sélecteur
+  « Terminal | Chat » de l'en-tête (⌘⇧M) montre la même session comme une
+  conversation — réponses de claude en Markdown (titres, listes imbriquées,
+  tableaux, blocs de code), appels d'outils repliés sur une ligne avec leur
+  résultat, champ de message en bas (Retour envoie, ⇧Retour va à la ligne). Elle
+  est lue dans le fichier de la session native (`~/.claude/projects/…/<uuid>.jsonl`),
+  jamais dans l'écran, et suit un `/resume` ou un `/clear`. Ce qu'on y écrit est
+  tapé dans le terminal de la session : claude continue d'y tourner, et c'est là
+  qu'on répond à ses demandes de permission.
 - **Git** : worktrees avec collisions départagées, status porcelain v2, diff
   (non-suivis compris), suppression refusée si travail non commité.
 - **Pull requests** : onglet PR sur le `gh` de l'utilisateur — projets locaux,
@@ -128,10 +141,11 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   Guide : [`docs/extensions.md`](docs/extensions.md).
 - **Thèmes** : 9 familles intégrées, chacune en clair et en sombre ; apparence
   Système / Clair / Sombre (suivi de macOS en direct) ; override par projet ;
-  import d'un thème tweakcn/shadcn (nom, URL ou CSS collé), suivi à la lettre :
+  import d'un thème tweakcn/shadcn (nom, URL ou CSS collé), toujours en entier :
   couleurs, bordures, rayon, espacement, polices (téléchargées depuis Google
-  Fonts si le Mac ne les a pas), interlettrage et ombres — ou, d'un interrupteur,
-  ses couleurs seulement (ADR-0022) ; aperçu sur des
+  Fonts si le Mac ne les a pas), interlettrage et ombres ; dans Réglages › Thèmes,
+  à côté de Clair/Sombre, on choisit de le suivre à la lettre ou pour ses couleurs
+  seulement (ADR-0022) ; aperçu sur des
   composants factices avec bascule clair/sombre ; sémantique des badges invariante ;
   en option, le thème appliqué à Claude Code lui-même, en direct (ADR-0013).
 

@@ -44,7 +44,7 @@ struct SessionSidePanelView: View {
                 HStack(spacing: DefaultTheme.space(5)) {
                     Image(systemName: sourceIcon)
                         .font(.system(size: 10))
-                        .foregroundStyle(DefaultTheme.accent)
+                        .foregroundStyle(DefaultTheme.accentInk)
                     Text(sourceTitle)
                         .themeFont(size: 11, weight: .semibold)
                         .foregroundStyle(DefaultTheme.primaryText)

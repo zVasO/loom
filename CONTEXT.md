@@ -60,6 +60,10 @@ _Avoid_ : split view, tiroir (le tiroir est celui de l'onglet PR)
 L'enregistrement intégral et continu de la sortie d'un terminal, conservé après la fin de la session.
 _Avoid_ : log, historique (« historique » = la liste des sessions passées)
 
+**Vue conversation** :
+La seconde façon de voir une session dans l'onglet Sessions (ADR-0023) : la conversation de sa session native en messages — Markdown rendu, appels d'outils repliés, champ de réponse —, lue dans le fichier `.jsonl` que l'agent tient lui-même. L'autre est son terminal, où l'agent tourne et où l'on répond à ses demandes de permission ; « Terminal | Chat » passe de l'une à l'autre. Ce qu'on y écrit est tapé dans le terminal.
+_Avoid_ : transcript (c'est l'enregistrement d'un terminal), historique (la liste des sessions passées)
+
 **Reprise** :
 Relance d'une session `interrupted` via le mécanisme natif de l'agent (ex. `claude --resume <session native>`).
 _Avoid_ : restauration (les PTY ne survivent pas ; on reprend la conversation, pas le process)
@@ -138,6 +142,10 @@ Ensemble de couleurs couvrant deux espaces : UI et Terminal. Résolu en cascade 
 **Design (d'un thème)** :
 Ce qu'un thème dit au-delà de ses couleurs : rayon, espacement, polices, interlettrage, bords et ombre. Seul un thème qui l'apporte en a un (un import tweakcn, ADR-0022) ; sans lui, c'est la charte qui s'applique. Les vues lui passent la valeur de la charte et reçoivent la sienne.
 _Avoid_ : style (le « style de document » est celui des rapports), skin, look
+
+**Tournée des thèmes** :
+L'app réelle promenée sous chaque thème d'un plan, une image par écran (`LOOM_AUTOTEST=themes`, `Tests/ThemeTour`) — le contrôle à l'écran de ce qu'un thème importé fait à l'affichage.
+_Avoid_ : snapshot tests (rien n'est comparé à une image de référence), captures
 
 **Override projet** :
 Choix d'un projet de dévier du thème global — soit thème complet, soit accent seul.

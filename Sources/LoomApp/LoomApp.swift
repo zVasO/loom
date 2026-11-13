@@ -85,6 +85,11 @@ struct LoomApp: App {
                     NotificationCenter.default.post(name: .loomToggleSidePanel, object: nil)
                 }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
+                // ⌘M is macOS's Minimise; with ⇧ it was nobody's.
+                Button("Show Session as Chat") {
+                    NotificationCenter.default.post(name: .loomToggleSessionView, object: nil)
+                }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
                 Button("Show Fleet Panel") {
                     NotificationCenter.default.post(name: .loomToggleFleetPanel, object: nil)
                 }
@@ -112,6 +117,11 @@ extension Notification.Name {
     static let loomSelectAllTerminal = Notification.Name("loom.selectAllTerminal")
     /// ⌘⇧B — the browser beside the selected session's terminal.
     static let loomToggleSidePanel = Notification.Name("loom.toggleSidePanel")
+    /// ⌘⇧M — the selected session as its terminal, or as its conversation.
+    static let loomToggleSessionView = Notification.Name("loom.toggleSessionView")
     /// ⌘J — fold or unfold the fleet panel under the Sessions view.
     static let loomToggleFleetPanel = Notification.Name("loom.toggleFleetPanel")
+    /// The theme tour (LOOM_AUTOTEST=themes) asks a view for a state only
+    /// it holds — a tab, a panel, a sheet; the object names it.
+    static let loomTourShow = Notification.Name("loom.tour.show")
 }

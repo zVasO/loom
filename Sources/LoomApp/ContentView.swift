@@ -103,7 +103,7 @@ struct LogoMark: View {
         } else {
             Image(systemName: "square.stack.3d.down.right.fill")
                 .font(.system(size: size * 0.75))
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
         }
     }
 }
@@ -190,6 +190,7 @@ struct ContentView: View {
         .background(DefaultTheme.background)
         .preferredColorScheme(DefaultTheme.colorScheme)
         .font(DefaultTheme.bodyFont)
+        .tint(DefaultTheme.controlTint)
         .onAppear {
             model.start()
             applyTheme()
@@ -227,6 +228,20 @@ struct ContentView: View {
             applyTheme()
         }
         .task {
+            // The app under each theme of a plan, a picture per screen
+            // (ThemeTour): what a whole imported theme does to the display.
+            if ProcessInfo.processInfo.environment["LOOM_AUTOTEST"] == "themes" {
+                let tour = ThemeTour(model: model, driver: ThemeTour.Driver(
+                    show: { tab = $0 },
+                    select: { selected = $0 },
+                    focusSettings: { settingsFocus = $0 },
+                    present: { overlay in
+                        paletteShown = overlay == .palette
+                        usageShown = overlay == .usage
+                        newSessionSheetShown = overlay == .newSession
+                    }))
+                exit(await tour.run() ? 0 : 1)
+            }
             // The agent's browser against a real engine (ADR-0014, ADR-0016):
             // LOOM_AUTOTEST_ENGINE=webkit|chromium (WebKit when unsaid; Chromium
             // from LOOM_CHROMIUM, else the one Loom finds). A report in
@@ -820,6 +835,13 @@ struct ProjectsView: View {
             }
         }
         .background(DefaultTheme.background)
+        .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
+            guard let name = note.object as? String, name.hasPrefix("project-"),
+                  let wanted = ProjectTab.allCases.first(where: {
+                      $0.rawValue.lowercased() == String(name.dropFirst("project-".count))
+                  }) else { return }
+            projectTab = wanted
+        }
         .onChange(of: current?.id) {
             projectTab = .overview
             filesPath = ""
@@ -891,7 +913,7 @@ struct ProjectsView: View {
                             HStack(spacing: DefaultTheme.space(8)) {
                                 Text(String(describing: change.kind).prefix(1).uppercased())
                                     .themeFont(size: 10, weight: .bold, design: .monospaced)
-                                    .foregroundStyle(DefaultTheme.accent)
+                                    .foregroundStyle(DefaultTheme.accentInk)
                                     .frame(width: 14)
                                 Text(change.path)
                                     .themeFont(size: 11, design: .monospaced)
@@ -902,6 +924,7 @@ struct ProjectsView: View {
                     }
                     .padding(DefaultTheme.space(12))
                     .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+                    .cardEdge()
                     .themeShadow(.sm, radius: 10)
                 }
             }
@@ -953,6 +976,7 @@ struct ProjectsView: View {
                 }
             }
             .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+            .cardEdge()
             .themeShadow(.sm, radius: 10)
         }
     }
@@ -961,7 +985,7 @@ struct ProjectsView: View {
         HStack(spacing: DefaultTheme.space(8)) {
             Image(systemName: isDirectory ? "folder.fill" : "doc")
                 .font(.system(size: 11))
-                .foregroundStyle(isDirectory ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isDirectory ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
                 .frame(width: 16)
             Text(name)
                 .themeFont(size: 12, design: .monospaced)
@@ -1063,6 +1087,7 @@ struct ProjectsView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, DefaultTheme.space(60))
                 .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+                .cardEdge()
                 .themeShadow(.sm, radius: 10)
             }
         }
@@ -1119,7 +1144,7 @@ struct ProjectsView: View {
     private func header(_ project: ProjectRecord) -> some View {
         HStack(spacing: DefaultTheme.space(12)) {
             AppIcon("folder.fill", size: 20.5)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
                 .frame(width: 40, height: 40)
                 .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
                 .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
@@ -1352,7 +1377,7 @@ struct AgentBrowserStackTab: View {
     var body: some View {
         HStack(spacing: DefaultTheme.space(6)) {
             AppIcon("sparkles", size: 11)
-                .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isActive ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
             Text("Agent")
                 .themeFont(size: 11, weight: isActive ? .semibold : .regular)
                 .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
@@ -1450,7 +1475,7 @@ struct RuleCard: View {
     var body: some View {
         HStack(alignment: .top, spacing: DefaultTheme.space(10)) {
             AppIcon("doc.text", size: 15.5)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
                 .frame(width: DefaultTheme.size(30), height: DefaultTheme.size(30))
                 .background(DefaultTheme.accent.opacity(0.12),
                             in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
@@ -1495,7 +1520,7 @@ struct PRRow: View {
                 .help(PRChips.checksSummary(pr))
             Text("#\(pr.number)")
                 .themeFont(size: 12, weight: .semibold, design: .monospaced)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text(pr.title)
                     .themeFont(size: 13, weight: .medium)
@@ -1573,7 +1598,7 @@ struct PRTourView: View {
         VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
             HStack(spacing: DefaultTheme.space(8)) {
                 Image(systemName: "sparkles")
-                    .foregroundStyle(DefaultTheme.accent)
+                    .foregroundStyle(DefaultTheme.accentInk)
                 Text(tour.pitch)
                     .themeFont(size: 13, weight: .medium)
                     .foregroundStyle(DefaultTheme.primaryText)
@@ -1588,7 +1613,7 @@ struct PRTourView: View {
                 HStack(alignment: .top, spacing: DefaultTheme.space(10)) {
                     Text("\(index + 1)")
                         .themeFont(size: 11, weight: .bold, design: .monospaced)
-                        .foregroundStyle(DefaultTheme.accent)
+                        .foregroundStyle(DefaultTheme.accentInk)
                         .frame(width: 20, height: 20)
                         .background(DefaultTheme.accent.opacity(0.12), in: Circle())
                     VStack(alignment: .leading, spacing: DefaultTheme.space(3)) {
@@ -1755,7 +1780,7 @@ struct ProjectSidebarRow: View {
                 .opacity(isSelected ? 1 : 0)
             Image(systemName: isSelected ? "folder.fill" : "folder")
                 .font(.system(size: 12))
-                .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isSelected ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
             Text(project.name)
                 .themeFont(size: 13, weight: isSelected ? .semibold : .regular)
                 .foregroundStyle(isSelected || hovered ? DefaultTheme.primaryText
@@ -2039,6 +2064,12 @@ struct SessionsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .loomToggleSidePanel)) { _ in
             if case .session(let id) = selected {
                 model.toggleSidePanel(for: model.stackParentID(of: id))
+            }
+        }
+        // ⌘⇧M: the selected session as its terminal, or as its conversation.
+        .onReceive(NotificationCenter.default.publisher(for: .loomToggleSessionView)) { _ in
+            if case .session(let id) = selected {
+                model.toggleViewMode(for: id)
             }
         }
         // ⌘T only exists in a terminal or browser context, and NECESSARILY
@@ -2442,7 +2473,8 @@ struct SessionsView: View {
         .background(DefaultTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: radius))
         .overlay(RoundedRectangle(cornerRadius: radius).stroke(DefaultTheme.cardBorder, lineWidth: 1))
-        .themeShadow(.sm, radius: compactSessions ? 6 : 10)
+        // No theme shadow: these are a sidebar's rows, a few points apart —
+        // a hard shadow welded each one to the next.
     }
 
     /// SES-04: THE stack's terminal group — a single row, the tab detail
@@ -2453,7 +2485,7 @@ struct SessionsView: View {
         let count = shells.count + dormants.count
         return HStack(spacing: DefaultTheme.space(8)) {
             AppIcon("terminal", size: 13)
-                .foregroundStyle(shells.isEmpty ? DefaultTheme.mutedText : DefaultTheme.accent)
+                .foregroundStyle(shells.isEmpty ? DefaultTheme.mutedText : DefaultTheme.accentInk)
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 HStack(spacing: DefaultTheme.space(6)) {
                     Text(count > 1 ? "Terminals" : (shells.first?.title ?? dormants.first?.title ?? "Terminal"))
@@ -2509,7 +2541,7 @@ struct SessionsView: View {
                              panes: [AppModel.BrowserPane]) -> some View {
         HStack(spacing: DefaultTheme.space(8)) {
             AppIcon("globe", size: 13)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 HStack(spacing: DefaultTheme.space(6)) {
                     Text(panes.count > 1 ? "Web" : (panes.first?.title ?? "Web"))
@@ -2559,7 +2591,7 @@ struct SessionsView: View {
         let pages = model.agentBrowserPageCount(parent.id)
         return HStack(spacing: DefaultTheme.space(8)) {
             AppIcon("sparkles", size: 13)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
                 .symbolEffect(.pulse, isActive: running)
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text("Agent browser")
@@ -2627,7 +2659,7 @@ struct SessionsView: View {
                              parent: AppModel.SessionItem?) -> some View {
         HStack(spacing: DefaultTheme.space(8)) {
             AppIcon("globe", size: 13)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text(pane.title)
                     .themeFont(size: 12, weight: .medium)
@@ -2826,10 +2858,25 @@ struct SessionsView: View {
 private struct StackChrome: ViewModifier {
     let isSelected: Bool
     func body(content: Content) -> some View {
+        // Under a theme of its own radius, the ring runs alongside the
+        // card's corner, two points in — and the tint stays inside it: a
+        // stadium ring over a square tint left wedges at its corners.
+        let redraws = DefaultTheme.redraws
+        let ring = redraws ? max(0, DefaultTheme.radius(10) - DefaultTheme.space(2)) : DefaultTheme.radius(6)
         content
-            .background(isSelected ? DefaultTheme.accent.opacity(0.08) : .clear)
+            .background {
+                if isSelected {
+                    if redraws {
+                        RoundedRectangle(cornerRadius: ring)
+                            .fill(DefaultTheme.accent.opacity(0.08))
+                            .padding(DefaultTheme.space(2))
+                    } else {
+                        DefaultTheme.accent.opacity(0.08)
+                    }
+                }
+            }
             .overlay(
-                RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
+                RoundedRectangle(cornerRadius: ring)
                     .stroke(isSelected ? DefaultTheme.accent : .clear, lineWidth: 1)
                     .padding(DefaultTheme.space(2)))
     }
@@ -2878,6 +2925,9 @@ struct SessionDetailView: View {
     @State private var lastDraggedWidth: CGFloat?
     /// The detail's width, for settling a reveal the agent asked for.
     @State private var detailWidth: CGFloat = 0
+    /// Bumped when the terminal comes back in place of the chat view: it
+    /// takes the keyboard again, whoever holds it.
+    @State private var terminalFocusRequest = 0
 
     private struct PanelDrag: Equatable {
         var startWidth: CGFloat
@@ -2898,6 +2948,10 @@ struct SessionDetailView: View {
     private var parentID: SessionID { model.stackParentID(of: sessionID) }
 
     private var panel: SidePanelState { model.sidePanel(for: parentID) }
+
+    /// The terminal, or the conversation as a chat (ADR-0023). The model's:
+    /// this view is rebuilt at every tab switch.
+    private var viewMode: SessionViewMode { model.viewMode(for: sessionID) }
 
     private func sideLayout(width: CGFloat) -> SidePanelLayout {
         // The drag's last width bridges the frame between the gesture's reset
@@ -2962,14 +3016,31 @@ struct SessionDetailView: View {
                     ZStack(alignment: .trailing) {
                         // Always the first child: toggling the panel never
                         // recreates the terminal (no focus grab, no first-fit race).
-                        TerminalPane(model: model, sessionID: sessionID,
-                                     role: split ? .sessionSplit : .session,
-                                     fitSuspended: panelDrag != nil,
-                                     otherShape: other)
+                        if viewMode == .chat {
+                            // The chat view REPLACES the terminal, in its
+                            // frame: laid over a mounted pane, it would lose
+                            // its clicks and its wheel to the terminal's
+                            // window-wide monitors. The surface is the
+                            // model's: the pane that comes back paints it as
+                            // after a tab switch, and its first fit — the
+                            // same frame, the same grid — is dropped by the
+                            // runtime. No resize, no repaint.
+                            SessionChatPane(model: model, sessionID: sessionID,
+                                            onShowTerminal: { model.setViewMode(.terminal, for: sessionID) })
+                        } else {
+                            TerminalPane(model: model, sessionID: sessionID,
+                                         role: split ? .sessionSplit : .session,
+                                         fitSuspended: panelDrag != nil,
+                                         otherShape: other,
+                                         focusRequest: terminalFocusRequest)
+                        }
                         if gitShown {
                             gitPanel
                                 .frame(width: min(380, columnWidth))
-                                .shadow(color: .black.opacity(0.45), radius: 20, x: -8)
+                                // A light theme takes a third of it: the same
+                                // black smeared a grey cloud over the terminal.
+                                .shadow(color: .black.opacity(DefaultTheme.colorScheme == .dark ? 0.45 : 0.14),
+                                        radius: 20, x: -8)
                                 .transition(.move(edge: .trailing))
                         }
                     }
@@ -2990,6 +3061,8 @@ struct SessionDetailView: View {
                 }
                 .animation(nil, value: split)
                 .animation(nil, value: layout.panelWidth)
+                // Nor a fade between the terminal and the chat view.
+                .animation(nil, value: viewMode)
                 .onAppear { detailWidth = geo.size.width }
                 .onChange(of: geo.size.width) { _, width in detailWidth = width }
             }
@@ -3010,6 +3083,10 @@ struct SessionDetailView: View {
         }
         .onChange(of: panel.pendingReveal, initial: true) { settlePendingReveal() }
         .onChange(of: detailWidth) { settlePendingReveal() }
+        // Back from the chat view, the terminal is where typing goes.
+        .onChange(of: viewMode) { _, mode in
+            if mode == .terminal { terminalFocusRequest += 1 }
+        }
         .task(id: InfoKey(shown: infoShown, state: item?.state)) {
             guard infoShown else { return }
             let snapshot = await model.sessionInfoSnapshot(sessionID)
@@ -3045,6 +3122,10 @@ struct SessionDetailView: View {
                 StatusLabel(state)
             }
             Spacer()
+            // A shell has no conversation: its terminal is all there is to show.
+            if item?.isShell != true {
+                SessionViewModeToggle(mode: viewMode) { model.setViewMode($0, for: sessionID) }
+            }
             // v3 — pipeline: queue the next goal, it launches when this ends.
             GhostButton(systemImage: "arrow.turn.down.right") {
                 followUpDraft = model.followUps[sessionID] ?? ""
@@ -3089,6 +3170,7 @@ struct SessionDetailView: View {
                 .background(DefaultTheme.surface)
                 .preferredColorScheme(DefaultTheme.colorScheme)
                 .font(DefaultTheme.bodyFont)
+                .tint(DefaultTheme.controlTint)
             }
             // The browser beside the terminal (the stack's side panel). A
             // pulsing dot: the agent is using its browser out of sight — the
@@ -3137,6 +3219,18 @@ struct SessionDetailView: View {
         } ?? "Context window — nothing recorded yet")
         .sheet(isPresented: $contextShown) {
             ContextWindowSheet(model: model, sessionID: sessionID) { contextShown = false }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
+            switch note.object as? String {
+            case "git":
+                gitShown.toggle()
+                if gitShown { Task { gitData = await model.gitPanel(for: sessionID) } }
+            case "context": contextShown = true
+            case "context-close": contextShown = false
+            case "chat": model.setViewMode(.chat, for: sessionID)
+            case "terminal": model.setViewMode(.terminal, for: sessionID)
+            default: break
+            }
         }
     }
 
@@ -3238,6 +3332,7 @@ struct SessionDetailView: View {
         .background(DefaultTheme.surface)
         .preferredColorScheme(DefaultTheme.colorScheme)
         .font(DefaultTheme.bodyFont)
+        .tint(DefaultTheme.controlTint)
     }
 
     private func infoRow(_ label: String, _ value: String,
@@ -3385,6 +3480,59 @@ struct SessionDetailView: View {
         case .deleted: "minus"
         case .renamed: "arrow.right"
         case .untracked: "questionmark"
+        }
+    }
+}
+
+/// "Terminal | Chat" in a session's breadcrumb: the fleet filter's well
+/// (2 pt inset, 22 pt segments), an icon before each word.
+private struct SessionViewModeToggle: View {
+    let mode: SessionViewMode
+    let onSelect: (SessionViewMode) -> Void
+
+    var body: some View {
+        HStack(spacing: DefaultTheme.space(2)) {
+            Segment(title: "Terminal", systemImage: "terminal", isOn: mode == .terminal) {
+                onSelect(.terminal)
+            }
+            .help("The terminal claude runs in (⌘⇧M)")
+            Segment(title: "Chat", systemImage: "bubble.left", isOn: mode == .chat) {
+                onSelect(.chat)
+            }
+            .help("The conversation as messages, with a field to answer from (⌘⇧M)")
+        }
+        .padding(DefaultTheme.space(2))
+        .background(DefaultTheme.background, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).strokeBorder(DefaultTheme.line, lineWidth: 1))
+        .fixedSize()
+    }
+
+    private struct Segment: View {
+        let title: String
+        let systemImage: String
+        let isOn: Bool
+        let action: () -> Void
+        @State private var hovered = false
+
+        var body: some View {
+            Button(action: action) {
+                HStack(spacing: DefaultTheme.space(5)) {
+                    AppIcon(systemImage, size: 12)
+                    Text(title.uppercased())
+                        .themeFont(size: 11, weight: .medium, design: .monospaced, tracking: 0.55)
+                }
+                .foregroundStyle(isOn || hovered ? DefaultTheme.primaryText : DefaultTheme.mutedText)
+                .padding(.horizontal, DefaultTheme.space(8))
+                .frame(height: DefaultTheme.size(22))
+                .background(isOn ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4))
+                    .strokeBorder(isOn ? DefaultTheme.line2 : .clear, lineWidth: 1))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovered = $0 }
+            .animation(.hover, value: hovered)
+            .animation(.hover, value: isOn)
         }
     }
 }
@@ -3558,7 +3706,7 @@ struct SidebarSessionCard: View, Equatable {
                     if agentBrowsing {
                         Image(systemName: "globe")
                             .font(.system(size: 9))
-                            .foregroundStyle(DefaultTheme.accent)
+                            .foregroundStyle(DefaultTheme.accentInk)
                             .help("claude is using its browser")
                     }
                     if childCount > 0 {
@@ -3649,7 +3797,7 @@ struct GoalFieldView: View {
             } label: {
                 Text("×\(draft.fanOut)")
                     .themeFont(size: 12, weight: .semibold, design: .monospaced)
-                    .foregroundStyle(draft.fanOut > 1 ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                    .foregroundStyle(draft.fanOut > 1 ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
                     .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(4))
                     .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             }

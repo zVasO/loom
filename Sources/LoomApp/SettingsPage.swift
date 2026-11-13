@@ -145,7 +145,10 @@ private struct SettingsSidebar: View {
                     .foregroundStyle(DefaultTheme.primaryText)
                     .padding(.horizontal, DefaultTheme.space(8))
                     .padding(.bottom, DefaultTheme.space(2))
-                ForEach(SettingsAnchor.groups) { entry in
+                // Identified by name, not by anchor: the page's headings
+                // carry the anchors, and a jump to a group must scroll the
+                // page — not this list, which held the same identity.
+                ForEach(SettingsAnchor.groups, id: \.id.rawValue) { entry in
                     VStack(alignment: .leading, spacing: 1) {
                         row(entry.id)
                         ForEach(entry.items) { item in
@@ -170,12 +173,12 @@ private struct SettingsSidebar: View {
                 if isGroup {
                     Image(systemName: anchor.icon)
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(inActiveGroup ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                        .foregroundStyle(inActiveGroup ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
                         .frame(width: 16)
                 }
                 Text(anchor.title)
                     .themeFont(size: isGroup ? 12.5 : 12, weight: isGroup ? .semibold : .regular)
-                    .foregroundStyle(isActive ? DefaultTheme.accent
+                    .foregroundStyle(isActive ? DefaultTheme.accentInk
                                      : (isGroup ? DefaultTheme.primaryText : DefaultTheme.secondaryText))
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -245,6 +248,8 @@ struct SettingsPage: View {
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
     @State private var importShown = false
+    /// What the import sheet opens on — a theme handed to it rather than pasted.
+    @State private var importPrefill: String?
     @State private var clearingAgentData = false
     /// The model reads the same keys (AgentBrowserAPI.swift); AppStorage keeps
     /// the switches showing what was just set.
@@ -578,7 +583,7 @@ struct SettingsPage: View {
                     .onChange(of: localOnlyOn) { _, on in model.agentBrowsersLocalOnly = on }
                     if localOnlyOn {
                         TextField("api.example.com, *.staging.example.com", text: $hostsDraft)
-                            .textFieldStyle(.roundedBorder)
+                            .themedField()
                             .themeFont(size: 12)
                             .onAppear { hostsDraft = model.agentBrowsersAllowedHosts }
                             .onSubmit { commitHosts() }
@@ -891,6 +896,7 @@ struct SettingsPage: View {
                     .themeFont(size: 12)
                     .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
                     .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                    .fieldEdge()
                     .frame(maxWidth: 220)
                 ColorPicker("", selection: $newBadgeColor, supportsOpacity: false)
                     .labelsHidden()
@@ -919,6 +925,9 @@ struct SettingsPage: View {
     /// pointer is on (else the chosen one) — in either variant.
     private var appearanceGroup: some View {
         let store = ThemeStore.shared
+        // Read here, not in the sheet's closure: set with `importShown` in
+        // one pass, the sheet would otherwise open on the value before.
+        let prefill = importPrefill
         return group(.appearance) {
             section(.appearanceMode) {
                 card {
@@ -966,7 +975,18 @@ struct SettingsPage: View {
             }
         }
         .sheet(isPresented: $importShown) {
-            ThemeImportSheet()
+            ThemeImportSheet(prefill: prefill)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
+            switch note.object as? String {
+            case "theme-import":
+                importPrefill = note.userInfo?["text"] as? String
+                importShown = true
+            case "theme-import-close":
+                importShown = false
+                importPrefill = nil
+            default: break
+            }
         }
     }
 
@@ -1019,7 +1039,7 @@ struct SettingsPage: View {
                     if index > 0 { cardDivider }
                     HStack(spacing: DefaultTheme.space(12)) {
                         AppIcon("folder.fill", size: 13)
-                            .foregroundStyle(DefaultTheme.accent)
+                            .foregroundStyle(DefaultTheme.accentInk)
                         Text(project.name)
                             .themeFont(size: 13)
                             .foregroundStyle(DefaultTheme.primaryText)
@@ -1121,7 +1141,7 @@ struct SettingsPage: View {
             HStack(spacing: DefaultTheme.space(10)) {
                 Image(systemName: installed.manifest.icon ?? "puzzlepiece.extension")
                     .font(.system(size: 13))
-                    .foregroundStyle(DefaultTheme.accent)
+                    .foregroundStyle(DefaultTheme.accentInk)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                     HStack(spacing: DefaultTheme.space(6)) {
@@ -1224,7 +1244,7 @@ private struct ThemeCard: View {
                 Spacer()
                 if isActive {
                     AppIcon("checkmark.circle.fill", size: 14.5)
-                        .foregroundStyle(DefaultTheme.accent)
+                        .foregroundStyle(DefaultTheme.accentInk)
                 }
             }
             .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(8))

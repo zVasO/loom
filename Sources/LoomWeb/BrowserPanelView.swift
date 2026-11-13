@@ -33,7 +33,7 @@ public struct BrowserPanelView: View {
                 Button { controller.activeWebView?.goForward() } label: { Image(systemName: "chevron.right") }
                 Button { controller.activeWebView?.reload() } label: { Image(systemName: "arrow.clockwise") }
                 TextField("Address or search…", text: $address)
-                    .textFieldStyle(.roundedBorder)
+                    .themedField()
                     .onSubmit {
                         controller.navigateActive(to: address)
                     }
@@ -49,6 +49,7 @@ public struct BrowserPanelView: View {
                     .help("Open in system browser")
                 }
             }
+            .themedBarButtons()
             .padding(DefaultTheme.space(8))
 
             if !controller.tabs.isEmpty {
@@ -101,7 +102,7 @@ struct BrowserTabButton: View {
         HStack(spacing: DefaultTheme.space(6)) {
             Image(systemName: "globe")
                 .font(.system(size: 9))
-                .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isActive ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
             Text(title.isEmpty ? "New tab" : title)
                 .themeFont(size: 11, weight: isActive ? .semibold : .regular)
                 .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText

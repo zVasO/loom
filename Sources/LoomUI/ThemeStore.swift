@@ -103,15 +103,100 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
         return tokens
     }
 
-    /// The tokens with `surfaceRaised` brought back to the surfaces' side: a
-    /// raised surface is a step above `surface`, never its opposite. Some
-    /// imported themes (tweakcn's Claude) carry a near-white chip colour
-    /// in a dark variant; painted under dark-theme text it hid the editors,
-    /// tabs and hovers that sit on it.
+    /// The WCAG contrast of two colours, from 1 (the same) to 21.
+    public static func contrast(_ hex: String, _ other: String) -> Double {
+        let a = luminance(hex), b = luminance(other)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    /// `hex` as it is when it stands at `minimum` to 1 against every
+    /// ground; else moved toward `ink`, a step at a time, until it does.
+    static func legible(_ hex: String, on grounds: [String], minimum: Double,
+                        toward ink: String, step: Double = 0.05) -> String {
+        var result = hex
+        var amount = 0.0
+        while amount < 1, grounds.contains(where: { contrast(result, $0) < minimum }) {
+            amount = min(1, amount + step)
+            result = mix(hex, with: ink, amount: amount)
+        }
+        return result
+    }
+
+    /// The accent as an ink: the colour of an active tab's label, of a
+    /// link, of a selected row's icon. A shadcn page fills with `--primary`
+    /// and writes on it; Loom also writes in it — and a theme whose primary
+    /// is a mid grey made every active item dimmer than its neighbours.
+    /// Under an imported theme it reads at 4.5 to 1 at least, lightened or
+    /// darkened no further than that, its hue kept; the charter's is the
+    /// accent.
+    public var accentInk: String {
+        guard design != nil else { return accent }
+        // A primary without a hue (shadcn's own near-black, mono's grey)
+        // has nothing to tell an active label by but its strength: it is
+        // written in the text colour, as shadcn writes an active item
+        // (`text-accent-foreground`).
+        if let c = Self.rgb(accent), max(c.red, c.green, c.blue) - min(c.red, c.green, c.blue) < 0.08 {
+            return primaryText
+        }
+        let grounds = [background, contentBackground, surface]
+        return Self.legible(accent, on: grounds, minimum: 4.5, toward: inkPole)
+    }
+
+    /// Black on a light page, white on a dark one: where a coloured label
+    /// goes to be read without losing its hue.
+    var inkPole: String { Self.luminance(contentBackground) > 0.4 ? "#000000" : "#FFFFFF" }
+
+    /// The tokens as the app can be read with them.
+    ///
+    /// `surfaceRaised` is brought back to the surfaces' side: a raised
+    /// surface is a step above `surface`, never its opposite. Some imported
+    /// themes (tweakcn's Claude) carry a near-white chip colour in a dark
+    /// variant; painted under dark-theme text it hid the editors, tabs and
+    /// hovers that sit on it.
+    ///
+    /// An imported theme (one with a design — the charter's palettes are
+    /// what they are) then gets what its own page never needed: Loom writes
+    /// labels in colours a shadcn page only fills with. A branch name in a
+    /// chart's yellow on a white card, a tertiary text at 2 to 1, a
+    /// selection filled with the very colour of the sidebar under it —
+    /// each is moved toward the text colour, no further than it takes to
+    /// be told from its ground.
     public var sanitized: ThemeTokens {
-        guard abs(Self.luminance(surfaceRaised) - Self.luminance(surface)) > 0.4 else { return self }
         var tokens = self
-        tokens.surfaceRaised = Self.mix(surface, with: primaryText, amount: 0.07)
+        if abs(Self.luminance(surfaceRaised) - Self.luminance(surface)) > 0.4 {
+            tokens.surfaceRaised = Self.mix(surface, with: primaryText, amount: 0.07)
+        }
+        guard design != nil else { return tokens }
+        let grounds = [tokens.background, tokens.contentBackground, tokens.surface]
+        func label(_ hex: String, _ minimum: Double) -> String {
+            Self.legible(hex, on: grounds, minimum: minimum, toward: primaryText)
+        }
+        // A colour that means something keeps its hue: darkened or
+        // lightened, not drawn toward a text colour that may be tinted — a
+        // pale red must still read as red.
+        func signal(_ hex: String, _ minimum: Double) -> String {
+            Self.legible(hex, on: grounds, minimum: minimum, toward: inkPole)
+        }
+        tokens.secondaryText = label(secondaryText, 3.5)
+        tokens.mutedText = label(mutedText, 3)
+        tokens.branch = signal(branch, 4.5)
+        tokens.danger = signal(danger, 4.5)
+        tokens.groupHeader = signal(groupHeader, 3)
+        // The fill of a selection, a chip, a track: told from all it lies on.
+        tokens.surfaceRaised = Self.legible(tokens.surfaceRaised, on: grounds, minimum: 1.06,
+                                            toward: primaryText, step: 0.02)
+        // An edge the very colour of what it borders — a theme that parts
+        // its panels by shadow alone, where Loom parts them by a rule. Only
+        // that one: a faint edge that can be seen (1.1 to 1 is common) is
+        // the theme's own, and stays.
+        func edge(_ hex: String) -> String {
+            guard Self.rgb(hex) != nil,
+                  grounds.contains(where: { Self.contrast(hex, $0) < 1.04 }) else { return hex }
+            return Self.legible(hex, on: grounds, minimum: 1.12, toward: primaryText, step: 0.02)
+        }
+        tokens.cardBorder = edge(cardBorder)
+        tokens.design?.border = design?.border.map(edge)
+        tokens.design?.input = design?.input.map(edge)
         return tokens
     }
 }
@@ -133,6 +218,8 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
     public let surfaceRaised: Color
     public let cardBorder: Color
     public let accent: Color
+    /// The accent where it is written with, not filled with (`ThemeTokens.accentInk`).
+    public let accentInk: Color
     public let accentText: Color
     public let primaryText: Color
     public let secondaryText: Color
@@ -174,6 +261,7 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
         surfaceRaised = Self.color(tokens.surfaceRaised)
         cardBorder = Self.color(tokens.cardBorder)
         accent = Self.color(tokens.accent)
+        accentInk = Self.color(tokens.accentInk)
         accentText = Self.color(tokens.accentText)
         primaryText = Self.color(tokens.primaryText)
         secondaryText = Self.color(tokens.secondaryText)
@@ -193,9 +281,11 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
         let edge = border.map(Self.color) ?? text.opacity(0.08)
         line = edge
         fieldLine = input.map(Self.color) ?? edge
-        line2 = border.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.15)) }
+        // The charter's steps (8, 13 and 21 % of the text) from the theme's
+        // own edge: the same distance further toward the text.
+        line2 = border.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.06)) }
             ?? text.opacity(0.13)
-        line3 = border.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.3)) }
+        line3 = border.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.14)) }
             ?? text.opacity(0.21)
         wash = tokens.design == nil ? text.opacity(0.025) : raised.opacity(0.5)
         wash2 = tokens.design == nil ? text.opacity(0.045) : raised
@@ -561,15 +651,14 @@ public final class ThemeStore {
     }
 
     /// A tweakcn theme, from what the user pasted: its CSS export, parsed
-    /// here; or a name / URL, fetched from tweakcn's registry. The whole
-    /// theme, or — `colorsOnly` — its colours alone. The family comes back
-    /// as soon as it is read, unsaved and without its fonts: the caller
-    /// previews it, asks `withFonts` for them — they redraw the preview as
-    /// they arrive — then saves it.
-    public func importTweakcn(_ input: String, colorsOnly: Bool = false) async throws -> ThemeFamily {
-        var family = try await readTweakcn(input)
-        family.colorsOnly = colorsOnly
-        return family
+    /// here; or a name / URL, fetched from tweakcn's registry. Always the
+    /// whole theme — how much of it Loom follows is chosen later, where the
+    /// theme is picked (`setColorsOnly`). The family comes back as soon as
+    /// it is read, unsaved and without its fonts: the caller previews it,
+    /// asks `withFonts` for them — they redraw the preview as they arrive —
+    /// then saves it.
+    public func importTweakcn(_ input: String) async throws -> ThemeFamily {
+        try await readTweakcn(input)
     }
 
     private func readTweakcn(_ input: String) async throws -> ThemeFamily {

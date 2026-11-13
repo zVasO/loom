@@ -146,7 +146,7 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
                     .help("Reload")
             }
             TextField("Address or search…", text: $address)
-                .textFieldStyle(.roundedBorder)
+                .themedField()
                 .focused($addressFocused)
                 .onSubmit { submitAddress() }
                 .onExitCommand {
@@ -166,6 +166,7 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
                 .help("Open in system browser")
             }
         }
+        .themedBarButtons()
         .padding(.horizontal, DefaultTheme.space(8))
     }
 

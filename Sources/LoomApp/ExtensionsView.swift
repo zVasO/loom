@@ -52,6 +52,9 @@ struct ExtensionsView: View {
             GhostButton("Manage in Settings", systemImage: "gearshape") { onOpenSettings() }
                 .padding(DefaultTheme.space(8))
         }
+        // The whole column, not the width of what it lists: a theme whose
+        // sidebar is not the colour of its page shows the difference.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(DefaultTheme.background)
     }
 
@@ -63,7 +66,7 @@ struct ExtensionsView: View {
             HStack(spacing: DefaultTheme.space(10)) {
                 Image(systemName: installed.manifest.icon ?? "puzzlepiece.extension")
                     .font(.system(size: 13))
-                    .foregroundStyle(selected ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                    .foregroundStyle(selected ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                     Text(installed.manifest.name)
@@ -122,7 +125,7 @@ struct ExtensionsView: View {
         VStack(spacing: 0) {
             HStack(spacing: DefaultTheme.space(8)) {
                 Image(systemName: installed.manifest.icon ?? "puzzlepiece.extension")
-                    .foregroundStyle(DefaultTheme.accent)
+                    .foregroundStyle(DefaultTheme.accentInk)
                 Text(installed.manifest.name)
                     .themeFont(size: 13, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
@@ -298,7 +301,7 @@ struct ExtensionOverlayView: View {
                 // The traffic lights float over this corner (hidden title bar).
                 Spacer().frame(width: 70)
                 Image(systemName: "puzzlepiece.extension")
-                    .foregroundStyle(DefaultTheme.accent)
+                    .foregroundStyle(DefaultTheme.accentInk)
                 Text(overlay.extensionName)
                     .themeFont(size: 12, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)

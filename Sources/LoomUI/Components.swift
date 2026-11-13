@@ -206,7 +206,7 @@ public struct BarIconButton: View {
     public var body: some View {
         Button(action: action) {
             AppIcon(systemImage, size: 15)
-                .foregroundStyle(isActive ? DefaultTheme.accent
+                .foregroundStyle(isActive ? DefaultTheme.accentInk
                                  : hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
                 .frame(width: DefaultTheme.size(28), height: DefaultTheme.size(26))
                 .background(isActive ? DefaultTheme.surfaceRaised
@@ -303,7 +303,7 @@ public struct ContextRing: View {
     public var body: some View {
         ZStack {
             Circle()
-                .stroke(DefaultTheme.cardBorder, lineWidth: lineWidth)
+                .stroke(DefaultTheme.track, lineWidth: lineWidth)
             Circle()
                 .trim(from: 0, to: min(1, max(0, fraction ?? 0)))
                 .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
@@ -312,4 +312,86 @@ public struct ContextRing: View {
         }
         .frame(width: size, height: size)
     }
+}
+
+// MARK: - Fields
+
+/// A text field as the theme draws one. The charter leaves a bordered
+/// field to macOS; an imported theme followed whole draws it itself —
+/// shadcn's Input: the theme's radius, `border-input`, `shadow-xs` — so a
+/// form does not mix the system's rounded fields with the theme's.
+struct ThemedField: ViewModifier {
+    func body(content: Content) -> some View {
+        if DefaultTheme.redraws {
+            content
+                .textFieldStyle(.plain)
+                .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(4))
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                .fieldEdge()
+        } else {
+            content.textFieldStyle(.roundedBorder)
+        }
+    }
+}
+
+public extension View {
+    /// What `.textFieldStyle(.roundedBorder)` was: macOS's field under the
+    /// charter, the theme's own under an imported theme followed whole.
+    func themedField() -> some View { modifier(ThemedField()) }
+
+    /// The edge shadcn gives a Card (`border`), for a card the charter
+    /// draws as a fill alone: nothing under the charter; under an imported
+    /// theme followed whole, the card's edge — its shadow falls on two
+    /// sides only, and a card without an edge looked cut on the others.
+    @MainActor
+    func cardEdge(radius: CGFloat = 10) -> some View {
+        overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(radius))
+            .strokeBorder(DefaultTheme.redraws ? DefaultTheme.cardBorder : Color.clear, lineWidth: 1))
+    }
+
+    /// The edge and the shadow shadcn gives an Input, for a field the
+    /// charter draws bare (a filter in a sidebar): nothing under the
+    /// charter, the theme's under an imported theme followed whole.
+    @MainActor
+    func fieldEdge(radius: CGFloat = 6) -> some View {
+        overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(radius))
+            .strokeBorder(DefaultTheme.redraws ? DefaultTheme.fieldBorder : Color.clear, lineWidth: 1))
+            .themeShadow(.xs, radius: radius)
+    }
+}
+
+// MARK: - Toolbar buttons
+
+/// A toolbar's button as the theme draws one: its raised surface, its
+/// radius, its edge.
+struct ThemedBarButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(DefaultTheme.secondaryText)
+            .frame(minWidth: DefaultTheme.size(28), minHeight: DefaultTheme.size(22))
+            .padding(.horizontal, DefaultTheme.space(3))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
+                .strokeBorder(DefaultTheme.line, lineWidth: 1))
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .contentShape(Rectangle())
+    }
+}
+
+struct ThemedBarButtons: ViewModifier {
+    func body(content: Content) -> some View {
+        if DefaultTheme.redraws {
+            content.buttonStyle(ThemedBarButtonStyle())
+        } else {
+            content
+        }
+    }
+}
+
+public extension View {
+    /// For the buttons of a toolbar the charter leaves to macOS (a web
+    /// panel's back, forward, reload): macOS's under the charter, the
+    /// theme's own under an imported theme followed whole — beside a
+    /// field the theme draws, they no longer look like another app's.
+    func themedBarButtons() -> some View { modifier(ThemedBarButtons()) }
 }

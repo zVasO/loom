@@ -88,7 +88,7 @@ struct ThemeDocumentSettings: View {
         GridRow {
             Text(label).themeFont(size: 12).foregroundStyle(DefaultTheme.primaryText)
             TextField(placeholder, text: text)
-                .textFieldStyle(.roundedBorder)
+                .themedField()
                 .themeFont(size: 11, design: .monospaced)
         }
     }

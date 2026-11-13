@@ -378,6 +378,7 @@ struct PRBrowserView: View {
             .width(min: 54, ideal: 64, max: 90)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
+        .font(DefaultTheme.tableHeaderFont)
         .scrollContentBackground(.hidden)
         .background(DefaultTheme.contentBackground)
         .contextMenu(forSelectionType: PRBrowseRow.ID.self) { ids in
@@ -510,6 +511,7 @@ struct PRBrowserView: View {
                 .width(min: 60, ideal: 76, max: 110)
             }
             .tableStyle(.inset(alternatesRowBackgrounds: true))
+            .font(DefaultTheme.tableHeaderFont)
             .scrollContentBackground(.hidden)
             .background(DefaultTheme.contentBackground)
             .contextMenu(forSelectionType: GitHubService.Repository.ID.self) { ids in
@@ -696,7 +698,7 @@ private struct PRModeSegment: View {
         Button(action: action) {
             HStack(spacing: DefaultTheme.space(6)) {
                 AppIcon(systemImage, size: 12)
-                    .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                    .foregroundStyle(isActive ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
                 Text(title)
                     .themeFont(size: 12, weight: isActive ? .semibold : .regular)
                     .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
@@ -748,7 +750,7 @@ private struct PRScopeRow: View {
         Button(action: action) {
             HStack(spacing: DefaultTheme.space(8)) {
                 AppIcon(systemImage, size: 13)
-                    .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                    .foregroundStyle(isSelected ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
@@ -771,7 +773,7 @@ private struct PRScopeRow: View {
                 } else if let count, count > 0 {
                     Text("\(count)")
                         .themeFont(size: 10, weight: .semibold, design: .monospaced)
-                        .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.mutedText)
+                        .foregroundStyle(isSelected ? DefaultTheme.accentInk : DefaultTheme.mutedText)
                 }
             }
             .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(5))
@@ -820,7 +822,7 @@ enum PRBrowseCells {
     static func number(_ row: PRBrowseRow) -> some View {
         Text("#\(row.number)")
             .themeFont(size: 11, weight: .bold, design: .monospaced)
-            .foregroundStyle(DefaultTheme.accent)
+            .foregroundStyle(DefaultTheme.accentInk)
     }
 
     static func title(_ row: PRBrowseRow) -> some View {
