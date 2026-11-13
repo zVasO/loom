@@ -208,8 +208,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.themes
     runs-on: macos-26
     timeout-minutes: 45
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
@@ -261,14 +259,3 @@ jobs:
           name: theme-tour
           path: ${{ runner.temp }}/theme-tour
           if-no-files-found: warn
-      # TEMPORARY, while the display is being put right from a cloud session
-      # that cannot download artifacts: the pictures come back on the branch
-      # that asked for them, in a commit dropped before the work is done.
-      - name: Pictures to the branch (temporary)
-        if: always()
-        run: |
-          mkdir -p .theme-tour && cp -R "$RUNNER_TEMP/theme-tour/." .theme-tour/ || exit 0
-          git config user.name "Loom CI" && git config user.email "ci@loom.invalid"
-          git add -f .theme-tour
-          git commit -q -m "theme tour pictures (temporary)"
-          git push origin "HEAD:${{ github.ref_name }}"
