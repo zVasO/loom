@@ -217,6 +217,18 @@ struct ThemeDesignTests {
         #expect(read.accent == tokens.accent && read.accentText == tokens.accentText, "fills are the theme's")
         #expect(read.background == tokens.background && read.surface == tokens.surface)
 
+        #expect(read.cardBorder == tokens.cardBorder && read.design?.border == "#000000", "an edge that shows is the theme's")
+
+        // tweakcn's claymorphism: a border the colour of the sidebar it should part from the page.
+        tokens.cardBorder = "#F0F0F0"
+        tokens.design = ThemeDesign(radius: 20, border: "#F0F0F0", input: "#F0F0F0")
+        let parted = tokens.sanitized
+        for ground in grounds {
+            #expect(ThemeTokens.contrast(parted.cardBorder, ground) >= 1.12)
+            #expect(ThemeTokens.contrast(parted.design?.border ?? "", ground) >= 1.12)
+        }
+        #expect(parted.design?.radius == 20, "the rest of the design is untouched")
+
         // Without a design — the charter's palettes, a hand-written theme — nothing moves.
         tokens.design = nil
         #expect(tokens.sanitized == tokens)

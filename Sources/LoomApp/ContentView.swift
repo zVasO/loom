@@ -2996,7 +2996,10 @@ struct SessionDetailView: View {
                         if gitShown {
                             gitPanel
                                 .frame(width: min(380, columnWidth))
-                                .shadow(color: .black.opacity(0.45), radius: 20, x: -8)
+                                // A light theme takes a third of it: the same
+                                // black smeared a grey cloud over the terminal.
+                                .shadow(color: .black.opacity(DefaultTheme.colorScheme == .dark ? 0.45 : 0.14),
+                                        radius: 20, x: -8)
                                 .transition(.move(edge: .trailing))
                         }
                     }

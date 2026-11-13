@@ -155,6 +155,15 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
         // The fill of a selection, a chip, a track: told from all it lies on.
         tokens.surfaceRaised = Self.legible(tokens.surfaceRaised, on: grounds, minimum: 1.06,
                                             toward: primaryText, step: 0.02)
+        // An edge the very colour of what it borders — a theme that parts
+        // its panels by shadow alone, where Loom parts them by a rule.
+        func edge(_ hex: String) -> String {
+            guard Self.rgb(hex) != nil else { return hex }
+            return Self.legible(hex, on: grounds, minimum: 1.12, toward: primaryText, step: 0.02)
+        }
+        tokens.cardBorder = edge(cardBorder)
+        tokens.design?.border = design?.border.map(edge)
+        tokens.design?.input = design?.input.map(edge)
         return tokens
     }
 }
