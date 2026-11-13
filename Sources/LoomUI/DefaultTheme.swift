@@ -56,9 +56,14 @@ public enum DefaultTheme {
     /// `space`, but never under four fifths — a row still holds its text.
     public static func size(_ charter: CGFloat) -> CGFloat { palette.size(charter) }
 
-    /// The theme's letter-spacing, in points — the same for every text; 0
+    /// The theme's letter-spacing for a text of this size, in points; 0
     /// without one. A text with a tracking of its own adds it to this.
-    public static var tracking: CGFloat { palette.tracking }
+    public static func tracking(at size: CGFloat) -> CGFloat { palette.tracking(at: size) }
+
+    /// The colour of the controls macOS draws — switches, segmented
+    /// pickers, progress bars: an imported theme's accent (shadcn's Switch
+    /// is `bg-primary`), macOS's own for a built-in theme.
+    public static var controlTint: Color? { palette.design == nil ? nil : palette.accent }
 
     /// The theme's font for this size, weight and design — the system's
     /// when the theme names none. Text takes it through `themeFont(…)`,
@@ -74,6 +79,14 @@ public enum DefaultTheme {
         guard let stack = palette.design?.fontSans,
               ThemeFonts.shared.familyName(for: stack) != nil else { return nil }
         return palette.font(size: 13)
+    }
+
+    /// The font of a table's header, which macOS draws: the theme's sans
+    /// at the header's own small size — it would otherwise take the body
+    /// font, larger than the rows under it. nil when the theme names no
+    /// family of its own: the system's header stays what it is.
+    public static var tableHeaderFont: Font? {
+        bodyFont == nil ? nil : palette.font(size: 11, weight: .medium)
     }
 
     // Accent (filled buttons: contrasting text on top, like the reference)

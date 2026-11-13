@@ -69,6 +69,7 @@ struct ContextWindowSheet: View {
         .background(DefaultTheme.surface)
         .preferredColorScheme(DefaultTheme.colorScheme)
         .font(DefaultTheme.bodyFont)
+        .tint(DefaultTheme.controlTint)
         .task(id: state) { await refresh() }
     }
 

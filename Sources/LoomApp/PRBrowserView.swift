@@ -378,6 +378,7 @@ struct PRBrowserView: View {
             .width(min: 54, ideal: 64, max: 90)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
+        .font(DefaultTheme.tableHeaderFont)
         .scrollContentBackground(.hidden)
         .background(DefaultTheme.contentBackground)
         .contextMenu(forSelectionType: PRBrowseRow.ID.self) { ids in
@@ -510,6 +511,7 @@ struct PRBrowserView: View {
                 .width(min: 60, ideal: 76, max: 110)
             }
             .tableStyle(.inset(alternatesRowBackgrounds: true))
+            .font(DefaultTheme.tableHeaderFont)
             .scrollContentBackground(.hidden)
             .background(DefaultTheme.contentBackground)
             .contextMenu(forSelectionType: GitHubService.Repository.ID.self) { ids in

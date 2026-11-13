@@ -24,11 +24,11 @@ public extension ThemePalette {
         return CGFloat(design.size(Double(charter)))
     }
 
-    /// The theme's letter-spacing, in points: the same for every text,
+    /// The theme's letter-spacing for a text of this size, in points:
     /// 0 without one.
-    var tracking: CGFloat {
+    func tracking(at size: CGFloat) -> CGFloat {
         guard let design else { return 0 }
-        return CGFloat(design.tracking)
+        return CGFloat(design.tracking(at: Double(size)))
     }
 
     /// The theme's font: `--font-mono` for a monospaced design, `--font-serif`
@@ -65,7 +65,7 @@ public extension Text {
                    palette: ThemePalette? = nil) -> Text {
         let palette = palette ?? DefaultTheme.palette
         let text = font(palette.font(size: size, weight: weight, design: design))
-        let letterSpacing = palette.tracking
+        let letterSpacing = palette.tracking(at: size)
         // SwiftUI applies tracking and ignores kerning when a text has both:
         // with a letter-spacing, the text's own kerning joins it.
         if letterSpacing != 0 { return text.tracking(letterSpacing + (tracking ?? kerning ?? 0)) }
@@ -109,7 +109,7 @@ struct ThemeFontModifier: ViewModifier {
     func body(content: Content) -> some View {
         let palette = self.palette ?? DefaultTheme.palette
         let font = palette.font(size: size, weight: weight, design: design)
-        let letterSpacing = palette.tracking
+        let letterSpacing = palette.tracking(at: size)
         // No tracking at all without a letter-spacing: a zero would still
         // win over the kerning of the texts inside.
         if letterSpacing != 0 {

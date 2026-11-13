@@ -190,6 +190,7 @@ struct ContentView: View {
         .background(DefaultTheme.background)
         .preferredColorScheme(DefaultTheme.colorScheme)
         .font(DefaultTheme.bodyFont)
+        .tint(DefaultTheme.controlTint)
         .onAppear {
             model.start()
             applyTheme()
@@ -3103,6 +3104,7 @@ struct SessionDetailView: View {
                 .background(DefaultTheme.surface)
                 .preferredColorScheme(DefaultTheme.colorScheme)
                 .font(DefaultTheme.bodyFont)
+                .tint(DefaultTheme.controlTint)
             }
             // The browser beside the terminal (the stack's side panel). A
             // pulsing dot: the agent is using its browser out of sight — the
@@ -3252,6 +3254,7 @@ struct SessionDetailView: View {
         .background(DefaultTheme.surface)
         .preferredColorScheme(DefaultTheme.colorScheme)
         .font(DefaultTheme.bodyFont)
+        .tint(DefaultTheme.controlTint)
     }
 
     private func infoRow(_ label: String, _ value: String,

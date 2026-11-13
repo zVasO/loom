@@ -224,6 +224,20 @@ jobs:
             spm-${{ runner.os }}-
       - name: Build
         run: swift build
+      # A runner's display is 1024x768: the largest mode it offers, so the
+      # window is a laptop's and nothing is truncated for lack of room.
+      - name: Display
+        continue-on-error: true
+        run: |
+          system_profiler SPDisplaysDataType | grep -E "Resolution|UI Looks like" || true
+          brew install displayplacer >/dev/null 2>&1 || { echo "displayplacer not installed"; exit 0; }
+          displayplacer list | grep -E "Persistent screen id|^ *mode [0-9]+: res:" | head -60 || true
+          id="$(displayplacer list | awk -F': ' '/Persistent screen id/ { print $2; exit }')"
+          line="$(displayplacer list | grep -E '^ *mode [0-9]+: res:' | grep -v 'scaling:on' \
+            | sed -E 's/^ *mode ([0-9]+): res:([0-9]+)x([0-9]+).*/\1 \2 \3/' \
+            | awk '$2 <= 1920 && $3 <= 1200 { print $2 * $3, $1 }' | sort -n | tail -1)"
+          if [ -n "$id" ] && [ -n "$line" ]; then displayplacer "id:$id mode:${line#* }" || true; fi
+          system_profiler SPDisplaysDataType | grep -E "Resolution|UI Looks like" || true
       # No claude on a runner: a stand-in on PATH paints the sessions' screens.
       - name: Tour
         timeout-minutes: 15

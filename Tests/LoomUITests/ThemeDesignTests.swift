@@ -25,7 +25,7 @@ struct ThemeDesignTests {
                     #expect(palette.radius(value) == value)
                     #expect(palette.space(value) == value)
                 }
-                #expect(palette.tracking == 0)
+                #expect(palette.tracking(at: 13) == 0)
                 #expect(palette.line == palette.primaryText.opacity(0.08))
                 #expect(palette.line2 == palette.primaryText.opacity(0.13))
                 #expect(palette.line3 == palette.primaryText.opacity(0.21))
@@ -61,19 +61,20 @@ struct ThemeDesignTests {
         tokens.design = ThemeDesign(letterSpacing: 0.025)
         let spaced = ThemePalette(name: "T", isLight: false, tokens: tokens)
         #expect(Text("a").themeFont(size: 9, kerning: 0.5, palette: spaced)
-                == Text("a").font(.system(size: 9, weight: none, design: plain)).tracking(spaced.tracking + 0.5))
+                == Text("a").font(.system(size: 9, weight: none, design: plain)).tracking(spaced.tracking(at: 9) + 0.5))
     }
 
     // MARK: Geometry
 
-    @Test("a radius follows tweakcn's scale: xl a card, lg, md a control, sm a tab, a pill a tag")
+    @Test("a radius follows tweakcn's scale: xl a card, lg, md a control, sm a tab, a tag one step under")
     func radiusScale() {
         let design = ThemeDesign(radius: 10)
         #expect(design.radius(10) == 14, "rounded-xl: --radius + 4")
         #expect(design.radius(8) == 10, "rounded-lg: --radius")
         #expect(design.radius(6) == 8, "rounded-md: --radius - 2")
         #expect(design.radius(4) == 6, "rounded-sm: --radius - 4")
-        #expect(design.radius(3) == ThemeDesign.pill, "a tag is a Badge: rounded-full")
+        #expect(design.radius(3) == 5, "a tag stays one step under a key, as in the charter")
+        #expect(ThemeDesign(radius: 8).radius(3) == 3, "the charter's own tag at shadcn's usual 0.5rem")
         #expect(design.radius(9) == 13 && design.radius(7) == 9 && design.radius(5) == 7,
                 "in between, the distance to the nearest step is kept")
 
@@ -81,10 +82,11 @@ struct ThemeDesignTests {
         #expect(square.radius(10) == 4, "rounded-xl of a square theme is 4, as on tweakcn")
         #expect(square.radius(8) == 0 && square.radius(6) == 0 && square.radius(4) == 0,
                 "calc(0px - 2px) clamps to 0")
-        #expect(square.radius(3) == ThemeDesign.pill)
+        #expect(square.radius(3) == 0, "a square theme has square tags")
 
         let round = ThemeDesign(radius: 22.4)
         #expect(near(round.radius(10), 26.4) && near(round.radius(6), 20.4) && near(round.radius(4), 18.4))
+        #expect(near(round.radius(3), 17.4), "a round theme's tag is taller than its radius: a pill")
 
         #expect(ThemeDesign().radius(6) == 6, "no --radius: the charter's")
         #expect(ThemeDesign(spacing: 5).radius(10) == 10)
@@ -117,7 +119,7 @@ struct ThemeDesignTests {
         // A theme file written by hand: 0.25 (rem, where points are meant), or 16.
         #expect(ThemeDesign(spacing: 0.25).space(38) == 19, "held at 0.125rem")
         #expect(ThemeDesign(spacing: 16).space(10) == 20, "held at 0.5rem")
-        #expect(near(ThemeDesign(letterSpacing: 3).tracking, 8), "held at 0.5em")
+        #expect(near(ThemeDesign(letterSpacing: 3).tracking(at: 14), 8), "held at 0.5em")
         var tokens = ThemeFamily.loom.light
         tokens.design = ThemeDesign(spacing: 2.4)
         #expect(ThemePalette(name: "T", isLight: true, tokens: tokens).size(38) == 30.5)
@@ -145,15 +147,19 @@ struct ThemeDesignTests {
         #expect(ThemeStore.palette(of: .dracula, shapedBy: imported, dark: false).design == nil)
     }
 
-    @Test("the letter-spacing is one length for every text: the em of the body's 16 px")
+    @Test("the letter-spacing is the body's length at tweakcn's 14 px, and keeps that proportion at other sizes")
     func tracking() {
-        #expect(near(ThemeDesign(letterSpacing: 0.025).tracking, 0.4))
-        #expect(near(ThemeDesign(letterSpacing: -0.025).tracking, -0.4))
-        #expect(ThemeDesign().tracking == 0)
+        // CSS: 0.025em of the body's 16 px = 0.4 px, on a preview written at 14 px.
+        #expect(near(ThemeDesign(letterSpacing: 0.025).tracking(at: 14), 0.4))
+        #expect(near(ThemeDesign(letterSpacing: -0.025).tracking(at: 14), -0.4))
+        // Smaller text takes less of it: a tight theme keeps its words apart at 10 pt.
+        #expect(near(ThemeDesign(letterSpacing: -0.025).tracking(at: 10.5), -0.3))
+        #expect(near(ThemeDesign(letterSpacing: -0.025).tracking(at: 21), -0.6))
+        #expect(ThemeDesign().tracking(at: 13) == 0)
         var tokens = ThemeFamily.loom.dark
         tokens.design = ThemeDesign(radius: 8, spacing: 5, letterSpacing: 0.05)
         let palette = ThemePalette(name: "T", isLight: false, tokens: tokens)
-        #expect(abs(palette.tracking - 0.8) < 1e-9)
+        #expect(abs(palette.tracking(at: 14) - 0.8) < 1e-9)
         #expect(palette.radius(6) == 6 && palette.radius(10) == 12)
         #expect(palette.space(8) == 10)
     }
@@ -245,7 +251,7 @@ struct ThemeDesignTests {
         family.colorsOnly = true
         let colours = family.palette(dark: false)
         #expect(colours.radius(6) == 6 && colours.radius(10) == 10 && colours.radius(3) == 3)
-        #expect(colours.space(8) == 8 && colours.tracking == 0)
+        #expect(colours.space(8) == 8 && colours.tracking(at: 13) == 0)
         #expect(colours.design == ThemeDesign(border: "#000000", input: "#111111"), "only the edges are left")
         #expect(colours.line == ThemePalette.color("#000000") && colours.fieldLine == ThemePalette.color("#111111"))
         #expect(family.palette(dark: true).line == ThemePalette.color("#FFFFFF"))

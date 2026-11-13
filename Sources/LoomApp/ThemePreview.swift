@@ -429,6 +429,7 @@ struct ThemeImportSheet: View {
         .background(DefaultTheme.background)
         .preferredColorScheme(DefaultTheme.colorScheme)
         .font(DefaultTheme.bodyFont)
+        .tint(DefaultTheme.controlTint)
         .onAppear { dark = ThemeStore.shared.isDark }
     }
 

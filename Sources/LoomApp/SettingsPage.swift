@@ -145,7 +145,10 @@ private struct SettingsSidebar: View {
                     .foregroundStyle(DefaultTheme.primaryText)
                     .padding(.horizontal, DefaultTheme.space(8))
                     .padding(.bottom, DefaultTheme.space(2))
-                ForEach(SettingsAnchor.groups) { entry in
+                // Identified by name, not by anchor: the page's headings
+                // carry the anchors, and a jump to a group must scroll the
+                // page — not this list, which held the same identity.
+                ForEach(SettingsAnchor.groups, id: \.id.rawValue) { entry in
                     VStack(alignment: .leading, spacing: 1) {
                         row(entry.id)
                         ForEach(entry.items) { item in

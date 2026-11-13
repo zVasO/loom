@@ -60,6 +60,7 @@ struct UsageSheet: View {
         .background(DefaultTheme.surface)
         .preferredColorScheme(DefaultTheme.colorScheme)
         .font(DefaultTheme.bodyFont)
+        .tint(DefaultTheme.controlTint)
         .task { await refresh() }
     }
 

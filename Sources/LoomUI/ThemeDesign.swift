@@ -61,19 +61,16 @@ public struct ThemeDesign: Codable, Equatable, Sendable, Hashable {
     /// previews with: a card is shadcn's Card, `rounded-xl` (`--radius` + 4
     /// — 4 even for a square theme, as on tweakcn); 8 is `rounded-lg`
     /// (`--radius`); a control is `rounded-md` (`--radius` − 2); a tab or a
-    /// key `rounded-sm` (`--radius` − 4); a tag is a Badge, `rounded-full`
-    /// whatever the radius. Anything else keeps its distance to the nearest
-    /// of those. Never negative: CSS clamps `calc(0rem - 4px)` to 0.
+    /// key `rounded-sm` (`--radius` − 4). Anything else keeps its distance
+    /// to the nearest of those — a tag one step under a key, as in the
+    /// charter: square in a square theme, round in a round one, and the
+    /// charter's own 3 at shadcn's usual 0.5rem. Never negative: CSS clamps
+    /// `calc(0rem - 4px)` to 0.
     public func radius(_ charter: Double) -> Double {
         guard let radius, radius >= 0, charter > 0 else { return charter }
-        if charter <= 3 { return Self.pill }
         let themed = charter >= 9 ? radius + 4 + (charter - 10) : radius - 2 + (charter - 6)
         return max(0, themed)
     }
-
-    /// `rounded-full`: a radius no shape is tall enough for — the shape
-    /// rounds to half its height.
-    public static let pill = 999.0
 
     /// A length of the charter — a padding, a gap, a control's height — in
     /// the theme's `--spacing`: every Tailwind spacing utility is
@@ -95,12 +92,20 @@ public struct ThemeDesign: Codable, Equatable, Sendable, Hashable {
         max(space(charter), (charter * 0.8 * 2).rounded() / 2)
     }
 
-    /// The letter-spacing of every text, in points. tweakcn writes
+    /// The letter-spacing of a text of this size, in points. tweakcn writes
     /// `letter-spacing: var(--tracking-normal)` on `body`: CSS resolves the
-    /// em against the body's own 16 px and hands that length down, the same
-    /// for every text whatever its size.
+    /// em against the body's 16 px and hands that one length down — to a
+    /// preview written at 14 px. Loom writes smaller (9 to 13 pt), where the
+    /// same length would run the words of a tight theme together: the
+    /// length keeps the proportion to the text it has on tweakcn.
     /// Within tweakcn's own range, ±0.5em, whoever wrote the value.
-    public var tracking: Double { min(max(letterSpacing ?? 0, -0.5), 0.5) * 16 }
+    public func tracking(at size: Double) -> Double {
+        min(max(letterSpacing ?? 0, -0.5), 0.5) * 16 * size / Self.previewTextSize
+    }
+
+    /// The size tweakcn's preview writes at (`text-sm`): what a theme's
+    /// letter-spacing was judged on.
+    public static let previewTextSize = 14.0
 }
 
 /// A theme's shadow, as tweakcn's six controls set it. The levels shadcn's
