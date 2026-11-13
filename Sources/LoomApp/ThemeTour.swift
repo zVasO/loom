@@ -74,18 +74,24 @@ final class ThemeTour {
         .general, .sessions, .badges, .agentEngine, .scheduledReviews,
         .appearance, .themes, .documents, .projects,
     ]
-    private static let screens: [String] = ["projects", "sessions", "side-panel", "overview", "prs",
-                                            "workflows", "extensions"]
+    private static let screens: [String] = ["projects", "project-git", "project-files", "sessions", "git-panel",
+                                            "side-panel", "context", "overview", "prs", "workflows", "extensions"]
         + settingsStops.map { "settings-" + $0.rawValue }
-        + ["palette", "new-session", "usage"]
-    private static let coreScreens: Set<String> = ["projects", "sessions", "overview", "workflows",
-                                                   "settings-general", "settings-themes", "palette"]
+        + ["theme-import", "palette", "new-session", "usage"]
+    private static let coreScreens: Set<String> = ["projects", "sessions", "git-panel", "overview", "workflows",
+                                                   "settings-general", "settings-themes", "theme-import",
+                                                   "palette"]
+    /// How long a screen takes to settle before its picture, in milliseconds.
+    private static let settling: [String: Int] = ["sessions": 1_200, "git-panel": 1_500, "project-git": 1_500,
+                                                  "theme-import": 2_500]
 
     private let model: AppModel
     private let driver: Driver
     private let environment = ProcessInfo.processInfo.environment
     private var window: NSWindow?
     private var sessions: [SessionID] = []
+    /// The stop being shown.
+    private var current: Stop?
     private var readsScreen = true
     private var failures: [String] = []
 
@@ -135,7 +141,7 @@ final class ThemeTour {
             let screens = Self.screens.filter { !stop.core || Self.coreScreens.contains($0) }
             for (order, screen) in screens.enumerated() {
                 enter(screen)
-                try? await Task.sleep(for: .milliseconds(screen == "sessions" ? 1_200 : 800))
+                try? await Task.sleep(for: .milliseconds(Self.settling[screen] ?? 800))
                 let name = String(format: "%02d-%@.png", order + 1, screen)
                 if number == 0, order == 0 { calibrate(in: output) }
                 if capture(to: folder.appendingPathComponent(name)) {
@@ -194,6 +200,7 @@ final class ThemeTour {
     /// colours comes back for the index. nil when the theme cannot be had.
     private func apply(_ stop: Stop) async -> [String: Any]? {
         let store = ThemeStore.shared
+        current = stop
         let name: String
         if let builtIn = ThemeFamily.builtins.first(where: { $0.name.lowercased() == stop.theme.lowercased() }) {
             name = builtIn.name
@@ -251,12 +258,22 @@ final class ThemeTour {
         }
         switch screen {
         case "projects": driver.show(.projects)
-        case "sessions", "side-panel":
+        case "project-git", "project-files":
+            driver.show(.projects)
+            ask(screen)
+        case "sessions", "side-panel", "git-panel", "context":
             driver.show(.sessions)
             driver.select(sessions.first.map { DetailSelection.session($0) })
             if screen == "side-panel" {
                 NotificationCenter.default.post(name: .loomToggleSidePanel, object: nil)
+            } else if screen == "git-panel" {
+                ask("git")
+            } else if screen == "context" {
+                ask("context")
             }
+        case "theme-import":
+            driver.show(.settings)
+            ask("theme-import", text: importText())
         case "overview": driver.show(.overview)
         case "prs": driver.show(.prs)
         case "workflows": driver.show(.workflows)
@@ -274,12 +291,41 @@ final class ThemeTour {
         case "side-panel":
             NotificationCenter.default.post(name: .loomToggleSidePanel, object: nil)
             return true
+        case "project-git", "project-files":
+            ask("project-overview")
+            return false
+        case "git-panel":
+            ask("git")
+            return true
+        case "context":
+            ask("context-close")
+            return true
+        case "theme-import":
+            ask("theme-import-close")
+            return true
         case "palette", "new-session", "usage":
             driver.present(nil)
             return true
         default:
             return false
         }
+    }
+
+    /// Asks a view for a state only it holds (`Notification.Name.loomTourShow`).
+    private func ask(_ state: String, text: String? = nil) {
+        NotificationCenter.default.post(name: .loomTourShow, object: state,
+                                        userInfo: text.map { ["text": $0] })
+    }
+
+    /// What the import sheet is opened on: the stop's own export, or — for
+    /// a built-in theme — shadcn's default one.
+    private func importText() -> String? {
+        guard let directory = environment["LOOM_TOUR_THEMES"] else { return nil }
+        let folder = URL(fileURLWithPath: directory)
+        let names = [current?.theme, "default"].compactMap { $0 }
+        return names.lazy
+            .compactMap { try? String(contentsOf: folder.appendingPathComponent($0 + ".css"), encoding: .utf8) }
+            .first
     }
 
     // MARK: Pictures

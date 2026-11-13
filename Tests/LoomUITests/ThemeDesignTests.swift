@@ -147,14 +147,14 @@ struct ThemeDesignTests {
         #expect(ThemeStore.palette(of: .dracula, shapedBy: imported, dark: false).design == nil)
     }
 
-    @Test("the letter-spacing is the body's length at tweakcn's 14 px, and keeps that proportion at other sizes")
+    @Test("the letter-spacing is the body's length from tweakcn's 14 px up, and in proportion under it")
     func tracking() {
         // CSS: 0.025em of the body's 16 px = 0.4 px, on a preview written at 14 px.
         #expect(near(ThemeDesign(letterSpacing: 0.025).tracking(at: 14), 0.4))
         #expect(near(ThemeDesign(letterSpacing: -0.025).tracking(at: 14), -0.4))
         // Smaller text takes less of it: a tight theme keeps its words apart at 10 pt.
         #expect(near(ThemeDesign(letterSpacing: -0.025).tracking(at: 10.5), -0.3))
-        #expect(near(ThemeDesign(letterSpacing: -0.025).tracking(at: 21), -0.6))
+        #expect(near(ThemeDesign(letterSpacing: -0.025).tracking(at: 21), -0.4), "never more than CSS gives")
         #expect(ThemeDesign().tracking(at: 13) == 0)
         var tokens = ThemeFamily.loom.dark
         tokens.design = ThemeDesign(radius: 8, spacing: 5, letterSpacing: 0.05)

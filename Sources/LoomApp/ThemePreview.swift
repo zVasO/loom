@@ -345,7 +345,7 @@ struct ThemePreview: View {
 /// then saved and applied.
 struct ThemeImportSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var input = ""
+    @State private var input: String
     @State private var importing = false
     @State private var error: String?
     @State private var family: ThemeFamily?
@@ -353,6 +353,12 @@ struct ThemeImportSheet: View {
     @State private var dark = false
     /// Font fetches on their way: the preview redraws as they land.
     @State private var fetchingFonts = 0
+
+    /// `prefill`: a name, a URL or a CSS export the sheet opens on, and
+    /// imports at once — nothing when the user is to paste one.
+    init(prefill: String? = nil) {
+        _input = State(initialValue: prefill ?? "")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
@@ -430,7 +436,11 @@ struct ThemeImportSheet: View {
         .preferredColorScheme(DefaultTheme.colorScheme)
         .font(DefaultTheme.bodyFont)
         .tint(DefaultTheme.controlTint)
-        .onAppear { dark = ThemeStore.shared.isDark }
+        .onAppear {
+            dark = ThemeStore.shared.isDark
+            // Opened on a theme: it is read without waiting for a click.
+            if family == nil, !input.isEmpty { runImport() }
+        }
     }
 
     private func named(_ family: ThemeFamily) -> ThemeFamily {

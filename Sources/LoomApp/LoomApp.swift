@@ -114,4 +114,7 @@ extension Notification.Name {
     static let loomToggleSidePanel = Notification.Name("loom.toggleSidePanel")
     /// ⌘J — fold or unfold the fleet panel under the Sessions view.
     static let loomToggleFleetPanel = Notification.Name("loom.toggleFleetPanel")
+    /// The theme tour (LOOM_AUTOTEST=themes) asks a view for a state only
+    /// it holds — a tab, a panel, a sheet; the object names it.
+    static let loomTourShow = Notification.Name("loom.tour.show")
 }

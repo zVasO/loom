@@ -835,6 +835,13 @@ struct ProjectsView: View {
             }
         }
         .background(DefaultTheme.background)
+        .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
+            guard let name = note.object as? String, name.hasPrefix("project-"),
+                  let wanted = ProjectTab.allCases.first(where: {
+                      $0.rawValue.lowercased() == String(name.dropFirst("project-".count))
+                  }) else { return }
+            projectTab = wanted
+        }
         .onChange(of: current?.id) {
             projectTab = .overview
             filesPath = ""
@@ -3153,6 +3160,16 @@ struct SessionDetailView: View {
         } ?? "Context window — nothing recorded yet")
         .sheet(isPresented: $contextShown) {
             ContextWindowSheet(model: model, sessionID: sessionID) { contextShown = false }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
+            switch note.object as? String {
+            case "git":
+                gitShown.toggle()
+                if gitShown { Task { gitData = await model.gitPanel(for: sessionID) } }
+            case "context": contextShown = true
+            case "context-close": contextShown = false
+            default: break
+            }
         }
     }
 

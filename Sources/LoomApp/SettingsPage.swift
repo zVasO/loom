@@ -248,6 +248,8 @@ struct SettingsPage: View {
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
     @State private var importShown = false
+    /// What the import sheet opens on — a theme handed to it rather than pasted.
+    @State private var importPrefill: String?
     @State private var clearingAgentData = false
     /// The model reads the same keys (AgentBrowserAPI.swift); AppStorage keeps
     /// the switches showing what was just set.
@@ -969,7 +971,18 @@ struct SettingsPage: View {
             }
         }
         .sheet(isPresented: $importShown) {
-            ThemeImportSheet()
+            ThemeImportSheet(prefill: importPrefill)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
+            switch note.object as? String {
+            case "theme-import":
+                importPrefill = note.userInfo?["text"] as? String
+                importShown = true
+            case "theme-import-close":
+                importShown = false
+                importPrefill = nil
+            default: break
+            }
         }
     }
 

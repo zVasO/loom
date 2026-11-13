@@ -231,7 +231,7 @@ jobs:
         run: |
           system_profiler SPDisplaysDataType | grep -E "Resolution|UI Looks like" || true
           brew install displayplacer >/dev/null 2>&1 || { echo "displayplacer not installed"; exit 0; }
-          displayplacer list | grep -E "Persistent screen id|^ *mode [0-9]+: res:" | head -60 || true
+          mkdir -p "$RUNNER_TEMP/theme-tour" && displayplacer list > "$RUNNER_TEMP/theme-tour/display.txt" || true
           id="$(displayplacer list | awk -F': ' '/Persistent screen id/ { print $2; exit }')"
           line="$(displayplacer list | grep -E '^ *mode [0-9]+: res:' | grep -v 'scaling:on' \
             | sed -E 's/^ *mode ([0-9]+): res:([0-9]+)x([0-9]+).*/\1 \2 \3/' \
@@ -250,6 +250,9 @@ jobs:
           LOOM_TOUR_PLAN: ${{ inputs.themes_plan || 'loom:dark,loom:light:core,default:light:core,neo-brutalism:light,claymorphism:light:core,violet-bloom:dark,notebook:light:core,mono:dark:core,kodama-grove:dark:core,pastel-dreams:light:core,neo-brutalism:dark:colours:core' }}
         run: |
           export PATH="$PWD/Tests/ThemeTour/bin:$PATH"
+          # A change for the Git panel to show, undone once the tour is over.
+          printf '\nA line the theme tour adds, for the Git panel to have a diff.\n' >> README.md
+          trap 'git checkout -- README.md' EXIT
           swift run --skip-build LoomApp
       - name: Index (log)
         if: always()
