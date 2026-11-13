@@ -179,9 +179,12 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
         tokens.surfaceRaised = Self.legible(tokens.surfaceRaised, on: grounds, minimum: 1.06,
                                             toward: primaryText, step: 0.02)
         // An edge the very colour of what it borders — a theme that parts
-        // its panels by shadow alone, where Loom parts them by a rule.
+        // its panels by shadow alone, where Loom parts them by a rule. Only
+        // that one: a faint edge that can be seen (1.1 to 1 is common) is
+        // the theme's own, and stays.
         func edge(_ hex: String) -> String {
-            guard Self.rgb(hex) != nil else { return hex }
+            guard Self.rgb(hex) != nil,
+                  grounds.contains(where: { Self.contrast(hex, $0) < 1.04 }) else { return hex }
             return Self.legible(hex, on: grounds, minimum: 1.12, toward: primaryText, step: 0.02)
         }
         tokens.cardBorder = edge(cardBorder)

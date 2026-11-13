@@ -251,6 +251,10 @@ struct ThemeDesignTests {
             #expect(ThemeTokens.contrast(parted.design?.border ?? "", ground) >= 1.12)
         }
         #expect(parted.design?.radius == 20, "the rest of the design is untouched")
+        // A faint edge that can be seen is the theme's own.
+        tokens.cardBorder = "#E4E4E4"
+        tokens.design = ThemeDesign(radius: 20, border: "#E4E4E4")
+        #expect(tokens.sanitized.cardBorder == "#E4E4E4" && tokens.sanitized.design?.border == "#E4E4E4")
 
         // Without a design — the charter's palettes, a hand-written theme — nothing moves.
         tokens.design = nil

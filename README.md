@@ -24,6 +24,10 @@ Chromium, par le protocole DevTools : `node --test --test-concurrency=1 Tests/Ag
 (et `LOOM_CHROMIUM=<chrome-headless-shell> swift test` pour les tests Swift de bout en bout) ;
 l'app entière : `LOOM_AUTOTEST=agent-browser LOOM_AUTOTEST_ENGINE=chromium|webkit swift run LoomApp`
 (rapport et latences p50/p90 dans `/tmp/loom-agent-browser-report.json`).
+Affichage sous les thèmes : `LOOM_AUTOTEST=themes` promène l'app sous chaque thème d'un plan
+— les intégrés, et les exports tweakcn de `Tests/ThemeTour/themes` suivis en entier ou pour
+leurs couleurs — et enregistre une image par écran (`Tests/ThemeTour/README.md`) ; en CI,
+le job « theme tour » (lancé à la main, entrée `themes`) rend les images en artefact.
 
 Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 étapes).
 

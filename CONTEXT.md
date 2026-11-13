@@ -139,6 +139,10 @@ Ensemble de couleurs couvrant deux espaces : UI et Terminal. Résolu en cascade 
 Ce qu'un thème dit au-delà de ses couleurs : rayon, espacement, polices, interlettrage, bords et ombre. Seul un thème qui l'apporte en a un (un import tweakcn, ADR-0022) ; sans lui, c'est la charte qui s'applique. Les vues lui passent la valeur de la charte et reçoivent la sienne.
 _Avoid_ : style (le « style de document » est celui des rapports), skin, look
 
+**Tournée des thèmes** :
+L'app réelle promenée sous chaque thème d'un plan, une image par écran (`LOOM_AUTOTEST=themes`, `Tests/ThemeTour`) — le contrôle à l'écran de ce qu'un thème importé fait à l'affichage.
+_Avoid_ : snapshot tests (rien n'est comparé à une image de référence), captures
+
 **Override projet** :
 Choix d'un projet de dévier du thème global — soit thème complet, soit accent seul.
 
