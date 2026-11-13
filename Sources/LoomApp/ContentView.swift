@@ -2464,7 +2464,8 @@ struct SessionsView: View {
         .background(DefaultTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: radius))
         .overlay(RoundedRectangle(cornerRadius: radius).stroke(DefaultTheme.cardBorder, lineWidth: 1))
-        .themeShadow(.sm, radius: compactSessions ? 6 : 10)
+        // No theme shadow: these are a sidebar's rows, a few points apart —
+        // a hard shadow welded each one to the next.
     }
 
     /// SES-04: THE stack's terminal group — a single row, the tab detail
@@ -2851,7 +2852,11 @@ private struct StackChrome: ViewModifier {
         content
             .background(isSelected ? DefaultTheme.accent.opacity(0.08) : .clear)
             .overlay(
-                RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
+                // Under a theme of its own radius, the ring runs alongside
+                // the card's corner, two points in.
+                RoundedRectangle(cornerRadius: DefaultTheme.redraws
+                                 ? max(0, DefaultTheme.radius(10) - DefaultTheme.space(2))
+                                 : DefaultTheme.radius(6))
                     .stroke(isSelected ? DefaultTheme.accent : .clear, lineWidth: 1)
                     .padding(DefaultTheme.space(2)))
     }

@@ -60,6 +60,18 @@ public enum DefaultTheme {
     /// without one. A text with a tracking of its own adds it to this.
     public static func tracking(at size: CGFloat) -> CGFloat { palette.tracking(at: size) }
 
+    /// True under an imported theme followed whole: the views that the
+    /// charter leaves to macOS (a bordered text field) are drawn in the
+    /// theme instead.
+    public static var redraws: Bool { palette.design?.redraws ?? false }
+
+    /// The empty part of a ring or a gauge: the card's edge in the
+    /// charter; the text at 14 % under an imported theme, whose edge can
+    /// be a full black line.
+    public static var track: Color {
+        palette.design == nil ? palette.cardBorder : palette.primaryText.opacity(0.14)
+    }
+
     /// The colour of the controls macOS draws — switches, segmented
     /// pickers, progress bars: an imported theme's accent (shadcn's Switch
     /// is `bg-primary`), macOS's own for a built-in theme.

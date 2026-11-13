@@ -73,6 +73,7 @@ struct WorkflowsView: View {
             }
             .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(7))
             .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .fieldEdge()
             .padding(DefaultTheme.space(12))
             Divider().overlay(DefaultTheme.cardBorder)
             ScrollView {

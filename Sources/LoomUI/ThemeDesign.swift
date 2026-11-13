@@ -50,6 +50,11 @@ public struct ThemeDesign: Codable, Equatable, Sendable, Hashable {
         return kept.isEmpty ? nil : kept
     }
 
+    /// True when the design changes more than colours — a radius, a
+    /// spacing, a font, a letter-spacing or a shadow: the theme redraws
+    /// the app, where edges alone only recolour it.
+    public var redraws: Bool { ThemeDesign(border: border, input: input) != self }
+
     // MARK: Geometry — pure, the charter's value in, the theme's out
 
     /// Tailwind's spacing unit in points: what the charter's lengths are

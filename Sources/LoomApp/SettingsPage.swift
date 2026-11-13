@@ -583,7 +583,7 @@ struct SettingsPage: View {
                     .onChange(of: localOnlyOn) { _, on in model.agentBrowsersLocalOnly = on }
                     if localOnlyOn {
                         TextField("api.example.com, *.staging.example.com", text: $hostsDraft)
-                            .textFieldStyle(.roundedBorder)
+                            .themedField()
                             .themeFont(size: 12)
                             .onAppear { hostsDraft = model.agentBrowsersAllowedHosts }
                             .onSubmit { commitHosts() }
@@ -896,6 +896,7 @@ struct SettingsPage: View {
                     .themeFont(size: 12)
                     .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
                     .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                    .fieldEdge()
                     .frame(maxWidth: 220)
                 ColorPicker("", selection: $newBadgeColor, supportsOpacity: false)
                     .labelsHidden()

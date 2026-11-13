@@ -33,7 +33,7 @@ public struct BrowserPanelView: View {
                 Button { controller.activeWebView?.goForward() } label: { Image(systemName: "chevron.right") }
                 Button { controller.activeWebView?.reload() } label: { Image(systemName: "arrow.clockwise") }
                 TextField("Address or search…", text: $address)
-                    .textFieldStyle(.roundedBorder)
+                    .themedField()
                     .onSubmit {
                         controller.navigateActive(to: address)
                     }

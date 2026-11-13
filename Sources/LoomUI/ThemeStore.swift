@@ -103,15 +103,58 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
         return tokens
     }
 
-    /// The tokens with `surfaceRaised` brought back to the surfaces' side: a
-    /// raised surface is a step above `surface`, never its opposite. Some
-    /// imported themes (tweakcn's Claude) carry a near-white chip colour
-    /// in a dark variant; painted under dark-theme text it hid the editors,
-    /// tabs and hovers that sit on it.
+    /// The WCAG contrast of two colours, from 1 (the same) to 21.
+    public static func contrast(_ hex: String, _ other: String) -> Double {
+        let a = luminance(hex), b = luminance(other)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    /// `hex` as it is when it stands at `minimum` to 1 against every
+    /// ground; else moved toward `ink`, a step at a time, until it does.
+    static func legible(_ hex: String, on grounds: [String], minimum: Double,
+                        toward ink: String, step: Double = 0.05) -> String {
+        var result = hex
+        var amount = 0.0
+        while amount < 1, grounds.contains(where: { contrast(result, $0) < minimum }) {
+            amount = min(1, amount + step)
+            result = mix(hex, with: ink, amount: amount)
+        }
+        return result
+    }
+
+    /// The tokens as the app can be read with them.
+    ///
+    /// `surfaceRaised` is brought back to the surfaces' side: a raised
+    /// surface is a step above `surface`, never its opposite. Some imported
+    /// themes (tweakcn's Claude) carry a near-white chip colour in a dark
+    /// variant; painted under dark-theme text it hid the editors, tabs and
+    /// hovers that sit on it.
+    ///
+    /// An imported theme (one with a design — the charter's palettes are
+    /// what they are) then gets what its own page never needed: Loom writes
+    /// labels in colours a shadcn page only fills with. A branch name in a
+    /// chart's yellow on a white card, a tertiary text at 2 to 1, a
+    /// selection filled with the very colour of the sidebar under it —
+    /// each is moved toward the text colour, no further than it takes to
+    /// be told from its ground.
     public var sanitized: ThemeTokens {
-        guard abs(Self.luminance(surfaceRaised) - Self.luminance(surface)) > 0.4 else { return self }
         var tokens = self
-        tokens.surfaceRaised = Self.mix(surface, with: primaryText, amount: 0.07)
+        if abs(Self.luminance(surfaceRaised) - Self.luminance(surface)) > 0.4 {
+            tokens.surfaceRaised = Self.mix(surface, with: primaryText, amount: 0.07)
+        }
+        guard design != nil else { return tokens }
+        let grounds = [tokens.background, tokens.contentBackground, tokens.surface]
+        func label(_ hex: String, _ minimum: Double) -> String {
+            Self.legible(hex, on: grounds, minimum: minimum, toward: primaryText)
+        }
+        tokens.secondaryText = label(secondaryText, 3.5)
+        tokens.mutedText = label(mutedText, 3)
+        tokens.branch = label(branch, 3)
+        tokens.danger = label(danger, 3)
+        tokens.groupHeader = label(groupHeader, 3)
+        // The fill of a selection, a chip, a track: told from all it lies on.
+        tokens.surfaceRaised = Self.legible(tokens.surfaceRaised, on: grounds, minimum: 1.06,
+                                            toward: primaryText, step: 0.02)
         return tokens
     }
 }
@@ -193,9 +236,11 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
         let edge = border.map(Self.color) ?? text.opacity(0.08)
         line = edge
         fieldLine = input.map(Self.color) ?? edge
-        line2 = border.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.15)) }
+        // The charter's steps (8, 13 and 21 % of the text) from the theme's
+        // own edge: the same distance further toward the text.
+        line2 = border.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.06)) }
             ?? text.opacity(0.13)
-        line3 = border.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.3)) }
+        line3 = border.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.14)) }
             ?? text.opacity(0.21)
         wash = tokens.design == nil ? text.opacity(0.025) : raised.opacity(0.5)
         wash2 = tokens.design == nil ? text.opacity(0.045) : raised

@@ -188,6 +188,48 @@ struct ThemeDesignTests {
         #expect(ThemeShadow(color: "#000000", opacity: 0, blur: 3, spread: 0, x: 0, y: 1).isInvisible)
     }
 
+    // MARK: Legibility
+
+    @Test("an imported theme's labels and selection fills are told from their grounds")
+    func legibility() {
+        // tweakcn's neo-brutalism, light: a chart's yellow for branch names,
+        // and a muted fill that is the very colour of the sidebar.
+        var tokens = ThemeFamily.loom.light
+        tokens.background = "#F0F0F0"
+        tokens.contentBackground = "#FFFFFF"
+        tokens.surface = "#FFFFFF"
+        tokens.surfaceRaised = "#F0F0F0"
+        tokens.primaryText = "#000000"
+        tokens.secondaryText = "#333333"
+        tokens.mutedText = "#ABABAB"
+        tokens.branch = "#FFFF00"
+        tokens.danger = "#000000"
+        tokens.design = ThemeDesign(radius: 0, border: "#000000")
+        let grounds = [tokens.background, tokens.contentBackground, tokens.surface]
+        let read = tokens.sanitized
+        for ground in grounds {
+            #expect(ThemeTokens.contrast(read.branch, ground) >= 3, "a yellow label on white is moved toward the text")
+            #expect(ThemeTokens.contrast(read.mutedText, ground) >= 3)
+            #expect(ThemeTokens.contrast(read.surfaceRaised, ground) >= 1.06, "a selection is seen on the sidebar")
+        }
+        #expect(ThemeTokens.contrast(read.branch, "#FFFFFF") < 4.5, "no further than it takes")
+        #expect(read.secondaryText == "#333333" && read.danger == "#000000", "what is read already is left alone")
+        #expect(read.accent == tokens.accent && read.accentText == tokens.accentText, "fills are the theme's")
+        #expect(read.background == tokens.background && read.surface == tokens.surface)
+
+        // Without a design — the charter's palettes, a hand-written theme — nothing moves.
+        tokens.design = nil
+        #expect(tokens.sanitized == tokens)
+        #expect(near(ThemeTokens.contrast("#000000", "#FFFFFF"), 21) && ThemeTokens.contrast("#777777", "#777777") == 1)
+    }
+
+    @Test("a design that only names edges recolours; any other value redraws")
+    func redraws() {
+        #expect(!ThemeDesign().redraws && !ThemeDesign(border: "#000000", input: "#111111").redraws)
+        #expect(ThemeDesign(radius: 0).redraws && ThemeDesign(fontSans: "Inter").redraws)
+        #expect(ThemeDesign(spacing: 4, border: "#000000").redraws)
+    }
+
     // MARK: Edges
 
     @Test("a theme with a border of its own is drawn with it; a field's edge is --input")
@@ -197,9 +239,9 @@ struct ThemeDesignTests {
         let palette = ThemePalette(name: "T", isLight: true, tokens: tokens)
         #expect(palette.line == ThemePalette.color("#E5E5E5"))
         #expect(palette.fieldLine == ThemePalette.color("#D4D4D4"), "shadcn's Input: border-input")
-        #expect(palette.line2 == ThemePalette.color(ThemeTokens.mix("#E5E5E5", with: tokens.primaryText, amount: 0.15)),
-                "the stronger hairlines are the border, a step towards the text — never --input")
-        #expect(palette.line3 == ThemePalette.color(ThemeTokens.mix("#E5E5E5", with: tokens.primaryText, amount: 0.3)))
+        #expect(palette.line2 == ThemePalette.color(ThemeTokens.mix("#E5E5E5", with: tokens.primaryText, amount: 0.06)),
+                "the stronger hairlines are the border, the charter's step towards the text — never --input")
+        #expect(palette.line3 == ThemePalette.color(ThemeTokens.mix("#E5E5E5", with: tokens.primaryText, amount: 0.14)))
         #expect(palette.wash == palette.surfaceRaised.opacity(0.5), "shadcn's hover:bg-muted/50")
         #expect(palette.wash2 == palette.surfaceRaised, "and its selected bg-muted")
 

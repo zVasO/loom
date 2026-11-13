@@ -103,12 +103,12 @@ struct ExpertEditor: View {
             }
             FormCard {
                 formTitle("Domain")
-                TextField("PHP, Symfony, security…", text: binding(\.domain)).textFieldStyle(.roundedBorder)
+                TextField("PHP, Symfony, security…", text: binding(\.domain)).themedField()
                 formTitle("Model")
                 TextField("opus, sonnet, haiku, or a model id — empty: the workflows' default",
                           text: Binding(get: { expert.model ?? "" },
                                         set: { draft?.model = $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }))
-                    .textFieldStyle(.roundedBorder)
+                    .themedField()
             }
             FormCard {
                 formTitle("Instructions")
@@ -300,7 +300,7 @@ struct ConnectorEditor: View {
             TextField("/opt/homebrew/bin/uvx", text: Binding(get: { command }, set: {
                 draft?.kind = .mcpStdio(command: $0, args: args, env: env)
             }))
-            .textFieldStyle(.roundedBorder)
+            .themedField()
             .themeFont(size: 12, design: .monospaced)
             formTitle("Arguments, one per line")
             MonoEditor(text: $argsText, minHeight: 70)
@@ -321,7 +321,7 @@ struct ConnectorEditor: View {
         case .mcpHTTP(let url, let headers):
             formTitle("URL")
             TextField("https://…", text: Binding(get: { url }, set: { draft?.kind = .mcpHTTP(url: $0, headers: headers) }))
-                .textFieldStyle(.roundedBorder)
+                .themedField()
                 .themeFont(size: 12, design: .monospaced)
             formTitle("Headers, Name: value per line")
             formHint("Write {{secret:NAME}} for a value kept in the Keychain — Authorization: Bearer {{secret:TOKEN}}.")
@@ -334,7 +334,7 @@ struct ConnectorEditor: View {
         case .claudeConfigured(let server):
             formTitle("Server name in your Claude Code")
             TextField("atlassian", text: Binding(get: { server }, set: { draft?.kind = .claudeConfigured(server: $0) }))
-                .textFieldStyle(.roundedBorder)
+                .themedField()
                 .themeFont(size: 12, design: .monospaced)
             formHint("As `claude mcp list` names it. For Atlassian: claude mcp add --transport sse atlassian https://mcp.atlassian.com/v1/sse, then /mcp in a session to sign in. Steps using it see your other servers too; only this one's tools are allowed.")
         }
@@ -349,7 +349,7 @@ struct ConnectorEditor: View {
                 Text(key).themeFont(size: 12, design: .monospaced).frame(width: 170, alignment: .leading)
                 SecureField(workflows.hasSecret(key, of: connectorID) ? "•••••• (set — type to replace)" : "not set",
                             text: Binding(get: { secretValues[key] ?? "" }, set: { secretValues[key] = $0 }))
-                    .textFieldStyle(.roundedBorder)
+                    .themedField()
                 GhostButton("Save") {
                     workflows.setSecret(secretValues[key] ?? "", key, of: connectorID)
                     secretValues[key] = nil
@@ -365,7 +365,7 @@ struct ConnectorEditor: View {
         }
         HStack(spacing: DefaultTheme.space(8)) {
             TextField("NEW_SECRET_NAME", text: $newSecretKey)
-                .textFieldStyle(.roundedBorder)
+                .themedField()
                 .themeFont(size: 12, design: .monospaced)
                 .frame(width: 220)
             GhostButton("Add", systemImage: "plus") {
@@ -596,7 +596,7 @@ struct RuleSetEditor: View {
                                 TextField("Cite path:line for every finding.", text: Binding(
                                     get: { self.draft?.rules[safe: index] ?? "" },
                                     set: { if self.draft?.rules.indices.contains(index) == true { self.draft?.rules[index] = $0 } }))
-                                    .textFieldStyle(.roundedBorder)
+                                    .themedField()
                                 HoverIconButton(systemImage: "minus.circle", help: "Remove this rule") {
                                     if self.draft?.rules.indices.contains(index) == true { self.draft?.rules.remove(at: index) }
                                 }
@@ -643,7 +643,7 @@ struct ApprovalBanner: View {
                 .textSelection(.enabled)
             HStack(spacing: DefaultTheme.space(8)) {
                 TextField("A comment for the next steps (optional)", text: $comment)
-                    .textFieldStyle(.roundedBorder)
+                    .themedField()
                 ForEach(Array(approval.options.enumerated()), id: \.offset) { index, option in
                     if index == 0 {
                         AccentButton(option, systemImage: "checkmark") {

@@ -242,7 +242,7 @@ private struct ReviewScheduleEditor: View {
                 .frame(width: 150)
                 TextField("GitHub search — empty: every open PR",
                           text: targetField(target.id, \.query, fallback: target.query, in: schedule))
-                    .textFieldStyle(.roundedBorder)
+                    .themedField()
                     .themeFont(size: 11, design: .monospaced)
                 Menu {
                     ForEach(model.prFilters) { filter in

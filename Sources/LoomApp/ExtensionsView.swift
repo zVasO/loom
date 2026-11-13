@@ -52,6 +52,9 @@ struct ExtensionsView: View {
             GhostButton("Manage in Settings", systemImage: "gearshape") { onOpenSettings() }
                 .padding(DefaultTheme.space(8))
         }
+        // The whole column, not the width of what it lists: a theme whose
+        // sidebar is not the colour of its page shows the difference.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(DefaultTheme.background)
     }
 

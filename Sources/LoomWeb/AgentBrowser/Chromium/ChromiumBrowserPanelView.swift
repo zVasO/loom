@@ -146,7 +146,7 @@ struct ChromiumBrowserPanelView<PageOverlay: View>: View {
                     .help("Reload")
             }
             TextField("Address or search…", text: $address)
-                .textFieldStyle(.roundedBorder)
+                .themedField()
                 .focused($addressFocused)
                 .onSubmit { submitAddress() }
                 .onExitCommand {

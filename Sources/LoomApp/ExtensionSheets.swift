@@ -54,7 +54,7 @@ struct ExtensionLaunchSheet: View {
 
             field("TITLE") {
                 TextField("Session title", text: $title)
-                    .textFieldStyle(.roundedBorder)
+                    .themedField()
             }
 
             if !badges.isEmpty {
