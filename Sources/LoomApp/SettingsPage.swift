@@ -924,6 +924,9 @@ struct SettingsPage: View {
     /// pointer is on (else the chosen one) — in either variant.
     private var appearanceGroup: some View {
         let store = ThemeStore.shared
+        // Read here, not in the sheet's closure: set with `importShown` in
+        // one pass, the sheet would otherwise open on the value before.
+        let prefill = importPrefill
         return group(.appearance) {
             section(.appearanceMode) {
                 card {
@@ -971,7 +974,7 @@ struct SettingsPage: View {
             }
         }
         .sheet(isPresented: $importShown) {
-            ThemeImportSheet(prefill: importPrefill)
+            ThemeImportSheet(prefill: prefill)
         }
         .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
             switch note.object as? String {

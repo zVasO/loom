@@ -32,5 +32,11 @@ printf '%s\n' \
   "${grey}│${off} >                                                            ${grey}│${off}" \
   "${grey}╰──────────────────────────────────────────────────────────────╯${off}" \
   "  ${dim}? for shortcuts${off}"
+# In a worktree of its own (a linked worktree's .git is a file), the agent
+# has changed something: the session's Git panel has a diff to show.
+if [ -f .git ] && [ -f README.md ]; then
+  printf '\n## Themes\n\nAn imported theme is followed to the letter.\n' >> README.md
+  printf 'struct Radius {\n    let card = 14\n    let control = 8\n}\n' > Radius.swift
+fi
 # Until the session is closed.
 exec cat > /dev/null

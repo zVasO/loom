@@ -250,9 +250,6 @@ jobs:
           LOOM_TOUR_PLAN: ${{ inputs.themes_plan || 'loom:dark,loom:light:core,default:light:core,neo-brutalism:light,claymorphism:light:core,violet-bloom:dark,notebook:light:core,mono:dark:core,kodama-grove:dark:core,pastel-dreams:light:core,neo-brutalism:dark:colours:core' }}
         run: |
           export PATH="$PWD/Tests/ThemeTour/bin:$PATH"
-          # A change for the Git panel to show, undone once the tour is over.
-          printf '\nA line the theme tour adds, for the Git panel to have a diff.\n' >> README.md
-          trap 'git checkout -- README.md' EXIT
           swift run --skip-build LoomApp
       - name: Index (log)
         if: always()

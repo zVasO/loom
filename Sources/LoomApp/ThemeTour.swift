@@ -18,7 +18,9 @@ import SwiftUI
 ///   theme followed for its colours only), `core` (the main screens only).
 /// - `LOOM_TOUR_OUT`: where the PNGs and `tour.json` go.
 /// - `LOOM_TOUR_PROJECT`: a folder opened as a project, with three sessions
-///   in it. Where the tour runs has no claude: `PATH` leads to a stand-in.
+///   in it — the first in a worktree of its own when it is a git
+///   repository. Where the tour runs has no claude: `PATH` leads to a
+///   stand-in (`Tests/ThemeTour/bin/claude`).
 /// - `LOOM_TOUR_CAPTURE`: `screen` (the display, through `screencapture`;
 ///   when unsaid) or `view` (the window drawing itself: no blur, no sheet
 ///   over it — for a Mac that refuses the screen to be read).
@@ -186,8 +188,11 @@ final class ThemeTour {
             ("Fix the flaky login test", ["wip"]),
             ("Settings open at once", []),
         ]
-        for session in wanted {
-            if let id = await model.launchSession(in: project, placement: .projectFolder,
+        for (order, session) in wanted.enumerated() {
+            // The first one in a worktree of its own: the stand-in claude
+            // changes a file there, and the Git panel has a diff to show.
+            if let id = await model.launchSession(in: project,
+                                                  placement: order == 0 ? .newWorktree : .projectFolder,
                                                   title: session.title, badges: session.badges) {
                 sessions.append(id)
             }
