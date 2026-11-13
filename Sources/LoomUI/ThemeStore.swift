@@ -561,15 +561,14 @@ public final class ThemeStore {
     }
 
     /// A tweakcn theme, from what the user pasted: its CSS export, parsed
-    /// here; or a name / URL, fetched from tweakcn's registry. The whole
-    /// theme, or — `colorsOnly` — its colours alone. The family comes back
-    /// as soon as it is read, unsaved and without its fonts: the caller
-    /// previews it, asks `withFonts` for them — they redraw the preview as
-    /// they arrive — then saves it.
-    public func importTweakcn(_ input: String, colorsOnly: Bool = false) async throws -> ThemeFamily {
-        var family = try await readTweakcn(input)
-        family.colorsOnly = colorsOnly
-        return family
+    /// here; or a name / URL, fetched from tweakcn's registry. Always the
+    /// whole theme — how much of it Loom follows is chosen later, where the
+    /// theme is picked (`setColorsOnly`). The family comes back as soon as
+    /// it is read, unsaved and without its fonts: the caller previews it,
+    /// asks `withFonts` for them — they redraw the preview as they arrive —
+    /// then saves it.
+    public func importTweakcn(_ input: String) async throws -> ThemeFamily {
+        try await readTweakcn(input)
     }
 
     private func readTweakcn(_ input: String) async throws -> ThemeFamily {

@@ -128,10 +128,11 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   Guide : [`docs/extensions.md`](docs/extensions.md).
 - **Thèmes** : 9 familles intégrées, chacune en clair et en sombre ; apparence
   Système / Clair / Sombre (suivi de macOS en direct) ; override par projet ;
-  import d'un thème tweakcn/shadcn (nom, URL ou CSS collé), suivi à la lettre :
+  import d'un thème tweakcn/shadcn (nom, URL ou CSS collé), toujours en entier :
   couleurs, bordures, rayon, espacement, polices (téléchargées depuis Google
-  Fonts si le Mac ne les a pas), interlettrage et ombres — ou, d'un interrupteur,
-  ses couleurs seulement (ADR-0022) ; aperçu sur des
+  Fonts si le Mac ne les a pas), interlettrage et ombres ; dans Réglages › Thèmes,
+  à côté de Clair/Sombre, on choisit de le suivre à la lettre ou pour ses couleurs
+  seulement (ADR-0022) ; aperçu sur des
   composants factices avec bascule clair/sombre ; sémantique des badges invariante ;
   en option, le thème appliqué à Claude Code lui-même, en direct (ADR-0013).
 

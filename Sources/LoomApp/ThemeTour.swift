@@ -223,7 +223,7 @@ final class ThemeTour {
         try? await Task.sleep(for: .seconds(1))
 
         var summary: [String: Any] = [:]
-        if let design = DefaultTheme.palette.design {
+        if let design = store.palette.design {
             if let radius = design.radius { summary["radius"] = radius }
             if let spacing = design.spacing { summary["spacing"] = spacing }
             if let letterSpacing = design.letterSpacing { summary["letterSpacing"] = letterSpacing }
