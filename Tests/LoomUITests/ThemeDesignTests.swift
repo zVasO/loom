@@ -236,14 +236,15 @@ struct ThemeDesignTests {
         mono.design = ThemeDesign(radius: 0)
         #expect(mono.sanitized.accentInk == "#FAFAFA", "a primary without a hue is written in the text colour")
         #expect(mono.sanitized.accent == "#737373", "the fill is untouched")
-        // A primary with a hue keeps it, lightened until it is read beside the secondary text.
+        // A primary with a hue keeps it, lightened no further than it takes to be read.
         mono.accent = "#5B3FA8"
         let ink = mono.sanitized.accentInk
         let channels = ThemeTokens.rgb(ink)
         #expect((channels?.blue ?? 0) > 1.2 * (channels?.green ?? 1), "still a violet")
         for ground in [mono.background, mono.contentBackground, mono.surface] {
-            #expect(ThemeTokens.contrast(ink, ground) >= 5.5)
+            #expect(ThemeTokens.contrast(ink, ground) >= 4.5)
         }
+        #expect(ThemeTokens.contrast(ink, mono.surface) < 5.5, "no paler than it takes")
         #expect(ThemeFamily.loom.dark.accentInk == ThemeFamily.loom.dark.accent, "the charter writes in its accent")
 
         // A pale red on a pastel page (pastel-dreams) is darkened, not drawn

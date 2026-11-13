@@ -126,9 +126,9 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
     /// link, of a selected row's icon. A shadcn page fills with `--primary`
     /// and writes on it; Loom also writes in it — and a theme whose primary
     /// is a mid grey made every active item dimmer than its neighbours.
-    /// Under an imported theme it reads at 4.5 to 1 at least — 5.5 beside
-    /// a secondary text that strong — lightened or darkened, its hue kept;
-    /// the charter's is the accent.
+    /// Under an imported theme it reads at 4.5 to 1 at least, lightened or
+    /// darkened no further than that, its hue kept; the charter's is the
+    /// accent.
     public var accentInk: String {
         guard design != nil else { return accent }
         // A primary without a hue (shadcn's own near-black, mono's grey)
@@ -139,18 +139,7 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
             return primaryText
         }
         let grounds = [background, contentBackground, surface]
-        func reads(_ hex: String) -> Bool {
-            grounds.allSatisfy { ground in
-                Self.contrast(hex, ground) >= min(5.5, max(4.5, Self.contrast(secondaryText, ground)))
-            }
-        }
-        var result = accent
-        var amount = 0.0
-        while amount < 1, !reads(result) {
-            amount = min(1, amount + 0.05)
-            result = Self.mix(accent, with: inkPole, amount: amount)
-        }
-        return result
+        return Self.legible(accent, on: grounds, minimum: 4.5, toward: inkPole)
     }
 
     /// Black on a light page, white on a dark one: where a coloured label
