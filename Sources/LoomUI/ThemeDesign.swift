@@ -100,13 +100,22 @@ public struct ThemeDesign: Codable, Equatable, Sendable, Hashable {
     /// The letter-spacing of a text of this size, in points. tweakcn writes
     /// `letter-spacing: var(--tracking-normal)` on `body`: CSS resolves the
     /// em against the body's 16 px and hands that one length down — to a
-    /// preview written at 14 px. From that size up, the length as it is;
-    /// under it — most of Loom's text, 9 to 13 pt — in proportion, or a
-    /// tight theme would run the words of small text together.
+    /// preview written at 14 px. From that size up, the length as it is.
+    /// Under it — most of Loom's text, 9 to 13 pt — a looser theme keeps
+    /// its proportion to the text, and a tighter one lets go as the text
+    /// gets small, down to nothing at 10 pt: tightening is a display
+    /// size's refinement, and at 11 pt it ran the words together.
     /// Within tweakcn's own range, ±0.5em, whoever wrote the value.
     public func tracking(at size: Double) -> Double {
-        min(max(letterSpacing ?? 0, -0.5), 0.5) * 16 * min(1, size / Self.previewTextSize)
+        let length = min(max(letterSpacing ?? 0, -0.5), 0.5) * 16
+        let preview = Self.previewTextSize
+        guard length < 0 else { return length * min(1, size / preview) }
+        let share = (size - Self.smallTextSize) / (preview - Self.smallTextSize)
+        return length * min(1, max(0, share))
     }
+
+    /// The size under which a tighter letter-spacing is no longer applied.
+    public static let smallTextSize = 10.0
 
     /// The size tweakcn's preview writes at (`text-sm`): what a theme's
     /// letter-spacing was judged on.

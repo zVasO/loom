@@ -2849,14 +2849,25 @@ struct SessionsView: View {
 private struct StackChrome: ViewModifier {
     let isSelected: Bool
     func body(content: Content) -> some View {
+        // Under a theme of its own radius, the ring runs alongside the
+        // card's corner, two points in — and the tint stays inside it: a
+        // stadium ring over a square tint left wedges at its corners.
+        let redraws = DefaultTheme.redraws
+        let ring = redraws ? max(0, DefaultTheme.radius(10) - DefaultTheme.space(2)) : DefaultTheme.radius(6)
         content
-            .background(isSelected ? DefaultTheme.accent.opacity(0.08) : .clear)
+            .background {
+                if isSelected {
+                    if redraws {
+                        RoundedRectangle(cornerRadius: ring)
+                            .fill(DefaultTheme.accent.opacity(0.08))
+                            .padding(DefaultTheme.space(2))
+                    } else {
+                        DefaultTheme.accent.opacity(0.08)
+                    }
+                }
+            }
             .overlay(
-                // Under a theme of its own radius, the ring runs alongside
-                // the card's corner, two points in.
-                RoundedRectangle(cornerRadius: DefaultTheme.redraws
-                                 ? max(0, DefaultTheme.radius(10) - DefaultTheme.space(2))
-                                 : DefaultTheme.radius(6))
+                RoundedRectangle(cornerRadius: ring)
                     .stroke(isSelected ? DefaultTheme.accent : .clear, lineWidth: 1)
                     .padding(DefaultTheme.space(2)))
     }

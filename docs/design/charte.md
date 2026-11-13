@@ -38,7 +38,8 @@ valeur de la charte dans `DefaultTheme.radius(6)`, `DefaultTheme.space(8)`,
   6 → `--radius` − 2, 4 → `--radius` − 4, 3 (un tag) → `--radius` − 5.
 - Marges, écarts, hauteurs de contrôles et de lignes × `--spacing` / 0,25rem.
 - Texte en `--font-sans`, mono en `--font-mono`, interlettrage `--letter-spacing`
-  (sa longueur CSS à partir de 14 pt, sa proportion en dessous).
+  (sa longueur CSS à partir de 14 pt ; en dessous, sa proportion — et de moins
+  en moins quand il resserre, jusqu'à rien à 10 pt).
 - Interrupteurs et sélecteurs de macOS à l'accent du thème (`DefaultTheme.controlTint`).
 - Bords en `--border` (contrôles : `--input`), cartes avec l'ombre du thème.
 
