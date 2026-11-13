@@ -227,6 +227,20 @@ struct ContentView: View {
             applyTheme()
         }
         .task {
+            // The app under each theme of a plan, a picture per screen
+            // (ThemeTour): what a whole imported theme does to the display.
+            if ProcessInfo.processInfo.environment["LOOM_AUTOTEST"] == "themes" {
+                let tour = ThemeTour(model: model, driver: ThemeTour.Driver(
+                    show: { tab = $0 },
+                    select: { selected = $0 },
+                    focusSettings: { settingsFocus = $0 },
+                    present: { overlay in
+                        paletteShown = overlay == .palette
+                        usageShown = overlay == .usage
+                        newSessionSheetShown = overlay == .newSession
+                    }))
+                exit(await tour.run() ? 0 : 1)
+            }
             // The agent's browser against a real engine (ADR-0014, ADR-0016):
             // LOOM_AUTOTEST_ENGINE=webkit|chromium (WebKit when unsaid; Chromium
             // from LOOM_CHROMIUM, else the one Loom finds). A report in

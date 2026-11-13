@@ -1,0 +1,36 @@
+#!/bin/bash
+# A stand-in for claude where the theme tour runs (CI has none): it paints a
+# session's screen in the terminal's sixteen colours and waits, like an agent
+# that has just answered. Loom's own flags are ignored.
+esc=$'\033'
+dim="${esc}[2m"; bold="${esc}[1m"; off="${esc}[0m"
+orange="${esc}[38;5;208m"; green="${esc}[32m"; red="${esc}[31m"; cyan="${esc}[36m"; grey="${esc}[90m"
+printf '%s\n' \
+  "${orange}╭──────────────────────────────────────────────╮${off}" \
+  "${orange}│${off} ${bold}✻ Welcome to Claude Code${off}                     ${orange}│${off}" \
+  "${orange}│${off}   ${dim}/help for help, /status for your setup${off}     ${orange}│${off}" \
+  "${orange}╰──────────────────────────────────────────────╯${off}" \
+  "" \
+  "${grey}>${off} make the imported theme follow tweakcn to the letter" \
+  "" \
+  "${green}⏺${off} I'll read how a theme reaches the views first." \
+  "" \
+  "${green}⏺${off} ${bold}Read${off}(Sources/LoomUI/ThemeStore.swift)" \
+  "  ${dim}⎿  Read 912 lines${off}" \
+  "" \
+  "${green}⏺${off} ${bold}Update${off}(Sources/LoomUI/ThemeDesign.swift)" \
+  "  ${dim}⎿  Updated with 4 additions and 2 removals${off}" \
+  "     ${grey}41${off} ${red}-        if charter <= 3 { return Self.pill }${off}" \
+  "     ${grey}41${off} ${green}+        if charter <= 3 { return min(charter, radius) }${off}" \
+  "" \
+  "${green}⏺${off} ${bold}Bash${off}(swift test --filter ThemeDesignTests)" \
+  "  ${dim}⎿  ${off}${cyan}✔ Test run with 38 tests passed after 0.412 seconds.${off}" \
+  "" \
+  "${green}⏺${off} The radius scale now follows the theme. ${dim}(12s · ↓ 2.1k tokens)${off}" \
+  "" \
+  "${grey}╭──────────────────────────────────────────────────────────────╮${off}" \
+  "${grey}│${off} >                                                            ${grey}│${off}" \
+  "${grey}╰──────────────────────────────────────────────────────────────╯${off}" \
+  "  ${dim}? for shortcuts${off}"
+# Until the session is closed.
+exec cat > /dev/null
