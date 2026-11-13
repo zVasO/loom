@@ -101,7 +101,7 @@ struct BrowserTabButton: View {
         HStack(spacing: DefaultTheme.space(6)) {
             Image(systemName: "globe")
                 .font(.system(size: 9))
-                .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isActive ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
             Text(title.isEmpty ? "New tab" : title)
                 .themeFont(size: 11, weight: isActive ? .semibold : .regular)
                 .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText

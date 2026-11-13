@@ -122,6 +122,29 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
         return result
     }
 
+    /// The accent as an ink: the colour of an active tab's label, of a
+    /// link, of a selected row's icon. A shadcn page fills with `--primary`
+    /// and writes on it; Loom also writes in it — and a theme whose primary
+    /// is a mid grey made every active item dimmer than its neighbours.
+    /// Under an imported theme it reads at 4.5 to 1 at least, and never
+    /// less than the secondary text beside it; the charter's is the accent.
+    public var accentInk: String {
+        guard design != nil else { return accent }
+        let grounds = [background, contentBackground, surface]
+        func reads(_ hex: String) -> Bool {
+            grounds.allSatisfy { ground in
+                Self.contrast(hex, ground) >= min(7, max(4.5, Self.contrast(secondaryText, ground)))
+            }
+        }
+        var result = accent
+        var amount = 0.0
+        while amount < 1, !reads(result) {
+            amount = min(1, amount + 0.05)
+            result = Self.mix(accent, with: primaryText, amount: amount)
+        }
+        return result
+    }
+
     /// The tokens as the app can be read with them.
     ///
     /// `surfaceRaised` is brought back to the surfaces' side: a raised
@@ -149,8 +172,8 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
         }
         tokens.secondaryText = label(secondaryText, 3.5)
         tokens.mutedText = label(mutedText, 3)
-        tokens.branch = label(branch, 3)
-        tokens.danger = label(danger, 3)
+        tokens.branch = label(branch, 4.5)
+        tokens.danger = label(danger, 4.5)
         tokens.groupHeader = label(groupHeader, 3)
         // The fill of a selection, a chip, a track: told from all it lies on.
         tokens.surfaceRaised = Self.legible(tokens.surfaceRaised, on: grounds, minimum: 1.06,
@@ -185,6 +208,8 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
     public let surfaceRaised: Color
     public let cardBorder: Color
     public let accent: Color
+    /// The accent where it is written with, not filled with (`ThemeTokens.accentInk`).
+    public let accentInk: Color
     public let accentText: Color
     public let primaryText: Color
     public let secondaryText: Color
@@ -226,6 +251,7 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
         surfaceRaised = Self.color(tokens.surfaceRaised)
         cardBorder = Self.color(tokens.cardBorder)
         accent = Self.color(tokens.accent)
+        accentInk = Self.color(tokens.accentInk)
         accentText = Self.color(tokens.accentText)
         primaryText = Self.color(tokens.primaryText)
         secondaryText = Self.color(tokens.secondaryText)

@@ -179,7 +179,7 @@ struct PRFilterEditorSheet: View {
                             Text(example.0).themeFont(size: 11)
                                 .foregroundStyle(DefaultTheme.secondaryText)
                             Text(example.1).themeFont(size: 11, design: .monospaced)
-                                .foregroundStyle(DefaultTheme.accent)
+                                .foregroundStyle(DefaultTheme.accentInk)
                         }
                     }
                     .buttonStyle(.plain)

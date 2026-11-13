@@ -69,7 +69,7 @@ struct UsageSheet: View {
     private var header: some View {
         HStack(spacing: DefaultTheme.space(10)) {
             AppIcon("dollarsign", size: 17)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
             Text("Usage & Estimated Costs")
                 .themeFont(size: 16, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)

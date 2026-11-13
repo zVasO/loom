@@ -175,7 +175,7 @@ struct ActionPaletteView: View {
         let isSelected = index == selection
         return HStack(spacing: DefaultTheme.space(11)) {
             AppIcon(action.icon, size: 15.5)
-                .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isSelected ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text(action.title)
@@ -210,7 +210,7 @@ struct ActionPaletteView: View {
         let isSelected = index == selection
         return HStack(spacing: DefaultTheme.space(11)) {
             AppIcon("text.magnifyingglass", size: 15.5)
-                .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isSelected ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text(hit.title)

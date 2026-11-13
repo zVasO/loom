@@ -206,7 +206,7 @@ public struct BarIconButton: View {
     public var body: some View {
         Button(action: action) {
             AppIcon(systemImage, size: 15)
-                .foregroundStyle(isActive ? DefaultTheme.accent
+                .foregroundStyle(isActive ? DefaultTheme.accentInk
                                  : hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
                 .frame(width: DefaultTheme.size(28), height: DefaultTheme.size(26))
                 .background(isActive ? DefaultTheme.surfaceRaised

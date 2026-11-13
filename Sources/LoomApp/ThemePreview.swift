@@ -194,7 +194,7 @@ struct ThemePreview: View {
                 if let badge {
                     Text(badge)
                         .themeFont(size: 8, weight: .semibold, design: .monospaced, palette: palette)
-                        .foregroundStyle(palette.accent)
+                        .foregroundStyle(palette.accentInk)
                         .padding(.horizontal, palette.space(4)).padding(.vertical, palette.space(1))
                         .background(palette.accent.opacity(0.15), in: Capsule())
                 }
@@ -226,7 +226,7 @@ struct ThemePreview: View {
             HStack(spacing: palette.space(8)) {
                 Text("#42")
                     .themeFont(size: 11, weight: .bold, design: .monospaced, palette: palette)
-                    .foregroundStyle(palette.accent)
+                    .foregroundStyle(palette.accentInk)
                 Text("Fix cache invalidation")
                     .themeFont(size: 11, weight: .semibold, palette: palette)
                     .foregroundStyle(palette.primaryText)
@@ -321,7 +321,7 @@ struct ThemePreview: View {
     private var terminal: some View {
         VStack(alignment: .leading, spacing: palette.space(5)) {
             HStack(spacing: 0) {
-                Text("❯ ").foregroundStyle(palette.accent)
+                Text("❯ ").foregroundStyle(palette.accentInk)
                 Text("swift test --filter LoomUITests").foregroundStyle(palette.primaryText)
             }
             Text("✔ 42 tests passed in 1.3 s").foregroundStyle(palette.stateWorking)

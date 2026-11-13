@@ -185,7 +185,7 @@ struct NewSessionSheet: View {
             HStack(spacing: DefaultTheme.space(10)) {
                 Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 12))
-                    .foregroundStyle(selected ? DefaultTheme.accent : DefaultTheme.mutedText)
+                    .foregroundStyle(selected ? DefaultTheme.accentInk : DefaultTheme.mutedText)
                 VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                     Text(project.name)
                         .themeFont(size: 12, weight: .medium)

@@ -213,16 +213,34 @@ struct ThemeDesignTests {
         let grounds = [tokens.background, tokens.contentBackground, tokens.surface]
         let read = tokens.sanitized
         for ground in grounds {
-            #expect(ThemeTokens.contrast(read.branch, ground) >= 3, "a yellow label on white is moved toward the text")
+            #expect(ThemeTokens.contrast(read.branch, ground) >= 4.5, "a yellow label on white is moved toward the text")
             #expect(ThemeTokens.contrast(read.mutedText, ground) >= 3)
             #expect(ThemeTokens.contrast(read.surfaceRaised, ground) >= 1.06, "a selection is seen on the sidebar")
         }
-        #expect(ThemeTokens.contrast(read.branch, "#FFFFFF") < 4.5, "no further than it takes")
+        #expect(ThemeTokens.contrast(read.branch, "#FFFFFF") < 7, "no further than it takes")
         #expect(read.secondaryText == "#333333" && read.danger == "#000000", "what is read already is left alone")
         #expect(read.accent == tokens.accent && read.accentText == tokens.accentText, "fills are the theme's")
         #expect(read.background == tokens.background && read.surface == tokens.surface)
 
         #expect(read.cardBorder == tokens.cardBorder && read.design?.border == "#000000", "an edge that shows is the theme's")
+
+        // tweakcn's mono: a mid-grey primary. Filled with, it is the theme's;
+        // written with, it is never dimmer than the secondary text beside it.
+        var mono = ThemeFamily.loom.dark
+        mono.background = "#171717"
+        mono.contentBackground = "#0A0A0A"
+        mono.surface = "#191919"
+        mono.primaryText = "#FAFAFA"
+        mono.secondaryText = "#A1A1A1"
+        mono.accent = "#737373"
+        mono.design = ThemeDesign(radius: 0)
+        let ink = mono.sanitized.accentInk
+        for ground in [mono.background, mono.contentBackground, mono.surface] {
+            #expect(ThemeTokens.contrast(ink, ground) >= ThemeTokens.contrast("#A1A1A1", ground) - 0.01
+                    || ThemeTokens.contrast(ink, ground) >= 7)
+        }
+        #expect(mono.sanitized.accent == "#737373", "the fill is untouched")
+        #expect(ThemeFamily.loom.dark.accentInk == ThemeFamily.loom.dark.accent, "the charter writes in its accent")
 
         // tweakcn's claymorphism: a border the colour of the sidebar it should part from the page.
         tokens.cardBorder = "#F0F0F0"

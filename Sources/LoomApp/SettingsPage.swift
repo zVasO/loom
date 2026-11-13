@@ -173,12 +173,12 @@ private struct SettingsSidebar: View {
                 if isGroup {
                     Image(systemName: anchor.icon)
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(inActiveGroup ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                        .foregroundStyle(inActiveGroup ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
                         .frame(width: 16)
                 }
                 Text(anchor.title)
                     .themeFont(size: isGroup ? 12.5 : 12, weight: isGroup ? .semibold : .regular)
-                    .foregroundStyle(isActive ? DefaultTheme.accent
+                    .foregroundStyle(isActive ? DefaultTheme.accentInk
                                      : (isGroup ? DefaultTheme.primaryText : DefaultTheme.secondaryText))
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -1039,7 +1039,7 @@ struct SettingsPage: View {
                     if index > 0 { cardDivider }
                     HStack(spacing: DefaultTheme.space(12)) {
                         AppIcon("folder.fill", size: 13)
-                            .foregroundStyle(DefaultTheme.accent)
+                            .foregroundStyle(DefaultTheme.accentInk)
                         Text(project.name)
                             .themeFont(size: 13)
                             .foregroundStyle(DefaultTheme.primaryText)
@@ -1141,7 +1141,7 @@ struct SettingsPage: View {
             HStack(spacing: DefaultTheme.space(10)) {
                 Image(systemName: installed.manifest.icon ?? "puzzlepiece.extension")
                     .font(.system(size: 13))
-                    .foregroundStyle(DefaultTheme.accent)
+                    .foregroundStyle(DefaultTheme.accentInk)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                     HStack(spacing: DefaultTheme.space(6)) {
@@ -1244,7 +1244,7 @@ private struct ThemeCard: View {
                 Spacer()
                 if isActive {
                     AppIcon("checkmark.circle.fill", size: 14.5)
-                        .foregroundStyle(DefaultTheme.accent)
+                        .foregroundStyle(DefaultTheme.accentInk)
                 }
             }
             .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(8))

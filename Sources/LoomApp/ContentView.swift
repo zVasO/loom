@@ -103,7 +103,7 @@ struct LogoMark: View {
         } else {
             Image(systemName: "square.stack.3d.down.right.fill")
                 .font(.system(size: size * 0.75))
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
         }
     }
 }
@@ -913,7 +913,7 @@ struct ProjectsView: View {
                             HStack(spacing: DefaultTheme.space(8)) {
                                 Text(String(describing: change.kind).prefix(1).uppercased())
                                     .themeFont(size: 10, weight: .bold, design: .monospaced)
-                                    .foregroundStyle(DefaultTheme.accent)
+                                    .foregroundStyle(DefaultTheme.accentInk)
                                     .frame(width: 14)
                                 Text(change.path)
                                     .themeFont(size: 11, design: .monospaced)
@@ -983,7 +983,7 @@ struct ProjectsView: View {
         HStack(spacing: DefaultTheme.space(8)) {
             Image(systemName: isDirectory ? "folder.fill" : "doc")
                 .font(.system(size: 11))
-                .foregroundStyle(isDirectory ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isDirectory ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
                 .frame(width: 16)
             Text(name)
                 .themeFont(size: 12, design: .monospaced)
@@ -1141,7 +1141,7 @@ struct ProjectsView: View {
     private func header(_ project: ProjectRecord) -> some View {
         HStack(spacing: DefaultTheme.space(12)) {
             AppIcon("folder.fill", size: 20.5)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
                 .frame(width: 40, height: 40)
                 .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
                 .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
@@ -1374,7 +1374,7 @@ struct AgentBrowserStackTab: View {
     var body: some View {
         HStack(spacing: DefaultTheme.space(6)) {
             AppIcon("sparkles", size: 11)
-                .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isActive ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
             Text("Agent")
                 .themeFont(size: 11, weight: isActive ? .semibold : .regular)
                 .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
@@ -1472,7 +1472,7 @@ struct RuleCard: View {
     var body: some View {
         HStack(alignment: .top, spacing: DefaultTheme.space(10)) {
             AppIcon("doc.text", size: 15.5)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
                 .frame(width: DefaultTheme.size(30), height: DefaultTheme.size(30))
                 .background(DefaultTheme.accent.opacity(0.12),
                             in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
@@ -1517,7 +1517,7 @@ struct PRRow: View {
                 .help(PRChips.checksSummary(pr))
             Text("#\(pr.number)")
                 .themeFont(size: 12, weight: .semibold, design: .monospaced)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text(pr.title)
                     .themeFont(size: 13, weight: .medium)
@@ -1595,7 +1595,7 @@ struct PRTourView: View {
         VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
             HStack(spacing: DefaultTheme.space(8)) {
                 Image(systemName: "sparkles")
-                    .foregroundStyle(DefaultTheme.accent)
+                    .foregroundStyle(DefaultTheme.accentInk)
                 Text(tour.pitch)
                     .themeFont(size: 13, weight: .medium)
                     .foregroundStyle(DefaultTheme.primaryText)
@@ -1610,7 +1610,7 @@ struct PRTourView: View {
                 HStack(alignment: .top, spacing: DefaultTheme.space(10)) {
                     Text("\(index + 1)")
                         .themeFont(size: 11, weight: .bold, design: .monospaced)
-                        .foregroundStyle(DefaultTheme.accent)
+                        .foregroundStyle(DefaultTheme.accentInk)
                         .frame(width: 20, height: 20)
                         .background(DefaultTheme.accent.opacity(0.12), in: Circle())
                     VStack(alignment: .leading, spacing: DefaultTheme.space(3)) {
@@ -1777,7 +1777,7 @@ struct ProjectSidebarRow: View {
                 .opacity(isSelected ? 1 : 0)
             Image(systemName: isSelected ? "folder.fill" : "folder")
                 .font(.system(size: 12))
-                .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isSelected ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
             Text(project.name)
                 .themeFont(size: 13, weight: isSelected ? .semibold : .regular)
                 .foregroundStyle(isSelected || hovered ? DefaultTheme.primaryText
@@ -2476,7 +2476,7 @@ struct SessionsView: View {
         let count = shells.count + dormants.count
         return HStack(spacing: DefaultTheme.space(8)) {
             AppIcon("terminal", size: 13)
-                .foregroundStyle(shells.isEmpty ? DefaultTheme.mutedText : DefaultTheme.accent)
+                .foregroundStyle(shells.isEmpty ? DefaultTheme.mutedText : DefaultTheme.accentInk)
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 HStack(spacing: DefaultTheme.space(6)) {
                     Text(count > 1 ? "Terminals" : (shells.first?.title ?? dormants.first?.title ?? "Terminal"))
@@ -2532,7 +2532,7 @@ struct SessionsView: View {
                              panes: [AppModel.BrowserPane]) -> some View {
         HStack(spacing: DefaultTheme.space(8)) {
             AppIcon("globe", size: 13)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 HStack(spacing: DefaultTheme.space(6)) {
                     Text(panes.count > 1 ? "Web" : (panes.first?.title ?? "Web"))
@@ -2582,7 +2582,7 @@ struct SessionsView: View {
         let pages = model.agentBrowserPageCount(parent.id)
         return HStack(spacing: DefaultTheme.space(8)) {
             AppIcon("sparkles", size: 13)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
                 .symbolEffect(.pulse, isActive: running)
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text("Agent browser")
@@ -2650,7 +2650,7 @@ struct SessionsView: View {
                              parent: AppModel.SessionItem?) -> some View {
         HStack(spacing: DefaultTheme.space(8)) {
             AppIcon("globe", size: 13)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
             VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text(pane.title)
                     .themeFont(size: 12, weight: .medium)
@@ -3611,7 +3611,7 @@ struct SidebarSessionCard: View, Equatable {
                     if agentBrowsing {
                         Image(systemName: "globe")
                             .font(.system(size: 9))
-                            .foregroundStyle(DefaultTheme.accent)
+                            .foregroundStyle(DefaultTheme.accentInk)
                             .help("claude is using its browser")
                     }
                     if childCount > 0 {
@@ -3702,7 +3702,7 @@ struct GoalFieldView: View {
             } label: {
                 Text("×\(draft.fanOut)")
                     .themeFont(size: 12, weight: .semibold, design: .monospaced)
-                    .foregroundStyle(draft.fanOut > 1 ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                    .foregroundStyle(draft.fanOut > 1 ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
                     .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(4))
                     .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             }

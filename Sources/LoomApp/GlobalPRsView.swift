@@ -265,7 +265,7 @@ struct GlobalPRsView: View {
         HStack(spacing: DefaultTheme.space(10)) {
             Text("#\(pr.number)")
                 .themeFont(size: 13, weight: .bold, design: .monospaced)
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
             Text(pr.title)
                 .themeFont(size: 13, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
@@ -405,7 +405,7 @@ struct GlobalPRsView: View {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(DefaultTheme.secondaryText)
                 AppIcon("sparkles", size: 14.5)
-                    .foregroundStyle(DefaultTheme.accent)
+                    .foregroundStyle(DefaultTheme.accentInk)
                 if let state, !paneOpen {
                     Circle()
                         .fill(DefaultTheme.badgeColor(for: state))
@@ -472,7 +472,7 @@ extension GlobalPRsView {
         return VStack(spacing: 0) {
             HStack(spacing: DefaultTheme.space(8)) {
                 AppIcon("sparkles", size: 12)
-                    .foregroundStyle(DefaultTheme.accent)
+                    .foregroundStyle(DefaultTheme.accentInk)
                 if reviews.count > 1, let tab {
                     // One tab per review of this PR: the fresh ones and the
                     // ones before them, a click away.
@@ -512,7 +512,7 @@ extension GlobalPRsView {
                 // the drawer): a dot says so, and the Sessions tab shows it.
                 if model.agentBrowsers[sessionID]?.activity?.isRunning == true {
                     AppIcon("globe", size: 12)
-                        .foregroundStyle(DefaultTheme.accent)
+                        .foregroundStyle(DefaultTheme.accentInk)
                         .help("claude is using its browser — open the session to watch")
                 }
                 HoverIconButton(systemImage: "arrow.up.forward.square",

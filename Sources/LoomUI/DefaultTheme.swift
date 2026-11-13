@@ -103,6 +103,8 @@ public enum DefaultTheme {
 
     // Accent (filled buttons: contrasting text on top, like the reference)
     public static var accent: Color { palette.accent }
+    /// The accent as a text or an icon colour — a fill keeps `accent`.
+    public static var accentInk: Color { palette.accentInk }
     public static var accentText: Color { palette.accentText }
 
     // Text
