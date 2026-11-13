@@ -271,4 +271,35 @@ struct MarkdownBlocksTests {
         #expect(MarkdownBlocks.fontSize(13.5, forBody: 13) == 14.5)
         #expect(MarkdownBlocks.fontSize(12.5, forBody: 13) == 13.5)
     }
+    // MARK: Table columns
+
+    @Test("a table that fits keeps each column as wide as its text")
+    func tableColumnsThatFit() {
+        #expect(MarkdownTableColumns.widths(natural: [120, 200, 300], available: 700, floor: 90) == [120, 200, 300])
+        #expect(MarkdownTableColumns.widths(natural: [120, 200, 300], available: 620, floor: 90) == [120, 200, 300])
+    }
+
+    @Test("a table too wide shares the room: short columns stay on one line, long ones split the rest and wrap")
+    func tableColumnsShareTheRoom() {
+        // A name, and two sentences: the name is whole, the sentences halve what is left.
+        let widths = MarkdownTableColumns.widths(natural: [260, 900, 1_400], available: 1_000, floor: 90)
+        #expect(widths == [260, 370, 370])
+        #expect(widths.reduce(0, +) == 1_000, "the table takes its place, no more")
+        // Two short columns served first, the long one takes what is left.
+        #expect(MarkdownTableColumns.widths(natural: [150, 200, 3_000], available: 1_000, floor: 90) == [150, 200, 650])
+        // Nobody is served: an even split.
+        #expect(MarkdownTableColumns.widths(natural: [800, 900], available: 600, floor: 90) == [300, 300])
+    }
+
+    @Test("a column is never squeezed under a word or two: under that the table scrolls")
+    func tableColumnsFloor() {
+        // Six long columns in a narrow place: each at the floor, wider than the place together.
+        let narrow = MarkdownTableColumns.widths(natural: [400, 400, 400, 400, 400, 400], available: 300, floor: 90)
+        #expect(narrow == [90, 90, 90, 90, 90, 90])
+        #expect(MarkdownTableColumns.minimum(natural: [40, 400], floor: 90) == [40, 90], "a short column's floor is its text")
+        #expect(MarkdownTableColumns.comfortable(natural: [40, 400, 150], floor: 90) == [40, 225, 150])
+        // What a scrolling table is laid out at is what the same arithmetic gives for that width.
+        let comfortable = MarkdownTableColumns.comfortable(natural: [150, 3_000], floor: 96)
+        #expect(MarkdownTableColumns.widths(natural: [150, 3_000], available: comfortable.reduce(0, +), floor: 96) == comfortable)
+    }
 }

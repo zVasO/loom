@@ -751,61 +751,172 @@ private enum MarkdownScroller {
     }
 }
 
-/// A pipe table as a grid: a hairline under the header and between rows.
-/// A cell wraps at `cellWidth`; a table wider than its place scrolls sideways
-/// rather than squeeze its columns to a word each.
+/// The widths of a table's columns, from the width each would take on one
+/// line. Pure: the layout's arithmetic, without a view.
+enum MarkdownTableColumns {
+    /// The least a column is given: its own text when that is shorter.
+    static func minimum(natural: [CGFloat], floor: CGFloat) -> [CGFloat] {
+        natural.map { min($0, floor) }
+    }
+
+    /// Columns for a table that scrolls sideways: no narrower than a short
+    /// sentence, so that it is read across, not down a word per line.
+    static func comfortable(natural: [CGFloat], floor: CGFloat) -> [CGFloat] {
+        natural.map { min($0, floor * 2.5) }
+    }
+
+    /// Columns that hold in `available`. A table that fits keeps each column
+    /// as wide as its text. One that does not shares the room, the
+    /// narrowest columns served first: a short column (a number, a name)
+    /// stays on one line, and the long ones split what is left and wrap —
+    /// what a browser does with a table. Never under `minimum`: below that
+    /// the table is wider than its place, and scrolls.
+    static func widths(natural: [CGFloat], available: CGFloat, floor: CGFloat) -> [CGFloat] {
+        guard natural.reduce(0, +) > available else { return natural }
+        var widths = minimum(natural: natural, floor: floor)
+        var room = available - widths.reduce(0, +)
+        var open = natural.indices
+            .filter { natural[$0] > widths[$0] }
+            .sorted { natural[$0] < natural[$1] }
+        while let column = open.first, room > 0.5 {
+            let share = room / CGFloat(open.count)
+            let wanted = natural[column] - widths[column]
+            if wanted <= share {
+                widths[column] += wanted
+                room -= wanted
+                open.removeFirst()
+            } else {
+                for other in open { widths[other] += share }
+                room = 0
+            }
+        }
+        return widths
+    }
+}
+
+/// A table's cells in rows and columns: each column as wide as
+/// `MarkdownTableColumns` says for the width at hand, each row as tall as
+/// its tallest cell once the text has wrapped. (A `Grid` sized its rows
+/// before its texts wrapped: a long cell was cut on one line, or ran over
+/// the rows under it.)
+private struct MarkdownTableLayout: Layout {
+    let columns: Int
+    let floor: CGFloat
+    /// Inside a sideways scroll view no width is proposed: the table then
+    /// takes comfortable columns; outside one, its narrowest — the width
+    /// `ViewThatFits` compares with the place.
+    let scrolls: Bool
+
+    struct Cache {
+        var natural: [CGFloat]
+    }
+
+    func makeCache(subviews: Subviews) -> Cache {
+        var natural = [CGFloat](repeating: 0, count: max(columns, 1))
+        for (index, subview) in subviews.enumerated() {
+            let column = index % max(columns, 1)
+            natural[column] = max(natural[column], subview.sizeThatFits(.unspecified).width)
+        }
+        return Cache(natural: natural)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        let widths = columnWidths(for: proposal.width, natural: cache.natural)
+        let heights = rowHeights(widths: widths, subviews: subviews)
+        return CGSize(width: widths.reduce(0, +), height: heights.reduce(0, +))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        let widths = columnWidths(for: bounds.width, natural: cache.natural)
+        let heights = rowHeights(widths: widths, subviews: subviews)
+        var y = bounds.minY
+        for row in heights.indices {
+            var x = bounds.minX
+            for column in widths.indices {
+                let index = row * widths.count + column
+                guard index < subviews.count else { break }
+                subviews[index].place(at: CGPoint(x: x, y: y), anchor: .topLeading,
+                                      proposal: ProposedViewSize(width: widths[column], height: heights[row]))
+                x += widths[column]
+            }
+            y += heights[row]
+        }
+    }
+
+    private func columnWidths(for width: CGFloat?, natural: [CGFloat]) -> [CGFloat] {
+        guard let width, width.isFinite else {
+            return scrolls ? MarkdownTableColumns.comfortable(natural: natural, floor: floor)
+                           : MarkdownTableColumns.minimum(natural: natural, floor: floor)
+        }
+        return MarkdownTableColumns.widths(natural: natural, available: width, floor: floor)
+    }
+
+    /// Each row as tall as its tallest cell at its column's width.
+    private func rowHeights(widths: [CGFloat], subviews: Subviews) -> [CGFloat] {
+        guard !widths.isEmpty else { return [] }
+        let rows = (subviews.count + widths.count - 1) / widths.count
+        var heights = [CGFloat](repeating: 0, count: rows)
+        for (index, subview) in subviews.enumerated() {
+            let column = index % widths.count
+            let size = subview.sizeThatFits(ProposedViewSize(width: widths[column], height: nil))
+            heights[index / widths.count] = max(heights[index / widths.count], size.height)
+        }
+        return heights
+    }
+}
+
+/// A pipe table: a hairline under the header and between rows, columns
+/// that share the width of its place and cells that wrap in them. Only a
+/// table too wide for its narrowest columns scrolls sideways.
 private struct MarkdownTable: View {
     let header: [String]
     let alignments: [MarkdownBlocks.ColumnAlignment]
     let rows: [[String]]
     let fontSize: CGFloat
 
-    private static let cellWidth: CGFloat = 320
-
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            // Its columns as wide as their cells, not stretched to the place.
-            grid.fixedSize(horizontal: true, vertical: false)
+            table(scrolls: false)
             ScrollView(.horizontal) {
-                grid.padding(.bottom, MarkdownScroller.room)
+                table(scrolls: true).padding(.bottom, MarkdownScroller.room)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var grid: some View {
-        Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
-            GridRow {
-                ForEach(Array(header.enumerated()), id: \.offset) { column, text in
-                    cellView(text, column: column, isHeader: true)
-                }
+    private func table(scrolls: Bool) -> some View {
+        // Seven ems: a word or two — under that a column is a ladder of
+        // syllables.
+        MarkdownTableLayout(columns: header.count, floor: (fontSize * 7).rounded(), scrolls: scrolls) {
+            ForEach(Array(header.enumerated()), id: \.offset) { column, text in
+                cell(text, column: column, row: nil)
             }
             ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                Rectangle()
-                    .fill(index == 0 ? DefaultTheme.line2 : DefaultTheme.line)
-                    .frame(height: 1)
-                    // The rule takes the grid's width: it does not ask for one.
-                    .gridCellUnsizedAxes(.horizontal)
-                GridRow {
-                    ForEach(Array(row.enumerated()), id: \.offset) { column, text in
-                        cellView(text, column: column, isHeader: false)
-                    }
+                ForEach(Array(header.indices), id: \.self) { column in
+                    cell(column < row.count ? row[column] : "", column: column, row: index)
                 }
             }
         }
     }
 
-    private func cellView(_ text: String, column: Int, isHeader: Bool) -> some View {
+    /// One cell, filling its column and its row; `row` nil for the header.
+    private func cell(_ text: String, column: Int, row: Int?) -> some View {
         let alignment: MarkdownBlocks.ColumnAlignment = column < alignments.count ? alignments[column] : .leading
+        let isHeader = row == nil
         let weight: Font.Weight? = isHeader ? Font.Weight.semibold : nil
         let ink: Color = isHeader ? DefaultTheme.primaryText : DefaultTheme.primaryText.opacity(0.85)
+        // The rule above a row: the stronger one under the header.
+        let rule: Color = row == nil ? Color.clear : (row == 0 ? DefaultTheme.line2 : DefaultTheme.line)
         return Text(MarkdownCache.inline(text, accent: DefaultTheme.accentInk))
             .themeFont(size: fontSize, weight: weight)
             .foregroundStyle(ink)
             .multilineTextAlignment(Self.textAlignment(alignment))
             .padding(.horizontal, DefaultTheme.space(10))
             .padding(.vertical, DefaultTheme.space(6))
-            .frame(maxWidth: Self.cellWidth, alignment: Self.frameAlignment(alignment))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Self.frameAlignment(alignment))
+            .overlay(alignment: .top) {
+                Rectangle().fill(rule).frame(height: 1)
+            }
     }
 
     private static func textAlignment(_ alignment: MarkdownBlocks.ColumnAlignment) -> TextAlignment {
