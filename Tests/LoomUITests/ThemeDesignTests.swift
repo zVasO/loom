@@ -242,6 +242,19 @@ struct ThemeDesignTests {
         #expect(mono.sanitized.accent == "#737373", "the fill is untouched")
         #expect(ThemeFamily.loom.dark.accentInk == ThemeFamily.loom.dark.accent, "the charter writes in its accent")
 
+        // A pale red on a pastel page (pastel-dreams) is darkened, not drawn
+        // toward the mauve of the text: it still reads as red.
+        var pastel = ThemeFamily.loom.light
+        pastel.background = "#E9D8FD"
+        pastel.contentBackground = "#F5EEFE"
+        pastel.surface = "#FFFFFF"
+        pastel.primaryText = "#4B3A5C"
+        pastel.danger = "#F87171"
+        pastel.design = ThemeDesign(radius: 24)
+        let danger = ThemeTokens.rgb(pastel.sanitized.danger)
+        #expect(ThemeTokens.contrast(pastel.sanitized.danger, "#E9D8FD") >= 4.5)
+        #expect((danger?.red ?? 0) > 2 * (danger?.green ?? 1), "a signal keeps its hue")
+
         // tweakcn's claymorphism: a border the colour of the sidebar it should part from the page.
         tokens.cardBorder = "#F0F0F0"
         tokens.design = ThemeDesign(radius: 20, border: "#F0F0F0", input: "#F0F0F0")

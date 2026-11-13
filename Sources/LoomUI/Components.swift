@@ -339,6 +339,16 @@ public extension View {
     /// charter, the theme's own under an imported theme followed whole.
     func themedField() -> some View { modifier(ThemedField()) }
 
+    /// The edge shadcn gives a Card (`border`), for a card the charter
+    /// draws as a fill alone: nothing under the charter; under an imported
+    /// theme followed whole, the card's edge — its shadow falls on two
+    /// sides only, and a card without an edge looked cut on the others.
+    @MainActor
+    func cardEdge(radius: CGFloat = 10) -> some View {
+        overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(radius))
+            .strokeBorder(DefaultTheme.redraws ? DefaultTheme.cardBorder : Color.clear, lineWidth: 1))
+    }
+
     /// The edge and the shadow shadcn gives an Input, for a field the
     /// charter draws bare (a filter in a sidebar): nothing under the
     /// charter, the theme's under an imported theme followed whole.

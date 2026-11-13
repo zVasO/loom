@@ -140,10 +140,14 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
         var amount = 0.0
         while amount < 1, !reads(result) {
             amount = min(1, amount + 0.05)
-            result = Self.mix(accent, with: primaryText, amount: amount)
+            result = Self.mix(accent, with: inkPole, amount: amount)
         }
         return result
     }
+
+    /// Black on a light page, white on a dark one: where a coloured label
+    /// goes to be read without losing its hue.
+    var inkPole: String { Self.luminance(contentBackground) > 0.4 ? "#000000" : "#FFFFFF" }
 
     /// The tokens as the app can be read with them.
     ///
@@ -170,11 +174,17 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
         func label(_ hex: String, _ minimum: Double) -> String {
             Self.legible(hex, on: grounds, minimum: minimum, toward: primaryText)
         }
+        // A colour that means something keeps its hue: darkened or
+        // lightened, not drawn toward a text colour that may be tinted — a
+        // pale red must still read as red.
+        func signal(_ hex: String, _ minimum: Double) -> String {
+            Self.legible(hex, on: grounds, minimum: minimum, toward: inkPole)
+        }
         tokens.secondaryText = label(secondaryText, 3.5)
         tokens.mutedText = label(mutedText, 3)
-        tokens.branch = label(branch, 4.5)
-        tokens.danger = label(danger, 4.5)
-        tokens.groupHeader = label(groupHeader, 3)
+        tokens.branch = signal(branch, 4.5)
+        tokens.danger = signal(danger, 4.5)
+        tokens.groupHeader = signal(groupHeader, 3)
         // The fill of a selection, a chip, a track: told from all it lies on.
         tokens.surfaceRaised = Self.legible(tokens.surfaceRaised, on: grounds, minimum: 1.06,
                                             toward: primaryText, step: 0.02)
