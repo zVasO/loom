@@ -20,7 +20,8 @@ import SwiftUI
 /// - `LOOM_TOUR_PROJECT`: a folder opened as a project, with three sessions
 ///   in it — the first in a worktree of its own when it is a git
 ///   repository. Where the tour runs has no claude: `PATH` leads to a
-///   stand-in (`Tests/ThemeTour/bin/claude`).
+///   stand-in (`Tests/ThemeTour/bin/claude`), which also writes the
+///   conversation the chat view shows.
 /// - `LOOM_TOUR_CAPTURE`: `screen` (the display, through `screencapture`;
 ///   when unsaid) or `view` (the window drawing itself: no blur, no sheet
 ///   over it — for a Mac that refuses the screen to be read).
@@ -76,16 +77,18 @@ final class ThemeTour {
         .general, .sessions, .badges, .agentEngine, .scheduledReviews,
         .appearance, .themes, .documents, .projects,
     ]
-    private static let screens: [String] = ["projects", "project-git", "project-files", "sessions", "git-panel",
-                                            "side-panel", "context", "overview", "prs", "workflows", "extensions"]
+    private static let screens: [String] = ["projects", "project-git", "project-files", "sessions", "chat",
+                                            "git-panel", "side-panel", "context", "overview", "prs", "workflows",
+                                            "extensions"]
         + settingsStops.map { "settings-" + $0.rawValue }
         + ["theme-import", "palette", "new-session", "usage"]
-    private static let coreScreens: Set<String> = ["projects", "sessions", "git-panel", "overview", "workflows",
-                                                   "settings-general", "settings-themes", "theme-import",
-                                                   "palette"]
+    private static let coreScreens: Set<String> = ["projects", "sessions", "chat", "git-panel", "overview",
+                                                   "workflows", "settings-general", "settings-themes",
+                                                   "theme-import", "palette"]
     /// How long a screen takes to settle before its picture, in milliseconds.
-    private static let settling: [String: Int] = ["sessions": 1_200, "git-panel": 1_500, "project-git": 1_500,
-                                                  "theme-import": 2_500]
+    /// The chat view finds and reads the conversation's file first.
+    private static let settling: [String: Int] = ["sessions": 1_200, "chat": 2_500, "git-panel": 1_500,
+                                                  "project-git": 1_500, "theme-import": 2_500]
 
     private let model: AppModel
     private let driver: Driver
@@ -266,10 +269,12 @@ final class ThemeTour {
         case "project-git", "project-files":
             driver.show(.projects)
             ask(screen)
-        case "sessions", "side-panel", "git-panel", "context":
+        case "sessions", "chat", "side-panel", "git-panel", "context":
             driver.show(.sessions)
             driver.select(sessions.first.map { DetailSelection.session($0) })
-            if screen == "side-panel" {
+            if screen == "chat" {
+                ask("chat")
+            } else if screen == "side-panel" {
                 NotificationCenter.default.post(name: .loomToggleSidePanel, object: nil)
             } else if screen == "git-panel" {
                 ask("git")
@@ -293,6 +298,10 @@ final class ThemeTour {
     /// Undoes what a screen put over the window. True when something was.
     private func leave(_ screen: String) -> Bool {
         switch screen {
+        case "chat":
+            // The screens after it are the terminal's.
+            ask("terminal")
+            return true
         case "side-panel":
             NotificationCenter.default.post(name: .loomToggleSidePanel, object: nil)
             return true

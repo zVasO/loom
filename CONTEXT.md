@@ -60,6 +60,10 @@ _Avoid_ : split view, tiroir (le tiroir est celui de l'onglet PR)
 L'enregistrement intégral et continu de la sortie d'un terminal, conservé après la fin de la session.
 _Avoid_ : log, historique (« historique » = la liste des sessions passées)
 
+**Vue conversation** :
+La seconde façon de voir une session dans l'onglet Sessions (ADR-0023) : la conversation de sa session native en messages — Markdown rendu, appels d'outils repliés, champ de réponse —, lue dans le fichier `.jsonl` que l'agent tient lui-même. L'autre est son terminal, où l'agent tourne et où l'on répond à ses demandes de permission ; « Terminal | Chat » passe de l'une à l'autre. Ce qu'on y écrit est tapé dans le terminal.
+_Avoid_ : transcript (c'est l'enregistrement d'un terminal), historique (la liste des sessions passées)
+
 **Reprise** :
 Relance d'une session `interrupted` via le mécanisme natif de l'agent (ex. `claude --resume <session native>`).
 _Avoid_ : restauration (les PTY ne survivent pas ; on reprend la conversation, pas le process)

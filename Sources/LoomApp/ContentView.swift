@@ -2066,6 +2066,12 @@ struct SessionsView: View {
                 model.toggleSidePanel(for: model.stackParentID(of: id))
             }
         }
+        // ⌘⇧M: the selected session as its terminal, or as its conversation.
+        .onReceive(NotificationCenter.default.publisher(for: .loomToggleSessionView)) { _ in
+            if case .session(let id) = selected {
+                model.toggleViewMode(for: id)
+            }
+        }
         // ⌘T only exists in a terminal or browser context, and NECESSARILY
         // creates a tab of the same type, in the horizontal bar.
         .onReceive(NotificationCenter.default.publisher(for: .loomNewTab)) { _ in
@@ -2919,6 +2925,9 @@ struct SessionDetailView: View {
     @State private var lastDraggedWidth: CGFloat?
     /// The detail's width, for settling a reveal the agent asked for.
     @State private var detailWidth: CGFloat = 0
+    /// Bumped when the terminal comes back in place of the chat view: it
+    /// takes the keyboard again, whoever holds it.
+    @State private var terminalFocusRequest = 0
 
     private struct PanelDrag: Equatable {
         var startWidth: CGFloat
@@ -2939,6 +2948,10 @@ struct SessionDetailView: View {
     private var parentID: SessionID { model.stackParentID(of: sessionID) }
 
     private var panel: SidePanelState { model.sidePanel(for: parentID) }
+
+    /// The terminal, or the conversation as a chat (ADR-0023). The model's:
+    /// this view is rebuilt at every tab switch.
+    private var viewMode: SessionViewMode { model.viewMode(for: sessionID) }
 
     private func sideLayout(width: CGFloat) -> SidePanelLayout {
         // The drag's last width bridges the frame between the gesture's reset
@@ -3003,10 +3016,24 @@ struct SessionDetailView: View {
                     ZStack(alignment: .trailing) {
                         // Always the first child: toggling the panel never
                         // recreates the terminal (no focus grab, no first-fit race).
-                        TerminalPane(model: model, sessionID: sessionID,
-                                     role: split ? .sessionSplit : .session,
-                                     fitSuspended: panelDrag != nil,
-                                     otherShape: other)
+                        if viewMode == .chat {
+                            // The chat view REPLACES the terminal, in its
+                            // frame: laid over a mounted pane, it would lose
+                            // its clicks and its wheel to the terminal's
+                            // window-wide monitors. The surface is the
+                            // model's: the pane that comes back paints it as
+                            // after a tab switch, and its first fit — the
+                            // same frame, the same grid — is dropped by the
+                            // runtime. No resize, no repaint.
+                            SessionChatPane(model: model, sessionID: sessionID,
+                                            onShowTerminal: { model.setViewMode(.terminal, for: sessionID) })
+                        } else {
+                            TerminalPane(model: model, sessionID: sessionID,
+                                         role: split ? .sessionSplit : .session,
+                                         fitSuspended: panelDrag != nil,
+                                         otherShape: other,
+                                         focusRequest: terminalFocusRequest)
+                        }
                         if gitShown {
                             gitPanel
                                 .frame(width: min(380, columnWidth))
@@ -3034,6 +3061,8 @@ struct SessionDetailView: View {
                 }
                 .animation(nil, value: split)
                 .animation(nil, value: layout.panelWidth)
+                // Nor a fade between the terminal and the chat view.
+                .animation(nil, value: viewMode)
                 .onAppear { detailWidth = geo.size.width }
                 .onChange(of: geo.size.width) { _, width in detailWidth = width }
             }
@@ -3054,6 +3083,10 @@ struct SessionDetailView: View {
         }
         .onChange(of: panel.pendingReveal, initial: true) { settlePendingReveal() }
         .onChange(of: detailWidth) { settlePendingReveal() }
+        // Back from the chat view, the terminal is where typing goes.
+        .onChange(of: viewMode) { _, mode in
+            if mode == .terminal { terminalFocusRequest += 1 }
+        }
         .task(id: InfoKey(shown: infoShown, state: item?.state)) {
             guard infoShown else { return }
             let snapshot = await model.sessionInfoSnapshot(sessionID)
@@ -3089,6 +3122,10 @@ struct SessionDetailView: View {
                 StatusLabel(state)
             }
             Spacer()
+            // A shell has no conversation: its terminal is all there is to show.
+            if item?.isShell != true {
+                SessionViewModeToggle(mode: viewMode) { model.setViewMode($0, for: sessionID) }
+            }
             // v3 — pipeline: queue the next goal, it launches when this ends.
             GhostButton(systemImage: "arrow.turn.down.right") {
                 followUpDraft = model.followUps[sessionID] ?? ""
@@ -3190,6 +3227,8 @@ struct SessionDetailView: View {
                 if gitShown { Task { gitData = await model.gitPanel(for: sessionID) } }
             case "context": contextShown = true
             case "context-close": contextShown = false
+            case "chat": model.setViewMode(.chat, for: sessionID)
+            case "terminal": model.setViewMode(.terminal, for: sessionID)
             default: break
             }
         }
@@ -3441,6 +3480,59 @@ struct SessionDetailView: View {
         case .deleted: "minus"
         case .renamed: "arrow.right"
         case .untracked: "questionmark"
+        }
+    }
+}
+
+/// "Terminal | Chat" in a session's breadcrumb: the fleet filter's well
+/// (2 pt inset, 22 pt segments), an icon before each word.
+private struct SessionViewModeToggle: View {
+    let mode: SessionViewMode
+    let onSelect: (SessionViewMode) -> Void
+
+    var body: some View {
+        HStack(spacing: DefaultTheme.space(2)) {
+            Segment(title: "Terminal", systemImage: "terminal", isOn: mode == .terminal) {
+                onSelect(.terminal)
+            }
+            .help("The terminal claude runs in (⌘⇧M)")
+            Segment(title: "Chat", systemImage: "bubble.left", isOn: mode == .chat) {
+                onSelect(.chat)
+            }
+            .help("The conversation as messages, with a field to answer from (⌘⇧M)")
+        }
+        .padding(DefaultTheme.space(2))
+        .background(DefaultTheme.background, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).strokeBorder(DefaultTheme.line, lineWidth: 1))
+        .fixedSize()
+    }
+
+    private struct Segment: View {
+        let title: String
+        let systemImage: String
+        let isOn: Bool
+        let action: () -> Void
+        @State private var hovered = false
+
+        var body: some View {
+            Button(action: action) {
+                HStack(spacing: DefaultTheme.space(5)) {
+                    AppIcon(systemImage, size: 12)
+                    Text(title.uppercased())
+                        .themeFont(size: 11, weight: .medium, design: .monospaced, tracking: 0.55)
+                }
+                .foregroundStyle(isOn || hovered ? DefaultTheme.primaryText : DefaultTheme.mutedText)
+                .padding(.horizontal, DefaultTheme.space(8))
+                .frame(height: DefaultTheme.size(22))
+                .background(isOn ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4))
+                    .strokeBorder(isOn ? DefaultTheme.line2 : .clear, lineWidth: 1))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovered = $0 }
+            .animation(.hover, value: hovered)
+            .animation(.hover, value: isOn)
         }
     }
 }

@@ -735,14 +735,6 @@ extension AppModel {
         return false
     }
 
-    /// Whether the session waits because its turn ended on a question (the
-    /// journal says so) rather than on a permission prompt.
-    private func endedOnQuestion(_ session: SessionID) async -> Bool {
-        let id = session.rawValue.uuidString
-        let last = await recentTransitions(limit: 200).last { $0.sessionID == id }
-        return last?.to == .needsInput && last?.event == SessionManager.stopOnQuestionLabel
-    }
-
     /// `claude -p` for one step: the answer parsed against its fields, asked
     /// again once when it does not fit. `resume`: the conversation the step
     /// carries on — lost (cleared by claude, another folder), it starts anew.

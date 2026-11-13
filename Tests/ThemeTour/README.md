@@ -4,9 +4,9 @@ Le contrôle qu'aucun test unitaire ne fait : que Loom reste entier à l'écran 
 importé suivi à la lettre (rayon, espacement, polices, interlettrage, ombres), et qu'un thème
 intégré se dessine comme avant. `ThemeTour` (`Sources/LoomApp/ThemeTour.swift`) promène l'app
 réelle sous chaque arrêt d'un plan et enregistre ce que l'écran montre de sa fenêtre, écran
-après écran : Projets et ses onglets, Sessions, panneau Git, navigateur, Mission Control, PRs,
-Workflows, Extensions, Réglages section par section, feuilles d'import, de contexte, de
-nouvelle session et d'usage, palette.
+après écran : Projets et ses onglets, Sessions (le terminal, puis la vue conversation), panneau
+Git, navigateur, Mission Control, PRs, Workflows, Extensions, Réglages section par section,
+feuilles d'import, de contexte, de nouvelle session et d'usage, palette.
 
 ```sh
 swift build
@@ -29,7 +29,11 @@ swift run --skip-build LoomApp
   seulement.
 - `bin/claude` remplace claude là où il n'y en a pas (un runner) : il peint l'écran d'une
   session, et modifie un fichier quand la session a son propre worktree — le panneau Git a un
-  diff à montrer.
+  diff à montrer. Il écrit aussi une conversation inventée (deux échanges, du Markdown avec
+  liste imbriquée, tableau et bloc de code, deux appels d'outils) dans
+  `~/.claude/projects/loom-theme-tour/<id de la session>.jsonl`, là où Loom cherche celle
+  d'une session native (ADR-0023) : c'est ce que montre l'écran `chat`. C'est le seul fichier
+  que la tournée laisse hors de `LOOM_SUPPORT_DIR` ; le dossier se supprime sans rien casser.
 - Les images vont dans `LOOM_TOUR_OUT`, un dossier par arrêt, avec `tour.json` (le design de
   chaque arrêt, ses écrans, les échecs). `screencapture` lit l'écran : il faut que le terminal
   qui lance la tournée y soit autorisé (Réglages Système › Confidentialité › Enregistrement de
