@@ -206,9 +206,11 @@ struct ContentView: View {
         .onChange(of: tab) {
             applyTheme()
             model.extensions.isTabVisible = tab == .extensions
-            // The window's shortcuts still answer under the palette (⌘G,
-            // ⌘,): one that changes the screen it was opened on closes it.
-            if paletteShown { paletteShown = false }
+            // The palette is not closed from here: a tab also changes on
+            // its own — a session launched a moment ago lands in Sessions —
+            // and closing it then took the field away mid-typing, the rest
+            // of the keystrokes going to the new terminal. The shortcuts
+            // that change the screen under it (⌘G, ⌘,) close it themselves.
         }
         .onChange(of: model.workflows.revealRequest) { tab = .workflows }
         // Every such request is about a schedule: Settings opens on them.
@@ -408,6 +410,9 @@ struct ContentView: View {
             // v2 — Mission Control: the fleet at a glance (⌘G). A TOGGLE:
             // press again to return to the view you came from.
             BarIconButton(systemImage: "square.grid.2x2", isActive: tab == .overview) {
+                // The shortcut still answers under the palette: it changes
+                // the screen the palette was opened on, and closes it.
+                paletteShown = false
                 if tab == .overview {
                     tab = tabBeforeOverview
                 } else {
@@ -454,6 +459,8 @@ struct ContentView: View {
             BarIconButton(systemImage: "dollarsign") { usageShown = true }
                 .help("Usage & estimated costs")
             BarIconButton(systemImage: "gearshape", isActive: tab == .settings) {
+                // As for ⌘G: ⌘, pressed under the palette closes it.
+                paletteShown = false
                 if tab == .settings {
                     tab = tabBeforeSettings
                 } else {

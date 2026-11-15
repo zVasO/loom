@@ -565,11 +565,14 @@ public struct KeyCaptureView: NSViewRepresentable {
     public func updateNSView(_ view: CaptureNSView, context: Context) {
         configure(view)
         // Asked for the keyboard: taken even from another owner — the person
-        // just pressed the key or the button that says so.
+        // just pressed the key or the button that says so. Not from under
+        // an overlay of the window, though: a shortcut still answers there
+        // (⌘⇧M, back to the terminal), and what is typed in the overlay is
+        // not for the agent. The terminal has the keyboard when it lowers.
         if view.answeredFocusRequest != focusRequest {
             view.answeredFocusRequest = focusRequest
             DispatchQueue.main.async { [weak view] in
-                guard let view else { return }
+                guard let view, !view.standsDown else { return }
                 view.window?.makeFirstResponder(view)
             }
             return
@@ -632,7 +635,7 @@ public struct KeyCaptureView: NSViewRepresentable {
         /// An overlay of the window (`WindowOverlay`) holds the keyboard, the
         /// clicks and the wheel: this pane takes none of them, though it is
         /// still under the pointer and its monitors still see every event.
-        private var standsDown: Bool { WindowOverlay.isUp }
+        fileprivate var standsDown: Bool { WindowOverlay.isUp }
 
         /// The one way this view takes the keyboard back: only when nothing owns it,
         /// never by stealing it from a text field the user is typing in — nor

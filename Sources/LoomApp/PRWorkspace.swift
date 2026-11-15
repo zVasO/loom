@@ -669,6 +669,10 @@ struct PRWorkspaceView: View, Equatable {
             var viewsLanded = false
             while let landed = await group.next() {
                 guard !Task.isCancelled else { break }
+                // Counted when the rows or the boxes land, not after every
+                // piece: a box ticked since is not in `views`, and the
+                // colours landing later would untick it.
+                var recount = false
                 switch landed {
                 case .detail(let detail):
                     if prDetail != detail { prDetail = detail }
@@ -687,6 +691,7 @@ struct PRWorkspaceView: View, Equatable {
                     if diffFiles != rows.files { diffFiles = rows.files }
                     diffLoading = false
                     paths = rows.files.map(\.file.path)
+                    recount = true
                     // Colours come last: the diff is readable plain, and
                     // highlight.js over a big PR takes a moment.
                     group.addTask {
@@ -699,8 +704,9 @@ struct PRWorkspaceView: View, Equatable {
                 case .fileViews(let landedViews):
                     views = landedViews
                     viewsLanded = true
+                    recount = true
                 }
-                if viewsLanded, let paths {
+                if recount, viewsLanded, let paths {
                     let counted = FileReviewProgress.compute(paths: paths,
                                                              views: views?.files ?? [])
                     if progress != counted { progress = counted }
@@ -913,8 +919,10 @@ struct PRVerdictBar: View {
             // again. Anything else is a scheduled review writing its summary
             // while keystrokes wait here: it only fills an empty summary,
             // this one is not — the typed text stays, and is written at the
-            // next pause.
-            if typed == stored || stored.isEmpty { self.typed = nil }
+            // next pause. Unless nothing is left of them (typed, then
+            // deleted): there is no text to keep, and the field shows what
+            // the review wrote.
+            if typed == stored || stored.isEmpty || typed.isEmpty { self.typed = nil }
         }
         .onDisappear { writeSummary() }
     }
@@ -922,8 +930,16 @@ struct PRVerdictBar: View {
     /// Hands the typed text to the tab, where it follows the PR across the
     /// app's tabs and across relaunches.
     private func writeSummary() {
-        guard let typed, let stored = model.prTabs.tab(tabID)?.reviewSummary,
-              typed != stored else { return }
+        guard let typed, let stored = model.prTabs.tab(tabID)?.reviewSummary else { return }
+        guard typed != stored else {
+            // Typed back to what the tab holds (a character, then deleted):
+            // nothing to write, and no change of the tab will come to
+            // release the field. It follows the tab again now — held, it
+            // hid the summary a scheduled review wrote next, then wrote
+            // this stale text over it.
+            self.typed = nil
+            return
+        }
         model.setPRTabSummary(typed, for: tabID)
     }
 

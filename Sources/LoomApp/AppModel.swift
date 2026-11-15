@@ -1342,9 +1342,10 @@ public final class AppModel {
     private func evictStaleContent(of fresh: [GitHubService.PullRequest],
                                    replacing previous: [GitHubService.PullRequest],
                                    in projectID: ProjectID) {
-        // The row each PR's content was loaded for: its open tab's (the poll
-        // keeps it true and drops the content itself when it moves), else
-        // this list's, else another filter's.
+        // The row each PR's content was loaded for: its open tab's (whoever
+        // writes it — the poll, `dropPRContentIfMoved` — drops the content
+        // itself when the row moved), else this list's, else another
+        // filter's.
         var known: [Int: GitHubService.PullRequest] = [:]
         for (listKey, entry) in prLists where listKey.projectID == projectID {
             for pr in entry.prs { known[pr.number] = pr }
@@ -1707,15 +1708,18 @@ public final class AppModel {
         } catch {
             failure = "Could not load PR #\(number): \(Self.ghErrorText(error))"
         }
-        prReviewsOpening.removeAll { $0 == reference }
         guard let pr = row else {
-            startupError = failure
             // The checkout may still be writing the worktree: this launch
             // is not over — and no other may start on that folder — before
-            // it is.
+            // it is. The "Opening" entry and the error wait for it too: an
+            // error shown while the launch still held the PR invited a
+            // retry, and that retry was dropped without a word.
             _ = await checkoutTask?.result
+            prReviewsOpening.removeAll { $0 == reference }
+            startupError = failure
             return nil
         }
+        prReviewsOpening.removeAll { $0 == reference }
         // A real row from the start: a placeholder in the tab would load the
         // workspace once for it and once more for the row that replaces it.
         notePRRowFetched(number, in: projectID)
@@ -1849,6 +1853,21 @@ public final class AppModel {
         // The stamp is parsed only when there is a call to judge.
         invalidatePRCaches(row.number, in: projectID,
                            callsLeftBefore: running ? Self.contentCallLimit(for: row) : .distantFuture)
+    }
+
+    /// A row is about to be written into a PR's tab by someone else than
+    /// the poll or a list fetch — a click in a list, a pasted URL, a
+    /// scheduled review. Those two drop what was loaded for the PR when its
+    /// row moves; a row written straight into the tab kept it, and nothing
+    /// dropped it afterwards: the poll and the next list fetch compare
+    /// GitHub with the row the tab then has. Measured against the row known
+    /// until now (the tab's, else a list's). With none — a tab closed since,
+    /// a PR in no loaded list — nothing says that what is cached was loaded
+    /// for this row, and it goes.
+    func dropPRContentIfMoved(to row: GitHubService.PullRequest, in projectID: ProjectID) {
+        if let known = knownPullRequest(row.number, in: projectID),
+           !row.contentMoved(since: known) { return }
+        invalidatePRCaches(movedTo: row, in: projectID)
     }
 
     /// The moment before which a call cannot be trusted to have read a PR

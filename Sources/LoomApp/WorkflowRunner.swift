@@ -883,8 +883,11 @@ extension AppModel {
         return AutoReviewReport(verdict: verdict, summary: step["summary"]?.plainText ?? "", comments: comments)
     }
 
-    /// The PR's tab, opened pinned without taking the screen.
+    /// The PR's tab, opened pinned without taking the screen. The row is
+    /// fresh from `gh`: a tab that was not the active one — only that one
+    /// is polled — may hold what was loaded for an older head.
     func openPRTabInBackground(_ pr: GitHubService.PullRequest, in projectID: ProjectID) {
+        dropPRContentIfMoved(to: pr, in: projectID)
         prTabs.openInBackground(pr, in: projectID)
         savePRTabs()
     }

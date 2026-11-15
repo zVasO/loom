@@ -313,8 +313,7 @@ extension AppModel {
         let pr = item.pr
         let projectID = item.projectID
         updateAutoReviewItem(item.id, run: runID) { $0.status = .preparing }
-        prTabs.openInBackground(pr, in: projectID)
-        savePRTabs()
+        openPRTabInBackground(pr, in: projectID)
         guard let repo = projectRepo(projectID) else {
             updateAutoReviewItem(item.id, run: runID) { $0.status = .failed("The project folder is missing.") }
             return
@@ -358,8 +357,7 @@ extension AppModel {
     /// consolidated verdict and findings say how it ended.
     private func autoReviewWithWorkflow(_ item: AutoReviewRun.Item, run runID: UUID, workflowID: UUID) async {
         updateAutoReviewItem(item.id, run: runID) { $0.status = .preparing }
-        prTabs.openInBackground(item.pr, in: item.projectID)
-        savePRTabs()
+        openPRTabInBackground(item.pr, in: item.projectID)
         let inputs = RunInputs(trigger: .schedule, projectID: item.projectID, prNumber: item.pr.number)
         guard let workflowRun = startWorkflowRun(workflowID, inputs: inputs) else {
             let reason = startupError ?? "The workflow could not start."

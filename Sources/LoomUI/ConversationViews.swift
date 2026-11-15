@@ -470,9 +470,24 @@ public struct ConversationComposer: View {
         .padding(.bottom, DefaultTheme.space(14))
         .frame(maxWidth: .infinity)
         // The terminal takes the keyboard whenever no field holds it: the
-        // composer asks for it by name, on arriving and when told to.
-        .onAppear { focused = true }
-        .onChange(of: focusRequest) { focused = true }
+        // composer asks for it by name, on arriving and when told to. Not
+        // from under an overlay of the window (the ⌘K palette), like the
+        // terminal: the chat view may arrive under it — ⌘⇧M, a session
+        // opened a moment ago — and what is typed in the palette is not a
+        // message for claude.
+        .onAppear { if !WindowOverlay.isUp { focused = true } }
+        .onChange(of: focusRequest) { if !WindowOverlay.isUp { focused = true } }
+        // The overlay is gone. When it left the keyboard to no one, the
+        // composer has it, as a terminal would: asked once the overlay's
+        // own field has left the window, and never taken from a view that
+        // holds it.
+        .onReceive(NotificationCenter.default.publisher(for: .loomWindowOverlayLowered)) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                guard let window = NSApp.mainWindow,
+                      window.firstResponder == nil || window.firstResponder === window else { return }
+                focused = true
+            }
+        }
     }
 
     @ViewBuilder

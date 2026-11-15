@@ -150,6 +150,32 @@ private enum PaletteKeyboard {
         }
     }
 
+    /// The key monitor that keeps Tab in the palette, for as long as it shows.
+    private static var tabMonitor: Any?
+
+    /// A sheet was its own window: Tab had nowhere to go. An overlay shares
+    /// its window's key loop with every field and terminal under the scrim,
+    /// and Tab handed one of them the keyboard — the palette still drawn,
+    /// Return then answered by a field nobody sees. While the palette
+    /// shows, Tab (⇧ or not) goes nowhere in its window.
+    static func holdTab() {
+        guard tabMonitor == nil else { return }
+        tabMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // 48: the Tab key. A sheet over the window keeps its own, and
+            // so does an input method composing in the field.
+            guard event.keyCode == 48, let window = event.window,
+                  window === (NSApp.mainWindow ?? NSApp.keyWindow),
+                  (window.firstResponder as? NSTextView)?.hasMarkedText() != true
+            else { return event }
+            return nil
+        }
+    }
+
+    static func releaseTab() {
+        if let tabMonitor { NSEvent.removeMonitor(tabMonitor) }
+        tabMonitor = nil
+    }
+
     /// Never taken from a view that got the keyboard meanwhile, and a view
     /// that left the window (its tab was closed) is not called back.
     private static func hand(fromField: Bool) {
@@ -214,7 +240,9 @@ struct PaletteOverlay: View {
         .onChange(of: isPresented) {
             if isPresented {
                 WindowOverlay.isUp = true
+                PaletteKeyboard.holdTab()
             } else {
+                PaletteKeyboard.releaseTab()
                 PaletteKeyboard.giveBack()
                 WindowOverlay.isUp = false
                 if opensOn != nil { opensOn = nil }

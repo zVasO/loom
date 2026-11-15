@@ -221,7 +221,11 @@ the main actor.
    (`GitHubService.staleContent`, `GitHubService.swift:626`;
    `evictStaleContent`, `AppModel.swift:1342`). The diff pipeline forgets
    a PR by its exact key (`DiffPipeline.evict(key:)`): a prefix match on
-   `…#12` would take `#123` with it.
+   `…#12` would take `#123` with it. A row written into a tab from outside
+   the poll and the lists — a click, a pasted URL, a scheduled review —
+   drops what was loaded for another one first (`dropPRContentIfMoved`):
+   the tab's row is the row its content was loaded for, which the eviction
+   and the poll both rely on.
 6. **Writes on change.** `reloadPersistedSessions` compares before assigning
    and writes `projects` once, already ordered (`AppModel.swift:660`);
    `prTabs` is rewritten only when a tab goes.

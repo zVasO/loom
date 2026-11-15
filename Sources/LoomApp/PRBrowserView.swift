@@ -300,8 +300,10 @@ struct PRBrowserView: View {
             } else if !query.isEmpty {
                 HoverIconButton(systemImage: "xmark.circle.fill", help: "Clear") { query = "" }
             }
-            // ⌘F lands in the field; the button itself is never seen.
-            Button("") { searchFocused = true }
+            // ⌘F lands in the field; the button itself is never seen. Not
+            // under the ⌘K palette, where the shortcut still answers: the
+            // keyboard would leave for a field behind its scrim.
+            Button("") { if !WindowOverlay.isUp { searchFocused = true } }
                 .keyboardShortcut("f", modifiers: .command)
                 .frame(width: 0, height: 0)
                 .opacity(0)

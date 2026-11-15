@@ -293,12 +293,15 @@ extension AppModel {
 
     /// A click in a list: previewed (the next click reuses the tab).
     public func showPR(_ pr: GitHubService.PullRequest, in projectID: ProjectID) {
+        // Before the tab takes the row: what was loaded for another one goes.
+        dropPRContentIfMoved(to: pr, in: projectID)
         prTabs.show(pr, in: projectID)
         savePRTabs()
     }
 
     /// Shown and pinned: a review starts, a row is double-clicked.
     public func openPRTab(_ pr: GitHubService.PullRequest, in projectID: ProjectID) {
+        dropPRContentIfMoved(to: pr, in: projectID)
         prTabs.open(pr, in: projectID)
         savePRTabs()
     }
