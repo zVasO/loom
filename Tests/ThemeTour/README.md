@@ -24,10 +24,28 @@ swift run --skip-build LoomApp
 - `LOOM_SUPPORT_DIR` est obligatoire : la tournée ajoute des thèmes, un projet et des sessions,
   jamais dans vos données. Elle change le thème et l'apparence de l'app le temps de passer, et
   les remet.
-- Un arrêt du plan : `thème[:light|dark][:colours][:core]`. Le thème est une famille intégrée
-  (`loom`, `dracula`…) ou `<nom>.css` dans `LOOM_TOUR_THEMES`, lu comme le lit la feuille
-  d'import. `colours` : le thème suivi pour ses seules couleurs. `core` : les écrans principaux
-  seulement.
+- Un arrêt du plan : `thème[:light|dark][:colours][:core][:keys]`. Le thème est une famille
+  intégrée (`loom`, `dracula`…) ou `<nom>.css` dans `LOOM_TOUR_THEMES`, lu comme le lit la
+  feuille d'import. `colours` : le thème suivi pour ses seules couleurs. `core` : les écrans
+  principaux seulement.
+- `keys` : aucun écran, mais la marche au clavier — ce qu'une image d'un état ne dit pas, que
+  la palette répond aux touches. ⌘K, une recherche, Tab, « Review code », sa question qui
+  refuse puis accepte une réponse, Échap deux fois, ⌘K qui referme, ↓ puis Entrée : chaque
+  touche est postée dans la file d'événements de l'app et prend le chemin d'une vraie (les
+  moniteurs de touches, les raccourcis, puis ce qui a le clavier). Chaque pas a son image, et
+  `tour.json` note ce qui avait le clavier (`keyboard` : la vue, et le texte du champ quand
+  c'en est un) et quelques durées en millisecondes (`timing` : de ⌘K au champ qui a le
+  clavier, d'Échap au terminal qui le reprend, d'Entrée à l'onglet de la review puis à sa
+  session) — un ordre de grandeur sur le Mac de la tournée, pas une borne. `stalls` liste les
+  silences du fil principal de plus de 60 ms pendant la marche, et le pas où ils tombent :
+  pendant ce temps l'app ne répondait à rien. `LOOM_TOUR_SAMPLE=1` fait lire les fils de
+  l'app par `/usr/bin/sample` pendant qu'une review se lance (`sample-*.txt` à côté des
+  images : ce que faisait le fil principal) ; l'échantillonnage ralentit l'app, les durées
+  d'une telle marche ne se lisent pas. Avec `LOOM_TOUR_REVIEW` (`github.com/owner/repo/pull/12`, tapé touche à touche :
+  minuscules, chiffres, `/`, `.` et `-`), la marche va jusqu'au bout : Entrée lance la review,
+  puis une autre depuis une ligne de la liste, et la palette est ouverte trois fois au-dessus
+  de chaque sorte d'écran — il faut alors `gh` connecté, et que le projet de la tournée soit
+  un clone de ce dépôt.
 - `bin/claude` remplace claude là où il n'y en a pas (un runner) : il peint l'écran d'une
   session, et modifie un fichier quand la session a son propre worktree — le panneau Git a un
   diff à montrer. Il écrit aussi une conversation inventée (deux échanges, du Markdown avec
