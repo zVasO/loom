@@ -123,6 +123,13 @@ struct PRWorkspaceView: View, Equatable {
     /// GitHub's "Viewed" boxes over the diff's files — the recap and the
     /// checkboxes read it; a toggle flips it before GitHub answers.
     @State private var progress = FileReviewProgress.empty
+    /// "Viewed" boxes ticked that a load in flight may not know of: its
+    /// answer can be older than the tick. Folded over every recount, and
+    /// let go once GitHub has answered for each and no such load is left
+    /// (`settleTicks`): what the next one reads holds them.
+    @State private var freshTicks: [String: Bool] = [:]
+    @State private var ticksInFlight = 0
+    @State private var loadsInFlight = 0
     /// Syntax colours per scheme (dark: true), computed after the diff off
     /// the main thread: the diff paints plain first, then coloured. Both
     /// palettes are kept, so an appearance flip never paints light colours
@@ -557,12 +564,18 @@ struct PRWorkspaceView: View, Equatable {
                                       // told after; a refusal puts it back.
                                       let previous = progress
                                       progress = progress.toggling(path, viewed: on)
+                                      freshTicks[path] = on
+                                      ticksInFlight += 1
                                       Task {
-                                          if let error = await model.setFileViewed(
-                                              pr.number, path: path, viewed: on, in: project.id) {
+                                          let error = await model.setFileViewed(
+                                              pr.number, path: path, viewed: on, in: project.id)
+                                          ticksInFlight -= 1
+                                          if let error {
+                                              freshTicks[path] = nil
                                               progress = previous
                                               prActionOutput = error
                                           }
+                                          settleTicks()
                                       }
                                   })
                         .padding(.horizontal, DefaultTheme.space(12))
@@ -642,6 +655,11 @@ struct PRWorkspaceView: View, Equatable {
         let baseBranch = pr.baseBranch
         let dark = colorScheme == .dark
         diffLoading = true
+        loadsInFlight += 1
+        defer {
+            loadsInFlight -= 1
+            settleTicks()
+        }
         let drafted = model.reviewDraft(for: number, in: projectID)
         if draft != drafted { draft = drafted }
         await withTaskGroup(of: Landed.self) { group in
@@ -707,12 +725,23 @@ struct PRWorkspaceView: View, Equatable {
                     recount = true
                 }
                 if recount, viewsLanded, let paths {
-                    let counted = FileReviewProgress.compute(paths: paths,
+                    var counted = FileReviewProgress.compute(paths: paths,
                                                              views: views?.files ?? [])
+                    // A box ticked while this load ran is not in its answer:
+                    // the rows landing after it would untick it.
+                    for (path, on) in freshTicks where paths.contains(path) {
+                        counted = counted.toggling(path, viewed: on)
+                    }
                     if progress != counted { progress = counted }
                 }
             }
         }
+    }
+
+    /// The ticks kept for the loads in flight are let go when GitHub has
+    /// answered for every one of them and no load older than them is left.
+    private func settleTicks() {
+        if loadsInFlight == 0, ticksInFlight == 0, !freshTicks.isEmpty { freshTicks = [:] }
     }
 
     /// Light markdown (bold, code, links) with line breaks preserved — a full
