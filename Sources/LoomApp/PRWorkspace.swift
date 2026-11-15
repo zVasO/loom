@@ -78,25 +78,37 @@ enum PRPane: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-struct PRWorkspaceView: View {
+struct PRWorkspaceView: View, Equatable {
     let model: AppModel
     let project: ProjectRecord
     let pr: GitHubService.PullRequest
     let pane: PRPane
-    /// How much of the right edge the session drawer covers. The diff scrolls
-    /// under it; the controls step aside, or they would be unreachable.
-    let controlsInset: CGFloat
+    /// The session drawer's width, kept by the PRs tab. Handed on to the two
+    /// bars whose controls must stay clear of the drawer, and read by them
+    /// alone: the diff scrolls under the drawer, and a drawer dragged or
+    /// slid re-runs two bars, not this view.
+    let drawerLayout: PRDrawerLayout
+    /// The drawer shows a session that runs: "Add to claude session" has an
+    /// input to type into.
+    let transcribes: Bool
     let onOpenSession: (SessionID) -> Void
     /// Phase 4 — receives the composed message for the PR's review session
     /// ("Explain these lines…", "Ask about…"). nil = quick actions still work
     /// through a session opened in the Sessions tab.
     var sendToSession: ((String) -> Void)?
-    /// Review pane open: "Add to claude session" types the lines into the
-    /// session's input (no submit — the user adds their question).
+    /// "Add to claude session" types the lines into the session's input (no
+    /// submit — the user adds their question). Offered while `transcribes`.
     var transcribeToSession: ((DiffSnippet) -> Void)?
-    /// The verdict bar's text, owned by the PR's tab: it follows the tab
-    /// across the app's tabs and across relaunches.
-    @Binding var reviewSummary: String
+
+    /// What the workspace SHOWS decides whether it re-runs; its closures
+    /// act on the same PR either way. Its parent runs again at every write
+    /// to the tabs (a summary saved, a drawer toggled, a row refreshed) and
+    /// whenever a session appears or goes: the diff used to run again with
+    /// it each time (audit 2026-11-15).
+    static func == (lhs: PRWorkspaceView, rhs: PRWorkspaceView) -> Bool {
+        lhs.project.id == rhs.project.id && lhs.pr == rhs.pr && lhs.pane == rhs.pane
+            && lhs.transcribes == rhs.transcribes
+    }
 
     @State private var prDetail: GitHubService.PRDetail?
     /// Parsed + row-paired ONCE when the diff arrives (off the main thread) —
@@ -111,6 +123,13 @@ struct PRWorkspaceView: View {
     /// GitHub's "Viewed" boxes over the diff's files — the recap and the
     /// checkboxes read it; a toggle flips it before GitHub answers.
     @State private var progress = FileReviewProgress.empty
+    /// "Viewed" boxes ticked that a load in flight may not know of: its
+    /// answer can be older than the tick. Folded over every recount, and
+    /// let go once GitHub has answered for each and no such load is left
+    /// (`settleTicks`): what the next one reads holds them.
+    @State private var freshTicks: [String: Bool] = [:]
+    @State private var ticksInFlight = 0
+    @State private var loadsInFlight = 0
     /// Syntax colours per scheme (dark: true), computed after the diff off
     /// the main thread: the diff paints plain first, then coloured. Both
     /// palettes are kept, so an appearance flip never paints light colours
@@ -132,26 +151,43 @@ struct PRWorkspaceView: View {
     /// per change, both gutters).
     @State private var unifiedDiff = UserDefaults.standard.bool(forKey: "loom.diff.unified")
 
-    /// Seeded from the model's diff cache: a revisited PR paints its rows,
-    /// coloured, in the first frame — the loads below then only confirm.
+    /// Seeded from what the model already holds for the PR: a revisit
+    /// paints its rows, coloured, with their threads under their lines, the
+    /// viewed files folded and the description in place — in the first
+    /// frame. The loads below then only confirm. Every read here is of
+    /// state the model does not observe: an init runs inside the parent's
+    /// body, and would subscribe it.
     init(model: AppModel, project: ProjectRecord, pr: GitHubService.PullRequest, pane: PRPane,
-         controlsInset: CGFloat, onOpenSession: @escaping (SessionID) -> Void,
+         drawerLayout: PRDrawerLayout, transcribes: Bool = false,
+         onOpenSession: @escaping (SessionID) -> Void,
          sendToSession: ((String) -> Void)? = nil,
-         transcribeToSession: ((DiffSnippet) -> Void)? = nil,
-         reviewSummary: Binding<String>) {
+         transcribeToSession: ((DiffSnippet) -> Void)? = nil) {
         self.model = model
         self.project = project
         self.pr = pr
         self.pane = pane
-        self.controlsInset = controlsInset
+        self.drawerLayout = drawerLayout
+        self.transcribes = transcribes
         self.onOpenSession = onOpenSession
         self.sendToSession = sendToSession
         self.transcribeToSession = transcribeToSession
-        self._reviewSummary = reviewSummary
         let cached = model.cachedDiff(pr: pr.number, in: project.id)
-        _diffFiles = State(initialValue: cached?.files ?? [])
+        let files: [DiffFileRows] = cached?.files ?? []
+        _diffFiles = State(initialValue: files)
         _highlights = State(initialValue: cached?.highlights ?? [:])
         _prTour = State(initialValue: model.cachedTour(pr: pr.number, in: project.id))
+        _prDetail = State(initialValue: model.cachedDetail(pr: pr.number, in: project.id))
+        _lineComments = State(initialValue: model.cachedReviewComments(pr: pr.number,
+                                                                       in: project.id) ?? [])
+        _draft = State(initialValue: model.reviewDraft(for: pr.number, in: project.id))
+        // The recap counts the files on screen: without rows there is no
+        // universe to count the viewed ones in.
+        if !files.isEmpty, let views = model.cachedFileViews(pr: pr.number, in: project.id) {
+            _progress = State(initialValue: FileReviewProgress.compute(
+                paths: files.map(\.file.path), views: views.files))
+        }
+        // The seeds are this PR's: the first load must not blank them.
+        _loadedNumber = State<Int?>(initialValue: pr.number)
     }
 
     var body: some View {
@@ -161,7 +197,16 @@ struct PRWorkspaceView: View {
             case .files: filesPane
             }
             Divider().overlay(DefaultTheme.cardBorder)
-            verdictBar
+            PRVerdictBar(model: model, projectID: project.id, pr: pr, draft: draft,
+                         busy: prActionBusy, output: prActionOutput,
+                         drawerLayout: drawerLayout,
+                         onDiscardDraft: {
+                             model.discardDraft(for: pr.number, in: project.id)
+                             draft = nil
+                         },
+                         onSubmit: { verdict, summary in
+                             submitReview(verdict, summary: summary)
+                         })
         }
         .background(DefaultTheme.background)
         // The head, the update stamp and the refresh button's generation
@@ -416,38 +461,42 @@ struct PRWorkspaceView: View {
 
     private var filesPane: some View {
         VStack(spacing: 0) {
-            HStack(spacing: DefaultTheme.space(10)) {
-                sectionHeader("FILES", count: diffFiles.count,
-                              color: DefaultTheme.secondaryText)
-                if diffLoading { ProgressView().controlSize(.mini) }
-                if progress.total > 0 {
-                    // The recap: how much of the PR has been checked off,
-                    // GitHub's own boxes behind it.
-                    HStack(spacing: DefaultTheme.space(6)) {
-                        ProgressView(value: progress.fraction)
-                            .progressViewStyle(.linear)
-                            .frame(width: 90)
-                            .tint(progress.isComplete ? DefaultTheme.groupHeader : DefaultTheme.accent)
-                        Text(progress.label)
-                            .themeFont(size: 10, weight: .medium, design: .monospaced)
-                            .foregroundStyle(progress.isComplete ? DefaultTheme.groupHeader
-                                                                 : DefaultTheme.secondaryText)
+            // The header's controls step out from under the drawer; the
+            // wrapper reads the drawer's width so that this view does not.
+            PRDrawerClearance(model: model, projectID: project.id, number: pr.number,
+                              layout: drawerLayout) {
+                HStack(spacing: DefaultTheme.space(10)) {
+                    sectionHeader("FILES", count: diffFiles.count,
+                                  color: DefaultTheme.secondaryText)
+                    if diffLoading { ProgressView().controlSize(.mini) }
+                    if progress.total > 0 {
+                        // The recap: how much of the PR has been checked off,
+                        // GitHub's own boxes behind it.
+                        HStack(spacing: DefaultTheme.space(6)) {
+                            ProgressView(value: progress.fraction)
+                                .progressViewStyle(.linear)
+                                .frame(width: 90)
+                                .tint(progress.isComplete ? DefaultTheme.groupHeader : DefaultTheme.accent)
+                            Text(progress.label)
+                                .themeFont(size: 10, weight: .medium, design: .monospaced)
+                                .foregroundStyle(progress.isComplete ? DefaultTheme.groupHeader
+                                                                     : DefaultTheme.secondaryText)
+                        }
+                        .help("Files marked as viewed — the same checkboxes as on github.com")
                     }
-                    .help("Files marked as viewed — the same checkboxes as on github.com")
+                    Spacer()
+                    // Split keeps old/new aligned; unified gives every line the
+                    // full width. Long lines wrap either way.
+                    HoverIconButton(systemImage: unifiedDiff
+                                        ? "rectangle.split.2x1" : "list.bullet.rectangle",
+                                    help: unifiedDiff ? "Split view (old | new)"
+                                                      : "Unified view (full-width lines)") {
+                        unifiedDiff.toggle()
+                        UserDefaults.standard.set(unifiedDiff, forKey: "loom.diff.unified")
+                    }
                 }
-                Spacer()
-                // Split keeps old/new aligned; unified gives every line the
-                // full width. Long lines wrap either way.
-                HoverIconButton(systemImage: unifiedDiff
-                                    ? "rectangle.split.2x1" : "list.bullet.rectangle",
-                                help: unifiedDiff ? "Split view (old | new)"
-                                                  : "Unified view (full-width lines)") {
-                    unifiedDiff.toggle()
-                    UserDefaults.standard.set(unifiedDiff, forKey: "loom.diff.unified")
-                }
+                .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(6))
             }
-            .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(6))
-            .padding(.trailing, controlsInset)
             Divider().overlay(DefaultTheme.cardBorder)
             if diffFiles.isEmpty {
                 diffPlaceholder
@@ -470,7 +519,7 @@ struct PRWorkspaceView: View {
                                       ```
                                       """)
                                   },
-                                  onAddToSession: transcribeToSession,
+                                  onAddToSession: transcribes ? transcribeToSession : nil,
                                   onComment: { snippet, text, isSuggestion in
                                       postLineComment(snippet, text: text,
                                                       isSuggestion: isSuggestion)
@@ -515,12 +564,18 @@ struct PRWorkspaceView: View {
                                       // told after; a refusal puts it back.
                                       let previous = progress
                                       progress = progress.toggling(path, viewed: on)
+                                      freshTicks[path] = on
+                                      ticksInFlight += 1
                                       Task {
-                                          if let error = await model.setFileViewed(
-                                              pr.number, path: path, viewed: on, in: project.id) {
+                                          let error = await model.setFileViewed(
+                                              pr.number, path: path, viewed: on, in: project.id)
+                                          ticksInFlight -= 1
+                                          if let error {
+                                              freshTicks[path] = nil
                                               progress = previous
                                               prActionOutput = error
                                           }
+                                          settleTicks()
                                       }
                                   })
                         .padding(.horizontal, DefaultTheme.space(12))
@@ -559,81 +614,6 @@ struct PRWorkspaceView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
-    // MARK: The verdict — docked, so it is never a scroll away
-
-    private var verdictBar: some View {
-        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
-            if let raw = model.prTabs.tab(PRTab.key(project.id, pr.number))?.suggestedVerdict,
-               let suggested = AutoReviewReport.Verdict(rawValue: raw) {
-                Label("A scheduled review suggests: \(suggested.label) — the summary and the pending comments are claude's draft. Read, edit, then submit your verdict.",
-                      systemImage: "sparkles")
-                    .themeFont(size: 11)
-                    .foregroundStyle(DefaultTheme.secondaryText)
-            }
-            if let draft, !draft.isEmpty {
-                pendingStrip(draft)
-            }
-            HStack(spacing: DefaultTheme.space(8)) {
-                TextField(draft?.isEmpty == false ? "Review summary…" : "Review comment…",
-                          text: $reviewSummary, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .themeFont(size: 12)
-                    .lineLimit(1...4)
-                    .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(7))
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
-                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
-                        .stroke(DefaultTheme.fieldBorder, lineWidth: 1))
-                    .themeShadow(.xs, radius: 6)
-                AccentButton("Approve") { submitReview(pr, .approve, project) }
-                GhostButton("Request changes", systemImage: "exclamationmark.bubble") {
-                    submitReview(pr, .requestChanges, project)
-                }
-                GhostButton("Comment", systemImage: "bubble.left") {
-                    submitReview(pr, .comment, project)
-                }
-                if prActionBusy { ProgressView().controlSize(.small) }
-            }
-            if let prActionOutput {
-                Text(prActionOutput)
-                    .themeFont(size: 10, design: .monospaced)
-                    .foregroundStyle(prActionOutput.hasSuffix("✓") ? DefaultTheme.groupHeader
-                                                                   : DefaultTheme.secondaryText)
-            }
-        }
-        .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(8))
-        .padding(.trailing, controlsInset)
-        // Background after the inset: the strip still spans the window, only
-        // its contents step out from under the drawer.
-        .background(DefaultTheme.background)
-    }
-
-    /// What the verdict will carry: how many drafted comments, a way to drop
-    /// them all, and a warning when the head moved under them.
-    private func pendingStrip(_ draft: ReviewDraft) -> some View {
-        let pending = DefaultTheme.badgeColor(for: .needsInput)
-        let count = draft.comments.count
-        return HStack(spacing: DefaultTheme.space(8)) {
-            AppIcon("tray.and.arrow.down", size: 12).foregroundStyle(pending)
-            Text(count == 1 ? "1 pending comment" : "\(count) pending comments")
-                .themeFont(size: 11, weight: .semibold)
-                .foregroundStyle(DefaultTheme.primaryText)
-            Text("— sent together with your verdict, as one review")
-                .themeFont(size: 11)
-                .foregroundStyle(DefaultTheme.secondaryText)
-            if !pr.headSHA.isEmpty, !draft.headSHA.isEmpty, draft.headSHA != pr.headSHA {
-                Label("written against an older head — line numbers may have moved",
-                      systemImage: "exclamationmark.triangle")
-                    .themeFont(size: 10)
-                    .foregroundStyle(pending)
-            }
-            Spacer()
-            GhostButton("Discard", systemImage: "trash", role: .destructive) {
-                model.discardDraft(for: pr.number, in: project.id)
-                self.draft = nil
-            }
-        }
-    }
-
     /// Keeps a line comment (or suggestion) for the review.
     private func addDraft(_ snippet: DiffSnippet, text: String, isSuggestion: Bool) {
         let body = GitHubService.lineCommentBody(isSuggestion ? "" : text,
@@ -649,32 +629,119 @@ struct PRWorkspaceView: View {
 
     // MARK: Loading and actions
 
-    /// Detail + diff (cached in the model unless refresh), then the heavy
-    /// parse/pair work off the main thread.
+    /// One piece of the PR, as it lands (see `load`).
+    private enum Landed: Sendable {
+        case detail(GitHubService.PRDetail?)
+        case comments([GitHubService.ReviewComment])
+        /// The diff's text, and why there is none when it is empty.
+        case diff(String, String?)
+        case rows(DiffPipeline.Rows)
+        case colours(DiffHighlights)
+        case fileViews(GitHubService.FileViews?)
+    }
+
+    /// Detail, comments, diff and viewed files (cached in the model unless
+    /// refresh), asked for TOGETHER and shown each as it lands: the first
+    /// diff is the slowest of four `gh` calls away, where it used to be
+    /// their sum. The heavy parse/pair work stays off the main thread.
+    /// A run its task dropped (the PR moved, the scheme flipped) writes
+    /// nothing more: the run that replaced it does, and joins the calls
+    /// this one left running.
     private func load(refresh: Bool) async {
-        diffLoading = true
-        draft = model.reviewDraft(for: pr.number, in: project.id)
-        prDetail = await model.prDetail(pr.number, in: project.id, refresh: refresh)
-        lineComments = await model.reviewComments(pr.number, in: project.id, refresh: refresh)
-        let result = await model.prDiff(pr.number, baseBranch: pr.baseBranch,
-                                        in: project.id, refresh: refresh)
-        diffError = result.error
-        let diff = result.diff
-        // Parsed, paired and coloured once per diff, in the model's pipeline:
-        // a revisit is a cache hit, not a "Loading the diff…".
-        let rows = await model.diffRows(pr: pr.number, in: project.id, diff: diff)
-        if diffFiles != rows.files { diffFiles = rows.files }
-        diffLoading = false
-        // Colours come last, at lower priority: the diff is readable plain,
-        // and highlight.js over a big PR takes a moment.
+        // What the calls below need, as values: they run off this view.
+        let model = self.model
+        let number = pr.number
+        let projectID = project.id
+        let baseBranch = pr.baseBranch
         let dark = colorScheme == .dark
-        let coloured = await model.diffHighlights(pr: pr.number, in: project.id, rows: rows, dark: dark)
-        if highlights[dark] != coloured { highlights[dark] = coloured }
-        // GitHub's viewed boxes, after the diff: the files on screen are the
-        // universe the recap counts.
-        let views = await model.fileViews(pr.number, in: project.id, refresh: refresh)
-        progress = FileReviewProgress.compute(paths: diffFiles.map(\.file.path),
-                                              views: views?.files ?? [])
+        diffLoading = true
+        loadsInFlight += 1
+        defer {
+            loadsInFlight -= 1
+            settleTicks()
+        }
+        let drafted = model.reviewDraft(for: number, in: projectID)
+        if draft != drafted { draft = drafted }
+        await withTaskGroup(of: Landed.self) { group in
+            group.addTask {
+                let detail = await model.prDetail(number, in: projectID, refresh: refresh)
+                return Landed.detail(detail)
+            }
+            group.addTask {
+                let comments = await model.reviewComments(number, in: projectID, refresh: refresh)
+                return Landed.comments(comments)
+            }
+            group.addTask {
+                let result = await model.prDiff(number, baseBranch: baseBranch,
+                                                in: projectID, refresh: refresh)
+                return Landed.diff(result.diff, result.error)
+            }
+            group.addTask {
+                let fetched = await model.fileViews(number, in: projectID, refresh: refresh)
+                return Landed.fileViews(fetched)
+            }
+            // GitHub's viewed boxes are counted over the files on screen:
+            // the recap waits for both the rows and the boxes.
+            var paths: [String]?
+            var views: GitHubService.FileViews?
+            var viewsLanded = false
+            while let landed = await group.next() {
+                guard !Task.isCancelled else { break }
+                // Counted when the rows or the boxes land, not after every
+                // piece: a box ticked since is not in `views`, and the
+                // colours landing later would untick it.
+                var recount = false
+                switch landed {
+                case .detail(let detail):
+                    if prDetail != detail { prDetail = detail }
+                case .comments(let comments):
+                    if lineComments != comments { lineComments = comments }
+                case .diff(let diff, let error):
+                    if diffError != error { diffError = error }
+                    // Parsed, paired and coloured once per diff, in the
+                    // model's pipeline: a revisit is a cache hit, not a
+                    // "Loading the diff…".
+                    group.addTask {
+                        let parsed = await model.diffRows(pr: number, in: projectID, diff: diff)
+                        return Landed.rows(parsed)
+                    }
+                case .rows(let rows):
+                    if diffFiles != rows.files { diffFiles = rows.files }
+                    diffLoading = false
+                    paths = rows.files.map(\.file.path)
+                    recount = true
+                    // Colours come last: the diff is readable plain, and
+                    // highlight.js over a big PR takes a moment.
+                    group.addTask {
+                        let coloured = await model.diffHighlights(pr: number, in: projectID,
+                                                                  rows: rows, dark: dark)
+                        return Landed.colours(coloured)
+                    }
+                case .colours(let coloured):
+                    if highlights[dark] != coloured { highlights[dark] = coloured }
+                case .fileViews(let landedViews):
+                    views = landedViews
+                    viewsLanded = true
+                    recount = true
+                }
+                if recount, viewsLanded, let paths {
+                    var counted = FileReviewProgress.compute(paths: paths,
+                                                             views: views?.files ?? [])
+                    // A box ticked while this load ran is not in its answer:
+                    // the rows landing after it would untick it.
+                    for (path, on) in freshTicks where paths.contains(path) {
+                        counted = counted.toggling(path, viewed: on)
+                    }
+                    if progress != counted { progress = counted }
+                }
+            }
+        }
+    }
+
+    /// The ticks kept for the loads in flight are let go when GitHub has
+    /// answered for every one of them and no load older than them is left.
+    private func settleTicks() {
+        if loadsInFlight == 0, ticksInFlight == 0, !freshTicks.isEmpty { freshTicks = [:] }
     }
 
     /// Light markdown (bold, code, links) with line breaks preserved — a full
@@ -711,13 +778,12 @@ struct PRWorkspaceView: View {
         }
     }
 
-    private func submitReview(_ pr: GitHubService.PullRequest,
-                              _ verdict: GitHubService.Verdict,
-                              _ project: ProjectRecord) {
+    /// `summary`: the verdict bar's text as typed — the bar owns it.
+    private func submitReview(_ verdict: GitHubService.Verdict, summary: String) {
         let hasDrafts = draft?.isEmpty == false
         // GitHub's API refuses REQUEST_CHANGES and COMMENT without a body,
         // drafted comments or not: the summary is the one thing to write.
-        if verdict != .approve, reviewSummary.trimmingCharacters(in: .whitespaces).isEmpty {
+        if verdict != .approve, summary.trimmingCharacters(in: .whitespaces).isEmpty {
             prActionOutput = hasDrafts ? "Write the review summary first — GitHub requires one with this verdict."
                                        : "Write the comment first."
             return
@@ -725,10 +791,11 @@ struct PRWorkspaceView: View {
         prActionBusy = true
         Task {
             let error = await model.submitPRReview(pr.number, verdict: verdict,
-                                                   body: reviewSummary, in: project.id)
+                                                   body: summary, in: project.id)
             prActionOutput = error ?? (hasDrafts ? "Review sent with its comments ✓" : "Review sent ✓")
             if error == nil {
-                reviewSummary = ""
+                // Emptied in the tab: the verdict bar follows what it holds.
+                model.setPRTabSummary("", for: PRTab.key(project.id, pr.number))
                 draft = nil
                 // After a submission the cached conversation is stale.
                 await load(refresh: true)
@@ -783,6 +850,155 @@ struct PRWorkspaceView: View {
                     }
                 }
                 if tourLoading { ProgressView().controlSize(.small) }
+            }
+        }
+    }
+}
+
+// MARK: - The verdict — docked, so it is never a scroll away
+
+/// The verdict bar under the workspace: what the review will carry, its
+/// summary, the three verdicts.
+/// The summary is this view's own text. It used to be written into the
+/// PR's tab at every keystroke, and the tabs are read by the whole PRs tab:
+/// each character re-ran the toolbar, the tab strip, the workspace and the
+/// diff (audit 2026-11-15). It reaches the tab at a pause in the typing,
+/// when a verdict is sent and when the bar leaves the screen.
+struct PRVerdictBar: View {
+    let model: AppModel
+    let projectID: ProjectID
+    let pr: GitHubService.PullRequest
+    /// The comments drafted for this PR's review — the workspace's copy.
+    let draft: ReviewDraft?
+    let busy: Bool
+    /// What the last action answered: "Review sent ✓", or GitHub's refusal.
+    let output: String?
+    let drawerLayout: PRDrawerLayout
+    let onDiscardDraft: () -> Void
+    /// A verdict was picked: the verdict, and the summary as typed.
+    let onSubmit: (GitHubService.Verdict, String) -> Void
+
+    /// What was typed here and may not be in the tab yet. nil: nothing was —
+    /// the field shows the tab's summary, whoever wrote it.
+    @State private var typed: String?
+
+    private var tabID: String { PRTab.key(projectID, pr.number) }
+
+    var body: some View {
+        let tab: PRTab? = model.prTabs.tab(tabID)
+        let stored: String = tab?.reviewSummary ?? ""
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
+            if let raw = tab?.suggestedVerdict,
+               let suggested = AutoReviewReport.Verdict(rawValue: raw) {
+                Label("A scheduled review suggests: \(suggested.label) — the summary and the pending comments are claude's draft. Read, edit, then submit your verdict.",
+                      systemImage: "sparkles")
+                    .themeFont(size: 11)
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
+            if let draft, !draft.isEmpty {
+                pendingStrip(draft)
+            }
+            HStack(spacing: DefaultTheme.space(8)) {
+                TextField(draft?.isEmpty == false ? "Review summary…" : "Review comment…",
+                          text: Binding(get: { typed ?? stored }, set: { typed = $0 }),
+                          axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .themeFont(size: 12)
+                    .lineLimit(1...4)
+                    .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(7))
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
+                        .stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                    .themeShadow(.xs, radius: 6)
+                    .onSubmit { writeSummary() }
+                AccentButton("Approve") { submit(.approve, stored: stored) }
+                GhostButton("Request changes", systemImage: "exclamationmark.bubble") {
+                    submit(.requestChanges, stored: stored)
+                }
+                GhostButton("Comment", systemImage: "bubble.left") {
+                    submit(.comment, stored: stored)
+                }
+                if busy { ProgressView().controlSize(.small) }
+            }
+            if let output {
+                Text(output)
+                    .themeFont(size: 10, design: .monospaced)
+                    .foregroundStyle(output.hasSuffix("✓") ? DefaultTheme.groupHeader
+                                                           : DefaultTheme.secondaryText)
+            }
+        }
+        .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(8))
+        // The bar's controls step out from under the session drawer.
+        .padding(.trailing, drawerLayout.covered(by: model, pr: pr.number, in: projectID))
+        // Background after the inset: the strip still spans the window, only
+        // its contents step out from under the drawer.
+        .background(DefaultTheme.background)
+        // Written at a pause, not at each character.
+        .task(id: typed) {
+            guard typed != nil else { return }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            writeSummary()
+        }
+        .onChange(of: stored) { _, stored in
+            guard let typed else { return }
+            // Our own write, back from the tab — or the tab's summary
+            // emptied: the review was sent, and the field empties whatever
+            // was typed while it left. Either way the field follows the tab
+            // again. Anything else is a scheduled review writing its summary
+            // while keystrokes wait here: it only fills an empty summary,
+            // this one is not — the typed text stays, and is written at the
+            // next pause. Unless nothing is left of them (typed, then
+            // deleted): there is no text to keep, and the field shows what
+            // the review wrote.
+            if typed == stored || stored.isEmpty || typed.isEmpty { self.typed = nil }
+        }
+        .onDisappear { writeSummary() }
+    }
+
+    /// Hands the typed text to the tab, where it follows the PR across the
+    /// app's tabs and across relaunches.
+    private func writeSummary() {
+        guard let typed, let stored = model.prTabs.tab(tabID)?.reviewSummary else { return }
+        guard typed != stored else {
+            // Typed back to what the tab holds (a character, then deleted):
+            // nothing to write, and no change of the tab will come to
+            // release the field. It follows the tab again now — held, it
+            // hid the summary a scheduled review wrote next, then wrote
+            // this stale text over it.
+            self.typed = nil
+            return
+        }
+        model.setPRTabSummary(typed, for: tabID)
+    }
+
+    private func submit(_ verdict: GitHubService.Verdict, stored: String) {
+        writeSummary()
+        onSubmit(verdict, typed ?? stored)
+    }
+
+    /// What the verdict will carry: how many drafted comments, a way to drop
+    /// them all, and a warning when the head moved under them.
+    private func pendingStrip(_ draft: ReviewDraft) -> some View {
+        let pending = DefaultTheme.badgeColor(for: .needsInput)
+        let count = draft.comments.count
+        return HStack(spacing: DefaultTheme.space(8)) {
+            AppIcon("tray.and.arrow.down", size: 12).foregroundStyle(pending)
+            Text(count == 1 ? "1 pending comment" : "\(count) pending comments")
+                .themeFont(size: 11, weight: .semibold)
+                .foregroundStyle(DefaultTheme.primaryText)
+            Text("— sent together with your verdict, as one review")
+                .themeFont(size: 11)
+                .foregroundStyle(DefaultTheme.secondaryText)
+            if !pr.headSHA.isEmpty, !draft.headSHA.isEmpty, draft.headSHA != pr.headSHA {
+                Label("written against an older head — line numbers may have moved",
+                      systemImage: "exclamationmark.triangle")
+                    .themeFont(size: 10)
+                    .foregroundStyle(pending)
+            }
+            Spacer()
+            GhostButton("Discard", systemImage: "trash", role: .destructive) {
+                onDiscardDraft()
             }
         }
     }

@@ -1,5 +1,6 @@
 import AppKit
 import LoomCore
+import LoomGit
 import LoomUI
 import SwiftUI
 
@@ -15,20 +16,30 @@ import SwiftUI
 ///   A theme is a built-in family's name, or `<theme>.css` in
 ///   `LOOM_TOUR_THEMES` — a tweakcn export, read as the import sheet reads
 ///   it. Options: `light` or `dark` (dark when unsaid), `colours` (the
-///   theme followed for its colours only), `core` (the main screens only).
+///   theme followed for its colours only), `core` (the main screens only),
+///   `keys` (no screen: the keyboard walk, see `LOOM_TOUR_REVIEW`).
 /// - `LOOM_TOUR_OUT`: where the PNGs and `tour.json` go.
 /// - `LOOM_TOUR_PROJECT`: a folder opened as a project, with three sessions
 ///   in it — the first in a worktree of its own when it is a git
 ///   repository. Where the tour runs has no claude: `PATH` leads to a
 ///   stand-in (`Tests/ThemeTour/bin/claude`), which also writes the
 ///   conversation the chat view shows.
+/// - `LOOM_TOUR_REVIEW`: a pull request the `keys` walk starts a review of,
+///   as it would be typed in the palette — typed key by key, so lowercase
+///   letters, digits, `/`, `.` and `-` only (`github.com/owner/repo/pull/12`).
+///   Needs `gh` signed in; unsaid, the walk stops before any review.
+/// - `LOOM_TOUR_SAMPLE`: set, the walk has `/usr/bin/sample` read the app's
+///   threads while a review launches (`sample-*.txt` beside the pictures):
+///   what the main thread was doing. The sampling slows the app: the
+///   durations of such a walk are not to be read.
 /// - `LOOM_TOUR_CAPTURE`: `screen` (the display, through `screencapture`;
 ///   when unsaid) or `view` (the window drawing itself: no blur, no sheet
-///   over it — for a Mac that refuses the screen to be read).
+///   over it — for a Mac that refuses the screen to be read). The palette
+///   is an overlay of the window (ADR-0024): it is in both.
 @MainActor
 final class ThemeTour {
 
-    /// A sheet over the window.
+    /// What shows over the window: a sheet — or the palette, drawn in it.
     enum Overlay { case palette, usage, newSession }
 
     /// What the tour asks of the window: `ContentView` holds that state.
@@ -45,10 +56,13 @@ final class ThemeTour {
         var dark = true
         var colorsOnly = false
         var core = false
+        /// The keyboard walk instead of the screens.
+        var keys = false
 
         var label: String {
             var parts = [theme, dark ? "dark" : "light"]
             if colorsOnly { parts.append("colours") }
+            if keys { parts.append("keys") }
             return parts.joined(separator: "-")
         }
 
@@ -62,6 +76,7 @@ final class ThemeTour {
                 case "dark": dark = true
                 case "colours", "colors": colorsOnly = true
                 case "core": core = true
+                case "keys": keys = true
                 default: return nil
                 }
             }
@@ -81,10 +96,10 @@ final class ThemeTour {
                                             "chat-narrow", "git-panel", "side-panel", "context", "overview",
                                             "prs", "workflows", "extensions"]
         + settingsStops.map { "settings-" + $0.rawValue }
-        + ["theme-import", "palette", "new-session", "usage"]
+        + ["theme-import", "palette", "palette-review", "new-session", "usage"]
     private static let coreScreens: Set<String> = ["projects", "sessions", "chat", "chat-narrow", "git-panel", "overview",
                                                    "workflows", "settings-general", "settings-themes",
-                                                   "theme-import", "palette"]
+                                                   "theme-import", "palette", "palette-review"]
     /// How long a screen takes to settle before its picture, in milliseconds.
     /// The chat view finds and reads the conversation's file first.
     private static let settling: [String: Int] = ["sessions": 1_200, "chat": 2_500, "chat-narrow": 2_500,
@@ -96,6 +111,15 @@ final class ThemeTour {
     private let environment = ProcessInfo.processInfo.environment
     private var window: NSWindow?
     private var sessions: [SessionID] = []
+    private var project: ProjectID?
+    /// The keyboard walk's pictures, and what had the keyboard at each.
+    private var walkShots: [String] = []
+    private var walkNotes: [[String: Any]] = []
+    /// The main thread's silences during the walk (see `watchStalls`).
+    private var walkStalls: [[String: Any]] = []
+    private var walkStep = "start"
+    /// Counts the walk's pictures: taking one holds the main thread.
+    private var walkCaptures = 0
     /// The stop being shown.
     private var current: Stop?
     private var readsScreen = true
@@ -144,7 +168,7 @@ final class ThemeTour {
             let folder = output.appendingPathComponent(String(format: "%02d-%@", number + 1, stop.label))
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             var shots: [String] = []
-            let screens = Self.screens.filter { !stop.core || Self.coreScreens.contains($0) }
+            let screens = stop.keys ? [] : Self.screens.filter { !stop.core || Self.coreScreens.contains($0) }
             for (order, screen) in screens.enumerated() {
                 enter(screen)
                 try? await Task.sleep(for: .milliseconds(Self.settling[screen] ?? 800))
@@ -157,9 +181,17 @@ final class ThemeTour {
                 }
                 if leave(screen) { try? await Task.sleep(for: .milliseconds(500)) }
             }
-            log("\(stop.label): \(shots.count) of \(screens.count) screens")
-            index.append(["stop": stop.label, "folder": folder.lastPathComponent,
-                          "design": design, "screens": shots])
+            var entry: [String: Any] = ["stop": stop.label, "folder": folder.lastPathComponent, "design": design]
+            if stop.keys {
+                if number == 0 { calibrate(in: output) }
+                await keyboardWalk(into: folder)
+                shots = walkShots
+                entry["keyboard"] = walkNotes
+                entry["stalls"] = walkStalls
+            }
+            log("\(stop.label): \(shots.count) of \(stop.keys ? shots.count : screens.count) screens")
+            entry["screens"] = shots
+            index.append(entry)
         }
 
         store.setAppearanceMode(modeBefore)
@@ -187,6 +219,7 @@ final class ThemeTour {
     private func seed() async {
         guard let path = environment["LOOM_TOUR_PROJECT"] else { return }
         let project = await model.addProject(at: URL(fileURLWithPath: path))
+        self.project = project
         let wanted: [(title: String, badges: [String])] = [
             ("Follow an imported theme to the letter", ["PR #42", "review"]),
             ("Fix the flaky login test", ["wip"]),
@@ -297,6 +330,9 @@ final class ThemeTour {
         case "workflows": driver.show(.workflows)
         case "extensions": driver.show(.extensions)
         case "palette": driver.present(.palette)
+        // The palette asking for a pull request ("Review code"): its host
+        // opens it on that prompt.
+        case "palette-review": ask("palette-review")
         case "new-session": driver.present(.newSession)
         case "usage": driver.present(.usage)
         default: break
@@ -329,11 +365,263 @@ final class ThemeTour {
         case "theme-import":
             ask("theme-import-close")
             return true
-        case "palette", "new-session", "usage":
+        case "palette", "palette-review", "new-session", "usage":
             driver.present(nil)
             return true
         default:
             return false
+        }
+    }
+
+    // MARK: The keyboard walk
+
+    /// What no picture of a state shows: that the palette answers the
+    /// keyboard. ⌘K, a search, Tab, "Review code", its prompt refusing and
+    /// taking an answer, Esc twice, and the keyboard back where it was —
+    /// pressed as keys, through the app's own event queue, each step with
+    /// its picture and a note of what had the keyboard (`tour.json`).
+    private func keyboardWalk(into folder: URL) async {
+        walkShots = []
+        walkNotes = []
+        walkStalls = []
+        let stalls = watchStalls()
+        defer { stalls.cancel() }
+        driver.show(.sessions)
+        driver.select(sessions.first.map { DetailSelection.session($0) })
+        await picture("terminal", in: folder, after: 1_500)
+        await typeText("ls")
+        await picture("terminal-typed", in: folder)
+
+        clockPalette("first")
+        await press("k", code: 40, modifiers: .command)
+        await picture("palette", in: folder)
+        await typeText("re")
+        await picture("palette-search", in: folder)
+        await press("\t", code: 48)
+        await typeText("v")
+        await picture("palette-after-tab", in: folder)
+        await press("\r", code: 36)
+        await picture("prompt", in: folder)
+        await typeText("nope")
+        await press("\r", code: 36)
+        await picture("prompt-refused", in: folder)
+        await press("\u{1B}", code: 53)
+        await picture("back-to-list", in: folder)
+        clock(["terminal-has-the-keyboard-back": { [weak self] in
+            !(self?.window?.firstResponder is NSTextView) && self?.window?.firstResponder !== self?.window
+        }])
+        await press("\u{1B}", code: 53)
+        await picture("closed", in: folder)
+        await typeText("pwd")
+        await picture("closed-typed", in: folder)
+
+        // ⌘K is a toggle: pressed again, it closes what it opened.
+        await press("k", code: 40, modifiers: .command)
+        await typeText("set")
+        await press("k", code: 40, modifiers: .command)
+        await picture("toggled-closed", in: folder)
+        // ↓ walks the list, Return runs the row it landed on.
+        clockPalette("again")
+        await press("k", code: 40, modifiers: .command)
+        await press(Self.downArrow, code: 125, modifiers: [.function, .numericPad])
+        await press(Self.downArrow, code: 125, modifiers: [.function, .numericPad])
+        await picture("arrow-down-twice", in: folder)
+        await press("\r", code: 36)
+        await picture("arrow-row-run", in: folder, after: 1_200)
+
+        guard let reference = environment["LOOM_TOUR_REVIEW"], !reference.isEmpty else { return }
+        await press("k", code: 40, modifiers: .command)
+        await typeText("rev")
+        await press("\r", code: 36)
+        await typeText(reference)
+        await picture("prompt-answer", in: folder)
+        await sample("url-review", seconds: 6, into: folder)
+        if let project, let number = PRReference.parse(reference)?.number {
+            let model = self.model
+            clock(["review-shows-in-the-tab": { model.prMode == .review && (!model.prReviewsOpening.isEmpty
+                                                    || model.prTabs.contains(PRTab.key(project, number))) },
+                   "review-tab-open": { model.prTabs.contains(PRTab.key(project, number)) },
+                   "review-session-started": { model.reviewSession(forPR: number, in: project) != nil }])
+        }
+        await press("\r", code: 36)
+        // What Return shows at once, then as the row, the checkout and the
+        // session land.
+        await picture("review-at-once", in: folder, after: 250)
+        await picture("review-3s", in: folder, after: 3_000)
+        await picture("review-12s", in: folder, after: 9_000)
+        await picture("review-25s", in: folder, after: 13_000)
+        // The list the tab browses, then a review started from one of its
+        // rows, as a click on "Start review" starts it.
+        await sample("to-browse", seconds: 3, into: folder)
+        model.prMode = .browse
+        await picture("browse", in: folder, after: 6_000)
+        if let project,
+           let row = model.prs(for: project).first(where: { model.reviewSession(forPR: $0.number, in: project) == nil }) {
+            let model = self.model
+            await sample("row-review", seconds: 7, into: folder)
+            clock(["row-review-drawer-open": { model.prTabs.tab(PRTab.key(project, row.number))?.drawerOpen == true },
+                   "row-review-session-started": { model.reviewSession(forPR: row.number, in: project) != nil }])
+            model.startPRReview(row, in: project)
+            await picture("row-review-at-once", in: folder, after: 250)
+            await picture("row-review-3s", in: folder, after: 3_000)
+            await picture("row-review-15s", in: folder, after: 12_000)
+        }
+        clockPalette("over-a-review")
+        await press("k", code: 40, modifiers: .command)
+        await picture("palette-over-review", in: folder)
+        await press("\u{1B}", code: 53)
+        await typeText("ok")
+        await picture("review-drawer-typed", in: folder)
+
+        // The palette's opening, three times over each kind of screen: what
+        // is under it should not make it slower.
+        await openings("over-review-and-drawer")
+        if let tab = model.prTabs.activeID {
+            model.setPRTabDrawer(open: false, for: tab)
+            await openings("over-review")
+        }
+        model.prMode = .browse
+        await openings("over-browse")
+        driver.show(.settings)
+        await openings("over-settings")
+        driver.show(.sessions)
+        await openings("over-sessions")
+    }
+
+    /// Has the app's threads sampled for a few seconds from now
+    /// (`LOOM_TOUR_SAMPLE`): the report says where the main thread was.
+    private func sample(_ name: String, seconds: Int, into folder: URL) async {
+        guard environment["LOOM_TOUR_SAMPLE"] != nil else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sample")
+        process.arguments = [String(ProcessInfo.processInfo.processIdentifier), String(seconds), "2",
+                             "-file", folder.appendingPathComponent("sample-\(name).txt").path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            log("sample: \(error)")
+            return
+        }
+        // It attaches first.
+        try? await Task.sleep(for: .milliseconds(800))
+    }
+
+    private func openings(_ place: String) async {
+        try? await Task.sleep(for: .milliseconds(1_500))
+        walkStep = place
+        for round in 1...3 {
+            clockPalette("\(place)-\(round)")
+            await press("k", code: 40, modifiers: .command)
+            try? await Task.sleep(for: .milliseconds(600))
+            await press("\u{1B}", code: 53)
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+    }
+
+    /// The main thread's silences: a task that asks for it every few
+    /// milliseconds notes each time it waited more than 60 ms — the app
+    /// answered nothing meanwhile — and the step it was in (`tour.json`,
+    /// `stalls`).
+    private func watchStalls() -> Task<Void, Never> {
+        let start = ProcessInfo.processInfo.systemUptime
+        return Task { @MainActor [weak self] in
+            var last = ProcessInfo.processInfo.systemUptime
+            var captures = self?.walkCaptures ?? 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(5))
+                let now = ProcessInfo.processInfo.systemUptime
+                let waited = Int(((now - last) * 1_000).rounded())
+                guard let self else { return }
+                // A picture taken meanwhile is the tour's doing, not the app's.
+                if waited > 60, captures == self.walkCaptures {
+                    self.walkStalls.append(["at": Int(((last - start) * 1_000).rounded()),
+                                            "ms": waited, "after": self.walkStep])
+                }
+                captures = self.walkCaptures
+                last = now
+            }
+        }
+    }
+
+    private static let downArrow = String(Character(UnicodeScalar(UInt16(NSDownArrowFunctionKey))!))
+
+    /// The keys the walk types, by their place on an ANSI keyboard.
+    private static let keyCodes: [Character: UInt16] = [
+        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11,
+        "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "1": 18, "2": 19, "3": 20, "4": 21,
+        "6": 22, "5": 23, "9": 25, "7": 26, "-": 27, "8": 28, "0": 29, "o": 31, "u": 32, "i": 34,
+        "p": 35, "l": 37, "j": 38, "k": 40, "/": 44, "n": 45, "m": 46, ".": 47, " ": 49,
+    ]
+
+    /// A key pressed and released, posted to the app's event queue: it
+    /// takes the road a real one takes — the key monitors, the shortcuts,
+    /// then whatever has the keyboard.
+    private func press(_ characters: String, code: UInt16, modifiers: NSEvent.ModifierFlags = []) async {
+        guard let window else { return }
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            guard let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: modifiers,
+                                               timestamp: ProcessInfo.processInfo.systemUptime,
+                                               windowNumber: window.windowNumber, context: nil,
+                                               characters: characters, charactersIgnoringModifiers: characters,
+                                               isARepeat: false, keyCode: code) else { continue }
+            NSApp.postEvent(event, atStart: false)
+        }
+        try? await Task.sleep(for: .milliseconds(120))
+    }
+
+    private func typeText(_ text: String) async {
+        for character in text {
+            guard let code = Self.keyCodes[character] else { continue }
+            await press(String(character), code: code)
+        }
+    }
+
+    /// ⌘K is about to be pressed: how long until the palette is up, and
+    /// until its field has the keyboard.
+    private func clockPalette(_ opening: String) {
+        clock(["palette-\(opening)-up": { WindowOverlay.isUp },
+               "palette-\(opening)-has-the-keyboard": { [weak self] in self?.window?.firstResponder is NSTextView }])
+    }
+
+    /// Notes how long from now each mark takes to come true, in milliseconds
+    /// (`tour.json`, `timing`) — looked at every few milliseconds beside
+    /// the walk, for half a minute at most. On the tour's Mac: an order of
+    /// magnitude, not a bound.
+    private func clock(_ marks: [String: @MainActor () -> Bool]) {
+        let start = ProcessInfo.processInfo.systemUptime
+        Task { @MainActor [weak self] in
+            var waiting = marks
+            while !waiting.isEmpty, ProcessInfo.processInfo.systemUptime - start < 30 {
+                for (name, reached) in waiting where reached() {
+                    let elapsed = Int(((ProcessInfo.processInfo.systemUptime - start) * 1_000).rounded())
+                    self?.walkNotes.append(["timing": name, "ms": elapsed])
+                    waiting[name] = nil
+                }
+                try? await Task.sleep(for: .milliseconds(4))
+            }
+            for name in waiting.keys.sorted() { self?.walkNotes.append(["timing": name, "ms": -1]) }
+        }
+    }
+
+    /// A step's picture, and what had the keyboard when it was taken: the
+    /// field's text when a field did.
+    private func picture(_ step: String, in folder: URL, after milliseconds: Int = 700) async {
+        try? await Task.sleep(for: .milliseconds(milliseconds))
+        walkStep = step
+        let responder = window?.firstResponder
+        var note: [String: Any] = ["step": step, "active": NSApp.isActive,
+                                   "key": window?.isKeyWindow ?? false,
+                                   "responder": responder.map { String(describing: Swift.type(of: $0)) } ?? "none"]
+        if let editor = responder as? NSTextView { note["text"] = editor.string }
+        walkNotes.append(note)
+        let name = String(format: "%02d-%@.png", walkShots.count + 1, step)
+        walkCaptures += 1
+        if capture(to: folder.appendingPathComponent(name)) {
+            walkShots.append(name)
+        } else {
+            failures.append("\(current?.label ?? "keys")/\(step)")
         }
     }
 

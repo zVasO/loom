@@ -64,6 +64,11 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   brouillon et envoyés en une seule review avec le verdict, session claude par PR,
   un onglet par PR ouverte (aperçu réutilisé au clic, épinglé par la review),
   conservés d'un onglet de l'app à l'autre et d'un lancement à l'autre.
+- **Palette ⌘K** (ADR-0024) : un calque de la fenêtre, pas une feuille — ni fenêtre
+  à construire ni transition, la liste suit la frappe en une passe. Une action peut y
+  poser sa question : « Review code » demande l'URL d'une pull request (reprise du
+  presse-papiers quand il en contient une) ou `owner/repo#12`, et Retour lance sa
+  review dans l'onglet PRs.
 - **Reviews planifiées** : des plannings (heure, jours) sur des tranches de PR —
   un projet + une requête GitHub (« needs review », un filtre perso…) + un maximum
   par passage. À l'heure dite (ou au réveil du Mac, jusqu'à 4 h de retard), Loom

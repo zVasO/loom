@@ -481,6 +481,29 @@ public struct KeyboardPreferences: Equatable, Sendable {
     public static let userDefaultsKey = "loom.terminal.optionAsMeta"
 }
 
+/// A panel drawn over the window's own content instead of in a sheet — the
+/// ⌘K palette (ADR-0024). A sheet is another window: what happens in it never
+/// reaches the terminal panes. An overlay shares their window, and their
+/// event monitors see its clicks and its wheel: while it is up they stand
+/// down, or a click in the palette would hand the keyboard to the terminal
+/// underneath and the wheel would scroll the agent instead of the list.
+@MainActor
+public enum WindowOverlay {
+    /// Set by the overlay's host, for as long as it shows.
+    public static var isUp = false {
+        didSet {
+            guard oldValue, !isUp else { return }
+            NotificationCenter.default.post(name: .loomWindowOverlayLowered, object: nil)
+        }
+    }
+}
+
+extension Notification.Name {
+    /// The window's overlay is gone: a terminal takes back the keyboard it
+    /// was kept from.
+    static let loomWindowOverlayLowered = Notification.Name("loom.windowOverlay.lowered")
+}
+
 /// Invisible zone under the terminal: as first responder it pushes every keystroke
 /// to the PTY — typing lives in the agent's field. Ordinary keys
 /// go through `interpretKeyEvents` to compose dead keys (ê, î…),
@@ -542,11 +565,14 @@ public struct KeyCaptureView: NSViewRepresentable {
     public func updateNSView(_ view: CaptureNSView, context: Context) {
         configure(view)
         // Asked for the keyboard: taken even from another owner — the person
-        // just pressed the key or the button that says so.
+        // just pressed the key or the button that says so. Not from under
+        // an overlay of the window, though: a shortcut still answers there
+        // (⌘⇧M, back to the terminal), and what is typed in the overlay is
+        // not for the agent. The terminal has the keyboard when it lowers.
         if view.answeredFocusRequest != focusRequest {
             view.answeredFocusRequest = focusRequest
             DispatchQueue.main.async { [weak view] in
-                guard let view else { return }
+                guard let view, !view.standsDown else { return }
                 view.window?.makeFirstResponder(view)
             }
             return
@@ -606,18 +632,35 @@ public struct KeyCaptureView: NSViewRepresentable {
             return acceptingUnset && window.firstResponder == nil
         }
 
+        /// An overlay of the window (`WindowOverlay`) holds the keyboard, the
+        /// clicks and the wheel: this pane takes none of them, though it is
+        /// still under the pointer and its monitors still see every event.
+        fileprivate var standsDown: Bool { WindowOverlay.isUp }
+
         /// The one way this view takes the keyboard back: only when nothing owns it,
-        /// never by stealing it from a text field the user is typing in.
+        /// never by stealing it from a text field the user is typing in — nor
+        /// from under an overlay, whose field may not have taken it yet.
         fileprivate func reclaimFocusIfIdle(acceptingUnset: Bool = false) {
-            guard claimsIdleFocus, focusIsIdle(acceptingUnset: acceptingUnset), let window else { return }
+            guard !standsDown, claimsIdleFocus, focusIsIdle(acceptingUnset: acceptingUnset),
+                  let window else { return }
             window.makeFirstResponder(self)
+        }
+
+        /// The overlay closed. When it left the keyboard to no one — it did
+        /// not open a sheet or another field — the terminal has it again:
+        /// now, and once the overlay's own field has left the window.
+        private func overlayLowered() {
+            reclaimFocusIfIdle(acceptingUnset: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.reclaimFocusIfIdle(acceptingUnset: true)
+            }
         }
 
         public override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             teardownFocusWatchers()
             guard let window else { return }
-            if claimsIdleFocus { window.makeFirstResponder(self) }
+            if claimsIdleFocus, !standsDown { window.makeFirstResponder(self) }
             // Opening a terminal from an icon inserts this view mid-event: the
             // first grab can be refused while layout settles. Retry shortly —
             // idempotent, and never steals from a field the user focused since
@@ -650,12 +693,16 @@ public struct KeyCaptureView: NSViewRepresentable {
                         self?.reportFocusIfChanged()
                     })
             }
+            keyWindowObservers.append(NotificationCenter.default.addObserver(
+                forName: .loomWindowOverlayLowered, object: nil, queue: .main) { [weak self] _ in
+                    self?.overlayLowered()
+                })
             // 2. Clicking the transcript is consumed by text selection — the
             //    SwiftUI tap never fired. A local monitor sees every click in
             //    the window; one inside our bounds refocuses the terminal
             //    (async: the selection interaction still runs first).
             clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-                guard let self, event.window === self.window else { return event }
+                guard let self, !self.standsDown, event.window === self.window else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
                 if self.bounds.contains(point) {
                     DispatchQueue.main.async { [weak self] in
@@ -675,7 +722,7 @@ public struct KeyCaptureView: NSViewRepresentable {
             //    monitor sees the event before the ScrollView does — going
             //    through the responder chain would already be too late.
             wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-                guard let self, self.mouseReporting, let onWheel = self.onWheel,
+                guard let self, !self.standsDown, self.mouseReporting, let onWheel = self.onWheel,
                       event.window === self.window
                 else { return event }
                 let point = self.convert(event.locationInWindow, from: nil)
@@ -856,7 +903,10 @@ public struct KeyCaptureView: NSViewRepresentable {
             // address bar or in a page's field would otherwise paste into
             // claude. Only the terminal's own keyboard (or nobody's, a
             // transient state the focus watcher reclaims) takes them.
-            guard window?.firstResponder === self || focusIsIdle(acceptingUnset: true) else {
+            // Nor under an overlay: ⌘V in its field is not a paste into claude,
+            // even in the instant the keyboard is nobody's.
+            guard !standsDown,
+                  window?.firstResponder === self || focusIsIdle(acceptingUnset: true) else {
                 return super.performKeyEquivalent(with: event)
             }
             guard event.modifierFlags.contains(.command),
