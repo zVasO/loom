@@ -71,11 +71,12 @@ actor DiffPipeline {
         return value
     }
 
-    /// Forgets every PR of a project (the model's key prefix) — what a list
-    /// refresh does to the raw diff cache too.
-    func evict(prefix: String) {
+    /// Forgets one PR (the model's key) — it left its list, as the raw diff
+    /// cache forgets it too. The key itself, never a prefix: `…#12` is also
+    /// how `…#123` begins.
+    func evict(key: String) {
         generation += 1
-        rows = rows.filter { !$0.key.hasPrefix(prefix) }
-        highlights = highlights.filter { !$0.key.hasPrefix(prefix) }
+        rows[key] = nil
+        highlights[key] = nil
     }
 }

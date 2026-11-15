@@ -75,6 +75,71 @@ struct ReviewWorktreeTests {
                 "the worktree stands on the new head")
     }
 
+    @Test("two reviews of one repository started together each stand on their own PR head")
+    func concurrentCheckoutsKeepTheirHeads() async throws {
+        let repo = try await makeFixtureRepo()
+        _ = try await git(["remote", "add", "origin", repo.path], in: repo)
+        let first = try await git(["rev-parse", "HEAD"], in: repo)
+        let second = try await git(["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "other"], in: repo)
+        _ = try await git(["update-ref", "refs/pull/11/head", first], in: repo)
+        _ = try await git(["update-ref", "refs/pull/12/head", second], in: repo)
+        let service = GitHubService()
+
+        // Both fetch into the repository's one FETCH_HEAD, and — read-only —
+        // both write its shared config.
+        async let one = service.syncPRWorktree(11, repo: repo, readOnly: true)
+        async let two = service.syncPRWorktree(12, repo: repo, readOnly: true)
+        let (eleven, twelve) = try await (one, two)
+
+        #expect(eleven.head == first && twelve.head == second,
+                "neither checkout reads the other's fetch")
+        #expect(try await git(["rev-parse", "HEAD"], in: eleven.path) == first)
+        #expect(try await git(["rev-parse", "HEAD"], in: twelve.path) == second)
+    }
+
+    @Test("read-only switched off, then on again, applies to a reused worktree")
+    func readOnlyFollowsTheSetting() async throws {
+        let repo = try await makeFixtureRepo()
+        _ = try await git(["remote", "add", "origin", repo.path], in: repo)
+        _ = try await git(["update-ref", "refs/pull/13/head", "HEAD"], in: repo)
+        let service = GitHubService()
+
+        let checkout = try await service.syncPRWorktree(13, repo: repo, readOnly: true)
+        let hooks = checkout.path.appendingPathComponent(".loom-guard-hooks").path
+        #expect(try await hooksPath(in: checkout.path) == hooks)
+
+        // The same worktree, synced again: what was already set is not asked
+        // of git twice, and what the setting changed still is.
+        _ = try await service.syncPRWorktree(13, repo: repo, readOnly: true)
+        #expect(try await hooksPath(in: checkout.path) == hooks)
+        _ = try await service.syncPRWorktree(13, repo: repo, readOnly: false)
+        #expect(try await hooksPath(in: checkout.path) == "", "writable again: the guard is gone")
+        _ = try await service.syncPRWorktree(13, repo: repo, readOnly: true)
+        #expect(try await hooksPath(in: checkout.path) == hooks, "and back")
+    }
+
+    @Test("a review worktree made anew gets its guard and its excludes again")
+    func recreatedWorktreeIsConfiguredAgain() async throws {
+        let repo = try await makeFixtureRepo()
+        _ = try await git(["remote", "add", "origin", repo.path], in: repo)
+        _ = try await git(["update-ref", "refs/pull/14/head", "HEAD"], in: repo)
+        let service = GitHubService()
+
+        let checkout = try await service.syncPRWorktree(14, repo: repo, readOnly: true)
+        try await service.installCommand(named: "setup-pr-review", markdown: "first", in: checkout.path)
+        // Removed behind Loom's back: its own config goes with it.
+        _ = try await git(["worktree", "remove", "--force", checkout.path.path], in: repo)
+
+        let again = try await service.syncPRWorktree(14, repo: repo, readOnly: true)
+        try await service.installCommand(named: "setup-pr-review", markdown: "second", in: again.path)
+
+        #expect(again.previousHead == nil, "a new worktree, not a synced one")
+        #expect(try await hooksPath(in: again.path)
+                == again.path.appendingPathComponent(".loom-guard-hooks").path)
+        #expect(try await git(["status", "--porcelain"], in: again.path) == "",
+                "what Loom wrote is excluded in the new worktree too")
+    }
+
     @Test("the exclude list names every Loom file, commands included")
     func excludeList() {
         let list = GitHubService.loomExcludes(commandNames: ["setup-pr-review"])
@@ -82,6 +147,11 @@ struct ReviewWorktreeTests {
         #expect(list.contains("/.loom-guard-hooks/\n"))
         #expect(list.contains("/.claude/commands/setup-pr-review.md\n"))
     }
+}
+
+/// The worktree's own `core.hooksPath` — empty when it has none.
+private func hooksPath(in worktree: URL) async throws -> String {
+    try await git(["config", "--worktree", "--get", "core.hooksPath"], in: worktree)
 }
 
 private func makeFixtureRepo() async throws -> URL {

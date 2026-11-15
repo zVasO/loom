@@ -120,18 +120,74 @@ extension AppModel {
     }
 
     /// The one-click review: the PR's tab kept and shown in Review, its
-    /// session started (or reattached) and its drawer opened. `fresh`: a new
+    /// drawer opened and its session started (or reattached). `fresh`: a new
     /// session takes over the PR instead of the one it has.
     func startPRReview(_ pr: GitHubService.PullRequest, in projectID: ProjectID,
                        fresh: Bool = false) {
-        guard !isLaunchingReview(forPR: pr.number, in: projectID) else { return }
+        let tabID = PRTab.key(projectID, pr.number)
+        // The drawer BEFORE the work, not after it: a fresh review is a
+        // network fetch and a checkout away from its session, a reattach a
+        // fetch away from a terminal that already exists. The click answers
+        // at once; the session takes its place in the drawer when it is there.
+        let drawerWasOpen = prTabs.tab(tabID)?.drawerOpen ?? false
+        // The animated write before any other to the tabs: the first one of
+        // a pass decides how it is drawn, and the drawer slides in.
+        if prTabs.contains(tabID) {
+            withAnimation(.hover) { setPRTabDrawer(open: true, for: tabID) }
+        }
         openPRTab(pr, in: projectID)
         prMode = .review
+        // A PR that had no tab until now: its drawer opens with it.
+        setPRTabDrawer(open: true, for: tabID)
+        guard !isLaunchingReview(forPR: pr.number, in: projectID) else { return }
+        // Started here, not in the task below: the PR is "launching" before
+        // this function returns, so the drawer has something to say.
+        let launch = reviewLaunchTask(pr, in: projectID, fresh: fresh)
         Task {
-            if await launchPRReviewSession(pr, in: projectID, fresh: fresh) != nil {
-                withAnimation(.hover) {
-                    setPRTabDrawer(open: true, for: PRTab.key(projectID, pr.number))
-                }
+            // No session came of it (the error is on screen): a drawer this
+            // click opened has nothing to show.
+            if await launch.value == nil, !drawerWasOpen {
+                setPRTabDrawer(open: false, for: tabID)
+            }
+        }
+    }
+
+    /// Starts — or reattaches — the review of the pull request a reference
+    /// names (a github.com pull URL, `owner/repo#12`; `#12` or `12` against
+    /// the selected project), as "Start review" does for a row of the PRs
+    /// tab: the tab, its review mode and the session drawer show at once,
+    /// the row and the checkout load behind them. What goes wrong (no such
+    /// PR, gh missing, a repository that is not a project) shows in the PRs
+    /// tab, where such failures already show. Returns at once.
+    func startPRReview(reference: PRReference) {
+        guard let repo = reference.repo else {
+            // A bare number means the selected project, as for `openPR(reference:)`.
+            guard let projectID = selectedProject ?? projects.first?.id else {
+                startupError = "Add a project first — a bare PR number needs a repository."
+                return
+            }
+            startPRReview(number: reference.number, in: projectID,
+                          repo: repoName(for: projectID), asked: reference)
+            return
+        }
+        if let project = project(forRepo: repo) {
+            startPRReview(number: reference.number, in: project.id, repo: repo, asked: reference)
+            return
+        }
+        // No project clones it — or, just after launch, the project that
+        // does has not had its remote read yet. Asked twice: once is enough.
+        guard !prReviewsOpening.contains(reference) else { return }
+        prReviewsOpening.append(reference)
+        Task {
+            let project = await resolvedProject(forRepo: repo)
+            prReviewsOpening.removeAll { $0 == reference }
+            if let project {
+                startPRReview(number: reference.number, in: project.id, repo: repo, asked: reference)
+            } else {
+                // Not a project: the clone dialog, with the intent to review
+                // carried through it — `confirmClone` starts the review.
+                pendingClone = PendingClone(repo: repo, number: reference.number,
+                                            pin: true, startsReview: true)
             }
         }
     }

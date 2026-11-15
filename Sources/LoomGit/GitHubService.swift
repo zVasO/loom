@@ -105,6 +105,15 @@ public struct GitHubService: Sendable {
         }
 
         public var isConflicting: Bool { mergeable == "CONFLICTING" }
+
+        /// Whether what was loaded for `other` — description, diff, comments,
+        /// viewed files — may be out of date for this row: a new head, or
+        /// anything GitHub stamped since (a comment, a review). Checks and
+        /// labels alone change neither.
+        public func contentMoved(since other: PullRequest) -> Bool {
+            headSHA != other.headSHA || updatedAt != other.updatedAt
+        }
+
         /// Something is still running — neither green nor red yet.
         public var checksPending: Bool { checks.contains { $0.state == .pending } }
         public var failingChecks: Int { checks.filter { $0.state == .failure }.count }
@@ -608,6 +617,30 @@ public struct GitHubService: Sendable {
         return payload
     }
 
+    /// The PRs whose loaded content a refetched list makes stale, by number:
+    /// the rows that moved since the one known before (`known`: the open
+    /// tab's row, else a list's), the rows nothing was known about, and the
+    /// PRs `previous` — the same list, before — held and `fresh` no longer
+    /// does (merged, closed, out of the filter). Every other PR keeps what
+    /// was loaded for it: a list refresh used to throw a whole project away.
+    public static func staleContent(previous: [PullRequest], known: [Int: PullRequest],
+                                    fresh: [PullRequest]) -> Set<Int> {
+        var stale: Set<Int> = []
+        var listed: Set<Int> = []
+        for pr in fresh {
+            listed.insert(pr.number)
+            guard let before = known[pr.number] else {
+                stale.insert(pr.number)
+                continue
+            }
+            if pr.contentMoved(since: before) { stale.insert(pr.number) }
+        }
+        for pr in previous where !listed.contains(pr.number) {
+            stale.insert(pr.number)
+        }
+        return stale
+    }
+
     // MARK: - gh execution
 
     /// The PRs of the repo a project folder belongs to, narrowed by a filter
@@ -731,12 +764,22 @@ public struct GitHubService: Sendable {
     /// oversized diffs (HTTP 406), git itself has no such limit. Three-dot
     /// (merge-base) semantics, same as GitHub's own view.
     public func localDiff(_ number: Int, baseBranch: String, in repo: URL) async throws -> String {
-        _ = try await runGit(["fetch", "origin", "pull/\(number)/head"], in: repo)
-        let head = try await revParse("FETCH_HEAD", in: repo)
-        _ = try await runGit(["fetch", "origin", baseBranch], in: repo)
-        let base = try await revParse("FETCH_HEAD", in: repo)
+        // Each fetch and the read of what it fetched hold the repository's
+        // turn: its FETCH_HEAD is the one a new review worktree is made from.
+        let head = try await fetchedCommit("pull/\(number)/head", in: repo)
+        let base = try await fetchedCommit(baseBranch, in: repo)
         let data = try await runGit(["diff", "\(base)...\(head)"], in: repo)
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Fetches `ref` from origin into the repository's own FETCH_HEAD and
+    /// says which commit that is — one fetch at a time per repository, so
+    /// nobody reads another caller's FETCH_HEAD.
+    private func fetchedCommit(_ ref: String, in repo: URL) async throws -> String {
+        try await Self.repositoryTurns.run(Self.turnKey(repo)) { () async throws -> String in
+            _ = try await self.runGit(["fetch", "origin", ref], in: repo)
+            return try await self.revParse("FETCH_HEAD", in: repo)
+        }
     }
 
     public func submitReview(_ number: Int, verdict: Verdict, body: String, in repo: URL) async throws {
@@ -865,20 +908,35 @@ public struct GitHubService: Sendable {
     public func syncPRWorktree(_ number: Int, repo: URL, readOnly: Bool = true) async throws -> PRCheckout {
         let path = Self.reviewWorktreePath(number, repo: repo)
         let root = path.deletingLastPathComponent()
-        let previousHead: String?
-        let head: String
         // Detached fetch of the PR head: never fights over branch names —
         // `gh pr checkout` refuses when the branch is checked out elsewhere
         // (reviewing your OWN pr from the same repo, the common case).
+        var created: String?
         if !FileManager.default.fileExists(atPath: path.path) {
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            // Fetch FIRST, then materialize the worktree directly on the PR
-            // head: one working-tree write instead of checkout-then-rewrite,
-            // which doubled the cost on large repos.
-            _ = try await runGit(["fetch", "origin", "pull/\(number)/head"], in: repo)
-            _ = try await runGit(["worktree", "add", "--detach", path.path, "FETCH_HEAD"], in: repo)
+            // One new worktree at a time per repository: the fetch lands in
+            // the repository's own FETCH_HEAD, shared by every caller — two
+            // reviews started together checked out each other's head.
+            created = try await Self.repositoryTurns.run(Self.turnKey(repo)) { () async throws -> String? in
+                // Made by another caller while this one waited its turn: an
+                // existing worktree by now, synced below.
+                guard !FileManager.default.fileExists(atPath: path.path) else { return nil }
+                try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                // Fetch FIRST, then materialize the worktree directly on the PR
+                // head: one working-tree write instead of checkout-then-rewrite,
+                // which doubled the cost on large repos.
+                _ = try await self.runGit(["fetch", "origin", "pull/\(number)/head"], in: repo)
+                _ = try await self.runGit(["worktree", "add", "--detach", path.path, "FETCH_HEAD"], in: repo)
+                // A new worktree starts with an empty config of its own:
+                // nothing written to an earlier one at this path still holds.
+                Self.configMemo.forget(worktree: path.path)
+                return try await self.revParse("HEAD", in: path)
+            }
+        }
+        let previousHead: String?
+        let head: String
+        if let created {
             previousHead = nil
-            head = try await revParse("HEAD", in: path)
+            head = created
         } else {
             _ = try await runGit(["fetch", "origin", "pull/\(number)/head"], in: path)
             let current = try await revParse("HEAD", in: path)
@@ -949,8 +1007,7 @@ public struct GitHubService: Sendable {
             .write(to: excludes, atomically: true, encoding: .utf8)
         // Worktree-scoped config needs the extension on the repository — the
         // guard hooks already rely on it; this is the same switch.
-        _ = try await runGit(["config", "extensions.worktreeConfig", "true"], in: worktree)
-        _ = try await runGit(["config", "--worktree", "core.excludesFile", excludes.path], in: worktree)
+        try await setWorktreeConfig("core.excludesFile", to: excludes.path, in: worktree)
     }
 
     /// The user's global excludes, as git would read them: `core.excludesFile`
@@ -958,9 +1015,8 @@ public struct GitHubService: Sendable {
     /// `$XDG_CONFIG_HOME/git/ignore`, else `~/.config/git/ignore`.
     private func globalExcludes(in worktree: URL) async -> String {
         var candidates: [URL] = []
-        if let data = try? await runGit(["config", "--global", "--get", "core.excludesFile"], in: worktree) {
-            let path = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !path.isEmpty { candidates.append(URL(fileURLWithPath: (path as NSString).expandingTildeInPath)) }
+        if let path = await globalExcludesPath(in: worktree) {
+            candidates.append(URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
         }
         let environment = ProcessInfo.processInfo.environment
         let configHome = environment["XDG_CONFIG_HOME"].map(URL.init(fileURLWithPath:))
@@ -972,9 +1028,68 @@ public struct GitHubService: Sendable {
         return ""
     }
 
+    /// The global config's `core.excludesFile`, nil when it names none —
+    /// asked of git once per run: every command install spawned the same
+    /// `git config --global` again. The FILE is still read at each install,
+    /// so patterns added to it reach the next review.
+    private func globalExcludesPath(in directory: URL) async -> String? {
+        if let known = Self.configMemo.globalExcludesPath() { return known.isEmpty ? nil : known }
+        var path = ""
+        if let data = try? await runGit(["config", "--global", "--get", "core.excludesFile"], in: directory) {
+            path = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        Self.configMemo.rememberGlobalExcludesPath(path)
+        return path.isEmpty ? nil : path
+    }
+
+    /// Turns on the worktree-scoped config (`extensions.worktreeConfig`, in
+    /// the repository's shared config) — asked of git once per directory and
+    /// run, where one checkout set it twice and every sync set it again.
+    /// `worktree`: a worktree of that repository, covered by the same switch.
+    private func enableWorktreeConfig(in directory: URL, covering worktree: URL? = nil) async throws {
+        var covered = [directory.path]
+        if let worktree { covered.append(worktree.path) }
+        if Self.configMemo.isEnabled(directory.path) {
+            Self.configMemo.markEnabled(covered)
+            return
+        }
+        // One writer at a time: the shared config has a single lock file,
+        // and of two checkouts writing it together one fails.
+        try await Self.repositoryTurns.run("extensions.worktreeConfig") { () async throws -> Void in
+            _ = try await self.runGit(["config", "extensions.worktreeConfig", "true"], in: directory)
+        }
+        Self.configMemo.markEnabled(covered)
+    }
+
+    /// Writes one key of a worktree's OWN config — unless this process
+    /// already wrote that very value there: a reattached review spawned the
+    /// same `git config` again at every sync. `repo`: where the extension is
+    /// switched on, the worktree itself when nil.
+    private func setWorktreeConfig(_ key: String, to value: String, in worktree: URL,
+                                   repo: URL? = nil) async throws {
+        if Self.configMemo.value(of: key, in: worktree.path) == value { return }
+        let switchDirectory = repo ?? worktree
+        try await enableWorktreeConfig(in: switchDirectory, covering: worktree)
+        do {
+            _ = try await runGit(["config", "--worktree", key, value], in: worktree)
+        } catch {
+            // The switch went away under the memo (a config edited by hand,
+            // a repository cloned again at the same path): set again, once.
+            Self.configMemo.forgetEnabled(switchDirectory.path)
+            try await enableWorktreeConfig(in: switchDirectory, covering: worktree)
+            _ = try await runGit(["config", "--worktree", key, value], in: worktree)
+        }
+        Self.configMemo.remember(value, of: key, in: worktree.path)
+    }
+
     /// Reverses `protectWorktree` (setting turned off on a reused worktree).
     public func unprotectWorktree(_ path: URL) async throws {
-        _ = try? await runGit(["config", "--worktree", "--unset", "core.hooksPath"], in: path)
+        // "" in the memo: known to be unset — a writable worktree asked git
+        // to unset it again at every sync.
+        if Self.configMemo.value(of: "core.hooksPath", in: path.path) != "" {
+            _ = try? await runGit(["config", "--worktree", "--unset", "core.hooksPath"], in: path)
+            Self.configMemo.remember("", of: "core.hooksPath", in: path.path)
+        }
         try? FileManager.default.removeItem(at: path.appendingPathComponent(".loom-guard-hooks"))
     }
 
@@ -984,7 +1099,7 @@ public struct GitHubService: Sendable {
     /// dev's branch by accident. (A determined `--no-verify` still bypasses;
     /// the guard is against accidents, not adversaries.)
     public func protectWorktree(_ path: URL, repo: URL) async throws {
-        _ = try await runGit(["config", "extensions.worktreeConfig", "true"], in: repo)
+        try await enableWorktreeConfig(in: repo, covering: path)
         let hooksDir = path.appendingPathComponent(".loom-guard-hooks")
         try FileManager.default.createDirectory(at: hooksDir, withIntermediateDirectories: true)
         let script = """
@@ -998,13 +1113,23 @@ public struct GitHubService: Sendable {
             try FileManager.default.setAttributes([.posixPermissions: 0o755],
                                                   ofItemAtPath: file.path)
         }
-        _ = try await runGit(["config", "--worktree", "core.hooksPath", hooksDir.path], in: path)
+        try await setWorktreeConfig("core.hooksPath", to: hooksDir.path, in: path, repo: repo)
     }
 
     public enum GitHubError: Error, Sendable {
         case ghNotInstalled
         case commandFailed(arguments: [String], stderr: String)
     }
+
+    /// Whose turn it is, per repository, to fetch into its FETCH_HEAD and
+    /// use what landed there — and, under one key of its own, to write a
+    /// repository's shared config.
+    private static let repositoryTurns = SerialTurns()
+    /// What this process already set in the git config of the repositories
+    /// and review worktrees it prepared.
+    private static let configMemo = WorktreeConfigMemo()
+
+    private static func turnKey(_ repo: URL) -> String { repo.standardizedFileURL.path }
 
     private func run(_ arguments: [String], in directory: URL,
                      stdin: Data? = nil) async throws -> Data {
@@ -1057,5 +1182,70 @@ public struct GitHubService: Sendable {
                     arguments: arguments, stderr: String(describing: error)))
             }
         }
+    }
+}
+
+/// Runs the operations given for one key one at a time, in the order they
+/// were asked for; different keys never wait on each other.
+private actor SerialTurns {
+    /// The last operation queued for each key — what the next one waits on.
+    private var tails: [String: Task<Void, Never>] = [:]
+
+    func run<T: Sendable>(_ key: String,
+                          _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        let previous = tails[key]
+        let task = Task<T, Error> {
+            _ = await previous?.value
+            return try await operation()
+        }
+        tails[key] = Task<Void, Never> { _ = try? await task.value }
+        return try await task.value
+    }
+}
+
+/// A memo of the `git config` writes a run already made, so a checkout only
+/// spawns git for what is not in place yet. Never a truth to rely on: a
+/// write that fails for a switch the memo believed on is done again, and a
+/// worktree made anew forgets what its path held.
+private final class WorktreeConfigMemo: @unchecked Sendable {
+    private let lock = NSLock()
+    /// Directories whose repository has `extensions.worktreeConfig` on.
+    private var enabled: Set<String> = []
+    /// The worktree-scoped values written, by worktree path then key —
+    /// "" for a key known to be unset.
+    private var written: [String: [String: String]] = [:]
+    /// The global `core.excludesFile` once asked — "" when git names none.
+    private var globalExcludes: String?
+
+    func isEnabled(_ directory: String) -> Bool {
+        lock.withLock { enabled.contains(directory) }
+    }
+
+    func markEnabled(_ directories: [String]) {
+        lock.withLock { enabled.formUnion(directories) }
+    }
+
+    func forgetEnabled(_ directory: String) {
+        lock.withLock { _ = enabled.remove(directory) }
+    }
+
+    func value(of key: String, in worktree: String) -> String? {
+        lock.withLock { written[worktree]?[key] }
+    }
+
+    func remember(_ value: String, of key: String, in worktree: String) {
+        lock.withLock { written[worktree, default: [:]][key] = value }
+    }
+
+    func forget(worktree: String) {
+        lock.withLock { written[worktree] = nil }
+    }
+
+    func globalExcludesPath() -> String? {
+        lock.withLock { globalExcludes }
+    }
+
+    func rememberGlobalExcludesPath(_ path: String) {
+        lock.withLock { globalExcludes = path }
     }
 }
