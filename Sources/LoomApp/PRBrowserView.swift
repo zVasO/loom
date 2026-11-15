@@ -23,12 +23,21 @@ struct PRBrowserView: View {
                                                           order: .reverse)]
     @State private var addRepoShown = false
     @State private var addRepoText = ""
+    /// The tables' rows as last filtered and sorted (see `shownRows`).
+    /// References the body fills, not state: filling one asks for no pass.
+    @State private var rowsMemo = RowsMemo<PRBrowseRow>()
+    @State private var reposMemo = RowsMemo<GitHubService.Repository>()
 
     static let railWidth: CGFloat = 240
 
     private var scope: PRBrowseScope { model.prBrowseScope }
 
     var body: some View {
+        // Once per pass, and handed to everything that shows them: the
+        // caption, the selection's actions and the table each used to build,
+        // filter and sort the scope's rows on their own.
+        let rows: [PRBrowseRow] = scope == .repositories ? [] : shownRows()
+        let repos: [GitHubService.Repository] = scope == .repositories ? shownRepositories() : []
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 HStack {
@@ -38,7 +47,7 @@ struct PRBrowserView: View {
                 .padding(.horizontal, DefaultTheme.space(12))
                 .frame(width: Self.railWidth)
                 Divider().overlay(DefaultTheme.cardBorder)
-                toolbar
+                toolbar(rows: rows, repositoryCount: repos.count)
             }
             .frame(height: PRModeSwitch.barHeight)
             .background(DefaultTheme.background)
@@ -47,7 +56,7 @@ struct PRBrowserView: View {
                 rail
                     .frame(width: Self.railWidth)
                 Divider().overlay(DefaultTheme.cardBorder)
-                content
+                content(rows: rows, repositories: repos)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -170,21 +179,23 @@ struct PRBrowserView: View {
 
     // MARK: Toolbar — the scope, the search, the actions on the selection
 
-    private var toolbar: some View {
+    private func toolbar(rows: [PRBrowseRow], repositoryCount: Int) -> some View {
         HStack(spacing: DefaultTheme.space(10)) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(scopeTitle)
                     .themeFont(size: 13, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                     .lineLimit(1)
-                Text(scopeCaption)
+                Text(scopeCaption(rowCount: rows.count, repositoryCount: repositoryCount))
                     .themeFont(size: 10)
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
             }
             .layoutPriority(1)
             Spacer(minLength: 12)
-            selectionActions
+            // A review asked for by reference, its PR not here yet.
+            PRReviewsOpening(model: model)
+            selectionActions(rows)
             searchField
             if scope.isProjectScope {
                 PRFilterMenu(model: model, projectsToRefresh: { model.projectIDs(in: model.prBrowseScope) })
@@ -214,14 +225,14 @@ struct PRBrowserView: View {
         }
     }
 
-    private var scopeCaption: String {
+    private func scopeCaption(rowCount: Int, repositoryCount: Int) -> String {
         var parts: [String] = []
         if scope == .repositories {
-            let count = repoRows.count
+            let count = repositoryCount
             parts.append(count == 1 ? "1 repository not added yet" : "\(count) repositories not added yet")
             if !repoSelection.isEmpty { parts.append("\(repoSelection.count) selected") }
         } else {
-            let count = rows.count
+            let count = rowCount
             parts.append(count == 1 ? "1 pull request" : "\(count) pull requests")
             if scope.isProjectScope && model.selectedPRFilterID != PRFilter.all.id {
                 parts.append(model.selectedPRFilter.name)
@@ -244,7 +255,7 @@ struct PRBrowserView: View {
 
     /// What the selection can become: a review, or projects.
     @ViewBuilder
-    private var selectionActions: some View {
+    private func selectionActions(_ rows: [PRBrowseRow]) -> some View {
         if scope == .repositories {
             if !repoSelection.isEmpty {
                 AccentButton(repoSelection.count == 1 ? "Add as project"
@@ -252,7 +263,7 @@ struct PRBrowserView: View {
                              systemImage: "plus") { addRepositories(repoSelection) }
             }
         } else {
-            let picked = rows(for: selection)
+            let picked = Self.pick(selection, from: rows)
             if picked.count == 1, let row = picked.first, let pr = row.pr, let projectID = row.projectID {
                 if model.isLaunchingReview(forPR: pr.number, in: projectID) {
                     ProgressView().controlSize(.small)
@@ -330,30 +341,47 @@ struct PRBrowserView: View {
     // MARK: Content — the table of the scope
 
     @ViewBuilder
-    private var content: some View {
+    private func content(rows: [PRBrowseRow],
+                         repositories: [GitHubService.Repository]) -> some View {
         if scope == .repositories {
-            repositoriesTable
+            repositoriesTable(repositories)
         } else {
-            pullRequestsTable
+            pullRequestsTable(rows)
         }
     }
 
     /// The scope's rows, filtered by the typed text, in the table's order.
-    private var rows: [PRBrowseRow] {
-        model.browseRows(in: scope)
-            .filter { $0.matches(query: query) }
-            .sorted(using: sortOrder)
+    /// Filtered and sorted when the scope's rows, the text or the order
+    /// changed — not at every pass: the body also runs for a click on a row,
+    /// a list arriving for another scope, a session changing state. The
+    /// scope's rows themselves are built each pass: that is how a change is
+    /// seen.
+    private func shownRows() -> [PRBrowseRow] {
+        let source: [PRBrowseRow] = model.browseRows(in: scope)
+        let memo = rowsMemo
+        if memo.source == source, memo.query == query, memo.sortOrder == sortOrder {
+            return memo.rows
+        }
+        // No text typed: nothing to match row by row.
+        let kept: [PRBrowseRow] = PRSidebarFilter.tokens(query).isEmpty
+            ? source
+            : source.filter { $0.matches(query: query) }
+        let rows: [PRBrowseRow] = kept.sorted(using: sortOrder)
+        memo.source = source
+        memo.query = query
+        memo.sortOrder = sortOrder
+        memo.rows = rows
+        return rows
     }
 
     /// The rows behind a set of ids, in the table's order.
-    private func rows(for ids: Set<PRBrowseRow.ID>) -> [PRBrowseRow] {
+    private static func pick(_ ids: Set<PRBrowseRow.ID>, from rows: [PRBrowseRow]) -> [PRBrowseRow] {
         guard !ids.isEmpty else { return [] }
         return rows.filter { ids.contains($0.id) }
     }
 
-    private var pullRequestsTable: some View {
-        let rows = self.rows
-        return Table(rows, selection: $selection, sortOrder: $sortOrder) {
+    private func pullRequestsTable(_ rows: [PRBrowseRow]) -> some View {
+        Table(rows, selection: $selection, sortOrder: $sortOrder) {
             TableColumn("CI", value: \PRBrowseRow.ciRank) { row in PRBrowseCells.ci(row) }
                 .width(30)
             TableColumn("#", value: \PRBrowseRow.number) { row in PRBrowseCells.number(row) }
@@ -382,9 +410,9 @@ struct PRBrowserView: View {
         .scrollContentBackground(.hidden)
         .background(DefaultTheme.contentBackground)
         .contextMenu(forSelectionType: PRBrowseRow.ID.self) { ids in
-            rowMenu(ids)
+            rowMenu(ids, in: rows)
         } primaryAction: { ids in
-            model.openForReview(self.rows(for: ids))
+            model.openForReview(Self.pick(ids, from: rows))
         }
         .overlay {
             if rows.isEmpty { emptyState }
@@ -392,8 +420,8 @@ struct PRBrowserView: View {
     }
 
     @ViewBuilder
-    private func rowMenu(_ ids: Set<PRBrowseRow.ID>) -> some View {
-        let picked = rows(for: ids)
+    private func rowMenu(_ ids: Set<PRBrowseRow.ID>, in rows: [PRBrowseRow]) -> some View {
+        let picked = Self.pick(ids, from: rows)
         if !picked.isEmpty {
             Button(picked.count == 1 ? "Open in Review" : "Open \(picked.count) in Review") {
                 model.openForReview(picked)
@@ -482,16 +510,28 @@ struct PRBrowserView: View {
 
     // MARK: Repositories — the catalog, one click from becoming projects
 
-    private var repoRows: [GitHubService.Repository] {
-        model.visibleOwners
+    /// The catalog's repositories, filtered and sorted as `shownRows` does
+    /// its own: when the catalog, the text or the order changed.
+    private func shownRepositories() -> [GitHubService.Repository] {
+        let source: [GitHubService.Repository] = model.visibleOwners
             .flatMap { model.catalogRepositories(of: $0) }
-            .filter { PRSidebarFilter.matches($0, query: query) }
-            .sorted(using: repoSortOrder)
+        let memo = reposMemo
+        if memo.source == source, memo.query == query, memo.sortOrder == repoSortOrder {
+            return memo.rows
+        }
+        let kept: [GitHubService.Repository] = PRSidebarFilter.tokens(query).isEmpty
+            ? source
+            : source.filter { PRSidebarFilter.matches($0, query: query) }
+        let rows: [GitHubService.Repository] = kept.sorted(using: repoSortOrder)
+        memo.source = source
+        memo.query = query
+        memo.sortOrder = repoSortOrder
+        memo.rows = rows
+        return rows
     }
 
-    private var repositoriesTable: some View {
-        let repos = repoRows
-        return VStack(spacing: 0) {
+    private func repositoriesTable(_ repos: [GitHubService.Repository]) -> some View {
+        VStack(spacing: 0) {
             Table(repos, selection: $repoSelection, sortOrder: $repoSortOrder) {
                 TableColumn("Repository", value: \GitHubService.Repository.nameWithOwner) { repo in
                     CatalogCells.name(repo, cloning: model.isCloning(repo.nameWithOwner))
@@ -651,6 +691,19 @@ struct PRBrowserView: View {
             model.startupError = "“\(text)” is neither owner/name nor a GitHub URL."
         }
     }
+}
+
+// MARK: - The rows, kept between passes
+
+/// A table's rows as last filtered and sorted, with what they were computed
+/// from. `body` reads the rows three times a pass and runs for every click
+/// and hover; the filter and the sort (a localised comparison per pair) are
+/// worth doing once per change of what they read (audit 2026-11-15).
+private final class RowsMemo<Row: Equatable> {
+    var source: [Row] = []
+    var query = ""
+    var sortOrder: [KeyPathComparator<Row>] = []
+    var rows: [Row] = []
 }
 
 // MARK: - The mode switch

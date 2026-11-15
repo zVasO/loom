@@ -15,25 +15,90 @@ struct PRTabStrip: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: DefaultTheme.space(4)) {
                     ForEach(model.prTabs.tabs) { tab in
-                        PRTabButton(tab: tab,
+                        // The session's id, not its state: which session a
+                        // PR has changes when one starts or goes, its state
+                        // at every turn of the agent. The dot reads that.
+                        PRTabButton(model: model, tab: tab,
                                     isActive: tab.id == model.prTabs.activeID,
-                                    sessionState: sessionState(of: tab),
+                                    sessionID: model.reviewSession(forPR: tab.pr.number,
+                                                                   in: tab.projectID),
                                     onSelect: { model.activatePRTab(tab.id) },
                                     onPin: { model.pinPRTab(tab.id) },
                                     onClose: { model.closePRTab(tab.id) },
                                     onCloseOthers: { model.closeOtherPRTabs(tab.id) })
                     }
+                    PRReviewsOpening(model: model)
                 }
                 .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
             }
         }
         .background(DefaultTheme.background)
     }
+}
 
-    /// The tab's review session state, for the dot — nil without a session.
-    private func sessionState(of tab: PRTab) -> SessionState? {
-        guard let id = model.reviewSession(forPR: tab.pr.number, in: tab.projectID) else { return nil }
-        return model.sessions.first { $0.id == id }?.state
+/// A session's state as a dot. It reads the live sessions itself, so a
+/// transition repaints the dot and nothing around it: the tab strip, the
+/// drawer's handle and the review tabs used to be handed the state by a
+/// parent that re-ran — workspace and diff included — at every transition
+/// of every session (audit 2026-11-15).
+struct SessionStateDot: View {
+    let model: AppModel
+    let id: SessionID
+    var size: CGFloat = 5
+    /// What the tooltip says before the state's name; nil for no tooltip.
+    var helpPrefix: String? = nil
+    /// A dormant session has no state. true: a hollow ring stands for it
+    /// (resumed on click). false: nothing shows.
+    var hollowWhenDormant = false
+
+    var body: some View {
+        let state: SessionState? = model.sessions.first(where: { $0.id == id })?.state
+        if let state {
+            if let helpPrefix {
+                dot(state).help(helpPrefix + DefaultTheme.label(for: state))
+            } else {
+                dot(state)
+            }
+        } else if hollowWhenDormant {
+            Circle()
+                .stroke(DefaultTheme.mutedText, lineWidth: 1)
+                .frame(width: size, height: size)
+        }
+    }
+
+    private func dot(_ state: SessionState) -> some View {
+        Circle()
+            .fill(DefaultTheme.badgeColor(for: state))
+            .frame(width: size, height: size)
+    }
+}
+
+/// The reviews asked for by reference (a URL typed in the palette) whose
+/// pull request GitHub has not answered for yet: no tab can show them, this
+/// does — a spinner and the reference each, gone when the tab opens or the
+/// attempt ends.
+struct PRReviewsOpening: View {
+    let model: AppModel
+
+    var body: some View {
+        ForEach(Array(model.prReviewsOpening.enumerated()), id: \.offset) { _, reference in
+            HStack(spacing: DefaultTheme.space(6)) {
+                ProgressView().controlSize(.mini)
+                Text("Opening \(Self.label(reference))…")
+                    .themeFont(size: 11)
+                    .foregroundStyle(DefaultTheme.secondaryText)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .padding(.horizontal, DefaultTheme.space(9)).padding(.vertical, DefaultTheme.space(5))
+            .help("Asking GitHub for the pull request — its review starts as soon as it answers")
+        }
+    }
+
+    /// `owner/name#12`, or `#12` for a number typed alone.
+    static func label(_ reference: PRReference) -> String {
+        guard let repo = reference.repo else { return "#\(reference.number)" }
+        return "\(repo)#\(reference.number)"
     }
 }
 
@@ -73,9 +138,11 @@ struct PRTabShortcuts: View {
 /// review session's dot, close cross on hover or when active. Italic while
 /// it is only a preview; a pin appears on hover to keep it.
 struct PRTabButton: View {
+    let model: AppModel
     let tab: PRTab
     let isActive: Bool
-    let sessionState: SessionState?
+    /// The PR's review session, live or not — nil when it never had one.
+    let sessionID: SessionID?
     let onSelect: () -> Void
     let onPin: () -> Void
     let onClose: () -> Void
@@ -86,9 +153,9 @@ struct PRTabButton: View {
         HStack(spacing: DefaultTheme.space(6)) {
             AppIcon("arrow.triangle.pull", size: 11)
                 .foregroundStyle(isActive ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
-            if let sessionState {
-                Circle().fill(DefaultTheme.badgeColor(for: sessionState)).frame(width: 5, height: 5)
-                    .help("Review session: " + DefaultTheme.label(for: sessionState))
+            if let sessionID {
+                // Shows while the session runs; nothing for a dormant one.
+                SessionStateDot(model: model, id: sessionID, helpPrefix: "Review session: ")
             }
             Text("#\(tab.pr.number)")
                 .themeFont(size: 10, weight: .bold, design: .monospaced)
