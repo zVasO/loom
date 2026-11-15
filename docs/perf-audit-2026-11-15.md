@@ -4,10 +4,12 @@ Context: two requests. ⌘K must answer in the keystroke and start a review
 from a pull request's URL; the PRs tab must perform better, above all when a
 review is started. Scope: the PRs tab (`GlobalPRsView`, Browse and Review),
 the review launch (`startPRReview` → `launchPRReviewSession`) and the ⌘K
-palette. **This is a static audit**: the environment is Linux with no Swift
-toolchain, so nothing was compiled, run or profiled. Every cost below comes
-from the code path cited; where a number appears it is an estimate, and
-says so. File and line references in "What was found" are those of `main`
+palette. **The findings are a static audit**: they were written on Linux,
+with no Swift toolchain, from the code paths cited; where a number appears
+among them it is an estimate, and says so. The changes were then built and
+tested on CI, and the palette and two review launches were run and clocked
+in the real app there ("What was measured, and what was not"). File and
+line references in "What was found" are those of `main`
 at `9973bce`, before the changes; those in "What was changed" are the
 working tree's.
 
@@ -298,33 +300,48 @@ the main actor.
     "Review code" asks for the pull request (`ContentView.swift:676`), shows
     the PRs tab, closes the palette and calls `startPRReview(reference:)`.
 
-## What was NOT measured
+## What was measured, and what was not
 
-Everything: nothing here was run on a Mac. No build, no test run, no
-Instruments trace — the code above was written against the declarations it
-calls and has not been compiled, and no figure in this document is a
-measurement. On a Mac, before merging:
+Built and tested on CI (macOS 26): `swift build`, `swift test` and the
+timing probes are green on the head of the branch. The probes that exist
+(`PerfProbes`, `TerminalRowProbes`, `DiffRowsProbes`) guard September's
+work; none of them covers anything in this audit. The new tests assert
+behaviour, not time: `PRStaleContentTests`, the `ReviewWorktreeTests`
+additions, `CommandPaletteTests`.
 
-1. `swift build`, then `swift test`. The constructs least sure to compile:
-   in the model, the `didSet` on the observed `sessions`, the generic
-   `SerialTurns.run`, the tuple-valued in-flight dictionaries and the
-   `@escaping @MainActor () async -> SessionID?` parameter; in the views,
-   the task group of `PRWorkspaceView.load` (it writes view state and adds
-   tasks while it drains), `PRWorkspaceView: Equatable` with its own `==`,
-   and the generic `PRDrawerClearance` around the files header.
-2. The probes that exist: `PerfProbes` (LoomTerminalTests — streaming frame,
-   one-row snapshot, tail re-prime, visible tail, native index),
-   `TerminalRowProbes` (LoomUITests — forty coloured rows),
-   `DiffRowsProbes` (LoomGitTests — a 5,000-line parse and the row
-   comparisons). They guard September's work and should still pass; **none
-   of them covers anything in this audit.**
-3. New tests, not probes: `PRStaleContentTests` (which PRs a refetched list
-   makes stale), the `ReviewWorktreeTests` additions (two reviews started
-   together keep their own heads; a reused or recreated worktree is
-   configured again), `CommandPaletteTests` (the folded keys rank as the
-   titles did). They assert behaviour, not time.
+The theme tour's keyboard walk (`Tests/ThemeTour/README.md`, the `keys`
+stop) then pressed the keys in the real app on the CI Mac — ⌘K, a search,
+Tab, "Review code", its prompt, Esc — and started two reviews of real pull
+requests, one from a URL typed in the palette, one from a row of Browse.
+Every step has its picture; the keyboard was where it should be at each.
+Its clock, over three runs, on a virtual machine without a GPU running a
+debug build — an order of magnitude, not a bound:
 
-What to measure first, in this order:
+| From | To | Time |
+| --- | --- | --- |
+| ⌘K | the palette up, its field with the keyboard | 45–135 ms once warm (270 ms in the noisiest run), 170–320 ms the first time — the same over Sessions, Settings, Browse and an open review |
+| Esc | the terminal has the keyboard back | 14–25 ms |
+| Return on a URL in "Review code" | Review shows "Opening…" | 100–230 ms |
+| | the PR's tab, with its row | 0.8–1.1 s (`gh`) |
+| | the review session started | 1.6–4.6 s (fetch and checkout) |
+| "Start review" on a row | the drawer, at its width | 180–440 ms |
+| | the review session started | 2.2–2.7 s |
+
+Before this change the drawer came with the session: the last line of each
+group is when a click was first answered. That "before" is read from the
+code, not clocked: the walk was not run on the previous version.
+
+`/usr/bin/sample` on the main thread while a review launched from a row:
+two thirds idle, the rest SwiftUI and AppKit laying out and drawing the
+new views; no function of Loom's own above 2 % (the highest:
+`SplitDiffView.DiffRowSpansKey.reduce`). Showing Browse costs about half a
+second on that machine, spent by AppKit building the table's row views.
+
+Not measured: anything on a real Mac, with Instruments; a session
+streaming while the tab is on screen (the stand-in claude of the tour
+paints once and waits), which is what findings 2 and 4 are about.
+
+What to measure first on a Mac, in this order:
 
 1. **Click to drawer, click to first byte.** "Start review" on a PR with no
    worktree, on a PR with a live session, and from ⌘K with a URL: time from
