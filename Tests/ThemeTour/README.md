@@ -6,7 +6,8 @@ intégré se dessine comme avant. `ThemeTour` (`Sources/LoomApp/ThemeTour.swift`
 réelle sous chaque arrêt d'un plan et enregistre ce que l'écran montre de sa fenêtre, écran
 après écran : Projets et ses onglets, Sessions (le terminal, puis la vue conversation), panneau
 Git, navigateur, Mission Control, PRs, Workflows, Extensions, Réglages section par section,
-feuilles d'import, de contexte, de nouvelle session et d'usage, palette.
+feuilles d'import, de contexte, de nouvelle session et d'usage, palette (`palette`, sa liste ;
+`palette-review`, sa question « Review code » : le champ qui attend l'URL d'une pull request).
 
 ```sh
 swift build
@@ -39,7 +40,10 @@ swift run --skip-build LoomApp
   chaque arrêt, ses écrans, les échecs). `screencapture` lit l'écran : il faut que le terminal
   qui lance la tournée y soit autorisé (Réglages Système › Confidentialité › Enregistrement de
   l'écran) ; sinon `LOOM_TOUR_CAPTURE=view` fait dessiner la fenêtre elle-même, sans flou ni
-  feuilles.
+  feuilles. La palette n'est plus une feuille mais un calque de la fenêtre (ADR-0024) : elle
+  est dans l'image dans les deux modes.
+- `palette-review` relit le presse-papiers, comme l'action : s'il contient l'URL d'une pull
+  request GitHub, le champ la montre, sélectionnée ; sinon il est vide.
 
 En CI : Actions › CI › Run workflow, `themes` coché (et `themes_plan` pour un autre plan). Le
 job agrandit l'écran du runner, joue la tournée et rend les images dans l'artefact

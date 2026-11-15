@@ -38,16 +38,43 @@ public enum CommandPalette {
             .map(\.index)
     }
 
+    /// A candidate as the match reads it: diacritics and case folded away.
+    /// The folding goes through ICU and is most of what a ranking costs: a
+    /// list that is ranked on every keystroke keeps its keys and calls
+    /// `rankIndices(query:keys:)`.
+    public static func key(for candidate: String) -> [Character] {
+        normalize(candidate)
+    }
+
+    /// The indices of the keys `query` threads through, best first, scored
+    /// as `rank` scores a candidate. Ties keep the keys' order; an empty
+    /// query keeps them all.
+    public static func rankIndices(query: String, keys: [[Character]]) -> [Int] {
+        let normalizedQuery = normalize(query.trimmingCharacters(in: .whitespaces))
+        guard !normalizedQuery.isEmpty else { return Array(keys.indices) }
+        return keys.indices
+            .compactMap { index -> (index: Int, score: Int)? in
+                guard let matched = score(normalizedQuery, inKey: keys[index]) else { return nil }
+                return (index, matched)
+            }
+            .sorted { $0.score != $1.score ? $0.score > $1.score : $0.index < $1.index }
+            .map(\.index)
+    }
+
     /// `nil` if `query` is not a subsequence of `candidate`.
     static func score(_ query: [Character], in candidate: String) -> Int? {
-        let normalized = normalize(candidate)
+        score(query, inKey: normalize(candidate))
+    }
+
+    /// `nil` if `query` is not a subsequence of `key`, a candidate already folded.
+    static func score(_ query: [Character], inKey key: [Character]) -> Int? {
         var score = 0
         var queryIndex = 0
         var previousMatched = -2
-        for (index, character) in normalized.enumerated() {
+        for (index, character) in key.enumerated() {
             guard queryIndex < query.count, character == query[queryIndex] else { continue }
             score += 1
-            if index == 0 || normalized[index - 1] == " " { score += 3 }   // word start
+            if index == 0 || key[index - 1] == " " { score += 3 }          // word start
             if index == previousMatched + 1 { score += 2 }                  // consecutive
             previousMatched = index
             queryIndex += 1

@@ -24,11 +24,12 @@ import SwiftUI
 ///   conversation the chat view shows.
 /// - `LOOM_TOUR_CAPTURE`: `screen` (the display, through `screencapture`;
 ///   when unsaid) or `view` (the window drawing itself: no blur, no sheet
-///   over it — for a Mac that refuses the screen to be read).
+///   over it — for a Mac that refuses the screen to be read). The palette
+///   is an overlay of the window (ADR-0024): it is in both.
 @MainActor
 final class ThemeTour {
 
-    /// A sheet over the window.
+    /// What shows over the window: a sheet — or the palette, drawn in it.
     enum Overlay { case palette, usage, newSession }
 
     /// What the tour asks of the window: `ContentView` holds that state.
@@ -81,7 +82,7 @@ final class ThemeTour {
                                             "chat-narrow", "git-panel", "side-panel", "context", "overview",
                                             "prs", "workflows", "extensions"]
         + settingsStops.map { "settings-" + $0.rawValue }
-        + ["theme-import", "palette", "new-session", "usage"]
+        + ["theme-import", "palette", "palette-review", "new-session", "usage"]
     private static let coreScreens: Set<String> = ["projects", "sessions", "chat", "chat-narrow", "git-panel", "overview",
                                                    "workflows", "settings-general", "settings-themes",
                                                    "theme-import", "palette"]
@@ -297,6 +298,9 @@ final class ThemeTour {
         case "workflows": driver.show(.workflows)
         case "extensions": driver.show(.extensions)
         case "palette": driver.present(.palette)
+        // The palette asking for a pull request ("Review code"): its host
+        // opens it on that prompt.
+        case "palette-review": ask("palette-review")
         case "new-session": driver.present(.newSession)
         case "usage": driver.present(.usage)
         default: break
@@ -329,7 +333,7 @@ final class ThemeTour {
         case "theme-import":
             ask("theme-import-close")
             return true
-        case "palette", "new-session", "usage":
+        case "palette", "palette-review", "new-session", "usage":
             driver.present(nil)
             return true
         default:

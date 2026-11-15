@@ -206,6 +206,9 @@ struct ContentView: View {
         .onChange(of: tab) {
             applyTheme()
             model.extensions.isTabVisible = tab == .extensions
+            // The window's shortcuts still answer under the palette (⌘G,
+            // ⌘,): one that changes the screen it was opened on closes it.
+            if paletteShown { paletteShown = false }
         }
         .onChange(of: model.workflows.revealRequest) { tab = .workflows }
         // Every such request is about a schedule: Settings opens on them.
@@ -224,6 +227,10 @@ struct ContentView: View {
             selected = .session(id)
             tab = .sessions
         }))
+        // ⌘K: over the window's content — an extension's overlay included —
+        // not in a sheet (ADR-0024). Only the binding is handed over: this
+        // body does not run again when the palette opens or closes.
+        .overlay { palette }
         .onReceive(NotificationCenter.default.publisher(for: .loomThemeChanged)) { _ in
             applyTheme()
         }
@@ -290,14 +297,13 @@ struct ContentView: View {
             createSession(in: model.selectedProject)
         }
         .onReceive(NotificationCenter.default.publisher(for: .loomNewSessionInProject)) { _ in
-            // Not over the palette or another sheet: one at a time.
+            // Not over the palette or a sheet: one at a time.
             guard !paletteShown, !usageShown else { return }
             newSessionSheetShown = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .loomFrameRateChanged)) { _ in
             model.applyFrameRate()
         }
-        .sheet(isPresented: $paletteShown) { palette }
         .sheet(isPresented: $usageShown) { UsageSheet(model: model) { usageShown = false } }
         .alert("Incomplete startup", isPresented: .constant(model.startupError != nil)) {
             Button("OK") { model.clearError() }
@@ -420,8 +426,10 @@ struct ContentView: View {
                 selected = .webPane(pane)
             }
             .help("New browser pane in the current session's stack")
+            // A toggle: under the palette the window's shortcuts stay live,
+            // and ⌘K pressed again closes it.
             Button {
-                paletteShown = true
+                paletteShown.toggle()
             } label: {
                 HStack(spacing: DefaultTheme.space(8)) {
                     AppIcon("magnifyingglass", size: 13)
@@ -468,8 +476,8 @@ struct ContentView: View {
         .background(TitleBarDoubleClick { toggleFullScreen() })
     }
 
-    /// keyWindow is nil while a sheet or the palette holds focus, and the
-    /// gesture would then do nothing at all.
+    /// keyWindow is nil while a sheet holds focus, and the gesture would
+    /// then do nothing at all.
     private func toggleFullScreen() {
         let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first
         window?.toggleFullScreen(nil)
@@ -502,6 +510,12 @@ struct ContentView: View {
                                      subtitle: "Shortcuts, themes, projects",
                                      section: "Navigation", shortcut: "⌘,") { tab = .settings })
 
+        actions.append(PaletteAction(id: PaletteAction.reviewID, icon: "sparkles",
+                                     title: "Review code",
+                                     subtitle: "Start a review from a pull request's URL",
+                                     section: "Actions",
+                                     prompt: reviewPrompt,
+                                     run: {}))
         actions.append(PaletteAction(id: "act.newSession", icon: "plus",
                                      title: "New claude session",
                                      subtitle: "In the current project",
@@ -518,9 +532,9 @@ struct ContentView: View {
                                      title: "New claude session in…",
                                      subtitle: "Choose the project first",
                                      section: "Actions", shortcut: "⌘⇧N") {
-            // Once the palette's own sheet is gone: a sheet asked for while
-            // another one closes is dropped.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { newSessionSheetShown = true }
+            // At once: the palette is not a sheet, there is none closing
+            // for this one to wait behind.
+            newSessionSheetShown = true
         })
         if case .session(let id) = selected,
            let item = model.sessions.first(where: { $0.id == id }) {
@@ -638,9 +652,12 @@ struct ContentView: View {
             })
         }
 
-        let dormantIDs = Set(model.dormantSessions.map(\.id))
+        // Read once: the dormant list is a filter of every record against
+        // every live session.
+        let dormant = model.dormantSessions
+        let dormantIDs = Set(dormant.map(\.id))
         let entries = model.sessions.filter { !$0.isShell }.map { ($0.title, $0.id) }
-            + model.dormantSessions.map { ($0.title, $0.id) }
+            + dormant.map { ($0.title, $0.id) }
         for (title, id) in entries {
             actions.append(PaletteAction(id: "session.\(id.rawValue.uuidString)",
                                          icon: "sparkle",
@@ -654,24 +671,54 @@ struct ContentView: View {
         return actions
     }
 
+    /// "Review code": the palette asks for the pull request, the PRs tab
+    /// does the rest — what goes wrong shows there, where it already does.
+    private var reviewPrompt: PalettePrompt {
+        PalettePrompt(
+            title: "Pull request URL — or owner/repo#12",
+            hint: "Return starts the review. The PRs tab opens on it.",
+            prefill: {
+                // A pull request's URL just copied is the likely answer;
+                // anything else on the clipboard is not offered.
+                guard let copied = NSPasteboard.general.string(forType: .string),
+                      copied.utf8.count < 2_000 else { return nil }
+                let text = copied.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard text.contains("github.com/"), PRReference.parse(text) != nil else { return nil }
+                return text
+            },
+            submit: { text in
+                guard let reference = PRReference.parse(text) else {
+                    return "Not a pull request: paste its github.com URL, or owner/repo#12."
+                }
+                // The view first: the tab shows before gh has answered.
+                tab = .prs
+                paletteShown = false
+                model.startPRReview(reference: reference)
+                return nil
+            })
+    }
+
+    /// The palette's place in the window. The actions are built by the
+    /// overlay, while it shows: nothing is listed for a closed palette.
     private var palette: some View {
-        ActionPaletteView(actions: paletteActions,
-                          transcriptSearch: { await model.searchTranscripts($0) },
-                          onOpenSession: { openSessionByID($0) },
-                          isPresented: $paletteShown)
+        PaletteOverlay(isPresented: $paletteShown,
+                       actions: { paletteActions },
+                       transcriptSearch: { await model.searchTranscripts($0) },
+                       onOpenSession: { openSessionByID($0) })
     }
 
     /// Opens a session found by search: resumes it first when it is dormant.
+    /// The Sessions tab shows before anything is awaited: Return is answered
+    /// at once, and the session lands in the tab when claude has resumed.
     private func openSessionByID(_ id: SessionID) {
         paletteShown = false
+        tab = .sessions
         if model.sessions.contains(where: { $0.id == id }) {
             selected = .session(id)
-            tab = .sessions
         } else {
             Task {
                 await model.resumeDormant(id)
                 selected = .session(id)
-                tab = .sessions
             }
         }
     }
