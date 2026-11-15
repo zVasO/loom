@@ -320,8 +320,11 @@ struct ActionPaletteView: View {
                 footer
             }
         }
+        // No height of its own: the list is as tall as its scroll view lets
+        // it be, a prompt as short as its one line and its hint. A maximum
+        // here made the panel take it whole — the prompt floated in the
+        // middle of an empty one.
         .frame(width: 640)
-        .frame(maxHeight: 520)
         .background(DefaultTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
         .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder, lineWidth: 1))

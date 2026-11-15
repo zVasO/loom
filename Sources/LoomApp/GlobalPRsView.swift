@@ -420,6 +420,10 @@ private struct PRReviewToolbarActions: View {
                 }
             }
         }
+        // The accent button's height, whatever shows: the bar is as tall
+        // while a review launches as once it has its button, and what is
+        // under it does not move when the launch ends.
+        .frame(minHeight: DefaultTheme.size(32))
     }
 
     /// The workflows a PR can start (ADR-0017): run one on this PR, the
