@@ -65,5 +65,23 @@ if [ -n "$session" ]; then
 {"parentUuid":"00000000-0000-4000-8000-000000000008","isSidechain":false,"sessionId":"@SESSION@","type":"assistant","message":{"id":"msg_tour_04","type":"message","role":"assistant","content":[{"type":"text","text":"Yes. A theme without a design of its own hands every charter value back unchanged, and the tour pictures it beside the imported ones.\n\n### What was checked\n\n| Point | In the code | Verdict |\n| --- | --- | --- |\n| #1 Built-in themes | **Confirmed.** `ThemePalette.design` is nil for every built-in family, so `radius(_:)`, `space(_:)` and `themeFont` hand the charter's own values back unchanged. | Agreed: nothing to do. Nine static screens compare pixel for pixel with the pictures taken before the change. |\n| #4 Colours only | **Confirmed**, with a nuance: the theme's `--border` and `--input` still apply, because an edge is a colour. | Agreed in part. The radius, the spacing and the fonts stay Loom's; say so in the preview's summary line. |\n| #9 Letter-spacing | Consistent with what tweakcn shows at 14 px (« supposed »). | Nuance: under 14 pt a tighter theme lets go, down to nothing at 10 pt. |\n\n| Point | Verdict |\n| --- | --- |\n| #7 Fonts | Agreed. Only the sans and the mono are fetched from Google Fonts, and only for the theme in use — a family Google does not know is noted and never asked for again. |\n| #15 Shadows | Agreed. A sidebar's session cards carry none: a hard shadow welded each card to the next. |\n"}]},"uuid":"00000000-0000-4000-8000-000000000009","timestamp":"2026-09-02T18:13:44.281Z"}
 JSONL
 fi
+# LOOM_TOUR_PERMISSION: the worktree's session then ends on a permission
+# prompt, drawn as claude draws one, and says which key answered it.
+if [ -n "$LOOM_TOUR_PERMISSION" ] && [ -f .git ]; then
+  printf '%s\n' "" \
+    "╭──────────────────────────────────────────────────────────╮" \
+    "│ Bash command                                             │" \
+    "│                                                          │" \
+    "│   git push origin loom/follow-the-letter                 │" \
+    "│   Push the branch to the remote                          │" \
+    "│                                                          │" \
+    "│ Do you want to proceed?                                  │" \
+    "│ ❯ 1. Yes                                                 │" \
+    "│   2. Yes, and don't ask again for git push commands      │" \
+    "│   3. No, and tell Claude what to do differently (esc)    │" \
+    "╰──────────────────────────────────────────────────────────╯"
+  IFS= read -rsn1 key
+  printf '\n%s answered: %s\n' "${green}⏺${off}" "$key"
+fi
 # Until the session is closed.
 exec cat > /dev/null

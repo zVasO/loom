@@ -53,8 +53,12 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   résultat, champ de message en bas (Retour envoie, ⇧Retour va à la ligne). Elle
   est lue dans le fichier de la session native (`~/.claude/projects/…/<uuid>.jsonl`),
   jamais dans l'écran, et suit un `/resume` ou un `/clear`. Ce qu'on y écrit est
-  tapé dans le terminal de la session : claude continue d'y tourner, et c'est là
-  qu'on répond à ses demandes de permission.
+  tapé dans le terminal de la session, où claude continue de tourner. Une demande
+  de permission (ou une question à options) que claude dessine dans son terminal
+  s'affiche dans le chat en carte, un bouton par option (ADR-0025). Pendant que
+  claude travaille, Stop l'interrompt (Échap) et l'éclair envoie le message tout de
+  suite au lieu de le mettre en file. Un message envoyé s'affiche aussitôt, en
+  attendant que claude l'écrive ; la conversation suit le fichier dès qu'il change.
 - **Git** : worktrees avec collisions départagées, status porcelain v2, diff
   (non-suivis compris), suppression refusée si travail non commité.
 - **Pull requests** : onglet PR sur le `gh` de l'utilisateur — projets locaux,
