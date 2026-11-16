@@ -30,7 +30,7 @@ swift run --skip-build LoomApp
   principaux seulement.
 - `keys` : aucun écran, mais la marche au clavier — ce qu'une image d'un état ne dit pas, que
   la palette répond aux touches. ⌘K, une recherche, Tab, « Review code », sa question qui
-  refuse puis accepte une réponse, Échap deux fois, ⌘K qui referme, ↓ puis Entrée : chaque
+  refuse puis accepte une réponse, Échap deux fois, ⌘⇧R qui ouvre la palette sur cette question, ⌘K qui referme, ↓ puis Entrée : chaque
   touche est postée dans la file d'événements de l'app et prend le chemin d'une vraie (les
   moniteurs de touches, les raccourcis, puis ce qui a le clavier). Chaque pas a son image, et
   `tour.json` note ce qui avait le clavier (`keyboard` : la vue, et le texte du champ quand

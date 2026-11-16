@@ -414,6 +414,11 @@ final class ThemeTour {
         await picture("closed", in: folder)
         await typeText("pwd")
         await picture("closed-typed", in: folder)
+        // ⌘⇧R: the palette, already asking for the pull request.
+        await press("r", code: 15, modifiers: [.command, .shift])
+        await picture("shortcut-review", in: folder)
+        await press("\u{1B}", code: 53)
+        await press("\u{1B}", code: 53)
 
         // ⌘K is a toggle: pressed again, it closes what it opened.
         await press("k", code: 40, modifiers: .command)
