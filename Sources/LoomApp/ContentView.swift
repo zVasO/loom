@@ -132,6 +132,7 @@ struct ContentView: View {
     @State private var settingsFocus: SettingsAnchor?
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
+    @AppStorage("loom.shortcut.review") private var keyReview = "r"
     @State private var selected: DetailSelection?
     @AppStorage("loom.session.restoreOnLaunch") private var restoreOnLaunch = true
     /// The session that was open at quit — reopened on the next launch.
@@ -521,6 +522,7 @@ struct ContentView: View {
                                      title: "Review code",
                                      subtitle: "Start a review from a pull request's URL",
                                      section: "Actions",
+                                     shortcut: "⌘⇧\(keyReview.uppercased())",
                                      prompt: reviewPrompt,
                                      run: {}))
         actions.append(PaletteAction(id: "act.newSession", icon: "plus",

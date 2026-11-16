@@ -68,7 +68,8 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   à construire ni transition, la liste suit la frappe en une passe. Une action peut y
   poser sa question : « Review code » demande l'URL d'une pull request (reprise du
   presse-papiers quand il en contient une) ou `owner/repo#12`, et Retour lance sa
-  review dans l'onglet PRs.
+  review dans l'onglet PRs. ⌘⇧R (lettre réglable dans Réglages › Raccourcis, aussi
+  dans le menu File) ouvre la palette directement sur cette question.
 - **Reviews planifiées** : des plannings (heure, jours) sur des tranches de PR —
   un projet + une requête GitHub (« needs review », un filtre perso…) + un maximum
   par passage. À l'heure dite (ou au réveil du Mac, jusqu'à 4 h de retard), Loom

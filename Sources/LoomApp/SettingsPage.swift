@@ -247,6 +247,7 @@ struct SettingsPage: View {
     @AppStorage("loom.shortcut.newTab") private var keyNewTab = "t"
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
+    @AppStorage("loom.shortcut.review") private var keyReview = "r"
     @State private var importShown = false
     /// What the import sheet opens on — a theme handed to it rather than pasted.
     @State private var importPrefill: String?
@@ -489,14 +490,20 @@ struct SettingsPage: View {
                     shortcutRow("Mission Control", key: $keyMissionControl)
                     cardDivider
                     shortcutRow("Go to session (palette)", key: $keyPalette)
-                    detail("One letter or digit, always combined with ⌘. ⌘N starts a session in the current project at once; with ⇧ the same letter asks which project first. Menu shortcuts update immediately.")
+                    cardDivider
+                    shortcutRow("Review a pull request", key: $keyReview, shift: true, editable: true)
+                    detail("One letter or digit, always combined with ⌘ (and ⇧ where shown). ⌘N starts a session in the current project at once; with ⇧ the same letter asks which project first. ⌘⇧R opens the palette on \u{201C}Review code\u{201D}: paste the pull request's URL, Return starts the review. Pick a letter no other ⌘⇧ shortcut uses (N, A, B, M, P). Menu shortcuts update immediately.")
                 }
             }
         }
     }
 
-    private func shortcutRow(_ title: String, key: Binding<String>, shift: Bool = false) -> some View {
-        HStack(spacing: DefaultTheme.space(12)) {
+    /// `editable`: false for a row that shows another row's letter (⌘⇧N
+    /// follows ⌘N).
+    private func shortcutRow(_ title: String, key: Binding<String>, shift: Bool = false,
+                             editable: Bool? = nil) -> some View {
+        let locked = !(editable ?? !shift)
+        return HStack(spacing: DefaultTheme.space(12)) {
             label(title)
             Spacer()
             Text(shift ? "⌘⇧" : "⌘")
@@ -519,8 +526,8 @@ struct SettingsPage: View {
                     .stroke(DefaultTheme.fieldBorder, lineWidth: 1))
                 .themeShadow(.xs, radius: 6)
                 // The ⇧ row follows ⌘N's letter: shown, not edited apart.
-                .disabled(shift)
-                .opacity(shift ? 0.6 : 1)
+                .disabled(locked)
+                .opacity(locked ? 0.6 : 1)
         }
     }
 
