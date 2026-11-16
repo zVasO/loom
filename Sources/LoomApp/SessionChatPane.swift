@@ -422,7 +422,10 @@ private final class FileWake: @unchecked Sendable {
     /// Returns at the next write, or after `timeout`.
     func next(timeout: Duration) async {
         let timer = Task { [weak self] in
-            try? await Task.sleep(for: timeout)
+            // Cancelled once a write has woken the reader: no wake of its
+            // own then, or the next wait would return at once — a reader
+            // spinning on the file.
+            guard (try? await Task.sleep(for: timeout)) != nil else { return }
             self?.wake()
         }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
