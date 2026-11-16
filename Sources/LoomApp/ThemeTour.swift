@@ -478,6 +478,8 @@ final class ThemeTour {
         await typeText("ok")
         await picture("review-drawer-typed", in: folder)
 
+        await chatWalk(into: folder)
+
         // The palette's opening, three times over each kind of screen: what
         // is under it should not make it slower.
         await openings("over-review-and-drawer")
@@ -510,6 +512,28 @@ final class ThemeTour {
             return
         }
         // It attaches first.
+        try? await Task.sleep(for: .milliseconds(800))
+    }
+
+    /// The chat view: the choice claude asks for (with LOOM_TOUR_PERMISSION),
+    /// an image in a message, and a picture pasted with ⌘V into the field.
+    private func chatWalk(into folder: URL) async {
+        driver.show(.sessions)
+        driver.select(sessions.first.map { DetailSelection.session($0) })
+        ask("chat")
+        await picture("chat", in: folder, after: 2_500)
+        let pasted = NSImage(size: NSSize(width: 320, height: 200), flipped: false) { rect in
+            NSColor(calibratedRed: 0.17, green: 0.24, blue: 0.31, alpha: 1).setFill()
+            rect.fill()
+            NSColor(calibratedRed: 0.9, green: 0.39, blue: 0.42, alpha: 1).setFill()
+            NSRect(x: 110, y: 80, width: 100, height: 40).fill()
+            return true
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([pasted])
+        await press("v", code: 9, modifiers: .command)
+        await picture("chat-pasted", in: folder)
+        ask("terminal")
         try? await Task.sleep(for: .milliseconds(800))
     }
 
