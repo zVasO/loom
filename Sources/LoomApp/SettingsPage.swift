@@ -481,7 +481,8 @@ struct SettingsPage: View {
             }
             section(.shortcuts) {
                 card {
-                    shortcutRow("New claude session", key: $keyNewSession)
+                    // Its letter is also ⌘⇧'s (a project of your choice): not the review's.
+                    shortcutRow("New claude session", key: $keyNewSession, taken: [keyReview])
                     cardDivider
                     shortcutRow("New session in a project of your choice", key: $keyNewSession, shift: true)
                     cardDivider
@@ -491,17 +492,26 @@ struct SettingsPage: View {
                     cardDivider
                     shortcutRow("Go to session (palette)", key: $keyPalette)
                     cardDivider
-                    shortcutRow("Review a pull request", key: $keyReview, shift: true, editable: true)
-                    detail("One letter or digit, always combined with ⌘ (and ⇧ where shown). ⌘N starts a session in the current project at once; with ⇧ the same letter asks which project first. ⌘⇧R opens the palette on \u{201C}Review code\u{201D}: paste the pull request's URL, Return starts the review. Pick a letter no other ⌘⇧ shortcut uses (N, A, B, M, P). Menu shortcuts update immediately.")
+                    shortcutRow("Review a pull request", key: $keyReview, shift: true, editable: true,
+                                taken: Self.fixedShiftLetters.union([keyNewSession]))
+                    detail("One letter or digit, always combined with ⌘ (and ⇧ where shown). ⌘N starts a session in the current project at once; with ⇧ the same letter asks which project first. ⌘⇧\(keyReview.uppercased()) opens the palette on \u{201C}Review code\u{201D}: paste the pull request's URL, Return starts the review. A letter another ⌘⇧ shortcut already uses (\(Self.takenList(keyNewSession))) is not taken. Menu shortcuts update immediately.")
                 }
             }
         }
     }
 
+    /// The ⌘⇧ letters fixed elsewhere: Select all (A), Browser (B), Show
+    /// Session as Chat (M), the PRs tab's pin (P).
+    static let fixedShiftLetters: Set<String> = ["a", "b", "m", "p"]
+
+    static func takenList(_ newSession: String) -> String {
+        fixedShiftLetters.union([newSession]).map { $0.uppercased() }.sorted().joined(separator: ", ")
+    }
+
     /// `editable`: false for a row that shows another row's letter (⌘⇧N
-    /// follows ⌘N).
+    /// follows ⌘N). `taken`: letters refused, held by another shortcut.
     private func shortcutRow(_ title: String, key: Binding<String>, shift: Bool = false,
-                             editable: Bool? = nil) -> some View {
+                             editable: Bool? = nil, taken: Set<String> = []) -> some View {
         let locked = !(editable ?? !shift)
         return HStack(spacing: DefaultTheme.space(12)) {
             label(title)
@@ -513,7 +523,8 @@ struct SettingsPage: View {
                 get: { key.wrappedValue.uppercased() },
                 set: { raw in
                     // Keep the LAST typed character, letters/digits only.
-                    if let char = raw.lowercased().last(where: { $0.isLetter || $0.isNumber }) {
+                    if let char = raw.lowercased().last(where: { $0.isLetter || $0.isNumber }),
+                       !taken.contains(String(char)) {
                         key.wrappedValue = String(char)
                     }
                 }))
