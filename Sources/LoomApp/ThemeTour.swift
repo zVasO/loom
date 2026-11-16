@@ -386,6 +386,9 @@ final class ThemeTour {
         walkStalls = []
         let stalls = watchStalls()
         defer { stalls.cancel() }
+        // First, while claude's stand-in still waits on its prompt: no key
+        // has answered it yet.
+        await chatWalk(into: folder)
         driver.show(.sessions)
         driver.select(sessions.first.map { DetailSelection.session($0) })
         await picture("terminal", in: folder, after: 1_500)
@@ -478,8 +481,6 @@ final class ThemeTour {
         await typeText("ok")
         await picture("review-drawer-typed", in: folder)
 
-        await chatWalk(into: folder)
-
         // The palette's opening, three times over each kind of screen: what
         // is under it should not make it slower.
         await openings("over-review-and-drawer")
@@ -520,6 +521,7 @@ final class ThemeTour {
     private func chatWalk(into folder: URL) async {
         driver.show(.sessions)
         driver.select(sessions.first.map { DetailSelection.session($0) })
+        try? await Task.sleep(for: .milliseconds(1_200))
         ask("chat")
         await picture("chat", in: folder, after: 2_500)
         let pasted = NSImage(size: NSSize(width: 320, height: 200), flipped: false) { rect in

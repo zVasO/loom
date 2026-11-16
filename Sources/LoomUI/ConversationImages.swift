@@ -187,8 +187,9 @@ struct MessageImages: View {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: images.count == 1 ? 320 : 160,
-                                   maxHeight: images.count == 1 ? 220 : 120)
+                            // Never past its own size: a small picture is not blown up.
+                            .frame(maxWidth: min(image.size.width, images.count == 1 ? 320 : 160),
+                                   maxHeight: min(image.size.height, images.count == 1 ? 220 : 120))
                             .clipShape(RoundedRectangle(cornerRadius: DefaultTheme.radius(8)))
                             .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(8))
                                 .strokeBorder(DefaultTheme.line, lineWidth: 1))
