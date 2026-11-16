@@ -59,6 +59,9 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   claude travaille, Stop l'interrompt (Échap) et l'éclair envoie le message tout de
   suite au lieu de le mettre en file. Un message envoyé s'affiche aussitôt, en
   attendant que claude l'écrive ; la conversation suit le fichier dès qu'il change.
+  Une image collée (⌘V) ou déposée sur le chat attend en vignette au-dessus du champ ;
+  envoyée, elle part comme un chemin collé dans claude (qui en fait une pièce jointe,
+  `[Image #1]`) et s'affiche dans le message, relue dans le fichier de claude.
 - **Git** : worktrees avec collisions départagées, status porcelain v2, diff
   (non-suivis compris), suppression refusée si travail non commité.
 - **Pull requests** : onglet PR sur le `gh` de l'utilisateur — projets locaux,

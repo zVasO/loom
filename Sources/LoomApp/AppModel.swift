@@ -2005,7 +2005,7 @@ public final class AppModel {
     /// Pasted, not typed: a paste never opens the slash-command menu, so the
     /// Return that follows submits instead of picking a suggestion.
     /// Returns whether the line went in.
-    func submitWhenReady(_ line: String, to id: SessionID,
+    func submitWhenReady(_ line: String, to id: SessionID, attaching files: [URL] = [],
                                  timeout: Duration = .seconds(120)) async -> Bool {
         guard let runtime = await manager?.runtime(for: id) else { return false }
         let surface = runtime.surface()
@@ -2014,13 +2014,29 @@ public final class AppModel {
         while clock.now < deadline, !Task.isCancelled {
             let sample = await runtime.readiness()
             if AgentReadiness.isReady(sample) {
-                surface.send(KeyTranslator.paste(line, bracketed: true) + "\r")
+                await Self.type(line, attaching: files, into: surface)
                 return true
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
         Self.log.warning("session \(id.rawValue.uuidString, privacy: .public) never became ready: line not submitted")
         return false
+    }
+
+    /// A message and its images into claude's input, then Return. An image
+    /// goes in as its path, pasted alone: claude turns a pasted image path
+    /// into an attachment ([Image #1]), as for a file dropped on its
+    /// terminal. A moment between pastes lets it read each file.
+    static func type(_ line: String, attaching files: [URL], into surface: TerminalSurface) async {
+        for file in files {
+            surface.send(KeyTranslator.paste(KeyTranslator.quoted(path: file.path), bracketed: true))
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        if !line.isEmpty {
+            surface.send(KeyTranslator.paste(line, bracketed: true))
+        }
+        if !files.isEmpty { try? await Task.sleep(for: .milliseconds(150)) }
+        surface.send("\r")
     }
 
     /// Types text into a session's input WITHOUT submitting — the same path as

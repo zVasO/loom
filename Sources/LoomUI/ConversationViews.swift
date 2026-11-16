@@ -64,7 +64,7 @@ public struct ConversationList: View {
     private let entries: [ConversationEntry]
     private let isWorking: Bool
     /// Sent, not yet in claude's file: shown at once, paler, until it is.
-    private let pending: [String]
+    private let pending: [ConversationEntry]
     private let emptyTitle: String
     private let emptyDetail: String
 
@@ -89,7 +89,7 @@ public struct ConversationList: View {
 
     /// The scrolling list of a conversation, newest at the bottom and kept
     /// there while the reader is at the bottom.
-    public init(entries: [ConversationEntry], isWorking: Bool, pending: [String] = [],
+    public init(entries: [ConversationEntry], isWorking: Bool, pending: [ConversationEntry] = [],
                 emptyTitle: String, emptyDetail: String) {
         self.entries = entries
         self.isWorking = isWorking
@@ -145,8 +145,8 @@ public struct ConversationList: View {
                                 .equatable()
                                 .padding(.top, gap(before: index))
                         }
-                        ForEach(Array(pending.enumerated()), id: \.offset) { _, text in
-                            UserBubble(text: text, maxWidth: bubble)
+                        ForEach(pending) { sent in
+                            UserBubble(text: sent.userText, images: sent.images, key: sent.id, maxWidth: bubble)
                                 .opacity(0.6)
                                 .padding(.top, DefaultTheme.space(14))
                         }
@@ -247,7 +247,7 @@ private struct ConversationEntryRow: View, Equatable {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .user(let text):
-            UserBubble(text: text, maxWidth: bubbleWidth)
+            UserBubble(text: text, images: entry.images, key: entry.id, maxWidth: bubbleWidth)
         case .thinking(let text):
             ThoughtRow(text: text, isOpen: isOpen, onToggle: onToggle)
         case .tool(let call):
@@ -267,19 +267,36 @@ private struct ConversationEntryRow: View, Equatable {
 /// a user's "*" is a "*".
 private struct UserBubble: View {
     let text: String
+    var images: [Data] = []
+    var key = ""
     let maxWidth: CGFloat
 
     var body: some View {
-        Text(text)
-            .themeFont(size: 13)
-            .foregroundStyle(DefaultTheme.primaryText)
-            .textSelection(.enabled)
-            .padding(.horizontal, DefaultTheme.space(12))
-            .padding(.vertical, DefaultTheme.space(10))
-            .background(DefaultTheme.surfaceRaised,
-                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
-            .frame(maxWidth: maxWidth, alignment: .trailing)
-            .frame(maxWidth: .infinity, alignment: .trailing)
+        VStack(alignment: .trailing, spacing: DefaultTheme.space(6)) {
+            if !images.isEmpty {
+                MessageImages(key: key, images: images)
+            }
+            if !text.isEmpty {
+                Text(text)
+                    .themeFont(size: 13)
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, DefaultTheme.space(12))
+                    .padding(.vertical, DefaultTheme.space(10))
+                    .background(DefaultTheme.surfaceRaised,
+                                in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+            }
+        }
+        .frame(maxWidth: maxWidth, alignment: .trailing)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
+
+extension ConversationEntry {
+    /// A user's message's text; empty for anything else.
+    var userText: String {
+        if case .user(let text) = kind { return text }
+        return ""
     }
 }
 
@@ -434,6 +451,9 @@ private struct JumpToLatestButton: View {
 
 public struct ConversationComposer: View {
     @Binding private var text: String
+    /// Pasted or dropped images, sent with the message.
+    @Binding private var images: [ComposerImage]
+    @State private var pasteWatch = ComposerPasteWatch()
     private let placeholder: String
     private let isEnabled: Bool
     private let isSending: Bool
@@ -447,10 +467,12 @@ public struct ConversationComposer: View {
 
     /// The message field and its Send button. Return sends, Shift-Return
     /// breaks the line. `focusRequest`: bump it to give the field the keyboard.
-    public init(text: Binding<String>, placeholder: String, isEnabled: Bool, isSending: Bool,
+    public init(text: Binding<String>, images: Binding<[ComposerImage]> = .constant([]),
+                placeholder: String, isEnabled: Bool, isSending: Bool,
                 focusRequest: Int = 0, onStop: (() -> Void)? = nil, onSendNow: (() -> Void)? = nil,
                 onSend: @escaping () -> Void) {
         _text = text
+        _images = images
         self.placeholder = placeholder
         self.isEnabled = isEnabled
         self.isSending = isSending
@@ -461,10 +483,32 @@ public struct ConversationComposer: View {
     }
 
     private var canSend: Bool {
-        isEnabled && !isSending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        isEnabled && !isSending
+            && (!images.isEmpty || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     public var body: some View {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
+            if !images.isEmpty {
+                ComposerImageStrip(images: $images)
+            }
+            field
+        }
+        .padding(.horizontal, DefaultTheme.space(12))
+        .padding(.vertical, DefaultTheme.space(10))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
+            .strokeBorder(focused ? DefaultTheme.line2 : DefaultTheme.line, lineWidth: 1))
+        .fieldEdge(radius: 10)
+        // ⌘V with a picture: a thumbnail above the field.
+        .onAppear {
+            pasteWatch.start(isFocused: { focused }, onImages: { images.append(contentsOf: $0) })
+        }
+        .onDisappear { pasteWatch.stop() }
+        .modifier(ComposerPlacement(focusRequest: focusRequest, focused: $focused))
+    }
+
+    private var field: some View {
         HStack(alignment: .bottom, spacing: DefaultTheme.space(8)) {
             // Never disabled: a message can be written while claude works,
             // only its sending waits.
@@ -483,12 +527,17 @@ public struct ConversationComposer: View {
                 .padding(.vertical, DefaultTheme.space(5))
             sendControl
         }
-        .padding(.horizontal, DefaultTheme.space(12))
-        .padding(.vertical, DefaultTheme.space(10))
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
-        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
-            .strokeBorder(focused ? DefaultTheme.line2 : DefaultTheme.line, lineWidth: 1))
-        .fieldEdge(radius: 10)
+    }
+}
+
+/// The composer's column and its keyboard: where it sits, and when it
+/// takes the keyboard.
+private struct ComposerPlacement: ViewModifier {
+    let focusRequest: Int
+    var focused: FocusState<Bool>.Binding
+
+    func body(content: Content) -> some View {
+        content
         // The same column as the messages above.
         .frame(maxWidth: ConversationLayout.columnWidth)
         .padding(.horizontal, DefaultTheme.space(20))
@@ -501,8 +550,8 @@ public struct ConversationComposer: View {
         // terminal: the chat view may arrive under it — ⌘⇧M, a session
         // opened a moment ago — and what is typed in the palette is not a
         // message for claude.
-        .onAppear { if !WindowOverlay.isUp { focused = true } }
-        .onChange(of: focusRequest) { if !WindowOverlay.isUp { focused = true } }
+        .onAppear { if !WindowOverlay.isUp { focused.wrappedValue = true } }
+        .onChange(of: focusRequest) { if !WindowOverlay.isUp { focused.wrappedValue = true } }
         // The overlay is gone. When it left the keyboard to no one, the
         // composer has it, as a terminal would: asked once the overlay's
         // own field has left the window, and never taken from a view that
@@ -511,10 +560,13 @@ public struct ConversationComposer: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 guard let window = NSApp.mainWindow,
                       window.firstResponder == nil || window.firstResponder === window else { return }
-                focused = true
+                focused.wrappedValue = true
             }
         }
     }
+}
+
+extension ConversationComposer {
 
     @ViewBuilder
     private var sendControl: some View {

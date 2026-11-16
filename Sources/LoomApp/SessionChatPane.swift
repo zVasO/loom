@@ -26,7 +26,11 @@ struct SessionChatPane: View {
     /// said it under.
     @State private var journal: JournalAnswer?
     /// Sent and taken by claude, not yet in its file: shown at once.
-    @State private var pending: [String] = []
+    @State private var pending: [PendingMessage] = []
+    /// Pasted or dropped, waiting in the composer.
+    @State private var images: [ComposerImage] = []
+    /// Something is dragged over the chat.
+    @State private var dropping = false
     /// The session's terminal: where a choice claude asks for is read, and
     /// where its answer, Stop and the messages are typed.
     @State private var surface: TerminalSurface?
@@ -125,7 +129,8 @@ struct SessionChatPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ConversationList(entries: entries, isWorking: item?.state == .working, pending: pending,
+            ConversationList(entries: entries, isWorking: item?.state == .working,
+                             pending: pending.map(\.entry),
                              emptyTitle: "No conversation yet",
                              emptyDetail: "What you and claude say will show here. The first message can be sent from below.")
             if let prompt {
@@ -139,7 +144,7 @@ struct SessionChatPane: View {
             }
             // The composer sets itself in the list's column.
             let working = isLive && item?.state == .working
-            ConversationComposer(text: $draft,
+            ConversationComposer(text: $draft, images: $images,
                                  placeholder: isLive ? "Message claude" : "This session has ended",
                                  isEnabled: canSend, isSending: isSending,
                                  onStop: working ? { stop() } : nil,
@@ -148,6 +153,29 @@ struct SessionChatPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DefaultTheme.contentBackground)
+        // An image dropped anywhere on the chat waits in the composer.
+        .onDrop(of: ComposerImage.dropTypes, isTargeted: $dropping) { providers in
+            Task {
+                let found = await ComposerImage.load(from: providers)
+                images.append(contentsOf: found)
+            }
+            return true
+        }
+        .overlay {
+            if dropping {
+                RoundedRectangle(cornerRadius: DefaultTheme.radius(14))
+                    .strokeBorder(DefaultTheme.accent, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                    .background(DefaultTheme.accent.opacity(0.08),
+                                in: RoundedRectangle(cornerRadius: DefaultTheme.radius(14)))
+                    .overlay {
+                        Text("Drop to attach to your message")
+                            .themeFont(size: 14, weight: .semibold)
+                            .foregroundStyle(DefaultTheme.primaryText)
+                    }
+                    .padding(DefaultTheme.space(16))
+                    .allowsHitTesting(false)
+            }
+        }
         .task(id: FollowKey(native: nativeID, live: isLive)) { await follow() }
         .task(id: WaitKey(state: item?.state, tick: model.transitionTick)) { await readWait() }
         // The terminal's screen, a few times a second, for as long as the
@@ -259,19 +287,25 @@ struct SessionChatPane: View {
 
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canSend, !isSending, !text.isEmpty else { return }
+        let files = images.map(\.url)
+        guard canSend, !isSending, !text.isEmpty || !files.isEmpty else { return }
         isSending = true
         sendFailed = false
         Task {
-            let taken = await deliver(text)
+            let taken = await deliver(text, attaching: files)
             isSending = false
-            if taken {
-                draft = ""
-                pending.append(text)
-            } else {
-                sendFailed = true
-            }
+            if taken { sent(text, files: files) } else { sendFailed = true }
         }
+    }
+
+    /// Taken by claude: the field empties, and the message shows at once.
+    private func sent(_ text: String, files: [URL]) {
+        draft = ""
+        images = []
+        let data = files.compactMap { try? Data(contentsOf: $0) }
+        pending.append(PendingMessage(entry: ConversationEntry(id: "pending-\(UUID().uuidString)",
+                                                               kind: .user(text), images: data),
+                                      sentAt: Date()))
     }
 
     /// "Send now", while claude works: its turn is interrupted (Esc, as in
@@ -279,19 +313,15 @@ struct SessionChatPane: View {
     /// rather than queued behind the turn.
     private func sendNow() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !isSending, !text.isEmpty else { return }
+        let files = images.map(\.url)
+        guard !isSending, !text.isEmpty || !files.isEmpty else { return }
         isSending = true
         sendFailed = false
         Task {
             await interrupt()
-            let taken = await model.submitWhenReady(text, to: sessionID, timeout: .seconds(15))
+            let taken = await model.submitWhenReady(text, to: sessionID, attaching: files, timeout: .seconds(15))
             isSending = false
-            if taken {
-                draft = ""
-                pending.append(text)
-            } else {
-                sendFailed = true
-            }
+            if taken { sent(text, files: files) } else { sendFailed = true }
         }
     }
 
@@ -319,39 +349,45 @@ struct SessionChatPane: View {
         surface.send(ClaudeTerminalPrompt.answer(option))
     }
 
-    /// A pending message is let go once claude's file holds it.
+    /// A pending message is let go once claude's file holds it — its text,
+    /// which claude may have prefixed with "[Image #1]", or for images
+    /// alone, a message with images — or after half a minute.
     private func dropDelivered() {
         guard !pending.isEmpty else { return }
-        let said = Set(entries.suffix(40).compactMap { entry -> String? in
-            if case .user(let text) = entry.kind {
-                return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let said = entries.suffix(40).filter { if case .user = $0.kind { return true } else { return false } }
+        let now = Date()
+        pending.removeAll { message in
+            if now.timeIntervalSince(message.sentAt) > 30 { return true }
+            let text = message.text
+            return said.contains { entry in
+                guard case .user(let written) = entry.kind else { return false }
+                if text.isEmpty { return !entry.images.isEmpty && (entry.timestamp ?? now) >= message.sentAt.addingTimeInterval(-5) }
+                return written.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix(text)
             }
-            return nil
-        })
-        pending.removeAll { said.contains($0) }
+        }
     }
 
     /// Hands the message to claude through the session's terminal: a
     /// bracketed paste, so its line breaks stay one message, then Return.
     /// False when nothing was typed.
-    private func deliver(_ text: String) async -> Bool {
+    private func deliver(_ text: String, attaching files: [URL] = []) async -> Bool {
         guard let state = item?.state else { return false }
         switch state {
         case .working:
             // claude queues what is typed while it works: no prompt to wait for.
             guard let surface = await model.surface(for: sessionID) else { return false }
-            surface.send(KeyTranslator.paste(text, bracketed: true) + "\r")
+            await AppModel.type(text, attaching: files, into: surface)
             return true
         case .needsInput:
             // Asked again at the moment of typing: the session may have moved
             // on to a permission prompt since the composer last looked.
             guard await model.sessionWait(sessionID) == .question else { return false }
-            return await model.submitWhenReady(text, to: sessionID, timeout: .seconds(15))
+            return await model.submitWhenReady(text, to: sessionID, attaching: files, timeout: .seconds(15))
         case .starting, .idle:
             // A prompt left unanswered reads `idle`: asked again here too.
             let reason = await model.sessionWait(sessionID)
             if reason == .permission, hasOpenToolCall { return false }
-            return await model.submitWhenReady(text, to: sessionID, timeout: .seconds(15))
+            return await model.submitWhenReady(text, to: sessionID, attaching: files, timeout: .seconds(15))
         case .draft, .completed, .failed, .interrupted, .archived:
             return false
         }
@@ -413,6 +449,16 @@ private final class FileWake: @unchecked Sendable {
             fired = true
             lock.unlock()
         }
+    }
+}
+
+/// A message sent and not yet in claude's file.
+private struct PendingMessage {
+    var entry: ConversationEntry
+    var sentAt: Date
+    var text: String {
+        if case .user(let text) = entry.kind { return text }
+        return ""
     }
 }
 
