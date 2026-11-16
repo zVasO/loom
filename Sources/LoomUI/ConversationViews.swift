@@ -728,6 +728,8 @@ public struct ConversationPromptCard: View {
                     .foregroundStyle(DefaultTheme.primaryText.opacity(0.85))
                     .textSelection(.enabled)
                     .lineLimit(10)
+                    // Its lines, even in a short pane: the list above gives way.
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(DefaultTheme.space(10))
                     .background(DefaultTheme.surfaceRaised,
