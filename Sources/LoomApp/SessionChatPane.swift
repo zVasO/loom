@@ -211,14 +211,18 @@ struct SessionChatPane: View {
     /// has ended.
     private func follow() async {
         let native = nativeID
+        // Where the last look at this conversation left it: back on the tab,
+        // the list shows at once and only what claude wrote since is read.
+        let kept = ChatReadCache.shared[native]
         if shownNative != native {
             // Another conversation: what the list held is not its.
             shownNative = native
-            if !entries.isEmpty { entries = [] }
+            let restored = kept?.reader.entries ?? []
+            if entries != restored { entries = restored }
         }
-        var reader = ClaudeConversation.Reader()
+        var reader = kept?.reader ?? ClaudeConversation.Reader()
         // Found once: looking for it lists every folder of ~/.claude/projects.
-        var file: URL?
+        var file: URL? = kept?.file
         // Woken by claude's writes: what it says shows as it lands, not at
         // the next tick. The ticks stay, slower, for what the watch misses
         // (a file replaced under it).
@@ -238,6 +242,9 @@ struct SessionChatPane: View {
             guard !Task.isCancelled else { return }   // a restarted read wins
             reader = result.reader
             file = result.file
+            if result.changed || kept == nil {
+                ChatReadCache.shared[native] = ChatReadCache.Kept(reader: reader, file: file)
+            }
             if result.changed, entries != reader.entries { entries = reader.entries }
             guard isLive else { return }
             if wake == nil, let file { wake = FileWake(url: file) }
@@ -451,6 +458,30 @@ private final class FileWake: @unchecked Sendable {
         } else {
             fired = true
             lock.unlock()
+        }
+    }
+}
+
+/// The conversations the chat has read, by native session: a return to
+/// the tab picks up where the reading stopped. A few, the latest kept.
+@MainActor
+private final class ChatReadCache {
+    static let shared = ChatReadCache()
+    struct Kept {
+        var reader: ClaudeConversation.Reader
+        var file: URL?
+    }
+    private var kept: [SessionID: Kept] = [:]
+    private var order: [SessionID] = []
+    private let limit = 8
+
+    subscript(native: SessionID) -> Kept? {
+        get { kept[native] }
+        set {
+            kept[native] = newValue
+            order.removeAll { $0 == native }
+            if newValue != nil { order.append(native) }
+            while order.count > limit { kept[order.removeFirst()] = nil }
         }
     }
 }

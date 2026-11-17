@@ -131,31 +131,18 @@ public struct ConversationList: View {
         return ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(spacing: 0) {
-                    // Lazy: a long conversation holds more paragraphs than
-                    // the Markdown cache, and only the rows on screen may ask it.
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                            ConversationEntryRow(entry: entry,
-                                                 isOpen: opened.contains(entry.id),
-                                                 isRunning: isWorking && index > lastUser,
-                                                 bubbleWidth: bubble,
-                                                 onToggle: { toggle(entry.id) })
-                                // A value: when claude's file grows, only the
-                                // rows that changed are drawn again.
-                                .equatable()
-                                .padding(.top, gap(before: index))
-                        }
-                        ForEach(pending) { sent in
-                            UserBubble(text: sent.userText, images: sent.images, key: sent.id, maxWidth: bubble)
-                                .opacity(0.6)
-                                .padding(.top, DefaultTheme.space(14))
-                        }
-                        if isWorking {
-                            StatusLabel(.working)
-                                .padding(.top, DefaultTheme.space(14))
-                        }
+                    // Lazy only for a long conversation, which holds more
+                    // paragraphs than the Markdown cache. A lazy stack
+                    // anchored at the bottom could open on an empty
+                    // viewport — black until a scroll — when the rows came
+                    // in just after it: a short one is laid out whole.
+                    if entries.count + pending.count > Self.eagerLimit {
+                        LazyVStack(alignment: .leading, spacing: 0) { rows(lastUser: lastUser, bubble: bubble) }
+                            .padding(.vertical, DefaultTheme.space(16))
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) { rows(lastUser: lastUser, bubble: bubble) }
+                            .padding(.vertical, DefaultTheme.space(16))
                     }
-                    .padding(.vertical, DefaultTheme.space(16))
                     // Outside the lazy stack, and last: the end must report
                     // where it is even a long way under the viewport, and
                     // scrolling to it must show everything above it.
@@ -167,6 +154,10 @@ public struct ConversationList: View {
             }
             .defaultScrollAnchor(.bottom)
             .coordinateSpace(name: Self.scroll)
+            // On arriving, and when the pane changes size: to the end, once
+            // laid out — what the anchor alone sometimes misses.
+            .onAppear { pin(proxy) }
+            .onChange(of: viewport) { _, _ in if atBottom { pin(proxy) } }
             // The anchor holds the bottom when the content grows; this covers
             // what it does not see. A reader who scrolled up is never moved.
             .onChange(of: tail) { _, _ in
@@ -182,6 +173,44 @@ public struct ConversationList: View {
                     .padding(.bottom, DefaultTheme.space(12))
                 }
             }
+        }
+    }
+
+    /// To the end of the conversation, once the list is laid out — and once
+    /// more a moment later, for rows that took their height late.
+    private func pin(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async { proxy.scrollTo(Self.endID, anchor: .bottom) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            guard atBottom else { return }
+            proxy.scrollTo(Self.endID, anchor: .bottom)
+        }
+    }
+
+    /// Under this many rows the list is laid out whole.
+    private static let eagerLimit = 120
+
+    /// The rows, in either stack.
+    @ViewBuilder
+    private func rows(lastUser: Int, bubble: CGFloat) -> some View {
+        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+            ConversationEntryRow(entry: entry,
+                                 isOpen: opened.contains(entry.id),
+                                 isRunning: isWorking && index > lastUser,
+                                 bubbleWidth: bubble,
+                                 onToggle: { toggle(entry.id) })
+                // A value: when claude's file grows, only the
+                // rows that changed are drawn again.
+                .equatable()
+                .padding(.top, gap(before: index))
+        }
+        ForEach(pending) { sent in
+            UserBubble(text: sent.userText, images: sent.images, key: sent.id, maxWidth: bubble)
+                .opacity(0.6)
+                .padding(.top, DefaultTheme.space(14))
+        }
+        if isWorking {
+            StatusLabel(.working)
+                .padding(.top, DefaultTheme.space(14))
         }
     }
 

@@ -36,7 +36,9 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
 - **Sessions** : lancement depuis un objectif (UC-1), worktree isolé `loom/<slug>`
   par session, arrêt escaladé SIGINT→SIGTERM→SIGKILL, Reprise après crash sous le
   même identifiant (`claude --resume`, UUID imposé au lancement), archivage,
-  historique, recherche FTS5, palette ⌘K.
+  historique, recherche FTS5, palette ⌘K. Dans la barre latérale, une carte de session
+  se réduit à son titre à l'unité (chevron au survol, ou menu contextuel), et le
+  reste d'un lancement à l'autre ; le bouton de la liste les réduit toutes.
 - **Détection d'état — le différenciateur** : deux canaux fusionnés par une machine
   à états pure (fenêtre de priorité hooks 10 s, hystérésis 2 s, péremption 4 s).
   Canal hooks : `--settings` injecté par session → binaire `loom-hook` → socket
