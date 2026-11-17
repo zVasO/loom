@@ -63,6 +63,8 @@ private extension ConversationEntry.Kind {
 public struct ConversationList: View {
     private let entries: [ConversationEntry]
     private let isWorking: Bool
+    /// Sent, not yet in claude's file: shown at once, paler, until it is.
+    private let pending: [ConversationEntry]
     private let emptyTitle: String
     private let emptyDetail: String
 
@@ -82,19 +84,22 @@ public struct ConversationList: View {
         let count: Int
         let lastID: String?
         let isWorking: Bool
+        let pending: Int
     }
 
     /// The scrolling list of a conversation, newest at the bottom and kept
     /// there while the reader is at the bottom.
-    public init(entries: [ConversationEntry], isWorking: Bool, emptyTitle: String, emptyDetail: String) {
+    public init(entries: [ConversationEntry], isWorking: Bool, pending: [ConversationEntry] = [],
+                emptyTitle: String, emptyDetail: String) {
         self.entries = entries
         self.isWorking = isWorking
+        self.pending = pending
         self.emptyTitle = emptyTitle
         self.emptyDetail = emptyDetail
     }
 
     public var body: some View {
-        if entries.isEmpty {
+        if entries.isEmpty, pending.isEmpty {
             empty
         } else {
             GeometryReader { viewport in
@@ -135,7 +140,15 @@ public struct ConversationList: View {
                                                  isRunning: isWorking && index > lastUser,
                                                  bubbleWidth: bubble,
                                                  onToggle: { toggle(entry.id) })
+                                // A value: when claude's file grows, only the
+                                // rows that changed are drawn again.
+                                .equatable()
                                 .padding(.top, gap(before: index))
+                        }
+                        ForEach(pending) { sent in
+                            UserBubble(text: sent.userText, images: sent.images, key: sent.id, maxWidth: bubble)
+                                .opacity(0.6)
+                                .padding(.top, DefaultTheme.space(14))
                         }
                         if isWorking {
                             StatusLabel(.working)
@@ -173,7 +186,7 @@ public struct ConversationList: View {
     }
 
     private var tail: Tail {
-        Tail(count: entries.count, lastID: entries.last?.id, isWorking: isWorking)
+        Tail(count: entries.count, lastID: entries.last?.id, isWorking: isWorking, pending: pending.count)
     }
 
     /// Folded rows sit close to each other; a message keeps its distance.
@@ -213,12 +226,18 @@ public struct ConversationList: View {
 
 // MARK: - Rows
 
-private struct ConversationEntryRow: View {
+private struct ConversationEntryRow: View, Equatable {
     let entry: ConversationEntry
     let isOpen: Bool
     let isRunning: Bool
     let bubbleWidth: CGFloat
+    /// Outside the comparison: it only reaches the list's own state.
     let onToggle: () -> Void
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.entry == rhs.entry && lhs.isOpen == rhs.isOpen && lhs.isRunning == rhs.isRunning
+            && lhs.bubbleWidth == rhs.bubbleWidth
+    }
 
     var body: some View {
         switch entry.kind {
@@ -228,7 +247,7 @@ private struct ConversationEntryRow: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .user(let text):
-            UserBubble(text: text, maxWidth: bubbleWidth)
+            UserBubble(text: text, images: entry.images, key: entry.id, maxWidth: bubbleWidth)
         case .thinking(let text):
             ThoughtRow(text: text, isOpen: isOpen, onToggle: onToggle)
         case .tool(let call):
@@ -248,19 +267,36 @@ private struct ConversationEntryRow: View {
 /// a user's "*" is a "*".
 private struct UserBubble: View {
     let text: String
+    var images: [Data] = []
+    var key = ""
     let maxWidth: CGFloat
 
     var body: some View {
-        Text(text)
-            .themeFont(size: 13)
-            .foregroundStyle(DefaultTheme.primaryText)
-            .textSelection(.enabled)
-            .padding(.horizontal, DefaultTheme.space(12))
-            .padding(.vertical, DefaultTheme.space(10))
-            .background(DefaultTheme.surfaceRaised,
-                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
-            .frame(maxWidth: maxWidth, alignment: .trailing)
-            .frame(maxWidth: .infinity, alignment: .trailing)
+        VStack(alignment: .trailing, spacing: DefaultTheme.space(6)) {
+            if !images.isEmpty {
+                MessageImages(key: key, images: images)
+            }
+            if !text.isEmpty {
+                Text(text)
+                    .themeFont(size: 13)
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, DefaultTheme.space(12))
+                    .padding(.vertical, DefaultTheme.space(10))
+                    .background(DefaultTheme.surfaceRaised,
+                                in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+            }
+        }
+        .frame(maxWidth: maxWidth, alignment: .trailing)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
+
+extension ConversationEntry {
+    /// A user's message's text; empty for anything else.
+    var userText: String {
+        if case .user(let text) = kind { return text }
+        return ""
     }
 }
 
@@ -415,30 +451,64 @@ private struct JumpToLatestButton: View {
 
 public struct ConversationComposer: View {
     @Binding private var text: String
+    /// Pasted or dropped images, sent with the message.
+    @Binding private var images: [ComposerImage]
+    @State private var pasteWatch = ComposerPasteWatch()
     private let placeholder: String
     private let isEnabled: Bool
     private let isSending: Bool
     private let focusRequest: Int
     private let onSend: () -> Void
+    /// Set while claude works: Stop interrupts its turn, and "Send now"
+    /// interrupts it to send the message at once rather than after it.
+    private let onStop: (() -> Void)?
+    private let onSendNow: (() -> Void)?
     @FocusState private var focused: Bool
 
     /// The message field and its Send button. Return sends, Shift-Return
     /// breaks the line. `focusRequest`: bump it to give the field the keyboard.
-    public init(text: Binding<String>, placeholder: String, isEnabled: Bool, isSending: Bool,
-                focusRequest: Int = 0, onSend: @escaping () -> Void) {
+    public init(text: Binding<String>, images: Binding<[ComposerImage]> = .constant([]),
+                placeholder: String, isEnabled: Bool, isSending: Bool,
+                focusRequest: Int = 0, onStop: (() -> Void)? = nil, onSendNow: (() -> Void)? = nil,
+                onSend: @escaping () -> Void) {
         _text = text
+        _images = images
         self.placeholder = placeholder
         self.isEnabled = isEnabled
         self.isSending = isSending
         self.focusRequest = focusRequest
+        self.onStop = onStop
+        self.onSendNow = onSendNow
         self.onSend = onSend
     }
 
     private var canSend: Bool {
-        isEnabled && !isSending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        isEnabled && !isSending
+            && (!images.isEmpty || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     public var body: some View {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
+            if !images.isEmpty {
+                ComposerImageStrip(images: $images)
+            }
+            field
+        }
+        .padding(.horizontal, DefaultTheme.space(12))
+        .padding(.vertical, DefaultTheme.space(10))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
+            .strokeBorder(focused ? DefaultTheme.line2 : DefaultTheme.line, lineWidth: 1))
+        .fieldEdge(radius: 10)
+        // ⌘V with a picture: a thumbnail above the field.
+        .onAppear {
+            pasteWatch.start(isFocused: { focused }, onImages: { images.append(contentsOf: $0) })
+        }
+        .onDisappear { pasteWatch.stop() }
+        .modifier(ComposerPlacement(focusRequest: focusRequest, focused: $focused))
+    }
+
+    private var field: some View {
         HStack(alignment: .bottom, spacing: DefaultTheme.space(8)) {
             // Never disabled: a message can be written while claude works,
             // only its sending waits.
@@ -457,12 +527,17 @@ public struct ConversationComposer: View {
                 .padding(.vertical, DefaultTheme.space(5))
             sendControl
         }
-        .padding(.horizontal, DefaultTheme.space(12))
-        .padding(.vertical, DefaultTheme.space(10))
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
-        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
-            .strokeBorder(focused ? DefaultTheme.line2 : DefaultTheme.line, lineWidth: 1))
-        .fieldEdge(radius: 10)
+    }
+}
+
+/// The composer's column and its keyboard: where it sits, and when it
+/// takes the keyboard.
+private struct ComposerPlacement: ViewModifier {
+    let focusRequest: Int
+    var focused: FocusState<Bool>.Binding
+
+    func body(content: Content) -> some View {
+        content
         // The same column as the messages above.
         .frame(maxWidth: ConversationLayout.columnWidth)
         .padding(.horizontal, DefaultTheme.space(20))
@@ -475,8 +550,8 @@ public struct ConversationComposer: View {
         // terminal: the chat view may arrive under it — ⌘⇧M, a session
         // opened a moment ago — and what is typed in the palette is not a
         // message for claude.
-        .onAppear { if !WindowOverlay.isUp { focused = true } }
-        .onChange(of: focusRequest) { if !WindowOverlay.isUp { focused = true } }
+        .onAppear { if !WindowOverlay.isUp { focused.wrappedValue = true } }
+        .onChange(of: focusRequest) { if !WindowOverlay.isUp { focused.wrappedValue = true } }
         // The overlay is gone. When it left the keyboard to no one, the
         // composer has it, as a terminal would: asked once the overlay's
         // own field has left the window, and never taken from a view that
@@ -485,10 +560,13 @@ public struct ConversationComposer: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 guard let window = NSApp.mainWindow,
                       window.firstResponder == nil || window.firstResponder === window else { return }
-                focused = true
+                focused.wrappedValue = true
             }
         }
     }
+}
+
+extension ConversationComposer {
 
     @ViewBuilder
     private var sendControl: some View {
@@ -497,7 +575,18 @@ public struct ConversationComposer: View {
                 .controlSize(.small)
                 .frame(width: DefaultTheme.size(26), height: DefaultTheme.size(26))
         } else {
-            SendButton(isEnabled: canSend, action: send)
+            HStack(spacing: DefaultTheme.space(6)) {
+                if let onSendNow, canSend {
+                    ComposerIconButton(icon: "bolt", help: "Send now — interrupts claude, then sends",
+                                       action: onSendNow)
+                }
+                if let onStop {
+                    ComposerIconButton(icon: "stop.fill", help: "Stop claude (Esc in the terminal)",
+                                       action: onStop)
+                }
+                SendButton(isEnabled: canSend, help: onSendNow == nil ? "Send"
+                           : "Send — claude reads it once its turn ends", action: send)
+            }
         }
     }
 
@@ -541,6 +630,7 @@ public struct ConversationComposer: View {
 /// something to send.
 private struct SendButton: View {
     let isEnabled: Bool
+    var help = "Send"
     let action: () -> Void
     @State private var hovered = false
 
@@ -557,6 +647,143 @@ private struct SendButton: View {
         .disabled(!isEnabled)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
-        .help("Send")
+        .help(help)
+    }
+}
+
+/// A round secondary control beside Send: Stop, Send now.
+private struct ComposerIconButton: View {
+    let icon: String
+    let help: String
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            AppIcon(icon, size: 12)
+                .foregroundStyle(hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
+                .frame(width: DefaultTheme.size(26), height: DefaultTheme.size(26))
+                .background(DefaultTheme.surfaceRaised, in: Circle())
+                .overlay(Circle().strokeBorder(hovered ? DefaultTheme.line3 : DefaultTheme.line2, lineWidth: 1))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
+        .help(help)
+    }
+}
+
+// MARK: - A choice claude asks for
+
+/// What claude asks in its terminal — a permission, a question with
+/// options — set in the chat, with a button per option. The app reads it
+/// off the screen and types the answer; the view only shows it.
+public struct ConversationPromptCard: View {
+    public struct Option: Identifiable, Equatable {
+        public let number: Int
+        public let label: String
+        public var id: Int { number }
+        public init(number: Int, label: String) {
+            self.number = number
+            self.label = label
+        }
+    }
+
+    private let question: String
+    private let context: [String]
+    private let options: [Option]
+    private let selected: Int?
+    private let onChoose: (Option) -> Void
+    private let onShowTerminal: () -> Void
+
+    public init(question: String, context: [String], options: [Option], selected: Int?,
+                onChoose: @escaping (Option) -> Void, onShowTerminal: @escaping () -> Void) {
+        self.question = question
+        self.context = context
+        self.options = options
+        self.selected = selected
+        self.onChoose = onChoose
+        self.onShowTerminal = onShowTerminal
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
+            HStack(spacing: DefaultTheme.space(8)) {
+                Circle().fill(DefaultTheme.badgeColor(for: .needsInput)).frame(width: 7, height: 7)
+                Text(question)
+                    .themeFont(size: 13, weight: .semibold)
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button(action: onShowTerminal) {
+                    AppIcon("terminal", size: 12).foregroundStyle(DefaultTheme.secondaryText)
+                }
+                .buttonStyle(.plain)
+                .help("Show the terminal")
+            }
+            if !context.isEmpty {
+                Text(context.joined(separator: "\n"))
+                    .themeFont(size: 11.5, design: .monospaced)
+                    .foregroundStyle(DefaultTheme.primaryText.opacity(0.85))
+                    .textSelection(.enabled)
+                    .lineLimit(10)
+                    // Its lines, even in a short pane: the list above gives way.
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(DefaultTheme.space(10))
+                    .background(DefaultTheme.surfaceRaised,
+                                in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            }
+            VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
+                ForEach(options) { option in
+                    PromptOptionButton(option: option, isFirst: option.number == 1,
+                                       isSelected: option.number == selected) { onChoose(option) }
+                }
+            }
+        }
+        .padding(DefaultTheme.space(12))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
+            .strokeBorder(DefaultTheme.badgeColor(for: .needsInput).opacity(0.6), lineWidth: 1))
+        .frame(maxWidth: ConversationLayout.columnWidth)
+        .padding(.horizontal, DefaultTheme.space(20))
+        .padding(.top, DefaultTheme.space(8))
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct PromptOptionButton: View {
+    let option: ConversationPromptCard.Option
+    let isFirst: Bool
+    let isSelected: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .firstTextBaseline, spacing: DefaultTheme.space(8)) {
+                Text("\(option.number)")
+                    .themeFont(size: 11, weight: .semibold, design: .monospaced)
+                    .foregroundStyle(isFirst ? DefaultTheme.accentText : DefaultTheme.secondaryText)
+                    .frame(width: DefaultTheme.size(18), height: DefaultTheme.size(18))
+                    .background(isFirst ? DefaultTheme.accent : DefaultTheme.surfaceRaised,
+                                in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
+                Text(option.label)
+                    .themeFont(size: 12.5, weight: isSelected ? .medium : .regular)
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, DefaultTheme.space(8))
+            .padding(.vertical, DefaultTheme.space(6))
+            .background(hovered ? DefaultTheme.wash2 : Color.clear,
+                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
     }
 }

@@ -53,8 +53,15 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   résultat, champ de message en bas (Retour envoie, ⇧Retour va à la ligne). Elle
   est lue dans le fichier de la session native (`~/.claude/projects/…/<uuid>.jsonl`),
   jamais dans l'écran, et suit un `/resume` ou un `/clear`. Ce qu'on y écrit est
-  tapé dans le terminal de la session : claude continue d'y tourner, et c'est là
-  qu'on répond à ses demandes de permission.
+  tapé dans le terminal de la session, où claude continue de tourner. Une demande
+  de permission (ou une question à options) que claude dessine dans son terminal
+  s'affiche dans le chat en carte, un bouton par option (ADR-0025). Pendant que
+  claude travaille, Stop l'interrompt (Échap) et l'éclair envoie le message tout de
+  suite au lieu de le mettre en file. Un message envoyé s'affiche aussitôt, en
+  attendant que claude l'écrive ; la conversation suit le fichier dès qu'il change.
+  Une image collée (⌘V) ou déposée sur le chat attend en vignette au-dessus du champ ;
+  envoyée, elle part comme un chemin collé dans claude (qui en fait une pièce jointe,
+  `[Image #1]`) et s'affiche dans le message, relue dans le fichier de claude.
 - **Git** : worktrees avec collisions départagées, status porcelain v2, diff
   (non-suivis compris), suppression refusée si travail non commité.
 - **Pull requests** : onglet PR sur le `gh` de l'utilisateur — projets locaux,
@@ -68,7 +75,8 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   à construire ni transition, la liste suit la frappe en une passe. Une action peut y
   poser sa question : « Review code » demande l'URL d'une pull request (reprise du
   presse-papiers quand il en contient une) ou `owner/repo#12`, et Retour lance sa
-  review dans l'onglet PRs.
+  review dans l'onglet PRs. ⌘⇧R (lettre réglable dans Réglages › Raccourcis, aussi
+  dans le menu File) ouvre la palette directement sur cette question.
 - **Reviews planifiées** : des plannings (heure, jours) sur des tranches de PR —
   un projet + une requête GitHub (« needs review », un filtre perso…) + un maximum
   par passage. À l'heure dite (ou au réveil du Mac, jusqu'à 4 h de retard), Loom

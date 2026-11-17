@@ -132,11 +132,16 @@ struct ClaudeConversationTests {
         #expect(outline([summary]) == ["notice: Conversation compacted"], "the summary alone says it too")
     }
 
-    @Test("an image in a message is named, not shown")
+    @Test("an image in a message comes with it, as its bytes")
     func image() {
-        #expect(outline([
-            #"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}},{"type":"text","text":"What is wrong here?"}]}}"#,
-        ]) == ["user: [image]\nWhat is wrong here?"])
+        let entries = ClaudeConversation.entries(fromJSONL:
+            #"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}},{"type":"text","text":"What is wrong here?"}]}}"#)
+        #expect(entries.map(\.kind) == [.user("What is wrong here?")])
+        #expect(entries.first?.images == [Data([0, 0, 0])])
+        let alone = ClaudeConversation.entries(fromJSONL:
+            #"{"type":"user","uuid":"u2","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}]}}"#)
+        #expect(alone.map(\.kind) == [.user("")])
+        #expect(alone.first?.images.count == 1)
     }
 
     @Test("a message sent while claude worked is the user's; a background task reporting back is a notice")

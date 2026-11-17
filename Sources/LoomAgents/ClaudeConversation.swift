@@ -182,6 +182,7 @@ public enum ClaudeConversation {
             guard let blocks = content as? [[String: Any]] else { return false }
             var changed = false
             var pieces: [String] = []
+            var images: [Data] = []
             var first: Int?
             for (index, block) in blocks.enumerated() {
                 let type = (block["type"] as? String) ?? ""
@@ -195,14 +196,25 @@ public enum ClaudeConversation {
                         if first == nil { first = index }
                     }
                 case "image":
-                    pieces.append("[image]")
+                    if let data = ClaudeConversation.imageData(block) {
+                        images.append(data)
+                    } else {
+                        pieces.append("[image]")
+                    }
                     if first == nil { first = index }
                 default:
                     break
                 }
             }
-            if let first, say(pieces.joined(separator: "\n"), id: "\(line)#\(first)", stamp: stamp) {
-                changed = true
+            guard let first else { return changed }
+            let text = pieces.joined(separator: "\n")
+            let id = "\(line)#\(first)"
+            if images.isEmpty {
+                if say(text, id: id, stamp: stamp) { changed = true }
+            } else {
+                // A message with images is the user's, whatever its text.
+                let kind = ClaudeConversation.kind(ofUserText: text) ?? .user(text)
+                if append(kind, id: id, stamp: stamp, images: images) { changed = true }
             }
             return changed
         }
@@ -227,14 +239,25 @@ public enum ClaudeConversation {
             return true
         }
 
-        private mutating func append(_ kind: ConversationEntry.Kind, id: String, stamp: String?) -> Bool {
+        private mutating func append(_ kind: ConversationEntry.Kind, id: String, stamp: String?,
+                                     images: [Data] = []) -> Bool {
             guard seen.insert(id).inserted else { return false }
             // claude marks a compaction twice, as a boundary and as the
             // summary that follows it: one notice says it.
             if kind == .notice(ClaudeConversation.compacted), entries.last?.kind == kind { return false }
-            entries.append(ConversationEntry(id: id, kind: kind, timestamp: ClaudeConversation.date(stamp)))
+            entries.append(ConversationEntry(id: id, kind: kind, timestamp: ClaudeConversation.date(stamp),
+                                             images: images))
             return true
         }
+    }
+
+    /// An image block's bytes: `{"type":"image","source":{"type":"base64",
+    /// "media_type":"image/png","data":"…"}}`.
+    static func imageData(_ block: [String: Any]) -> Data? {
+        guard let source = block["source"] as? [String: Any],
+              (source["type"] as? String) == "base64",
+              let encoded = source["data"] as? String else { return nil }
+        return Data(base64Encoded: encoded, options: .ignoreUnknownCharacters)
     }
 
     // MARK: - The user's side

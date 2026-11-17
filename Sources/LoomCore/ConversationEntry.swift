@@ -50,10 +50,14 @@ public struct ConversationEntry: Identifiable, Equatable, Sendable {
     public let id: String
     public var kind: Kind
     public var timestamp: Date?
+    /// The images a user's message carried (PNG, JPEG…), as claude keeps
+    /// them: shown with the message.
+    public var images: [Data]
 
-    public init(id: String, kind: Kind, timestamp: Date? = nil) {
+    public init(id: String, kind: Kind, timestamp: Date? = nil, images: [Data] = []) {
         self.id = id
         self.kind = kind
         self.timestamp = timestamp
+        self.images = images
     }
 }

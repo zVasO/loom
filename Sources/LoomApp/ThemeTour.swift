@@ -386,6 +386,9 @@ final class ThemeTour {
         walkStalls = []
         let stalls = watchStalls()
         defer { stalls.cancel() }
+        // First, while claude's stand-in still waits on its prompt: no key
+        // has answered it yet.
+        await chatWalk(into: folder)
         driver.show(.sessions)
         driver.select(sessions.first.map { DetailSelection.session($0) })
         await picture("terminal", in: folder, after: 1_500)
@@ -414,6 +417,11 @@ final class ThemeTour {
         await picture("closed", in: folder)
         await typeText("pwd")
         await picture("closed-typed", in: folder)
+        // ⌘⇧R: the palette, already asking for the pull request.
+        await press("r", code: 15, modifiers: [.command, .shift])
+        await picture("shortcut-review", in: folder)
+        await press("\u{1B}", code: 53)
+        await press("\u{1B}", code: 53)
 
         // ⌘K is a toggle: pressed again, it closes what it opened.
         await press("k", code: 40, modifiers: .command)
@@ -505,6 +513,29 @@ final class ThemeTour {
             return
         }
         // It attaches first.
+        try? await Task.sleep(for: .milliseconds(800))
+    }
+
+    /// The chat view: the choice claude asks for (with LOOM_TOUR_PERMISSION),
+    /// an image in a message, and a picture pasted with ⌘V into the field.
+    private func chatWalk(into folder: URL) async {
+        driver.show(.sessions)
+        driver.select(sessions.first.map { DetailSelection.session($0) })
+        try? await Task.sleep(for: .milliseconds(1_200))
+        ask("chat")
+        await picture("chat", in: folder, after: 2_500)
+        let pasted = NSImage(size: NSSize(width: 320, height: 200), flipped: false) { rect in
+            NSColor(calibratedRed: 0.17, green: 0.24, blue: 0.31, alpha: 1).setFill()
+            rect.fill()
+            NSColor(calibratedRed: 0.9, green: 0.39, blue: 0.42, alpha: 1).setFill()
+            NSRect(x: 110, y: 80, width: 100, height: 40).fill()
+            return true
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([pasted])
+        await press("v", code: 9, modifiers: .command)
+        await picture("chat-pasted", in: folder)
+        ask("terminal")
         try? await Task.sleep(for: .milliseconds(800))
     }
 

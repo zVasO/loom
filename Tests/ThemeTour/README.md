@@ -30,7 +30,7 @@ swift run --skip-build LoomApp
   principaux seulement.
 - `keys` : aucun écran, mais la marche au clavier — ce qu'une image d'un état ne dit pas, que
   la palette répond aux touches. ⌘K, une recherche, Tab, « Review code », sa question qui
-  refuse puis accepte une réponse, Échap deux fois, ⌘K qui referme, ↓ puis Entrée : chaque
+  refuse puis accepte une réponse, Échap deux fois, ⌘⇧R qui ouvre la palette sur cette question, ⌘K qui referme, ↓ puis Entrée : chaque
   touche est postée dans la file d'événements de l'app et prend le chemin d'une vraie (les
   moniteurs de touches, les raccourcis, puis ce qui a le clavier). Chaque pas a son image, et
   `tour.json` note ce qui avait le clavier (`keyboard` : la vue, et le texte du champ quand
@@ -46,6 +46,8 @@ swift run --skip-build LoomApp
   puis une autre depuis une ligne de la liste, et la palette est ouverte trois fois au-dessus
   de chaque sorte d'écran — il faut alors `gh` connecté, et que le projet de la tournée soit
   un clone de ce dépôt.
+- `LOOM_TOUR_PERMISSION=1` : la session du worktree finit sur une demande de permission
+  dessinée comme celle de claude ; les écrans `chat` montrent alors la carte qui y répond.
 - `bin/claude` remplace claude là où il n'y en a pas (un runner) : il peint l'écran d'une
   session, et modifie un fichier quand la session a son propre worktree — le panneau Git a un
   diff à montrer. Il écrit aussi une conversation inventée (deux échanges, du Markdown avec

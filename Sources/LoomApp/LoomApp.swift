@@ -25,6 +25,7 @@ struct LoomApp: App {
     @NSApplicationDelegateAdaptor(LoomAppDelegate.self) private var appDelegate
     @AppStorage("loom.shortcut.newSession") private var keyNewSession = "n"
     @AppStorage("loom.shortcut.newTab") private var keyNewTab = "t"
+    @AppStorage("loom.shortcut.review") private var keyReview = "r"
 
     init() {
         // Launched outside an .app bundle (`swift run`), the process is treated as background:
@@ -68,6 +69,13 @@ struct LoomApp: App {
                     NotificationCenter.default.post(name: .loomNewTab, object: nil)
                 }
                 .keyboardShortcut(KeyEquivalent(keyNewTab.first ?? "t"), modifiers: .command)
+                Divider()
+                // The palette's "Review code", already asking for the pull
+                // request: one shortcut, the URL, Return.
+                Button("Review a pull request…") {
+                    NotificationCenter.default.post(name: .loomStartReview, object: nil)
+                }
+                .keyboardShortcut(KeyEquivalent(keyReview.first ?? "r"), modifiers: [.command, .shift])
             }
             // ⌘⇧A, not ⌘A: ⌘A stays the agent's own select-all inside its input
             // field, which is the one actually pressed. A menu item rather than a
@@ -124,4 +132,6 @@ extension Notification.Name {
     /// The theme tour (LOOM_AUTOTEST=themes) asks a view for a state only
     /// it holds — a tab, a panel, a sheet; the object names it.
     static let loomTourShow = Notification.Name("loom.tour.show")
+    /// ⌘⇧R (the letter is a setting) — the palette, open on "Review code".
+    static let loomStartReview = Notification.Name("loom.startReview")
 }

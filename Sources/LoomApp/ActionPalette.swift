@@ -255,6 +255,13 @@ struct PaletteOverlay: View {
             opensOn = PaletteAction.reviewID
             isPresented = true
         }
+        // ⌘⇧R: the same, from the keyboard. A palette already up asks the
+        // question itself (`ActionPaletteView`).
+        .onReceive(NotificationCenter.default.publisher(for: .loomStartReview)) { _ in
+            guard !isPresented else { return }
+            opensOn = PaletteAction.reviewID
+            isPresented = true
+        }
     }
 }
 
@@ -368,6 +375,12 @@ struct ActionPaletteView: View {
             if let opensOn, let action = actions.first(where: { $0.id == opensOn }) {
                 ask(action)
             }
+        }
+        // ⌘⇧R pressed while the palette shows: its question, at once.
+        .onReceive(NotificationCenter.default.publisher(for: .loomStartReview)) { _ in
+            guard asking?.id != PaletteAction.reviewID,
+                  let action = actions.first(where: { $0.id == PaletteAction.reviewID }) else { return }
+            ask(action)
         }
     }
 

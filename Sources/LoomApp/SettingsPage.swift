@@ -247,6 +247,7 @@ struct SettingsPage: View {
     @AppStorage("loom.shortcut.newTab") private var keyNewTab = "t"
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
+    @AppStorage("loom.shortcut.review") private var keyReview = "r"
     @State private var importShown = false
     /// What the import sheet opens on — a theme handed to it rather than pasted.
     @State private var importPrefill: String?
@@ -480,7 +481,8 @@ struct SettingsPage: View {
             }
             section(.shortcuts) {
                 card {
-                    shortcutRow("New claude session", key: $keyNewSession)
+                    // Its letter is also ⌘⇧'s (a project of your choice): not the review's.
+                    shortcutRow("New claude session", key: $keyNewSession, taken: [keyReview])
                     cardDivider
                     shortcutRow("New session in a project of your choice", key: $keyNewSession, shift: true)
                     cardDivider
@@ -489,14 +491,29 @@ struct SettingsPage: View {
                     shortcutRow("Mission Control", key: $keyMissionControl)
                     cardDivider
                     shortcutRow("Go to session (palette)", key: $keyPalette)
-                    detail("One letter or digit, always combined with ⌘. ⌘N starts a session in the current project at once; with ⇧ the same letter asks which project first. Menu shortcuts update immediately.")
+                    cardDivider
+                    shortcutRow("Review a pull request", key: $keyReview, shift: true, editable: true,
+                                taken: Self.fixedShiftLetters.union([keyNewSession]))
+                    detail("One letter or digit, always combined with ⌘ (and ⇧ where shown). ⌘N starts a session in the current project at once; with ⇧ the same letter asks which project first. ⌘⇧\(keyReview.uppercased()) opens the palette on \u{201C}Review code\u{201D}: paste the pull request's URL, Return starts the review. A letter another ⌘⇧ shortcut already uses (\(Self.takenList(keyNewSession))) is not taken. Menu shortcuts update immediately.")
                 }
             }
         }
     }
 
-    private func shortcutRow(_ title: String, key: Binding<String>, shift: Bool = false) -> some View {
-        HStack(spacing: DefaultTheme.space(12)) {
+    /// The ⌘⇧ letters fixed elsewhere: Select all (A), Browser (B), Show
+    /// Session as Chat (M), the PRs tab's pin (P).
+    static let fixedShiftLetters: Set<String> = ["a", "b", "m", "p"]
+
+    static func takenList(_ newSession: String) -> String {
+        fixedShiftLetters.union([newSession]).map { $0.uppercased() }.sorted().joined(separator: ", ")
+    }
+
+    /// `editable`: false for a row that shows another row's letter (⌘⇧N
+    /// follows ⌘N). `taken`: letters refused, held by another shortcut.
+    private func shortcutRow(_ title: String, key: Binding<String>, shift: Bool = false,
+                             editable: Bool? = nil, taken: Set<String> = []) -> some View {
+        let locked = !(editable ?? !shift)
+        return HStack(spacing: DefaultTheme.space(12)) {
             label(title)
             Spacer()
             Text(shift ? "⌘⇧" : "⌘")
@@ -506,7 +523,8 @@ struct SettingsPage: View {
                 get: { key.wrappedValue.uppercased() },
                 set: { raw in
                     // Keep the LAST typed character, letters/digits only.
-                    if let char = raw.lowercased().last(where: { $0.isLetter || $0.isNumber }) {
+                    if let char = raw.lowercased().last(where: { $0.isLetter || $0.isNumber }),
+                       !taken.contains(String(char)) {
                         key.wrappedValue = String(char)
                     }
                 }))
@@ -519,8 +537,8 @@ struct SettingsPage: View {
                     .stroke(DefaultTheme.fieldBorder, lineWidth: 1))
                 .themeShadow(.xs, radius: 6)
                 // The ⇧ row follows ⌘N's letter: shown, not edited apart.
-                .disabled(shift)
-                .opacity(shift ? 0.6 : 1)
+                .disabled(locked)
+                .opacity(locked ? 0.6 : 1)
         }
     }
 

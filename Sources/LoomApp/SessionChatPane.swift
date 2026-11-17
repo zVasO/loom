@@ -25,6 +25,20 @@ struct SessionChatPane: View {
     /// What the journal last said the session waits on, and the state it
     /// said it under.
     @State private var journal: JournalAnswer?
+    /// Sent and taken by claude, not yet in its file: shown at once.
+    @State private var pending: [PendingMessage] = []
+    /// Pasted or dropped, waiting in the composer.
+    @State private var images: [ComposerImage] = []
+    /// Something is dragged over the chat.
+    @State private var dropping = false
+    /// The session's terminal: where a choice claude asks for is read, and
+    /// where its answer, Stop and the messages are typed.
+    @State private var surface: TerminalSurface?
+    /// An option clicked: the card waits for the screen to move on.
+    @State private var answered: ClaudeTerminalPrompt?
+    /// The choice the terminal's screen shows, read by `watchScreen`, not
+    /// in the body: the screen changes several times a second.
+    @State private var onScreen: ClaudeTerminalPrompt?
 
     private struct JournalAnswer: Equatable {
         var wait: AppModel.SessionWait
@@ -72,9 +86,18 @@ struct SessionChatPane: View {
         return false
     }
 
+    /// The choice claude's screen shows now — a permission, a question with
+    /// options — when the session is not working. Read off the terminal,
+    /// which the pane watches for as long as it shows.
+    private var prompt: ClaudeTerminalPrompt? {
+        guard isLive, item?.state != .working, let onScreen, onScreen != answered else { return nil }
+        return onScreen
+    }
+
     /// A permission prompt is up in the terminal, the only place that draws
     /// it — or may still be.
     private var waitsOnPermission: Bool {
+        if prompt != nil { return true }
         guard isLive, let reason = knownWait else { return false }
         if item?.state == .needsInput { return reason != .question }
         // Left unanswered, a prompt does not stay `needsInput`: on the
@@ -107,18 +130,61 @@ struct SessionChatPane: View {
     var body: some View {
         VStack(spacing: 0) {
             ConversationList(entries: entries, isWorking: item?.state == .working,
+                             pending: pending.map(\.entry),
                              emptyTitle: "No conversation yet",
                              emptyDetail: "What you and claude say will show here. The first message can be sent from below.")
-            banner
+            if let prompt {
+                ConversationPromptCard(question: prompt.question, context: prompt.context,
+                                       options: prompt.options.map { .init(number: $0.number, label: $0.label) },
+                                       selected: prompt.selected,
+                                       onChoose: { choose($0.number, in: prompt) },
+                                       onShowTerminal: onShowTerminal)
+            } else {
+                banner
+            }
             // The composer sets itself in the list's column.
-            ConversationComposer(text: $draft,
+            let working = isLive && item?.state == .working
+            ConversationComposer(text: $draft, images: $images,
                                  placeholder: isLive ? "Message claude" : "This session has ended",
-                                 isEnabled: canSend, isSending: isSending, onSend: { send() })
+                                 isEnabled: canSend, isSending: isSending,
+                                 onStop: working ? { stop() } : nil,
+                                 onSendNow: working ? { sendNow() } : nil,
+                                 onSend: { send() })
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DefaultTheme.contentBackground)
+        // An image dropped anywhere on the chat waits in the composer.
+        .onDrop(of: ComposerImage.dropTypes, isTargeted: $dropping) { providers in
+            Task {
+                let found = await ComposerImage.load(from: providers)
+                images.append(contentsOf: found)
+            }
+            return true
+        }
+        .overlay {
+            if dropping {
+                RoundedRectangle(cornerRadius: DefaultTheme.radius(14))
+                    .strokeBorder(DefaultTheme.accent, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                    .background(DefaultTheme.accent.opacity(0.08),
+                                in: RoundedRectangle(cornerRadius: DefaultTheme.radius(14)))
+                    .overlay {
+                        Text("Drop to attach to your message")
+                            .themeFont(size: 14, weight: .semibold)
+                            .foregroundStyle(DefaultTheme.primaryText)
+                    }
+                    .padding(DefaultTheme.space(16))
+                    .allowsHitTesting(false)
+            }
+        }
         .task(id: FollowKey(native: nativeID, live: isLive)) { await follow() }
         .task(id: WaitKey(state: item?.state, tick: model.transitionTick)) { await readWait() }
+        // The terminal's screen, a few times a second, for as long as the
+        // session runs: claude draws its choices there and nowhere else.
+        .task(id: FollowKey(native: sessionID, live: isLive)) { await watchScreen() }
+        // In claude's file at last: no longer shown as pending.
+        .onChange(of: entries) { dropDelivered() }
+        // The screen moved on from the prompt answered: a new one may come.
+        .onChange(of: item?.state) { answered = nil }
         // The failure is about the text as it was sent: edited, it is a new message.
         .onChange(of: draft) {
             if sendFailed { sendFailed = false }
@@ -153,6 +219,10 @@ struct SessionChatPane: View {
         var reader = ClaudeConversation.Reader()
         // Found once: looking for it lists every folder of ~/.claude/projects.
         var file: URL?
+        // Woken by claude's writes: what it says shows as it lands, not at
+        // the next tick. The ticks stay, slower, for what the watch misses
+        // (a file replaced under it).
+        var wake: FileWake?
         repeat {
             let before = reader
             let known = file
@@ -170,9 +240,36 @@ struct SessionChatPane: View {
             file = result.file
             if result.changed, entries != reader.entries { entries = reader.entries }
             guard isLive else { return }
-            let pause: Duration = item?.state == .working ? .milliseconds(400) : .seconds(1)
-            try? await Task.sleep(for: pause)
+            if wake == nil, let file { wake = FileWake(url: file) }
+            if let wake {
+                await wake.next(timeout: item?.state == .working ? .seconds(1) : .seconds(2))
+            } else {
+                try? await Task.sleep(for: .milliseconds(500))
+            }
         } while !Task.isCancelled
+    }
+
+    /// Watches the session's screen while it runs, and reads the choice it
+    /// shows. Off the body: only a prompt that changed is written.
+    private func watchScreen() async {
+        guard isLive, let found = await model.surface(for: sessionID) else {
+            if onScreen != nil { onScreen = nil }
+            return
+        }
+        surface = found
+        async let watching: Void = found.attached(cadence: .preview(.milliseconds(200)))
+        var revision: UInt64 = .max
+        while !Task.isCancelled {
+            let screen = found.screen
+            if screen.revision != revision {
+                revision = screen.revision
+                let lines = screen.lines.map { String($0.cells.map(\.character)) }
+                let read = ClaudeTerminalPrompt.parse(lines: lines)
+                if onScreen != read { onScreen = read }
+            }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        await watching
     }
 
     /// Asks the journal what the session waits on: a question leaves
@@ -190,16 +287,82 @@ struct SessionChatPane: View {
 
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canSend, !isSending, !text.isEmpty else { return }
+        let files = images.map(\.url)
+        guard canSend, !isSending, !text.isEmpty || !files.isEmpty else { return }
         isSending = true
         sendFailed = false
         Task {
-            let taken = await deliver(text)
+            let taken = await deliver(text, attaching: files)
             isSending = false
-            if taken {
-                draft = ""
-            } else {
-                sendFailed = true
+            if taken { sent(text, files: files) } else { sendFailed = true }
+        }
+    }
+
+    /// Taken by claude: the field empties, and the message shows at once.
+    private func sent(_ text: String, files: [URL]) {
+        draft = ""
+        images = []
+        let data = files.compactMap { try? Data(contentsOf: $0) }
+        pending.append(PendingMessage(entry: ConversationEntry(id: "pending-\(UUID().uuidString)",
+                                                               kind: .user(text), images: data),
+                                      sentAt: Date()))
+    }
+
+    /// "Send now", while claude works: its turn is interrupted (Esc, as in
+    /// the terminal), and the message goes in once the prompt is back —
+    /// rather than queued behind the turn.
+    private func sendNow() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let files = images.map(\.url)
+        guard !isSending, !text.isEmpty || !files.isEmpty else { return }
+        isSending = true
+        sendFailed = false
+        Task {
+            await interrupt()
+            let taken = await model.submitWhenReady(text, to: sessionID, attaching: files, timeout: .seconds(15))
+            isSending = false
+            if taken { sent(text, files: files) } else { sendFailed = true }
+        }
+    }
+
+    /// Stop: Esc in claude's terminal ends its turn.
+    private func stop() {
+        Task { await interrupt() }
+    }
+
+    /// Esc, then a moment for claude to leave its turn: the state says so
+    /// when the hooks are on; otherwise the readiness of `submitWhenReady`
+    /// is what waits.
+    private func interrupt() async {
+        guard let surface = await model.surface(for: sessionID) else { return }
+        surface.send("\u{1B}")
+        for _ in 0..<30 where item?.state == .working {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    /// An option of the card: its key, typed into the terminal.
+    private func choose(_ number: Int, in prompt: ClaudeTerminalPrompt) {
+        guard let option = prompt.options.first(where: { $0.number == number }),
+              let surface else { return }
+        answered = prompt
+        surface.send(ClaudeTerminalPrompt.answer(option))
+    }
+
+    /// A pending message is let go once claude's file holds it — its text,
+    /// which claude may have prefixed with "[Image #1]", or for images
+    /// alone, a message with images — or after half a minute.
+    private func dropDelivered() {
+        guard !pending.isEmpty else { return }
+        let said = entries.suffix(40).filter { if case .user = $0.kind { return true } else { return false } }
+        let now = Date()
+        pending.removeAll { message in
+            if now.timeIntervalSince(message.sentAt) > 30 { return true }
+            let text = message.text
+            return said.contains { entry in
+                guard case .user(let written) = entry.kind else { return false }
+                if text.isEmpty { return !entry.images.isEmpty && (entry.timestamp ?? now) >= message.sentAt.addingTimeInterval(-5) }
+                return written.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix(text)
             }
         }
     }
@@ -207,27 +370,98 @@ struct SessionChatPane: View {
     /// Hands the message to claude through the session's terminal: a
     /// bracketed paste, so its line breaks stay one message, then Return.
     /// False when nothing was typed.
-    private func deliver(_ text: String) async -> Bool {
+    private func deliver(_ text: String, attaching files: [URL] = []) async -> Bool {
         guard let state = item?.state else { return false }
         switch state {
         case .working:
             // claude queues what is typed while it works: no prompt to wait for.
             guard let surface = await model.surface(for: sessionID) else { return false }
-            surface.send(KeyTranslator.paste(text, bracketed: true) + "\r")
+            await AppModel.type(text, attaching: files, into: surface)
             return true
         case .needsInput:
             // Asked again at the moment of typing: the session may have moved
             // on to a permission prompt since the composer last looked.
             guard await model.sessionWait(sessionID) == .question else { return false }
-            return await model.submitWhenReady(text, to: sessionID, timeout: .seconds(15))
+            return await model.submitWhenReady(text, to: sessionID, attaching: files, timeout: .seconds(15))
         case .starting, .idle:
             // A prompt left unanswered reads `idle`: asked again here too.
             let reason = await model.sessionWait(sessionID)
             if reason == .permission, hasOpenToolCall { return false }
-            return await model.submitWhenReady(text, to: sessionID, timeout: .seconds(15))
+            return await model.submitWhenReady(text, to: sessionID, attaching: files, timeout: .seconds(15))
         case .draft, .completed, .failed, .interrupted, .archived:
             return false
         }
+    }
+}
+
+/// Wakes a reader when a file is written to, or after a timeout. The
+/// kernel's watch (a vnode source) on the file claude appends to.
+private final class FileWake: @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiter: CheckedContinuation<Void, Never>?
+    private var fired = false
+    private var source: DispatchSourceFileSystemObject?
+
+    init?(url: URL) {
+        let descriptor = open(url.path, O_EVTONLY)
+        guard descriptor >= 0 else { return nil }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor, eventMask: [.write, .extend, .delete, .rename],
+            queue: .global(qos: .userInitiated))
+        source.setCancelHandler { close(descriptor) }
+        self.source = source
+        source.setEventHandler { [weak self] in self?.wake() }
+        source.resume()
+    }
+
+    deinit {
+        source?.cancel()
+        wake()
+    }
+
+    /// Returns at the next write, or after `timeout`.
+    func next(timeout: Duration) async {
+        let timer = Task { [weak self] in
+            // Cancelled once a write has woken the reader: no wake of its
+            // own then, or the next wait would return at once — a reader
+            // spinning on the file.
+            guard (try? await Task.sleep(for: timeout)) != nil else { return }
+            self?.wake()
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if fired {
+                fired = false
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiter = continuation
+                lock.unlock()
+            }
+        }
+        timer.cancel()
+    }
+
+    private func wake() {
+        lock.lock()
+        if let waiter {
+            self.waiter = nil
+            lock.unlock()
+            waiter.resume()
+        } else {
+            fired = true
+            lock.unlock()
+        }
+    }
+}
+
+/// A message sent and not yet in claude's file.
+private struct PendingMessage {
+    var entry: ConversationEntry
+    var sentAt: Date
+    var text: String {
+        if case .user(let text) = entry.kind { return text }
+        return ""
     }
 }
 
