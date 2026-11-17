@@ -25,6 +25,27 @@ public enum TerminalMetrics {
     /// the cell count are both measured from it — they must not drift apart.
     public static let gridInset: CGFloat = 8
 
+    /// A selection dragged to the viewport's edge scrolls it: +1 when the
+    /// pointer is at (or past) the bottom edge, -1 at the top, 0 between.
+    /// `y` and `top` are in the content's space.
+    public static func edgeDirection(y: CGFloat, top: CGFloat, height: CGFloat,
+                                     margin: CGFloat = 6) -> Int {
+        guard height > 0 else { return 0 }
+        if y >= top + height - margin { return 1 }
+        if y <= top + margin { return -1 }
+        return 0
+    }
+
+    /// The rows the viewport shows, as content indices.
+    public static func visibleRows(top: CGFloat, height: CGFloat, rows: Int) -> ClosedRange<Int>? {
+        let cell = cellSize
+        guard rows > 0, cell.height > 0 else { return nil }
+        // A hair over: a row exactly at the edge is not lost to rounding.
+        let first = max(0, Int(((top - gridInset) / cell.height + 0.001).rounded(.down)))
+        let last = min(rows - 1, max(first, Int(((top + height - gridInset) / cell.height + 0.001).rounded(.down)) - 1))
+        return first...max(first, last)
+    }
+
     /// The narrowest pane that still holds `columns` cells: the floor the side
     /// panel leaves the terminal, so claude keeps the 80-column layout it draws
     /// for. Half a point of slack absorbs the fractional cell width — `grid`
@@ -170,7 +191,14 @@ public struct TerminalScreenView: View {
     private final class ScrollProbe {
         var contentEnd: CGFloat = 0
         var viewportHeight: CGFloat = 0
+        /// The content's top in the viewport's space: minus the offset scrolled.
+        var contentTop: CGFloat = 0
     }
+
+    /// A selection held at the viewport's edge: the way it scrolls (+1 down,
+    /// -1 up, 0 not), and where across the pointer is.
+    @State private var edgeDirection = 0
+    @State private var edgeX: CGFloat = 0
 
     public var body: some View {
         let cell = TerminalMetrics.cellSize
@@ -205,6 +233,12 @@ public struct TerminalScreenView: View {
                 }
                 .padding(TerminalMetrics.gridInset)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
+                // Where the content stands in the viewport — kept in the probe
+                // for a selection dragged to the edge, never in view state.
+                .background(GeometryReader { content in
+                    Color.clear.preference(key: ContentTopKey.self,
+                                           value: content.frame(in: .named(Self.scroll)).minY)
+                })
                 // The selection layer sits ON TOP: cells carry ANSI background
                 // colours painted by Text itself, and a highlight behind them would
                 // vanish on exactly the lines people want to copy. An overlay also
@@ -239,6 +273,27 @@ public struct TerminalScreenView: View {
             })
             .onPreferenceChange(ContentEndKey.self) { probe.contentEnd = $0 }
             .onPreferenceChange(ViewportHeightKey.self) { probe.viewportHeight = $0 }
+            .onPreferenceChange(ContentTopKey.self) { probe.contentTop = $0 }
+            // A selection held at the edge: the view scrolls a row at a time
+            // and the selection follows, as in any terminal.
+            .task(id: edgeDirection) {
+                guard edgeDirection != 0 else { return }
+                while !Task.isCancelled, dragging, edgeDirection != 0 {
+                    let top = -probe.contentTop
+                    if let visible = TerminalMetrics.visibleRows(top: top, height: probe.viewportHeight,
+                                                                 rows: contentRows) {
+                        let index = edgeDirection > 0 ? min(contentRows - 1, visible.upperBound + 1)
+                                                      : max(0, visible.lowerBound - 1)
+                        proxy.scrollTo(historyBase + index, anchor: edgeDirection > 0 ? .bottom : .top)
+                        let y = TerminalMetrics.gridInset + (CGFloat(index) + 0.5) * cell.height
+                        let column = TerminalMetrics.boundary(at: CGPoint(x: edgeX, y: y), rows: contentRows,
+                                                              cols: screen.geometry.cols).col
+                        let head = TerminalPosition(row: historyBase + index, col: column)
+                        if selection.head != head { selection.head = head }
+                    }
+                    try? await Task.sleep(for: .milliseconds(45))
+                }
+            }
             // Past the scrollback cap the history stops growing: a line is trimmed
             // for each one pushed, the content keeps its SIZE, and the bottom anchor
             // — which only re-applies on a size change — never fires again while the
@@ -263,6 +318,11 @@ public struct TerminalScreenView: View {
     private var lastRowID: Int { historyBase + contentRows - 1 }
 
     private struct ContentEndKey: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+    }
+
+    private struct ContentTopKey: PreferenceKey {
         static let defaultValue: CGFloat = 0
         static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
     }
@@ -344,9 +404,15 @@ public struct TerminalScreenView: View {
                 if selection.mode != mode { selection.mode = mode }
                 let head = position(at: value.location)
                 if selection.head != head { selection.head = head }
+                // At the viewport's edge, or past it: the view scrolls on.
+                let direction = TerminalMetrics.edgeDirection(y: value.location.y, top: -probe.contentTop,
+                                                              height: probe.viewportHeight)
+                if direction != 0 { edgeX = value.location.x }
+                if edgeDirection != direction { edgeDirection = direction }
             }
             .onEnded { value in
                 dragging = false
+                if edgeDirection != 0 { edgeDirection = 0 }
                 if openingLink {
                     openingLink = false
                     return

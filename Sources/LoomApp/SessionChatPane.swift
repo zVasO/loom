@@ -186,9 +186,17 @@ struct SessionChatPane: View {
         // The screen moved on from the prompt answered: a new one may come.
         .onChange(of: item?.state) { answered = nil }
         // The failure is about the text as it was sent: edited, it is a new message.
+        // Kept per session as it is typed: another tab, another session and
+        // back, the message waits where it was left.
         .onChange(of: draft) {
             if sendFailed { sendFailed = false }
+            ChatDrafts.shared.text[sessionID] = draft.isEmpty ? nil : draft
         }
+        .onChange(of: images) {
+            ChatDrafts.shared.images[sessionID] = images.isEmpty ? nil : images
+        }
+        .onAppear { restoreDraft() }
+        .onChange(of: sessionID) { restoreDraft() }
     }
 
     @ViewBuilder
@@ -291,6 +299,14 @@ struct SessionChatPane: View {
         guard !Task.isCancelled else { return }
         let answer = JournalAnswer(wait: reason, state: state)
         if journal != answer { journal = answer }
+    }
+
+    /// What was being written in this session when the chat was left.
+    private func restoreDraft() {
+        let text = ChatDrafts.shared.text[sessionID] ?? ""
+        if draft != text { draft = text }
+        let waiting = ChatDrafts.shared.images[sessionID] ?? []
+        if images != waiting { images = waiting }
     }
 
     // MARK: Sending
@@ -466,6 +482,15 @@ private final class FileWake: @unchecked Sendable {
             lock.unlock()
         }
     }
+}
+
+/// The messages being written, by session: the chat view is rebuilt at
+/// every tab switch, and a draft is not something to lose there.
+@MainActor
+private final class ChatDrafts {
+    static let shared = ChatDrafts()
+    var text: [SessionID: String] = [:]
+    var images: [SessionID: [ComposerImage]] = [:]
 }
 
 /// The conversations the chat has read, by native session: a return to

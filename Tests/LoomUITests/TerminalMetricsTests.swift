@@ -151,3 +151,25 @@ struct TerminalMetricsTests {
         #expect(TerminalMetrics.rowsAboveLast(distanceFromBottom: inset + cell.height * 10.5) == 10)
     }
 }
+
+@Suite("TerminalMetrics — a selection dragged to the edge")
+struct TerminalEdgeScrollTests {
+    @Test("the edge scrolls: down at the bottom and past it, up at the top, not between")
+    func direction() {
+        #expect(TerminalMetrics.edgeDirection(y: 500, top: 100, height: 400) == 1)
+        #expect(TerminalMetrics.edgeDirection(y: 800, top: 100, height: 400) == 1)
+        #expect(TerminalMetrics.edgeDirection(y: 102, top: 100, height: 400) == -1)
+        #expect(TerminalMetrics.edgeDirection(y: 20, top: 100, height: 400) == -1)
+        #expect(TerminalMetrics.edgeDirection(y: 300, top: 100, height: 400) == 0)
+        #expect(TerminalMetrics.edgeDirection(y: 300, top: 0, height: 0) == 0)
+    }
+
+    @Test("the visible rows follow the offset")
+    func visible() throws {
+        let height = TerminalMetrics.cellSize.height
+        let range = try #require(TerminalMetrics.visibleRows(top: TerminalMetrics.gridInset + 10 * height,
+                                                             height: 20 * height, rows: 100))
+        #expect(range.lowerBound == 10)
+        #expect(range.upperBound == 29)
+    }
+}
