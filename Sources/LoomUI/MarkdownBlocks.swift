@@ -694,7 +694,9 @@ private struct MarkdownCodeBlock: View {
 
     @ViewBuilder
     private func code(topInset: CGFloat, fill: Color) -> some View {
-        let label = Text(text)
+        // A shell block in the theme's colours; any other plain.
+        let shell = ShellHighlighter.isShell(language)
+        let label = (shell ? Text(ShellHighlighter.attributed(text)) : Text(text))
             .themeFont(size: fontSize, design: .monospaced)
             .foregroundStyle(DefaultTheme.primaryText.opacity(0.9))
             .padding(.horizontal, DefaultTheme.space(10))

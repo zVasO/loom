@@ -251,6 +251,43 @@ public enum ClaudeConversation {
         }
     }
 
+    /// A user's text as it compares with what was typed: claude rewrites a
+    /// message that carried images — "[Image #1]" where the image was, a
+    /// pasted path left as text — so those go, and the spacing with them.
+    public static func comparable(_ text: String) -> String {
+        var words: [Substring] = []
+        for word in text.split(whereSeparator: \.isWhitespace) {
+            if word.hasPrefix("[Image"), word.count < 6 + 8 { continue }
+            if word.hasPrefix("#"), word.hasSuffix("]"), word.dropFirst().dropLast().allSatisfy(\.isNumber) { continue }
+            let bare = word.trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+            if bare.hasPrefix("/"), bare.contains("loom-chat-images/") { continue }
+            words.append(word)
+        }
+        return words.joined(separator: " ")
+    }
+
+    /// The same message twice in a row, a few seconds apart — claude
+    /// writes some messages again as it attaches their images — is one:
+    /// the copy with images is kept.
+    public static func mergingEchoes(_ entries: [ConversationEntry]) -> [ConversationEntry] {
+        var result: [ConversationEntry] = []
+        result.reserveCapacity(entries.count)
+        for entry in entries {
+            if case .user(let text) = entry.kind,
+               let index = result.lastIndex(where: { if case .user = $0.kind { return true } else { return false } }),
+               index == result.count - 1,
+               case .user(let previous) = result[index].kind,
+               comparable(previous) == comparable(text),
+               let before = result[index].timestamp, let after = entry.timestamp,
+               abs(after.timeIntervalSince(before)) < 5 {
+                if result[index].images.isEmpty, !entry.images.isEmpty { result[index] = entry }
+                continue
+            }
+            result.append(entry)
+        }
+        return result
+    }
+
     /// An image block's bytes: `{"type":"image","source":{"type":"base64",
     /// "media_type":"image/png","data":"…"}}`.
     static func imageData(_ block: [String: Any]) -> Data? {

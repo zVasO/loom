@@ -217,7 +217,7 @@ struct SessionChatPane: View {
         if shownNative != native {
             // Another conversation: what the list held is not its.
             shownNative = native
-            let restored = kept?.reader.entries ?? []
+            let restored = ClaudeConversation.mergingEchoes(kept?.reader.entries ?? [])
             if entries != restored { entries = restored }
         }
         var reader = kept?.reader ?? ClaudeConversation.Reader()
@@ -245,7 +245,10 @@ struct SessionChatPane: View {
             if result.changed || kept == nil {
                 ChatReadCache.shared[native] = ChatReadCache.Kept(reader: reader, file: file)
             }
-            if result.changed, entries != reader.entries { entries = reader.entries }
+            if result.changed {
+                let shown = ClaudeConversation.mergingEchoes(reader.entries)
+                if entries != shown { entries = shown }
+            }
             guard isLive else { return }
             if wake == nil, let file { wake = FileWake(url: file) }
             if let wake {
@@ -365,11 +368,14 @@ struct SessionChatPane: View {
         let now = Date()
         pending.removeAll { message in
             if now.timeIntervalSince(message.sentAt) > 30 { return true }
-            let text = message.text
+            let text = ClaudeConversation.comparable(message.text)
             return said.contains { entry in
-                guard case .user(let written) = entry.kind else { return false }
-                if text.isEmpty { return !entry.images.isEmpty && (entry.timestamp ?? now) >= message.sentAt.addingTimeInterval(-5) }
-                return written.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix(text)
+                guard case .user(let written) = entry.kind,
+                      (entry.timestamp ?? now) >= message.sentAt.addingTimeInterval(-5) else { return false }
+                // Images alone: the next message with images is it.
+                if text.isEmpty { return !entry.images.isEmpty }
+                let shown = ClaudeConversation.comparable(written)
+                return shown == text || shown.contains(text)
             }
         }
     }

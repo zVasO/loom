@@ -376,7 +376,7 @@ private struct ToolCallRow: View {
         VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
             FoldedRowHeader(isOpen: isOpen, isError: call.isError, onToggle: onToggle) {
                 AppIcon(ConversationLayout.toolIcon(for: call.name), size: 13)
-                Text(call.summary)
+                summary
                     .themeFont(size: 11.5, design: .monospaced)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -388,7 +388,7 @@ private struct ToolCallRow: View {
             if isOpen {
                 VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
                     if !call.input.isEmpty {
-                        ToolTextBlock(text: call.input, isError: false)
+                        ToolTextBlock(text: call.input, isError: false, isShell: call.name == "Bash")
                     }
                     if let result = call.result, !result.isEmpty {
                         ToolTextBlock(text: result, isError: call.isError)
@@ -402,17 +402,29 @@ private struct ToolCallRow: View {
     }
 }
 
+extension ToolCallRow {
+    /// "Bash docker exec …": the command in the theme's colours.
+    var summary: Text {
+        if call.name == "Bash", call.summary.hasPrefix("Bash ") {
+            return Text("Bash ") + Text(ShellHighlighter.attributed(String(call.summary.dropFirst(5))))
+        }
+        return Text(call.summary)
+    }
+}
+
 /// A tool's input or result: as tall as its text up to `maxHeight`, then it
 /// scrolls on its own — a long file read must not push the answer off screen.
 private struct ToolTextBlock: View {
     let text: String
     let isError: Bool
+    /// A shell command: in colours.
+    var isShell = false
 
     private static let maxHeight: CGFloat = 240
 
     var body: some View {
         ScrollView(.vertical) {
-            Text(text)
+            (isShell && !isError ? Text(ShellHighlighter.attributed(text)) : Text(text))
                 .themeFont(size: 11.5, design: .monospaced)
                 .foregroundStyle(isError ? DefaultTheme.danger : DefaultTheme.primaryText.opacity(0.85))
                 .textSelection(.enabled)
@@ -736,6 +748,17 @@ public struct ConversationPromptCard: View {
         self.onShowTerminal = onShowTerminal
     }
 
+    /// The dialog's lines; under "Bash command", the command in colours.
+    private var contextText: Text {
+        var text = Text("")
+        for (index, line) in context.enumerated() {
+            if index > 0 { text = text + Text("\n") }
+            let isCommand = index == 1 && context.first?.lowercased().hasPrefix("bash") == true
+            text = text + (isCommand ? Text(ShellHighlighter.attributed(line)) : Text(line))
+        }
+        return text
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
             HStack(spacing: DefaultTheme.space(8)) {
@@ -752,7 +775,7 @@ public struct ConversationPromptCard: View {
                 .help("Show the terminal")
             }
             if !context.isEmpty {
-                Text(context.joined(separator: "\n"))
+                contextText
                     .themeFont(size: 11.5, design: .monospaced)
                     .foregroundStyle(DefaultTheme.primaryText.opacity(0.85))
                     .textSelection(.enabled)
