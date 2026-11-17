@@ -295,4 +295,23 @@ struct ClaudeConversationReaderTests {
         #expect(moved, "another file: what was read is dropped")
         #expect(reader.entries.isEmpty)
     }
+
+    @Test("a message with images compares with what was typed")
+    func comparableText() {
+        #expect(ClaudeConversation.comparable("[Image #1] Why is it red?") == "Why is it red?")
+        #expect(ClaudeConversation.comparable("Why is it red? [Image #2]") == "Why is it red?")
+        #expect(ClaudeConversation.comparable("/var/folders/x/T/loom-chat-images/A.png  Why\nis it red?") == "Why is it red?")
+        #expect(ClaudeConversation.comparable("[Image #1]") == "")
+    }
+
+    @Test("the same message twice in a row, seconds apart, is one; the copy with images stays")
+    func echoes() {
+        let now = Date()
+        let first = ConversationEntry(id: "a", kind: .user("[Image #1] Why?"), timestamp: now)
+        let second = ConversationEntry(id: "b", kind: .user("Why?"), timestamp: now.addingTimeInterval(1),
+                                       images: [Data([1])])
+        let later = ConversationEntry(id: "c", kind: .user("Why?"), timestamp: now.addingTimeInterval(60))
+        let merged = ClaudeConversation.mergingEchoes([first, second, later])
+        #expect(merged.map(\.id) == ["b", "c"])
+    }
 }

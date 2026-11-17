@@ -2027,6 +2027,21 @@ struct SessionsView: View {
     /// nothing else: no branch, no state, no row for their terminals and
     /// browsers (those stay in the tab bar of the session once it is open).
     @AppStorage("loom.sessions.compact") private var compactSessions = false
+    /// The cards reduced one by one to their title line, as the list's
+    /// switch reduces them all: the ids, comma-separated, kept across
+    /// launches.
+    @AppStorage("loom.sessions.collapsedCards") private var collapsedCardsRaw = ""
+
+    private var collapsedCards: Set<String> {
+        Set(collapsedCardsRaw.split(separator: ",").map(String.init))
+    }
+
+    private func toggleCollapsed(_ id: SessionID) {
+        var cards = collapsedCards
+        let key = id.rawValue.uuidString
+        if cards.contains(key) { cards.remove(key) } else { cards.insert(key) }
+        withAnimation(.hover) { collapsedCardsRaw = cards.sorted().joined(separator: ",") }
+    }
 
     /// A sidebar group's identity: its fold state and the drag confinement.
     private static func groupKey(_ projectID: ProjectID?, review: Bool = false) -> String {
@@ -2460,8 +2475,11 @@ struct SessionsView: View {
         let paneSelected = panes.contains { selected == .webPane($0.id) }
         let agentSelected = selected == .agentBrowser(item.id)
         let childSelected = shellSelected || paneSelected || agentSelected
-        let cardSelected = ownSelected || (compactSessions && childSelected)
-        let radius = DefaultTheme.radius(compactSessions ? 6 : 10)
+        // Reduced by the list's switch, or this card alone.
+        let ownCollapse = collapsedCards.contains(item.id.rawValue.uuidString)
+        let compact = compactSessions || ownCollapse
+        let cardSelected = ownSelected || (compact && childSelected)
+        let radius = DefaultTheme.radius(compact ? 6 : 10)
         return VStack(spacing: 0) {
             SidebarSessionCard(
                 model: model,
@@ -2469,7 +2487,10 @@ struct SessionsView: View {
                 childCount: shells.count + dormantShells.count + panes.count,
                 isSelected: cardSelected,
                 agentBrowsing: model.agentBrowsers[item.id]?.activity?.isRunning == true,
-                compact: compactSessions,
+                compact: compact,
+                // The list's switch rules them all: no card of its own then.
+                collapse: compactSessions ? nil : (ownCollapse ? .expand : .collapse),
+                onToggleCollapse: { toggleCollapsed(item.id) },
                 onSelect: {
                     if item.isDormant {
                         Task {
@@ -2508,7 +2529,7 @@ struct SessionsView: View {
             // Individual tabs live in the HORIZONTAL bar: the vertical
             // stack only shows one group row per type — and none at all
             // when the sessions are reduced to their title.
-            if !compactSessions {
+            if !compact {
                 if !shells.isEmpty || !dormantShells.isEmpty {
                     Divider().overlay(DefaultTheme.cardBorder)
                     terminalGroupRow(parent: item, shells: shells, dormants: dormantShells)
@@ -3700,6 +3721,10 @@ struct SidebarSessionCard: View, Equatable {
     /// One line: the title, nothing else — no badge, branch or state. What
     /// is left out is a hover away, in the line's tooltip.
     var compact = false
+    /// What the card's own chevron does: nil while the list's switch has
+    /// reduced every card.
+    var collapse: CollapseAction? = nil
+    var onToggleCollapse: () -> Void = {}
     let onSelect: () -> Void
     let onNewTerminal: () -> Void
     let onOpenBrowser: () -> Void
@@ -3714,6 +3739,11 @@ struct SidebarSessionCard: View, Equatable {
     static func == (lhs: SidebarSessionCard, rhs: SidebarSessionCard) -> Bool {
         lhs.item == rhs.item && lhs.childCount == rhs.childCount && lhs.isSelected == rhs.isSelected
             && lhs.agentBrowsing == rhs.agentBrowsing && lhs.compact == rhs.compact
+            && lhs.collapse == rhs.collapse
+    }
+
+    enum CollapseAction: Equatable {
+        case collapse, expand
     }
 
     /// What the compact line leaves out, for its tooltip: "working · loom/fix-cache · 2 tabs".
@@ -3738,6 +3768,12 @@ struct SidebarSessionCard: View, Equatable {
                     // Same cluster as the stack rows: identical spacing
                     // everywhere, whatever the tab type.
                     HStack(spacing: DefaultTheme.space(2)) {
+                        if let collapse {
+                            HoverIconButton(systemImage: collapse == .collapse ? "chevron.up" : "chevron.down",
+                                            help: collapse == .collapse ? "Reduce this card to its title"
+                                                                        : "Show this card's branch, state and tabs",
+                                            action: onToggleCollapse)
+                        }
                         HoverIconButton(systemImage: "terminal",
                                         help: "New terminal in this worktree",
                                         action: onNewTerminal)
@@ -3787,6 +3823,9 @@ struct SidebarSessionCard: View, Equatable {
         .contextMenu {
             BadgeMenu(model: model, sessionID: item.id, current: item.badges)
             Button("Rename…", action: onRename)
+            if let collapse {
+                Button(collapse == .collapse ? "Reduce to Title" : "Show Details", action: onToggleCollapse)
+            }
             Button("New terminal", action: onNewTerminal)
             Button("Dedicated browser", action: onOpenBrowser)
             Button("Archive", action: onArchive)

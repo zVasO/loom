@@ -131,31 +131,18 @@ public struct ConversationList: View {
         return ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(spacing: 0) {
-                    // Lazy: a long conversation holds more paragraphs than
-                    // the Markdown cache, and only the rows on screen may ask it.
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                            ConversationEntryRow(entry: entry,
-                                                 isOpen: opened.contains(entry.id),
-                                                 isRunning: isWorking && index > lastUser,
-                                                 bubbleWidth: bubble,
-                                                 onToggle: { toggle(entry.id) })
-                                // A value: when claude's file grows, only the
-                                // rows that changed are drawn again.
-                                .equatable()
-                                .padding(.top, gap(before: index))
-                        }
-                        ForEach(pending) { sent in
-                            UserBubble(text: sent.userText, images: sent.images, key: sent.id, maxWidth: bubble)
-                                .opacity(0.6)
-                                .padding(.top, DefaultTheme.space(14))
-                        }
-                        if isWorking {
-                            StatusLabel(.working)
-                                .padding(.top, DefaultTheme.space(14))
-                        }
+                    // Lazy only for a long conversation, which holds more
+                    // paragraphs than the Markdown cache. A lazy stack
+                    // anchored at the bottom could open on an empty
+                    // viewport — black until a scroll — when the rows came
+                    // in just after it: a short one is laid out whole.
+                    if entries.count + pending.count > Self.eagerLimit {
+                        LazyVStack(alignment: .leading, spacing: 0) { rows(lastUser: lastUser, bubble: bubble) }
+                            .padding(.vertical, DefaultTheme.space(16))
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) { rows(lastUser: lastUser, bubble: bubble) }
+                            .padding(.vertical, DefaultTheme.space(16))
                     }
-                    .padding(.vertical, DefaultTheme.space(16))
                     // Outside the lazy stack, and last: the end must report
                     // where it is even a long way under the viewport, and
                     // scrolling to it must show everything above it.
@@ -167,6 +154,10 @@ public struct ConversationList: View {
             }
             .defaultScrollAnchor(.bottom)
             .coordinateSpace(name: Self.scroll)
+            // On arriving, and when the pane changes size: to the end, once
+            // laid out — what the anchor alone sometimes misses.
+            .onAppear { pin(proxy) }
+            .onChange(of: viewport) { _, _ in if atBottom { pin(proxy) } }
             // The anchor holds the bottom when the content grows; this covers
             // what it does not see. A reader who scrolled up is never moved.
             .onChange(of: tail) { _, _ in
@@ -182,6 +173,44 @@ public struct ConversationList: View {
                     .padding(.bottom, DefaultTheme.space(12))
                 }
             }
+        }
+    }
+
+    /// To the end of the conversation, once the list is laid out — and once
+    /// more a moment later, for rows that took their height late.
+    private func pin(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async { proxy.scrollTo(Self.endID, anchor: .bottom) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            guard atBottom else { return }
+            proxy.scrollTo(Self.endID, anchor: .bottom)
+        }
+    }
+
+    /// Under this many rows the list is laid out whole.
+    private static let eagerLimit = 120
+
+    /// The rows, in either stack.
+    @ViewBuilder
+    private func rows(lastUser: Int, bubble: CGFloat) -> some View {
+        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+            ConversationEntryRow(entry: entry,
+                                 isOpen: opened.contains(entry.id),
+                                 isRunning: isWorking && index > lastUser,
+                                 bubbleWidth: bubble,
+                                 onToggle: { toggle(entry.id) })
+                // A value: when claude's file grows, only the
+                // rows that changed are drawn again.
+                .equatable()
+                .padding(.top, gap(before: index))
+        }
+        ForEach(pending) { sent in
+            UserBubble(text: sent.userText, images: sent.images, key: sent.id, maxWidth: bubble)
+                .opacity(0.6)
+                .padding(.top, DefaultTheme.space(14))
+        }
+        if isWorking {
+            StatusLabel(.working)
+                .padding(.top, DefaultTheme.space(14))
         }
     }
 
@@ -347,7 +376,7 @@ private struct ToolCallRow: View {
         VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
             FoldedRowHeader(isOpen: isOpen, isError: call.isError, onToggle: onToggle) {
                 AppIcon(ConversationLayout.toolIcon(for: call.name), size: 13)
-                Text(call.summary)
+                summary
                     .themeFont(size: 11.5, design: .monospaced)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -359,7 +388,7 @@ private struct ToolCallRow: View {
             if isOpen {
                 VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
                     if !call.input.isEmpty {
-                        ToolTextBlock(text: call.input, isError: false)
+                        ToolTextBlock(text: call.input, isError: false, isShell: call.name == "Bash")
                     }
                     if let result = call.result, !result.isEmpty {
                         ToolTextBlock(text: result, isError: call.isError)
@@ -373,17 +402,29 @@ private struct ToolCallRow: View {
     }
 }
 
+extension ToolCallRow {
+    /// "Bash docker exec …": the command in the theme's colours.
+    var summary: Text {
+        if call.name == "Bash", call.summary.hasPrefix("Bash ") {
+            return Text("Bash ") + Text(ShellHighlighter.attributed(String(call.summary.dropFirst(5))))
+        }
+        return Text(call.summary)
+    }
+}
+
 /// A tool's input or result: as tall as its text up to `maxHeight`, then it
 /// scrolls on its own — a long file read must not push the answer off screen.
 private struct ToolTextBlock: View {
     let text: String
     let isError: Bool
+    /// A shell command: in colours.
+    var isShell = false
 
     private static let maxHeight: CGFloat = 240
 
     var body: some View {
         ScrollView(.vertical) {
-            Text(text)
+            (isShell && !isError ? Text(ShellHighlighter.attributed(text)) : Text(text))
                 .themeFont(size: 11.5, design: .monospaced)
                 .foregroundStyle(isError ? DefaultTheme.danger : DefaultTheme.primaryText.opacity(0.85))
                 .textSelection(.enabled)
@@ -707,6 +748,17 @@ public struct ConversationPromptCard: View {
         self.onShowTerminal = onShowTerminal
     }
 
+    /// The dialog's lines; under "Bash command", the command in colours.
+    private var contextText: Text {
+        var text = Text("")
+        for (index, line) in context.enumerated() {
+            if index > 0 { text = text + Text("\n") }
+            let isCommand = index == 1 && context.first?.lowercased().hasPrefix("bash") == true
+            text = text + (isCommand ? Text(ShellHighlighter.attributed(line)) : Text(line))
+        }
+        return text
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
             HStack(spacing: DefaultTheme.space(8)) {
@@ -723,7 +775,7 @@ public struct ConversationPromptCard: View {
                 .help("Show the terminal")
             }
             if !context.isEmpty {
-                Text(context.joined(separator: "\n"))
+                contextText
                     .themeFont(size: 11.5, design: .monospaced)
                     .foregroundStyle(DefaultTheme.primaryText.opacity(0.85))
                     .textSelection(.enabled)

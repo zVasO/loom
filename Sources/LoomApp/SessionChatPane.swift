@@ -186,9 +186,17 @@ struct SessionChatPane: View {
         // The screen moved on from the prompt answered: a new one may come.
         .onChange(of: item?.state) { answered = nil }
         // The failure is about the text as it was sent: edited, it is a new message.
+        // Kept per session as it is typed: another tab, another session and
+        // back, the message waits where it was left.
         .onChange(of: draft) {
             if sendFailed { sendFailed = false }
+            ChatDrafts.shared.text[sessionID] = draft.isEmpty ? nil : draft
         }
+        .onChange(of: images) {
+            ChatDrafts.shared.images[sessionID] = images.isEmpty ? nil : images
+        }
+        .onAppear { restoreDraft() }
+        .onChange(of: sessionID) { restoreDraft() }
     }
 
     @ViewBuilder
@@ -211,14 +219,18 @@ struct SessionChatPane: View {
     /// has ended.
     private func follow() async {
         let native = nativeID
+        // Where the last look at this conversation left it: back on the tab,
+        // the list shows at once and only what claude wrote since is read.
+        let kept = ChatReadCache.shared[native]
         if shownNative != native {
             // Another conversation: what the list held is not its.
             shownNative = native
-            if !entries.isEmpty { entries = [] }
+            let restored = ClaudeConversation.mergingEchoes(kept?.reader.entries ?? [])
+            if entries != restored { entries = restored }
         }
-        var reader = ClaudeConversation.Reader()
+        var reader = kept?.reader ?? ClaudeConversation.Reader()
         // Found once: looking for it lists every folder of ~/.claude/projects.
-        var file: URL?
+        var file: URL? = kept?.file
         // Woken by claude's writes: what it says shows as it lands, not at
         // the next tick. The ticks stay, slower, for what the watch misses
         // (a file replaced under it).
@@ -238,7 +250,13 @@ struct SessionChatPane: View {
             guard !Task.isCancelled else { return }   // a restarted read wins
             reader = result.reader
             file = result.file
-            if result.changed, entries != reader.entries { entries = reader.entries }
+            if result.changed || kept == nil {
+                ChatReadCache.shared[native] = ChatReadCache.Kept(reader: reader, file: file)
+            }
+            if result.changed {
+                let shown = ClaudeConversation.mergingEchoes(reader.entries)
+                if entries != shown { entries = shown }
+            }
             guard isLive else { return }
             if wake == nil, let file { wake = FileWake(url: file) }
             if let wake {
@@ -281,6 +299,14 @@ struct SessionChatPane: View {
         guard !Task.isCancelled else { return }
         let answer = JournalAnswer(wait: reason, state: state)
         if journal != answer { journal = answer }
+    }
+
+    /// What was being written in this session when the chat was left.
+    private func restoreDraft() {
+        let text = ChatDrafts.shared.text[sessionID] ?? ""
+        if draft != text { draft = text }
+        let waiting = ChatDrafts.shared.images[sessionID] ?? []
+        if images != waiting { images = waiting }
     }
 
     // MARK: Sending
@@ -358,11 +384,14 @@ struct SessionChatPane: View {
         let now = Date()
         pending.removeAll { message in
             if now.timeIntervalSince(message.sentAt) > 30 { return true }
-            let text = message.text
+            let text = ClaudeConversation.comparable(message.text)
             return said.contains { entry in
-                guard case .user(let written) = entry.kind else { return false }
-                if text.isEmpty { return !entry.images.isEmpty && (entry.timestamp ?? now) >= message.sentAt.addingTimeInterval(-5) }
-                return written.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix(text)
+                guard case .user(let written) = entry.kind,
+                      (entry.timestamp ?? now) >= message.sentAt.addingTimeInterval(-5) else { return false }
+                // Images alone: the next message with images is it.
+                if text.isEmpty { return !entry.images.isEmpty }
+                let shown = ClaudeConversation.comparable(written)
+                return shown == text || shown.contains(text)
             }
         }
     }
@@ -451,6 +480,39 @@ private final class FileWake: @unchecked Sendable {
         } else {
             fired = true
             lock.unlock()
+        }
+    }
+}
+
+/// The messages being written, by session: the chat view is rebuilt at
+/// every tab switch, and a draft is not something to lose there.
+@MainActor
+private final class ChatDrafts {
+    static let shared = ChatDrafts()
+    var text: [SessionID: String] = [:]
+    var images: [SessionID: [ComposerImage]] = [:]
+}
+
+/// The conversations the chat has read, by native session: a return to
+/// the tab picks up where the reading stopped. A few, the latest kept.
+@MainActor
+private final class ChatReadCache {
+    static let shared = ChatReadCache()
+    struct Kept {
+        var reader: ClaudeConversation.Reader
+        var file: URL?
+    }
+    private var kept: [SessionID: Kept] = [:]
+    private var order: [SessionID] = []
+    private let limit = 8
+
+    subscript(native: SessionID) -> Kept? {
+        get { kept[native] }
+        set {
+            kept[native] = newValue
+            order.removeAll { $0 == native }
+            if newValue != nil { order.append(native) }
+            while order.count > limit { kept[order.removeFirst()] = nil }
         }
     }
 }
