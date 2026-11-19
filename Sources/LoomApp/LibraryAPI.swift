@@ -125,7 +125,8 @@ extension AppModel {
             }
             let inputs = RunInputs(trigger: params.prNumber != nil ? .pullRequest : .manual, projectID: projectID,
                                    prNumber: params.prNumber, jiraKey: params.jiraKey,
-                                   note: String((params.note ?? "").prefix(2_000)))
+                                   note: String((params.note ?? "").prefix(2_000)),
+                                   task: String((params.task ?? "").prefix(8_000)))
             workflows.launchRequest = WorkflowsModel.LaunchRequest(workflowID: id, inputs: inputs)
             workflows.revealRequest = UUID()
             return APIResponse(id: request.id, result: .object([

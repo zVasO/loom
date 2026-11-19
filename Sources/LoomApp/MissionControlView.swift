@@ -1,202 +1,208 @@
-import LoomAgents
 import LoomCore
-import LoomTerminal
 import LoomUI
 import SwiftUI
 
-/// v2 — Mission Control: the whole fleet at a glance. Every live claude
-/// session as a card with a LIVE terminal preview, its state and branch;
-/// one click dives into the session. This is the orchestrator's cockpit:
-/// spot the session that needs input without cycling through tabs.
+/// Mission Control (⌘G): the whole fleet in one window — its head (title,
+/// location, filter), the session table, and under it the selected session's
+/// MAIN TERMINAL: the real one, fitted to its pane, where the conversation
+/// reads as it does in the Sessions tab and where you type your answer.
+/// Spot the session that waits for you, answer it, move on.
+///
+/// The table keeps the keyboard (↑ ↓, ↵, R) until you click the terminal or
+/// press R: the terminal never takes it by itself. Its height depends on the
+/// window alone, so the terminal under it is resized by a window resize and
+/// by nothing else — a filter that hides rows costs no repaint.
 struct MissionControlView: View {
     let model: AppModel
     let onOpen: (SessionID) -> Void
+
+    @State private var filter: FleetFilter = .all
+    @State private var selected: SessionID?
+    /// The session whose terminal shows: the selection once it rests. Walking
+    /// the table with ↑ ↓ must not fit — resize — every session on the way.
+    @State private var shown: SessionID?
+    /// Bumped to hand the terminal the keyboard (Reply, R).
+    @State private var terminalFocus = 0
+    @State private var terminalHasKeyboard = false
 
     private var fleet: [AppModel.SessionItem] {
         model.sessions.filter { !$0.isShell }
     }
 
+    private var visible: [AppModel.SessionItem] {
+        fleet.filter { filter.matches($0) }
+    }
+
+    private var shownItem: AppModel.SessionItem? {
+        fleet.first { $0.id == shown }
+    }
+
     var body: some View {
-        ScrollView {
+        Group {
             if fleet.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 34))
-                        .foregroundStyle(DefaultTheme.secondaryText)
-                    Text("No live session")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(DefaultTheme.primaryText)
-                    Text("⌘N starts one in the current project.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(DefaultTheme.secondaryText)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 120)
+                emptyState
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 14)],
-                          spacing: 14) {
-                    ForEach(fleet) { item in
-                        FleetCard(model: model, item: item) { onOpen(item.id) }
-                    }
-                }
-                .padding(20)
+                window.padding(DefaultTheme.space(20))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DefaultTheme.background)
-    }
-}
-
-/// One session of the fleet: header (title, state), live terminal preview,
-/// branch footer. The border takes the state color when the session needs
-/// attention — amber is what you scan for.
-private struct FleetCard: View {
-    let model: AppModel
-    let item: AppModel.SessionItem
-    let onOpen: () -> Void
-    @State private var surface: TerminalSurface?
-
-    init(model: AppModel, item: AppModel.SessionItem, onOpen: @escaping () -> Void) {
-        self.model = model
-        self.item = item
-        self.onOpen = onOpen
-        _surface = State(initialValue: model.cachedSurface(for: item.id))
-    }
-    @State private var hovered = false
-    @State private var quickReply = ""
-    @State private var loadedUsage: SessionUsageSummary?
-    /// Measured against the window claude reported, when it did.
-    private var usage: SessionUsageSummary? {
-        loadedUsage?.reportingWindow(model.reportedWindows[item.id])
+        .onAppear(perform: ensureSelection)
+        .onChange(of: fleet.map(\.id)) { _, _ in ensureSelection() }
+        .onChange(of: filter) { _, _ in ensureSelection() }
+        .task(id: selected) {
+            guard selected != shown else { return }
+            // The first terminal shows at once; afterwards the selection
+            // rests a moment before its terminal replaces the one on screen.
+            if shown != nil { try? await Task.sleep(for: .milliseconds(160)) }
+            guard !Task.isCancelled else { return }
+            shown = selected
+        }
     }
 
-    private var borderColor: Color {
-        if item.state == .needsInput { return DefaultTheme.badgeColor(for: .needsInput).opacity(0.8) }
-        if hovered { return DefaultTheme.accent.opacity(0.5) }
-        return DefaultTheme.cardBorder
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text(model.project(item.projectID)?.name ?? "—")
-                    .font(.system(size: 11))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                Text("/").foregroundStyle(DefaultTheme.mutedText)
-                Text(item.title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(DefaultTheme.primaryText)
-                    .lineLimit(1)
-                BadgeRow(model: model, badges: item.badges)
-                Spacer()
-                StatusLabel(item.state)
-            }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-
-            Divider().overlay(DefaultTheme.cardBorder)
-
-            preview
-                .frame(height: 170)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .background(DefaultTheme.contentBackground)
-                .clipped()
-
-            // v3 — instant reply: answer the agent right from the fleet,
-            // without opening the session.
-            if item.state == .needsInput, let surface {
-                Divider().overlay(DefaultTheme.cardBorder)
-                TextField("Reply to the agent…", text: $quickReply)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.primaryText)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .onSubmit {
-                        let text = quickReply.trimmingCharacters(in: .whitespaces)
-                        guard !text.isEmpty else { return }
-                        surface.send(text + "\r")
-                        quickReply = ""
-                    }
-            }
-            if item.branch != nil || usage != nil {
-                Divider().overlay(DefaultTheme.cardBorder)
-                HStack(spacing: 10) {
-                    if let branch = item.branch {
-                        MonoTag(branch, systemImage: "arrow.triangle.branch",
-                                color: DefaultTheme.secondaryText)
-                    }
-                    Spacer()
-                    if let usage {
-                        MonoTag("ctx \(UsageSheet.tokens(usage.contextTokens)) · \(ContextWindowSheet.percent(usage.fraction))",
-                                systemImage: "gauge.with.needle",
-                                color: usage.level == .normal ? DefaultTheme.mutedText : usage.level.color)
-                    }
-                }
-                .padding(.horizontal, 12).padding(.vertical, 7)
+    private var window: some View {
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                FleetHead(model: model, filter: $filter, counts: FleetFilter.counts(fleet))
+                Hairline()
+                FleetTable(model: model, items: visible, selected: $selected,
+                           onOpen: onOpen, onReply: reply(to:))
+                    .frame(height: Self.tableHeight(windowHeight: proxy.size.height))
+                Hairline()
+                terminal
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Hairline()
+                FleetFooter(model: model, items: fleet,
+                            hints: [(["↑", "↓"], "navigate"), (["↵"], "open"), (["R"], "type in the terminal")])
             }
         }
         .background(DefaultTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 11))
-        .overlay(RoundedRectangle(cornerRadius: 11).stroke(borderColor, lineWidth: 1))
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onOpen)
-        .contextMenu {
-            BadgeMenu(model: model, sessionID: item.id, current: item.badges)
-        }
-        .onHover { hovered = $0 }
-        .animation(.hover, value: hovered)
-        .task(id: item.nativeID) {
-            let fetched = await model.surface(for: item.id)
-            if fetched !== surface { surface = fetched }
-            // P1 perf: the native .jsonl can be MBs — read only its tail, off
-            // the main actor (the context figure lives in the LAST entry).
-            // Keyed by the native id: a `/resume <id>` in the terminal
-            // changes which file to read.
-            let id = item.nativeID
-            loadedUsage = await Task.detached(priority: .utility) {
-                ClaudeNativeSessions.usage(for: id, tailBytes: 65_536)
-            }.value
-        }
+        .clipShape(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).strokeBorder(DefaultTheme.line2, lineWidth: 1))
+        .themeShadow(.sm, radius: 10)
     }
 
-    /// Live miniature: the LAST populated screen lines, tiny mono type. The
-    /// surface stays attached while the card is visible — frames keep flowing.
+    /// The table's share of the window: about three tenths of its height in
+    /// whole rows, three at least, eight at most — the rest is the terminal's.
+    static func tableHeight(windowHeight: CGFloat) -> CGFloat {
+        let rows = Int((windowHeight * 0.3 - FleetTable.headerHeight) / FleetTable.rowHeight)
+        return FleetTable.headerHeight + CGFloat(min(8, max(3, rows))) * FleetTable.rowHeight
+    }
+
+    // MARK: - Terminal
+
     @ViewBuilder
-    private var preview: some View {
-        if let surface {
-            MiniTerminalPreview(surface: surface)
-                // A preview's cadence: four frames a second are plenty for 7 pt
-                // text, where the pane's rate cost a snapshot, a main-actor hop
-                // and a pass of 22 rows per card per frame.
-                .task(id: ObjectIdentifier(surface)) {
-                    await surface.attached(cadence: .preview(.milliseconds(250)))
+    private var terminal: some View {
+        if let item = shownItem {
+            VStack(spacing: 0) {
+                terminalHead(item)
+                Hairline()
+                if item.isDormant {
+                    dormantNotice(item)
+                } else {
+                    // One pane for every session shown: it follows the
+                    // session it is given, and keeps its key capture — the
+                    // keyboard handed over by Reply stays where it was put.
+                    TerminalPane(model: model, sessionID: item.id, role: .missionControl,
+                                 focusRequest: terminalFocus,
+                                 onFocusChange: { terminalHasKeyboard = $0 })
                 }
+            }
+            .background(DefaultTheme.contentBackground)
         } else {
-            ProgressView().controlSize(.small)
+            Text(visible.isEmpty ? "No session matches this filter." : "Select a session: its terminal shows here.")
+                .themeFont(size: 12)
+                .foregroundStyle(DefaultTheme.secondaryText)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(DefaultTheme.contentBackground)
         }
     }
-}
 
-private struct MiniTerminalPreview: View {
-    let surface: TerminalSurface
-
-    private var lines: [String] {
-        // P2 perf: find the populated tail FIRST, then map only what we show.
-        let all = surface.screen.lines
-        var end = all.count
-        while end > 0, all[end - 1].cells.allSatisfy({ $0.character == " " }) { end -= 1 }
-        let start = max(0, end - 22)
-        return all[start..<end].map { String($0.cells.prefix(120).map(\.character)) }
+    private func terminalHead(_ item: AppModel.SessionItem) -> some View {
+        HStack(spacing: DefaultTheme.space(10)) {
+            LucideIcon(.terminal, size: 14).foregroundStyle(DefaultTheme.secondaryText)
+            MonoLabel("Main terminal")
+            MonoLabel(item.title, color: DefaultTheme.mutedText)
+            StatusTag(FleetState.label(item), color: FleetState.color(item))
+            Spacer(minLength: 12)
+            if !item.isDormant {
+                if terminalHasKeyboard {
+                    StatusTag("Typing here", color: DefaultTheme.accent)
+                } else {
+                    HStack(spacing: DefaultTheme.space(5)) {
+                        KeyCap("R")
+                        MonoLabel("or click to type", color: DefaultTheme.mutedText)
+                    }
+                }
+            }
+            if let branch = item.branch {
+                Text(branch)
+                    .themeFont(size: 11.5, design: .monospaced)
+                    .foregroundStyle(DefaultTheme.branch)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 260, alignment: .trailing)
+            }
+            FleetButton("Open", prominent: false) { onOpen(item.id) }
+                .help("Open this session in the Sessions tab (↵)")
+        }
+        .padding(.horizontal, DefaultTheme.space(14))
+        .frame(height: DefaultTheme.size(38))
+        .background(DefaultTheme.background)
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                Text(line.isEmpty ? " " : line)
-                    .font(.system(size: 7, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.primaryText.opacity(0.85))
-                    .lineLimit(1)
+    private func dormantNotice(_ item: AppModel.SessionItem) -> some View {
+        VStack(spacing: DefaultTheme.space(10)) {
+            Text("Session inactive — Resume reopens its conversation.")
+                .themeFont(size: 12)
+                .foregroundStyle(DefaultTheme.secondaryText)
+            FleetButton("Resume", prominent: true) {
+                Task { await model.resumeDormant(item.id) }
             }
         }
-        .padding(8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: DefaultTheme.space(10)) {
+            LucideIcon(.layoutGrid, size: 34)
+                .foregroundStyle(DefaultTheme.secondaryText)
+            Text("No live session")
+                .themeFont(size: 15, weight: .semibold)
+                .foregroundStyle(DefaultTheme.primaryText)
+            HStack(spacing: DefaultTheme.space(4)) {
+                KeyCap("⌘")
+                KeyCap("N")
+                Text("starts one in the current project.")
+                    .themeFont(size: 12)
+                    .foregroundStyle(DefaultTheme.secondaryText)
+            }
+        }
+        .padding(.top, DefaultTheme.space(120))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    // MARK: - Selection
+
+    /// Reply, from a row's button or R: that session's terminal shows at
+    /// once and takes the keyboard — what you type next goes to its agent.
+    private func reply(to id: SessionID) {
+        selected = id
+        shown = id
+        terminalFocus += 1
+        // A pane that mounts for this very reply (nothing shown before, or an
+        // inactive session) is born after the request: ask again once it is there.
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard shown == id else { return }
+            terminalFocus += 1
+        }
+    }
+
+    /// Keeps a visible row selected: the one already chosen, else the first
+    /// session that waits for you, else the first row.
+    private func ensureSelection() {
+        if let selected, visible.contains(where: { $0.id == selected }) { return }
+        selected = (visible.first { $0.state == .needsInput } ?? visible.first)?.id
     }
 }

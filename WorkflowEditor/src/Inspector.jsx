@@ -210,7 +210,7 @@ function VerdictEditor({ verdict, disabled, onChange }) {
 }
 
 /** What an agent step is: expert, mode, model, prompt, fields, verdict, skills, connectors, time. */
-function AgentFields({ config, setConfig, disabled, groups, state, headlessOnly }) {
+function AgentFields({ config, setConfig, disabled, groups, state, headlessOnly, conversation }) {
   const experts = state.experts || [];
   const connectors = state.connectors || [];
   const skills = state.skills || [];
@@ -239,6 +239,23 @@ function AgentFields({ config, setConfig, disabled, groups, state, headlessOnly 
           <datalist id="models"><option value="opus" /><option value="sonnet" /><option value="haiku" /></datalist>
         </Field>
       </div>
+      {conversation && (
+        <Field label="Conversation"
+          hint="Carrying one on keeps what the agent already read and did: a developer who plans, implements, then fixes what a review found.">
+          <select name="continues" value={config.continues || ""} disabled={disabled}
+            onChange={(e) => setConfig({ continues: e.target.value || null })}>
+            <option value="">A new agent every time</option>
+            <option value={conversation.self}>Its own — run again, it remembers</option>
+            {conversation.steps.map((step) => (
+              <option key={step.id} value={step.id}>Carries on from {step.title}</option>
+            ))}
+            {config.continues && config.continues !== conversation.self
+              && !conversation.steps.some((step) => step.id === config.continues) && (
+              <option value={config.continues}>Carries on from {config.continues} (not possible)</option>
+            )}
+          </select>
+        </Field>
+      )}
       <Field label="Prompt">
         <PromptEditor value={config.prompt || ""} disabled={disabled} groups={groups}
           onChange={(prompt) => setConfig({ prompt })} />
@@ -500,6 +517,13 @@ export function Inspector({ workflow, node, state, readOnly, run, onChange, onDe
           of one to the left of another: several links out run in parallel, several in wait for all.
           A Loop step runs earlier steps again, a few times at most.
         </p>
+        <Field label="Where its runs work"
+          hint={(G.WORKSPACES.find((w) => w.value === (workflow.workspace || "project")) || G.WORKSPACES[0]).hint}>
+          <select name="workspace" value={workflow.workspace || "project"} disabled={!!readOnly}
+            onChange={(e) => onWorkflowChange && onWorkflowChange({ workspace: e.target.value })}>
+            {G.WORKSPACES.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+          </select>
+        </Field>
         <OrchestratorPanel orchestrator={workflow.orchestrator || null} experts={state.experts || []}
           disabled={!!readOnly} run={run} onOpen={onOpenOrchestrator}
           onChange={(orchestrator) => onWorkflowChange && onWorkflowChange({ orchestrator })} />
@@ -581,7 +605,8 @@ export function Inspector({ workflow, node, state, readOnly, run, onChange, onDe
 
       {node.type === "agent" && !config.blockID && (
         <>
-          <AgentFields config={config} setConfig={setConfig} disabled={disabled} groups={groups} state={state} />
+          <AgentFields config={config} setConfig={setConfig} disabled={disabled} groups={groups} state={state}
+            conversation={{ self: node.id, steps: G.continuable(workflow, node.id, blocks) }} />
           <RulesFields label="Rules for this step" rules={config.rules} ruleSetIDs={config.ruleSetIDs}
             ruleSets={state.ruleSets} disabled={disabled} onChange={setConfig} />
           {!disabled && (

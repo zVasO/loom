@@ -24,6 +24,10 @@ Chromium, par le protocole DevTools : `node --test --test-concurrency=1 Tests/Ag
 (et `LOOM_CHROMIUM=<chrome-headless-shell> swift test` pour les tests Swift de bout en bout) ;
 l'app entière : `LOOM_AUTOTEST=agent-browser LOOM_AUTOTEST_ENGINE=chromium|webkit swift run LoomApp`
 (rapport et latences p50/p90 dans `/tmp/loom-agent-browser-report.json`).
+Affichage sous les thèmes : `LOOM_AUTOTEST=themes` promène l'app sous chaque thème d'un plan
+— les intégrés, et les exports tweakcn de `Tests/ThemeTour/themes` suivis en entier ou pour
+leurs couleurs — et enregistre une image par écran (`Tests/ThemeTour/README.md`) ; en CI,
+le job « theme tour » (lancé à la main, entrée `themes`) rend les images en artefact.
 
 Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 étapes).
 
@@ -32,7 +36,9 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
 - **Sessions** : lancement depuis un objectif (UC-1), worktree isolé `loom/<slug>`
   par session, arrêt escaladé SIGINT→SIGTERM→SIGKILL, Reprise après crash sous le
   même identifiant (`claude --resume`, UUID imposé au lancement), archivage,
-  historique, recherche FTS5, palette ⌘K.
+  historique, recherche FTS5, palette ⌘K. Dans la barre latérale, une carte de session
+  se réduit à son titre à l'unité (chevron au survol, ou menu contextuel), et le
+  reste d'un lancement à l'autre ; le bouton de la liste les réduit toutes.
 - **Détection d'état — le différenciateur** : deux canaux fusionnés par une machine
   à états pure (fenêtre de priorité hooks 10 s, hystérésis 2 s, péremption 4 s).
   Canal hooks : `--settings` injecté par session → binaire `loom-hook` → socket
@@ -42,6 +48,22 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   (sa doc ment sur la thread-safety — voir ADR-0007), `TerminalSurface` `@Observable`
   dont l'écran n'est jamais vide, transcripts bruts + dé-ANSI-isés en continu,
   rotation 10 Mo.
+- **Vue conversation** (ADR-0023) : dans l'onglet Sessions, le sélecteur
+  « Terminal | Chat » de l'en-tête (⌘⇧M) montre la même session comme une
+  conversation — réponses de claude en Markdown (titres, listes imbriquées,
+  tableaux, blocs de code), appels d'outils repliés sur une ligne avec leur
+  résultat, champ de message en bas (Retour envoie, ⇧Retour va à la ligne). Elle
+  est lue dans le fichier de la session native (`~/.claude/projects/…/<uuid>.jsonl`),
+  jamais dans l'écran, et suit un `/resume` ou un `/clear`. Ce qu'on y écrit est
+  tapé dans le terminal de la session, où claude continue de tourner. Une demande
+  de permission (ou une question à options) que claude dessine dans son terminal
+  s'affiche dans le chat en carte, un bouton par option (ADR-0025). Pendant que
+  claude travaille, Stop l'interrompt (Échap) et l'éclair envoie le message tout de
+  suite au lieu de le mettre en file. Un message envoyé s'affiche aussitôt, en
+  attendant que claude l'écrive ; la conversation suit le fichier dès qu'il change.
+  Une image collée (⌘V) ou déposée sur le chat attend en vignette au-dessus du champ ;
+  envoyée, elle part comme un chemin collé dans claude (qui en fait une pièce jointe,
+  `[Image #1]`) et s'affiche dans le message, relue dans le fichier de claude.
 - **Git** : worktrees avec collisions départagées, status porcelain v2, diff
   (non-suivis compris), suppression refusée si travail non commité.
 - **Pull requests** : onglet PR sur le `gh` de l'utilisateur — projets locaux,
@@ -51,6 +73,12 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   brouillon et envoyés en une seule review avec le verdict, session claude par PR,
   un onglet par PR ouverte (aperçu réutilisé au clic, épinglé par la review),
   conservés d'un onglet de l'app à l'autre et d'un lancement à l'autre.
+- **Palette ⌘K** (ADR-0024) : un calque de la fenêtre, pas une feuille — ni fenêtre
+  à construire ni transition, la liste suit la frappe en une passe. Une action peut y
+  poser sa question : « Review code » demande l'URL d'une pull request (reprise du
+  presse-papiers quand il en contient une) ou `owner/repo#12`, et Retour lance sa
+  review dans l'onglet PRs. ⌘⇧R (lettre réglable dans Réglages › Raccourcis, aussi
+  dans le menu File) ouvre la palette directement sur cette question.
 - **Reviews planifiées** : des plannings (heure, jours) sur des tranches de PR —
   un projet + une requête GitHub (« needs review », un filtre perso…) + un maximum
   par passage. À l'heure dite (ou au réveil du Mac, jusqu'à 4 h de retard), Loom
@@ -59,15 +87,23 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   le rapport que claude écrit dans `.loom-review/auto-review.json` : résumé dans la
   barre de verdict, commentaires sur les lignes du diff en commentaires en attente,
   verdict suggéré. L'humain relit, corrige, envoie. Une PR n'est revue à nouveau
-  qu'après un push. Réglages › Scheduled reviews ; suivi dans la sidebar PR.
-- **Workflows** (ADR-0017) : des graphes d'étapes dessinés dans l'onglet Workflows
+  qu'après un push. Réglages › Scheduled reviews ; suivi dans le rail du mode Browse de l'onglet PRs.
+- **Workflows** (ADR-0017, ADR-0021) : une tâche en entrée, une branche relue en
+  sortie. L'onglet s'ouvre sur des **gabarits** prêts à lancer — Réaliser une tâche
+  (plan, ton accord, implémentation, relecture indépendante qui renvoie le travail),
+  Corriger jusqu'au vert, Relire une PR, Enquêter sur un bug. Un run peut travailler
+  **sur sa propre branche** (un worktree à lui : ton dossier ne bouge pas, rien n'est
+  poussé) ; une étape peut **poursuivre la conversation** d'une autre (le même
+  développeur planifie, implémente et corrige) ; un run se lit comme une liste
+  d'étapes avec leurs verdicts et leurs réponses. Dessous, des graphes d'étapes
   (éditeur React Flow embarqué) — départ, contexte (PR, ticket Jira via un connecteur
   Atlassian, repo), agents confiés à des **experts** (instructions, modèle, skills,
   connecteurs MCP, outils autorisés), conditions, boucles bornées, rapport final.
   Étapes en parallèle, réponses JSON validées entre étapes, headless (`claude -p`)
   ou en session visible ; estimation de coût avant lancement ; runs suivis en direct
   et conservés. Lancés à la main, depuis l'onglet d'une PR ou par une review
-  planifiée. Built-in : « PR review — 3 passes ». Le rapport, animé, porte un thème
+  planifiée. La bibliothèque démarre vide : un gabarit n'y entre que lorsqu'on le
+  lance. Le rapport, animé, porte un thème
   de Loom (thème HomeServe prêt dans `docs/themes/`). Un run peut avoir un
   **orchestrateur** (ADR-0018) : une session visible, sous Sessions › Workflows, qui
   reçoit chaque résultat, questionne une étape (même headless, en reprenant sa
@@ -120,7 +156,11 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   Guide : [`docs/extensions.md`](docs/extensions.md).
 - **Thèmes** : 9 familles intégrées, chacune en clair et en sombre ; apparence
   Système / Clair / Sombre (suivi de macOS en direct) ; override par projet ;
-  import d'un thème tweakcn/shadcn (nom, URL ou CSS collé) ; aperçu sur des
+  import d'un thème tweakcn/shadcn (nom, URL ou CSS collé), toujours en entier :
+  couleurs, bordures, rayon, espacement, polices (téléchargées depuis Google
+  Fonts si le Mac ne les a pas), interlettrage et ombres ; dans Réglages › Thèmes,
+  à côté de Clair/Sombre, on choisit de le suivre à la lettre ou pour ses couleurs
+  seulement (ADR-0022) ; aperçu sur des
   composants factices avec bascule clair/sombre ; sémantique des badges invariante ;
   en option, le thème appliqué à Claude Code lui-même, en direct (ADR-0013).
 

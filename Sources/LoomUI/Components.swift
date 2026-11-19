@@ -1,14 +1,15 @@
 import LoomCore
 import SwiftUI
 
-// The visual vocabulary of the reference: tab pills, mono tags,
-// status dots, accent-filled buttons. Everything clickable
-// responds to hover — same recipe everywhere: background rises, text
-// lights up, 120 ms easeOut.
+// The visual vocabulary of the landing page's charter: tab pills, mono
+// tags, status dots, accent-filled buttons, hairline edges. Everything
+// clickable responds to hover the same way — the surface rises a step, the
+// edge lightens a step, the text lights up — in 160 ms on a sharp
+// ease-out, never a slow fade or a bounce.
 
 public extension Animation {
-    /// The hover transition shared by all controls.
-    static var hover: Animation { .easeOut(duration: 0.12) }
+    /// The hover transition shared by all controls: cubic-bezier(0.16, 1, 0.3, 1), 160 ms.
+    static var hover: Animation { .timingCurve(0.16, 1, 0.3, 1, duration: 0.16) }
 }
 
 /// Brightens the control on hover — for hand-rolled filled buttons
@@ -48,36 +49,67 @@ public extension View {
     }
 }
 
-/// Navigation bar tab (Projects / Sessions).
+/// Navigation bar tab (Projects / Sessions): a Lucide icon and a label; the
+/// active one sits on a raised pill with a hairline edge.
 public struct NavTab: View {
     let title: String
+    let icon: LucideIcon.Glyph?
     let isActive: Bool
     let action: () -> Void
     @State private var hovered = false
 
-    public init(_ title: String, isActive: Bool, action: @escaping () -> Void) {
+    public init(_ title: String, icon: LucideIcon.Glyph? = nil, isActive: Bool, action: @escaping () -> Void) {
         self.title = title
+        self.icon = icon
         self.isActive = isActive
         self.action = action
     }
 
     public var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: isActive ? .semibold : .regular))
-                .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
-                                                     : DefaultTheme.secondaryText)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(isActive ? DefaultTheme.surfaceRaised
-                            : hovered ? DefaultTheme.surfaceRaised.opacity(0.6) : .clear,
-                            in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8)
-                    .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
+            HStack(spacing: DefaultTheme.space(6)) {
+                if let icon { LucideIcon(icon, size: 14) }
+                Text(title).themeFont(size: 12)
+            }
+            .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText : DefaultTheme.mutedText)
+            .padding(.horizontal, DefaultTheme.space(8))
+            .frame(height: DefaultTheme.size(24))
+            .background(isActive ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4))
+                .strokeBorder(isActive ? DefaultTheme.line : .clear, lineWidth: 1))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
+    }
+}
+
+/// A status tag: mono capitals in the colour of what it reports, on a 7 %
+/// wash with a 32 % edge ("● HOOKS ONLINE", "LIVE").
+public struct StatusTag: View {
+    let text: String
+    let color: Color
+    let showsDot: Bool
+
+    public init(_ text: String, color: Color, dot: Bool = true) {
+        self.text = text
+        self.color = color
+        self.showsDot = dot
+    }
+
+    public var body: some View {
+        HStack(spacing: DefaultTheme.space(6)) {
+            if showsDot { Circle().fill(color).frame(width: 6, height: 6) }
+            Text(text.uppercased())
+                .themeFont(size: 10.5, weight: .medium, design: .monospaced, tracking: 0.5)
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, DefaultTheme.space(6))
+        .frame(height: DefaultTheme.size(20))
+        .background(color.opacity(0.07), in: RoundedRectangle(cornerRadius: DefaultTheme.radius(3)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(3)).strokeBorder(color.opacity(0.32), lineWidth: 1))
+        .fixedSize()
     }
 }
 
@@ -97,15 +129,16 @@ public struct AccentButton: View {
 
     public var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                if let systemImage { Image(systemName: systemImage).font(.system(size: 12, weight: .bold)) }
-                Text(title).font(.system(size: 13, weight: .semibold))
+            HStack(spacing: DefaultTheme.space(8)) {
+                if let systemImage { AppIcon(systemImage, size: 14) }
+                Text(title).themeFont(size: 13, weight: .medium)
             }
             .foregroundStyle(DefaultTheme.accentText)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 9))
+            .padding(.horizontal, DefaultTheme.space(14))
+            .frame(height: DefaultTheme.size(32))
+            .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             .brightness(hovered ? 0.06 : 0)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
@@ -132,18 +165,20 @@ public struct GhostButton: View {
 
     public var body: some View {
         Button(role: role, action: action) {
-            HStack(spacing: 6) {
-                if let systemImage { Image(systemName: systemImage).font(.system(size: 12)) }
-                if let title { Text(title).font(.system(size: 13)) }
+            HStack(spacing: DefaultTheme.space(6)) {
+                if let systemImage { AppIcon(systemImage, size: 14) }
+                if let title { Text(title).themeFont(size: 12.5) }
             }
             .foregroundStyle(role == .destructive ? DefaultTheme.danger
                              : hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, DefaultTheme.space(10))
+            .frame(height: DefaultTheme.size(28))
             .background(hovered ? (role == .destructive ? DefaultTheme.danger.opacity(0.12)
                                                         : DefaultTheme.surfaceRaised)
                                 : .clear,
-                        in: RoundedRectangle(cornerRadius: 7))
+                        in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
+                .strokeBorder(hovered ? DefaultTheme.line : .clear, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -170,14 +205,15 @@ public struct BarIconButton: View {
 
     public var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isActive ? DefaultTheme.accent
+            AppIcon(systemImage, size: 15)
+                .foregroundStyle(isActive ? DefaultTheme.accentInk
                                  : hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
-                .frame(width: 30, height: 26)
+                .frame(width: DefaultTheme.size(28), height: DefaultTheme.size(26))
                 .background(isActive ? DefaultTheme.surfaceRaised
                             : hovered ? DefaultTheme.surfaceRaised.opacity(0.7) : .clear,
-                            in: RoundedRectangle(cornerRadius: 7))
+                            in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
+                    .strokeBorder(isActive ? DefaultTheme.line2 : hovered ? DefaultTheme.line : .clear, lineWidth: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -195,10 +231,10 @@ public struct StatusLabel: View {
     }
 
     public var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: DefaultTheme.space(8)) {
             Circle().fill(DefaultTheme.badgeColor(for: state)).frame(width: 6, height: 6)
             Text(DefaultTheme.label(for: state))
-                .font(.system(size: 11))
+                .themeFont(size: 11, design: .monospaced, tracking: 0.22)
                 .foregroundStyle(DefaultTheme.badgeColor(for: state))
         }
     }
@@ -219,12 +255,32 @@ public struct MonoTag: View {
     }
 
     public var body: some View {
-        HStack(spacing: 4) {
-            if let systemImage { Image(systemName: systemImage).font(.system(size: 10)) }
-            Text(text).font(.system(size: 11, design: .monospaced))
+        HStack(spacing: DefaultTheme.space(5)) {
+            if let systemImage { AppIcon(systemImage, size: 12) }
+            Text(text).themeFont(size: 11.5, design: .monospaced)
         }
         .foregroundStyle(color ?? DefaultTheme.branch)
         .lineLimit(1)
+    }
+}
+
+/// A keyboard key, drawn the way shortcut hints show it (⌘, ↵, K…).
+public struct KeyCap: View {
+    let key: String
+
+    public init(_ key: String) {
+        self.key = key
+    }
+
+    public var body: some View {
+        Text(key)
+            .themeFont(size: 10.5, weight: .medium, design: .monospaced)
+            .foregroundStyle(DefaultTheme.secondaryText)
+            .padding(.horizontal, DefaultTheme.space(4))
+            .frame(minWidth: DefaultTheme.size(18), minHeight: DefaultTheme.size(18))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4)).strokeBorder(DefaultTheme.line2, lineWidth: 1))
+            .fixedSize()
     }
 }
 
@@ -247,7 +303,7 @@ public struct ContextRing: View {
     public var body: some View {
         ZStack {
             Circle()
-                .stroke(DefaultTheme.cardBorder, lineWidth: lineWidth)
+                .stroke(DefaultTheme.track, lineWidth: lineWidth)
             Circle()
                 .trim(from: 0, to: min(1, max(0, fraction ?? 0)))
                 .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
@@ -256,4 +312,86 @@ public struct ContextRing: View {
         }
         .frame(width: size, height: size)
     }
+}
+
+// MARK: - Fields
+
+/// A text field as the theme draws one. The charter leaves a bordered
+/// field to macOS; an imported theme followed whole draws it itself —
+/// shadcn's Input: the theme's radius, `border-input`, `shadow-xs` — so a
+/// form does not mix the system's rounded fields with the theme's.
+struct ThemedField: ViewModifier {
+    func body(content: Content) -> some View {
+        if DefaultTheme.redraws {
+            content
+                .textFieldStyle(.plain)
+                .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(4))
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                .fieldEdge()
+        } else {
+            content.textFieldStyle(.roundedBorder)
+        }
+    }
+}
+
+public extension View {
+    /// What `.textFieldStyle(.roundedBorder)` was: macOS's field under the
+    /// charter, the theme's own under an imported theme followed whole.
+    func themedField() -> some View { modifier(ThemedField()) }
+
+    /// The edge shadcn gives a Card (`border`), for a card the charter
+    /// draws as a fill alone: nothing under the charter; under an imported
+    /// theme followed whole, the card's edge — its shadow falls on two
+    /// sides only, and a card without an edge looked cut on the others.
+    @MainActor
+    func cardEdge(radius: CGFloat = 10) -> some View {
+        overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(radius))
+            .strokeBorder(DefaultTheme.redraws ? DefaultTheme.cardBorder : Color.clear, lineWidth: 1))
+    }
+
+    /// The edge and the shadow shadcn gives an Input, for a field the
+    /// charter draws bare (a filter in a sidebar): nothing under the
+    /// charter, the theme's under an imported theme followed whole.
+    @MainActor
+    func fieldEdge(radius: CGFloat = 6) -> some View {
+        overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(radius))
+            .strokeBorder(DefaultTheme.redraws ? DefaultTheme.fieldBorder : Color.clear, lineWidth: 1))
+            .themeShadow(.xs, radius: radius)
+    }
+}
+
+// MARK: - Toolbar buttons
+
+/// A toolbar's button as the theme draws one: its raised surface, its
+/// radius, its edge.
+struct ThemedBarButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(DefaultTheme.secondaryText)
+            .frame(minWidth: DefaultTheme.size(28), minHeight: DefaultTheme.size(22))
+            .padding(.horizontal, DefaultTheme.space(3))
+            .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
+                .strokeBorder(DefaultTheme.line, lineWidth: 1))
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .contentShape(Rectangle())
+    }
+}
+
+struct ThemedBarButtons: ViewModifier {
+    func body(content: Content) -> some View {
+        if DefaultTheme.redraws {
+            content.buttonStyle(ThemedBarButtonStyle())
+        } else {
+            content
+        }
+    }
+}
+
+public extension View {
+    /// For the buttons of a toolbar the charter leaves to macOS (a web
+    /// panel's back, forward, reload): macOS's under the charter, the
+    /// theme's own under an imported theme followed whole — beside a
+    /// field the theme draws, they no longer look like another app's.
+    func themedBarButtons() -> some View { modifier(ThemedBarButtons()) }
 }

@@ -10,7 +10,9 @@ qui parle à Loom par `window.loom`. Deux exemples complets et commentés :
   couvre Loom pendant les pauses ;
 - [`Examples/extensions/tech-watch/`](../Examples/extensions/tech-watch/) — une
   veille techno (Hacker News, releases GitHub, flux RSS/Atom, Reddit, Lobsters)
-  dont Claude prépare un résumé chaque matin.
+  dont Claude prépare un résumé chaque matin. « → session Claude » envoie un
+  article à une session ; le prompt est un gabarit que l'on réécrit dans ses
+  Réglages (`{{title}}`, `{{source}}`, `{{url}}`, `{{discussion}}`, `{{excerpt}}`).
 
 Le pourquoi et les limites de sécurité : [ADR-0011](adr/0011-extensions-web-isolees.md),
 [ADR-0012](adr/0012-extensions-arriere-plan-alarmes-barre-et-ecran.md) et

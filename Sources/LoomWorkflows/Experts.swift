@@ -29,6 +29,17 @@ public struct Expert: Codable, Identifiable, Equatable, Sendable, Proposable {
         "Bash(gh issue view:*)",
     ]
 
+    /// What a step needs to WORK in a run's own worktree (ADR-0021): reading,
+    /// editing, and the shell — tests, linters and builds are commands only
+    /// the project knows. Given by hand, never by default: a headless step
+    /// has nobody to refuse a command.
+    public static let workTools = readOnlyTools + ["Edit", "MultiEdit", "Write", "NotebookEdit", "Bash"]
+
+    /// Whether the tools let a step change files or run arbitrary commands.
+    public static func canWrite(_ tools: [String]) -> Bool {
+        tools.contains { ["Edit", "MultiEdit", "Write", "NotebookEdit", "Bash"].contains($0) }
+    }
+
     public init(id: UUID = UUID(), name: String, domain: String = "", systemPrompt: String = "",
                 model: String? = nil, skills: [String] = [], connectorIDs: [UUID] = [],
                 allowedTools: [String] = Expert.readOnlyTools, color: String = "#0D6E74",

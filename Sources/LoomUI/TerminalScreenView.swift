@@ -25,6 +25,27 @@ public enum TerminalMetrics {
     /// the cell count are both measured from it — they must not drift apart.
     public static let gridInset: CGFloat = 8
 
+    /// A selection dragged to the viewport's edge scrolls it: +1 when the
+    /// pointer is at (or past) the bottom edge, -1 at the top, 0 between.
+    /// `y` and `top` are in the content's space.
+    public static func edgeDirection(y: CGFloat, top: CGFloat, height: CGFloat,
+                                     margin: CGFloat = 6) -> Int {
+        guard height > 0 else { return 0 }
+        if y >= top + height - margin { return 1 }
+        if y <= top + margin { return -1 }
+        return 0
+    }
+
+    /// The rows the viewport shows, as content indices.
+    public static func visibleRows(top: CGFloat, height: CGFloat, rows: Int) -> ClosedRange<Int>? {
+        let cell = cellSize
+        guard rows > 0, cell.height > 0 else { return nil }
+        // A hair over: a row exactly at the edge is not lost to rounding.
+        let first = max(0, Int(((top - gridInset) / cell.height + 0.001).rounded(.down)))
+        let last = min(rows - 1, max(first, Int(((top + height - gridInset) / cell.height + 0.001).rounded(.down)) - 1))
+        return first...max(first, last)
+    }
+
     /// The narrowest pane that still holds `columns` cells: the floor the side
     /// panel leaves the terminal, so claude keeps the 80-column layout it draws
     /// for. Half a point of slack absorbs the fractional cell width — `grid`
@@ -74,6 +95,37 @@ public enum TerminalMetrics {
         guard cell.width > 0 else { return 0 }
         return min(max(0, Int(((x - gridInset) / cell.width).rounded(.down))), max(0, cols - 1))
     }
+
+    /// The cell of the LIVE screen under a point of the padded content — what
+    /// a click means to a program that tracks the mouse. Nil over the
+    /// scrollback: those rows are ours, no target of the program is there.
+    ///
+    /// Measured in the content's own space on purpose. The grid hangs from the
+    /// BOTTOM of the pane (the view is anchored there), so the room left over
+    /// by a height that is not a whole number of rows sits ABOVE the first
+    /// row: counting rows down from the pane's top edge was off by that
+    /// fraction, and a click on the lower part of a one-row target — a close
+    /// box, a fold mark — went to the row under it.
+    public static func screenCell(at point: CGPoint, historyRows: Int, screenRows: Int,
+                                  cols: Int) -> (col: Int, row: Int)? {
+        let cell = cellSize
+        guard cell.height > 0, screenRows > 0 else { return nil }
+        let contentRow = max(0, Int(((point.y - gridInset) / cell.height).rounded(.down)))
+        let row = contentRow - max(0, historyRows)
+        guard row >= 0 else { return nil }
+        return (cellColumn(atX: point.x, cols: cols), min(row, screenRows - 1))
+    }
+
+    /// How many rows sit between a point and the LAST row of the grid, the
+    /// point given by its distance up from the pane's bottom edge. The wheel
+    /// uses it: a pane whose program tracks the mouse stays glued to its
+    /// bottom, and the grid is measured from there — never from the top,
+    /// where the leftover fraction of a row is.
+    public static func rowsAboveLast(distanceFromBottom distance: CGFloat) -> Int {
+        let cell = cellSize
+        guard cell.height > 0 else { return 0 }
+        return max(0, Int(((distance - gridInset) / cell.height).rounded(.down)))
+    }
 }
 
 /// Renders a `TerminalScreen` — the view pulls values, never the engine
@@ -91,18 +143,27 @@ public struct TerminalScreenView: View {
     @Binding public var selection: TerminalSelection
     /// How many characters copy-on-select put on the pasteboard.
     private let onCopied: ((Int) -> Void)?
+    /// A press released where it landed, on a cell of the live screen
+    /// (0-based): the click a program that tracks the mouse asked to hear —
+    /// the only way to reach a target it draws without a keybinding.
+    private let onTap: ((_ col: Int, _ row: Int) -> Void)?
 
     public init(screen: TerminalScreen, history: [TerminalLine] = [], historyBase: Int = 0,
                 cursorVisible: Bool = true,
                 selection: Binding<TerminalSelection> = .constant(.empty),
-                onCopied: ((Int) -> Void)? = nil) {
+                onCopied: ((Int) -> Void)? = nil,
+                onTap: ((_ col: Int, _ row: Int) -> Void)? = nil) {
         self.screen = screen
         self.history = history
         self.historyBase = historyBase
         self.cursorVisible = cursorVisible
         self._selection = selection
         self.onCopied = onCopied
+        self.onTap = onTap
     }
+
+    /// A hand never holds perfectly still: below this, the pointer did not travel.
+    private static let tapSlop: CGFloat = 3
 
     /// One press, kept only to tell a double click from two single ones.
     private struct Press {
@@ -130,7 +191,14 @@ public struct TerminalScreenView: View {
     private final class ScrollProbe {
         var contentEnd: CGFloat = 0
         var viewportHeight: CGFloat = 0
+        /// The content's top in the viewport's space: minus the offset scrolled.
+        var contentTop: CGFloat = 0
     }
+
+    /// A selection held at the viewport's edge: the way it scrolls (+1 down,
+    /// -1 up, 0 not), and where across the pointer is.
+    @State private var edgeDirection = 0
+    @State private var edgeX: CGFloat = 0
 
     public var body: some View {
         let cell = TerminalMetrics.cellSize
@@ -165,6 +233,12 @@ public struct TerminalScreenView: View {
                 }
                 .padding(TerminalMetrics.gridInset)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
+                // Where the content stands in the viewport — kept in the probe
+                // for a selection dragged to the edge, never in view state.
+                .background(GeometryReader { content in
+                    Color.clear.preference(key: ContentTopKey.self,
+                                           value: content.frame(in: .named(Self.scroll)).minY)
+                })
                 // The selection layer sits ON TOP: cells carry ANSI background
                 // colours painted by Text itself, and a highlight behind them would
                 // vanish on exactly the lines people want to copy. An overlay also
@@ -199,6 +273,27 @@ public struct TerminalScreenView: View {
             })
             .onPreferenceChange(ContentEndKey.self) { probe.contentEnd = $0 }
             .onPreferenceChange(ViewportHeightKey.self) { probe.viewportHeight = $0 }
+            .onPreferenceChange(ContentTopKey.self) { probe.contentTop = $0 }
+            // A selection held at the edge: the view scrolls a row at a time
+            // and the selection follows, as in any terminal.
+            .task(id: edgeDirection) {
+                guard edgeDirection != 0 else { return }
+                while !Task.isCancelled, dragging, edgeDirection != 0 {
+                    let top = -probe.contentTop
+                    if let visible = TerminalMetrics.visibleRows(top: top, height: probe.viewportHeight,
+                                                                 rows: contentRows) {
+                        let index = edgeDirection > 0 ? min(contentRows - 1, visible.upperBound + 1)
+                                                      : max(0, visible.lowerBound - 1)
+                        proxy.scrollTo(historyBase + index, anchor: edgeDirection > 0 ? .bottom : .top)
+                        let y = TerminalMetrics.gridInset + (CGFloat(index) + 0.5) * cell.height
+                        let column = TerminalMetrics.boundary(at: CGPoint(x: edgeX, y: y), rows: contentRows,
+                                                              cols: screen.geometry.cols).col
+                        let head = TerminalPosition(row: historyBase + index, col: column)
+                        if selection.head != head { selection.head = head }
+                    }
+                    try? await Task.sleep(for: .milliseconds(45))
+                }
+            }
             // Past the scrollback cap the history stops growing: a line is trimmed
             // for each one pushed, the content keeps its SIZE, and the bottom anchor
             // — which only re-applies on a size change — never fires again while the
@@ -223,6 +318,11 @@ public struct TerminalScreenView: View {
     private var lastRowID: Int { historyBase + contentRows - 1 }
 
     private struct ContentEndKey: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+    }
+
+    private struct ContentTopKey: PreferenceKey {
         static let defaultValue: CGFloat = 0
         static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
     }
@@ -304,13 +404,20 @@ public struct TerminalScreenView: View {
                 if selection.mode != mode { selection.mode = mode }
                 let head = position(at: value.location)
                 if selection.head != head { selection.head = head }
+                // At the viewport's edge, or past it: the view scrolls on.
+                let direction = TerminalMetrics.edgeDirection(y: value.location.y, top: -probe.contentTop,
+                                                              height: probe.viewportHeight)
+                if direction != 0 { edgeX = value.location.x }
+                if edgeDirection != direction { edgeDirection = direction }
             }
-            .onEnded { _ in
+            .onEnded { value in
                 dragging = false
+                if edgeDirection != 0 { edgeDirection = 0 }
                 if openingLink {
                     openingLink = false
                     return
                 }
+                reportTap(from: value.startLocation, to: value.location)
                 guard selection.isActive else { return }
                 selection.capturedText = selection.text(history: history,
                                                         historyBase: historyBase,
@@ -322,6 +429,25 @@ public struct TerminalScreenView: View {
                     onCopied?(text.count)
                 }
             }
+    }
+
+    /// The press is decided on its RELEASE: only then is it known whether the
+    /// pointer travelled. One that moved was a selection, and the program
+    /// hears nothing of it; one that stayed in its cell is a click, at the
+    /// cell this view — the only one that knows where its rows are — finds
+    /// under it.
+    private func reportTap(from down: CGPoint, to up: CGPoint) {
+        guard let onTap else { return }
+        let cols = screen.geometry.cols
+        guard let pressed = TerminalMetrics.screenCell(at: down, historyRows: history.count,
+                                                       screenRows: screen.lines.count, cols: cols),
+              let released = TerminalMetrics.screenCell(at: up, historyRows: history.count,
+                                                        screenRows: screen.lines.count, cols: cols),
+              TerminalClick.isTap(from: down, to: up,
+                                  sameCell: pressed.col == released.col && pressed.row == released.row,
+                                  slop: Self.tapSlop)
+        else { return }
+        onTap(released.col, released.row)
     }
 
     private func position(at point: CGPoint) -> TerminalPosition {

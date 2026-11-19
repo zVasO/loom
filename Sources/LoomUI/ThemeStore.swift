@@ -6,7 +6,9 @@ import SwiftUI
 // MARK: - Tokens
 
 /// The 16 colours a palette is made of, as `#RRGGBB` — what a theme file
-/// carries, what an import produces, what a palette is built from.
+/// carries, what an import produces, what a palette is built from. And,
+/// for a theme that brings its own (a tweakcn import), the variant's
+/// design: radius, spacing, fonts, edges and shadow (ADR-0022).
 public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
     public var background: String
     public var contentBackground: String
@@ -24,12 +26,14 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
     public var stateWorking: String
     public var stateNeedsInput: String
     public var stateIdle: String
+    /// What the variant says beyond its colours; nil draws the charter.
+    public var design: ThemeDesign?
 
     public init(background: String, contentBackground: String, surface: String,
                 surfaceRaised: String, cardBorder: String, accent: String, accentText: String,
                 primaryText: String, secondaryText: String, mutedText: String, branch: String,
                 danger: String, groupHeader: String, stateWorking: String,
-                stateNeedsInput: String, stateIdle: String) {
+                stateNeedsInput: String, stateIdle: String, design: ThemeDesign? = nil) {
         self.background = background
         self.contentBackground = contentBackground
         self.surface = surface
@@ -46,6 +50,7 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
         self.stateWorking = stateWorking
         self.stateNeedsInput = stateNeedsInput
         self.stateIdle = stateIdle
+        self.design = design
     }
 
     /// Every token, in a stable order — for validation and previews.
@@ -90,15 +95,108 @@ public struct ThemeTokens: Codable, Equatable, Sendable, Hashable {
 
     public var isLight: Bool { Self.luminance(background) > 0.4 }
 
-    /// The tokens with `surfaceRaised` brought back to the surfaces' side: a
-    /// raised surface is a step above `surface`, never its opposite. Some
-    /// imported themes (tweakcn's Claude) carry a near-white chip colour
-    /// in a dark variant; painted under dark-theme text it hid the editors,
-    /// tabs and hovers that sit on it.
-    public var sanitized: ThemeTokens {
-        guard abs(Self.luminance(surfaceRaised) - Self.luminance(surface)) > 0.4 else { return self }
+    /// The tokens with only the colours of their design: the edges stay,
+    /// the radius, spacing, fonts, letter-spacing and shadow go.
+    public var colorsOnly: ThemeTokens {
         var tokens = self
-        tokens.surfaceRaised = Self.mix(surface, with: primaryText, amount: 0.07)
+        tokens.design = design?.colors
+        return tokens
+    }
+
+    /// The WCAG contrast of two colours, from 1 (the same) to 21.
+    public static func contrast(_ hex: String, _ other: String) -> Double {
+        let a = luminance(hex), b = luminance(other)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    /// `hex` as it is when it stands at `minimum` to 1 against every
+    /// ground; else moved toward `ink`, a step at a time, until it does.
+    static func legible(_ hex: String, on grounds: [String], minimum: Double,
+                        toward ink: String, step: Double = 0.05) -> String {
+        var result = hex
+        var amount = 0.0
+        while amount < 1, grounds.contains(where: { contrast(result, $0) < minimum }) {
+            amount = min(1, amount + step)
+            result = mix(hex, with: ink, amount: amount)
+        }
+        return result
+    }
+
+    /// The accent as an ink: the colour of an active tab's label, of a
+    /// link, of a selected row's icon. A shadcn page fills with `--primary`
+    /// and writes on it; Loom also writes in it — and a theme whose primary
+    /// is a mid grey made every active item dimmer than its neighbours.
+    /// Under an imported theme it reads at 4.5 to 1 at least, lightened or
+    /// darkened no further than that, its hue kept; the charter's is the
+    /// accent.
+    public var accentInk: String {
+        guard design != nil else { return accent }
+        // A primary without a hue (shadcn's own near-black, mono's grey)
+        // has nothing to tell an active label by but its strength: it is
+        // written in the text colour, as shadcn writes an active item
+        // (`text-accent-foreground`).
+        if let c = Self.rgb(accent), max(c.red, c.green, c.blue) - min(c.red, c.green, c.blue) < 0.08 {
+            return primaryText
+        }
+        let grounds = [background, contentBackground, surface]
+        return Self.legible(accent, on: grounds, minimum: 4.5, toward: inkPole)
+    }
+
+    /// Black on a light page, white on a dark one: where a coloured label
+    /// goes to be read without losing its hue.
+    var inkPole: String { Self.luminance(contentBackground) > 0.4 ? "#000000" : "#FFFFFF" }
+
+    /// The tokens as the app can be read with them.
+    ///
+    /// `surfaceRaised` is brought back to the surfaces' side: a raised
+    /// surface is a step above `surface`, never its opposite. Some imported
+    /// themes (tweakcn's Claude) carry a near-white chip colour in a dark
+    /// variant; painted under dark-theme text it hid the editors, tabs and
+    /// hovers that sit on it.
+    ///
+    /// An imported theme (one with a design — the charter's palettes are
+    /// what they are) then gets what its own page never needed: Loom writes
+    /// labels in colours a shadcn page only fills with. A branch name in a
+    /// chart's yellow on a white card, a tertiary text at 2 to 1, a
+    /// selection filled with the very colour of the sidebar under it —
+    /// each is moved toward the text colour, no further than it takes to
+    /// be told from its ground.
+    public var sanitized: ThemeTokens {
+        var tokens = self
+        if abs(Self.luminance(surfaceRaised) - Self.luminance(surface)) > 0.4 {
+            tokens.surfaceRaised = Self.mix(surface, with: primaryText, amount: 0.07)
+        }
+        guard design != nil else { return tokens }
+        let grounds = [tokens.background, tokens.contentBackground, tokens.surface]
+        func label(_ hex: String, _ minimum: Double) -> String {
+            Self.legible(hex, on: grounds, minimum: minimum, toward: primaryText)
+        }
+        // A colour that means something keeps its hue: darkened or
+        // lightened, not drawn toward a text colour that may be tinted — a
+        // pale red must still read as red.
+        func signal(_ hex: String, _ minimum: Double) -> String {
+            Self.legible(hex, on: grounds, minimum: minimum, toward: inkPole)
+        }
+        tokens.secondaryText = label(secondaryText, 3.5)
+        tokens.mutedText = label(mutedText, 3)
+        tokens.branch = signal(branch, 4.5)
+        tokens.danger = signal(danger, 4.5)
+        tokens.groupHeader = signal(groupHeader, 3)
+        // The fill of a selection, a chip, a track: told from all it lies on.
+        tokens.surfaceRaised = Self.legible(tokens.surfaceRaised, on: grounds, minimum: 1.06,
+                                            toward: primaryText, step: 0.02)
+        // An edge the very colour of what it borders — a theme that parts
+        // its panels by shadow alone, where Loom parts them by a rule. Only
+        // that one: a faint edge that can be seen (1.1 to 1 is common) is
+        // the theme's own, and stays.
+        func edge(_ hex: String) -> String {
+            guard Self.rgb(hex) != nil,
+                  grounds.contains(where: { Self.contrast(hex, $0) < 1.04 }) else { return hex }
+            return Self.legible(hex, on: grounds, minimum: 1.12, toward: primaryText, step: 0.02)
+        }
+        tokens.cardBorder = edge(cardBorder)
+        tokens.design?.border = design?.border.map(edge)
+        tokens.design?.input = design?.input.map(edge)
         return tokens
     }
 }
@@ -120,6 +218,8 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
     public let surfaceRaised: Color
     public let cardBorder: Color
     public let accent: Color
+    /// The accent where it is written with, not filled with (`ThemeTokens.accentInk`).
+    public let accentInk: Color
     public let accentText: Color
     public let primaryText: Color
     public let secondaryText: Color
@@ -130,6 +230,25 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
     public let stateWorking: Color
     public let stateNeedsInput: Color
     public let stateIdle: Color
+
+    /// The variant's design — what `radius(_:)`, `space(_:)`, `font(…)` and
+    /// `tracking(_:)` answer from; nil draws the charter.
+    public let design: ThemeDesign?
+    /// Edges. The charter's hairlines — the text colour at 8, 13 and 21 % —
+    /// unless the theme has a border of its own: then `--border` as is, and
+    /// for the two stronger ones that border one and two steps towards the
+    /// text. (`--input` is a field's edge, `fieldLine`: in real themes it
+    /// can be the card's own colour, no edge for anything else.)
+    public let line: Color
+    public let line2: Color
+    public let line3: Color
+    /// The edge of a text field: the charter's hairline, or the theme's
+    /// `--input` — what shadcn's Input is bordered with.
+    public let fieldLine: Color
+    /// Row washes, hover then selection: 2.5 and 4.5 % of the text colour,
+    /// or — a theme with a design — shadcn's own `muted/50` and `muted`.
+    public let wash: Color
+    public let wash2: Color
 
     public init(name: String, isLight: Bool, tokens: ThemeTokens) {
         let tokens = tokens.sanitized
@@ -142,6 +261,7 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
         surfaceRaised = Self.color(tokens.surfaceRaised)
         cardBorder = Self.color(tokens.cardBorder)
         accent = Self.color(tokens.accent)
+        accentInk = Self.color(tokens.accentInk)
         accentText = Self.color(tokens.accentText)
         primaryText = Self.color(tokens.primaryText)
         secondaryText = Self.color(tokens.secondaryText)
@@ -152,6 +272,28 @@ public struct ThemePalette: Identifiable, Equatable, Sendable {
         stateWorking = Self.color(tokens.stateWorking)
         stateNeedsInput = Self.color(tokens.stateNeedsInput)
         stateIdle = Self.color(tokens.stateIdle)
+
+        design = tokens.design
+        let text = Self.color(tokens.primaryText)
+        let raised = Self.color(tokens.surfaceRaised)
+        let border = tokens.design?.border.flatMap(Self.validHex)
+        let input = tokens.design?.input.flatMap(Self.validHex) ?? border
+        let edge = border.map(Self.color) ?? text.opacity(0.08)
+        line = edge
+        fieldLine = input.map(Self.color) ?? edge
+        // The charter's steps (8, 13 and 21 % of the text) from the theme's
+        // own edge: the same distance further toward the text.
+        line2 = border.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.06)) }
+            ?? text.opacity(0.13)
+        line3 = border.map { Self.color(ThemeTokens.mix($0, with: tokens.primaryText, amount: 0.14)) }
+            ?? text.opacity(0.21)
+        wash = tokens.design == nil ? text.opacity(0.025) : raised.opacity(0.5)
+        wash2 = tokens.design == nil ? text.opacity(0.045) : raised
+    }
+
+    /// A `#RRGGBB` that reads as one, else nil: a hand-written file may hold anything.
+    private static func validHex(_ hex: String) -> String? {
+        ThemeTokens.rgb(hex) == nil ? nil : hex
     }
 
     public static func color(_ hex: String) -> Color {
@@ -184,10 +326,15 @@ public struct ThemeFamily: Identifiable, Codable, Equatable, Sendable, Hashable 
     /// workflow's artifact (ADR-0017): fonts, corner radius, logo. Optional:
     /// the app itself never reads it.
     public var document: ThemeDocumentStyle?
+    /// The user's switch for a theme that brings a design (ADR-0022): on,
+    /// only its colours are followed — edges included — and the radius,
+    /// spacing, fonts, letter-spacing and shadow stay the charter's. The
+    /// design is kept, so the switch goes both ways.
+    public var colorsOnly: Bool
 
     public init(name: String, light: ThemeTokens, dark: ThemeTokens,
                 lightName: String? = nil, darkName: String? = nil, isBuiltIn: Bool = false,
-                document: ThemeDocumentStyle? = nil) {
+                document: ThemeDocumentStyle? = nil, colorsOnly: Bool = false) {
         self.name = name
         self.light = light
         self.dark = dark
@@ -195,6 +342,7 @@ public struct ThemeFamily: Identifiable, Codable, Equatable, Sendable, Hashable 
         self.darkName = darkName
         self.isBuiltIn = isBuiltIn
         self.document = document
+        self.colorsOnly = colorsOnly
     }
 
     /// Files written by hand or by an older Loom may omit the optional keys.
@@ -208,14 +356,22 @@ public struct ThemeFamily: Identifiable, Codable, Equatable, Sendable, Hashable 
         // A file on disk is the user's by definition.
         isBuiltIn = false
         document = try container.decodeIfPresent(ThemeDocumentStyle.self, forKey: .document)
+        colorsOnly = try container.decodeIfPresent(Bool.self, forKey: .colorsOnly) ?? false
+    }
+
+    /// Whether the family brings more than colours — a radius, a spacing,
+    /// fonts, a letter-spacing or a shadow: what `colorsOnly` turns off.
+    public var hasDesign: Bool {
+        [light, dark].contains { $0.design != nil && $0.design != $0.design?.colors }
     }
 
     public var variantLightName: String { lightName ?? name + " Light" }
     public var variantDarkName: String { darkName ?? name + " Dark" }
 
     public func palette(dark: Bool) -> ThemePalette {
-        dark ? ThemePalette(name: variantDarkName, isLight: false, tokens: self.dark)
-             : ThemePalette(name: variantLightName, isLight: true, tokens: light)
+        let variant = dark ? self.dark : light
+        return ThemePalette(name: dark ? variantDarkName : variantLightName, isLight: !dark,
+                            tokens: colorsOnly ? variant.colorsOnly : variant)
     }
 
     /// A family name, or a variant's name (what the settings stored before
@@ -265,6 +421,13 @@ public struct ThemeDocumentStyle: Codable, Equatable, Sendable, Hashable {
     public var isEmpty: Bool {
         [fontSans, fontMono, fontsURL, radius, logoSVG, extraCSS]
             .allSatisfy { ($0 ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    /// What a family followed for its colours only keeps of its document
+    /// style: the logo and the extra CSS. The fonts and the radius are the
+    /// theme's design: a report keeps Loom's own, like the app.
+    public var colorsOnly: ThemeDocumentStyle {
+        ThemeDocumentStyle(logoSVG: logoSVG, extraCSS: extraCSS)
     }
 
     /// Only Google Fonts' stylesheet host is accepted for `fontsURL`.
@@ -380,10 +543,55 @@ public final class ThemeStore {
     /// Where the user's families live. Called once, at launch, by the app —
     /// the store itself has no idea where the support directory is.
     public func configure(themesDirectory: URL) {
+        // The fonts fetched for imported themes are registered first: the
+        // first frame of a theme that names one is drawn with it.
+        ThemeFonts.shared.configure(directory: themesDirectory.appendingPathComponent("fonts"))
         let store = ThemeFamilyStore(directory: themesDirectory)
         familyStore = store
         customFamilies = store.load()
         apply(projectID: contextProjectID)
+        // The theme in use may name fonts this Mac does not have (a theme
+        // file brought from another one): fetched in the background, drawn
+        // when they arrive. Only the theme in use — the others ask nothing.
+        ensureFonts(ofFamilyNamed: globalFamilyName)
+    }
+
+    /// The font stacks a family draws with: the sans and the mono of its
+    /// two designs (no view writes in the serif) — none for a family
+    /// followed for its colours only: nothing is fetched for it.
+    nonisolated static func fontStacks(of family: ThemeFamily) -> [String] {
+        guard !family.colorsOnly else { return [] }
+        return [family.light.design, family.dark.design].flatMap { design in
+            [design?.fontSans, design?.fontMono].compactMap { $0 }
+        }
+    }
+
+    /// Fetches, in the background, the fonts a family of the user's names
+    /// and this Mac does not have.
+    private func ensureFonts(ofFamilyNamed name: String) {
+        guard let family = customFamilies.first(where: { $0.name == name }) else { return }
+        let stacks = Self.fontStacks(of: family)
+        guard !stacks.isEmpty else { return }
+        Task { await ThemeFonts.shared.ensure(stacks: stacks) }
+    }
+
+    /// Makes a family's fonts drawable — installed, or fetched from Google
+    /// Fonts as tweakcn's editor does — and, for a family whose document
+    /// style names fonts without saying where to load them, points its
+    /// reports at the same families on Google Fonts.
+    public func withFonts(_ family: ThemeFamily) async -> ThemeFamily {
+        let fonts = ThemeFonts.shared
+        await fonts.ensure(stacks: Self.fontStacks(of: family))
+        var family = family
+        if var document = family.document, (document.fontsURL ?? "").isEmpty {
+            let stacks = [document.fontSans, document.fontMono].compactMap { $0 }
+            let fetched = fonts.fetchedFamilies(in: stacks)
+            if !fetched.isEmpty, let url = GoogleFonts.stylesheetURL(families: fetched) {
+                document.fontsURL = url.absoluteString
+                family.document = document
+            }
+        }
+        return family
     }
 
     // MARK: Families
@@ -399,10 +607,33 @@ public final class ThemeStore {
         var stored = family
         stored.isBuiltIn = false
         try familyStore?.save(stored)
-        customFamilies.removeAll { $0.name == stored.name }
-        customFamilies.append(stored)
+        // In place: a family saved again keeps its card where it was.
+        if let index = customFamilies.firstIndex(where: { $0.name == stored.name }) {
+            customFamilies[index] = stored
+        } else {
+            customFamilies.append(stored)
+        }
         apply(projectID: contextProjectID)
         onInputsChanged?()
+        // The theme in use, saved again: it may name fonts this Mac lacks.
+        if stored.name == globalFamilyName { ensureFonts(ofFamilyNamed: stored.name) }
+    }
+
+    /// A family of the user's followed whole, or for its colours only
+    /// (ADR-0022), saved with the choice. Turned whole, it gets what an
+    /// import gives a whole theme: its fonts, and its reports' stylesheet.
+    public func setColorsOnly(_ colorsOnly: Bool, for family: ThemeFamily) throws {
+        var updated = family
+        updated.colorsOnly = colorsOnly
+        try addFamily(updated)
+        guard !colorsOnly else { return }
+        Task {
+            let fetched = await withFonts(updated)
+            // Unless it changed again meanwhile.
+            guard fetched != updated,
+                  customFamilies.first(where: { $0.name == updated.name }) == updated else { return }
+            try? addFamily(fetched)
+        }
     }
 
     /// Removes a user family; the global theme and any project pointing at it
@@ -420,9 +651,17 @@ public final class ThemeStore {
     }
 
     /// A tweakcn theme, from what the user pasted: its CSS export, parsed
-    /// here; or a name / URL, fetched from tweakcn's registry. The family
-    /// comes back unsaved — the caller previews it, then `addFamily`.
+    /// here; or a name / URL, fetched from tweakcn's registry. Always the
+    /// whole theme — how much of it Loom follows is chosen later, where the
+    /// theme is picked (`setColorsOnly`). The family comes back as soon as
+    /// it is read, unsaved and without its fonts: the caller previews it,
+    /// asks `withFonts` for them — they redraw the preview as they arrive —
+    /// then saves it.
     public func importTweakcn(_ input: String) async throws -> ThemeFamily {
+        try await readTweakcn(input)
+    }
+
+    private func readTweakcn(_ input: String) async throws -> ThemeFamily {
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if TweakcnImport.looksLikeCSS(text) {
             let (light, dark) = try TweakcnImport.parseCSS(text)
@@ -473,6 +712,7 @@ public final class ThemeStore {
     public func setGlobalTheme(_ name: String) {
         UserDefaults.standard.set(family(named: name)?.name ?? name, forKey: Self.globalKey)
         onInputsChanged?()
+        ensureFonts(ofFamilyNamed: globalFamilyName)
     }
 
     public func setAppearanceMode(_ mode: AppearanceMode) {
@@ -532,10 +772,32 @@ public final class ThemeStore {
         if next != palette { palette = next }
     }
 
-    /// The palette a context resolves to, without making it the active one.
+    /// The palette a context resolves to, without making it the active one:
+    /// the global theme, or a project's own colours on the global theme's
+    /// shapes.
     public func palette(for projectID: ProjectID?) -> ThemePalette {
-        let name = projectID.flatMap(projectThemeName) ?? globalFamilyName
-        return (family(named: name) ?? .loom).palette(dark: isDark)
+        let global = family(named: globalFamilyName) ?? .loom
+        guard let name = projectID.flatMap(projectThemeName), name != global.name,
+              let project = family(named: name) else { return global.palette(dark: isDark) }
+        return Self.palette(of: project, shapedBy: global, dark: isDark)
+    }
+
+    /// A project's theme over the global one (ADR-0022): the project
+    /// brings its colours, edges included — the repère « which project am I
+    /// in » — and the radius, spacing, fonts, letter-spacing and shadow
+    /// stay the global theme's. Going from a session of one project to a
+    /// session of another recolours the window; it never re-lays it out,
+    /// refits a terminal or takes the focus from a field.
+    nonisolated public static func palette(of project: ThemeFamily, shapedBy global: ThemeFamily,
+                                           dark: Bool) -> ThemePalette {
+        var tokens = (dark ? project.dark : project.light).colorsOnly
+        if !global.colorsOnly, var shape = (dark ? global.dark : global.light).design {
+            shape.border = tokens.design?.border
+            shape.input = tokens.design?.input
+            tokens.design = shape
+        }
+        return ThemePalette(name: dark ? project.variantDarkName : project.variantLightName,
+                            isLight: !dark, tokens: tokens)
     }
 }
 
@@ -559,9 +821,10 @@ extension ThemeFamily {
             primaryText: "#1C1C21", secondaryText: "#6B6B76", mutedText: "#9494A0",
             branch: "#1C9C95", danger: "#C9333C", groupHeader: "#2A9D63",
             stateWorking: "#2A9D63", stateNeedsInput: "#B8860B", stateIdle: "#3B6BB5"),
+        // The charter's OLED dark: absolute black, zinc surfaces.
         dark: ThemeTokens(
-            background: "#0D0D0E", contentBackground: "#111113",
-            surface: "#17171A", surfaceRaised: "#1E1E22", cardBorder: "#26262B",
+            background: "#000000", contentBackground: "#000000",
+            surface: "#09090B", surfaceRaised: "#121214", cardBorder: "#1D1D20",
             accent: "#E8945C", accentText: "#201204",
             primaryText: "#ECECEE", secondaryText: "#86868E", mutedText: "#6B6B73",
             branch: "#5CC8C2", danger: "#E5646C", groupHeader: "#4CC38A",

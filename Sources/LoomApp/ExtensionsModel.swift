@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import LoomAPI
 import LoomExtensions
+import LoomUI
 import LoomWeb
 import Observation
 
@@ -179,11 +180,12 @@ final class ExtensionsModel {
 
     /// The extension the user is looking at — in the Extensions tab, with
     /// Loom in front. The only one that may ask for a launch.
-    /// With another sheet up (⌘K, usage) a launch sheet could not show, and
-    /// the page's promise would hang: not frontmost then.
+    /// With another sheet up (usage) a launch sheet could not show, and the
+    /// page's promise would hang: not frontmost then. Nor under the palette
+    /// (⌘K), which is over the window's content, not a sheet (ADR-0024).
     func isFrontmost(_ id: String) -> Bool {
         NSApp.isActive && isTabVisible && selectedID == id
-            && NSApp.mainWindow?.attachedSheet == nil
+            && NSApp.mainWindow?.attachedSheet == nil && !WindowOverlay.isUp
     }
 
     // MARK: - Registry

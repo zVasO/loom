@@ -16,6 +16,7 @@
    *   class?: string, href?: string | null, type?: string, value?: string, placeholder?: string,
    *   title?: string, name?: string, min?: string, max?: string, hidden?: boolean, disabled?: boolean,
    *   checked?: boolean, selected?: boolean, dataset?: Record<string, string>, open?: boolean,
+   *   rows?: string, spellcheck?: string,
    *   on?: Record<string, (event: Event) => void>,
    * }} Props
    * @typedef {Node | string | null | undefined | false} Child
@@ -217,6 +218,82 @@
       error);
   }
 
+  /** The prompt's preview stays as the reader left it across redraws (a save redraws the settings). */
+  let previewOpen = false;
+
+  /** An article to preview the session prompt with, when the watch holds none yet. */
+  const SAMPLE_ITEM = Object.freeze({
+    id: "sample", source: "hn", sourceLabel: "Hacker News", title: "Swift 7 est sorti",
+    url: "https://swift.org/blog/swift-7-released", discussionUrl: "https://news.ycombinator.com/item?id=1",
+    publishedAt: 0, summary: "Les nouveautés du langage, du compilateur et du gestionnaire de paquets.",
+  });
+
+  /**
+   * The prompt "→ session Claude" sends, as the reader's own template: the
+   * text, its variables (a click inserts one where the caret is), a preview on
+   * a real article, and the way back to the default.
+   * @param {TechWatchTypes.ViewContext} context
+   */
+  function sessionPromptEditor(context) {
+    const { settings, actions } = context;
+    const { buildSessionPrompt, defaultSessionPrompt, SESSION_PROMPT_VARIABLES } = TechWatch.digest;
+    const fallback = defaultSessionPrompt(settings.language);
+    const custom = settings.sessionPrompt.trim() !== "";
+    const area = /** @type {HTMLTextAreaElement} */ (h("textarea", {
+      name: "sessionPrompt", class: "prompt", rows: "10", spellcheck: "false",
+      value: custom ? settings.sessionPrompt : fallback,
+    }));
+    area.maxLength = TechWatch.settings.SESSION_PROMPT_MAX;
+    /** @type {TechWatchTypes.Item} */
+    const sample = context.items[0] || /** @type {any} */ (SAMPLE_ITEM);
+    const preview = h("pre", { class: "preview" });
+    const state = h("span", { class: "muted" });
+    /** What the text means once stored: the default, typed again or emptied, is "no prompt of my own". */
+    const stored = () => (area.value.trim() === "" || area.value.trim() === fallback.trim() ? "" : area.value);
+    const refresh = () => {
+      preview.textContent = buildSessionPrompt(sample, settings.language, stored());
+      state.textContent = stored() === "" ? "Prompt par défaut" : "Prompt personnalisé";
+    };
+    const save = () => {
+      const next = stored();
+      if (next.trim() === settings.sessionPrompt.trim()) return;
+      actions.updateSettings((draft) => { draft.sessionPrompt = next; });
+    };
+    /** A press on a button here must not take the caret out of the text. @param {Event} event */
+    const keepCaret = (event) => event.preventDefault();
+    area.addEventListener("input", refresh);
+    area.addEventListener("blur", save);
+    refresh();
+    return h("div", { class: "prompt-editor" },
+      area,
+      h("div", { class: "row vars" },
+        h("span", { class: "muted" }, "Variables :"),
+        ...SESSION_PROMPT_VARIABLES.map((variable) => h("button", {
+          type: "button", class: "chip var", title: "Insérer " + variable.label, dataset: { variable: variable.name },
+          on: { mousedown: keepCaret, click: () => {
+            const start = area.selectionStart ?? area.value.length;
+            area.setRangeText("{{" + variable.name + "}}", start, area.selectionEnd ?? start, "end");
+            area.focus();
+            refresh();
+          } },
+        }, "{{" + variable.name + "}}"))),
+      h("p", { class: "hint" }, "Une ligne dont les variables sont toutes vides est retirée : pas de ligne « Discussion » pour un article sans discussion."),
+      h("div", { class: "row" },
+        state,
+        h("button", {
+          type: "button", class: "ghost", dataset: { action: "reset-prompt" },
+          on: { mousedown: keepCaret, click: () => {
+            area.value = fallback;
+            refresh();
+            if (settings.sessionPrompt.trim() !== "") actions.updateSettings((draft) => { draft.sessionPrompt = ""; });
+          } },
+        }, "Rétablir le prompt par défaut")),
+      h("details", { class: "card", open: previewOpen,
+                     on: { toggle: (event) => { previewOpen = /** @type {HTMLDetailsElement} */ (event.target).open; } } },
+        h("summary", {}, "Aperçu avec « " + TechWatch.text.clip(sample.title, 60) + " »"),
+        preview));
+  }
+
   /** @param {HTMLElement} container @param {TechWatchTypes.ViewContext} context */
   function renderSettings(container, context) {
     const { settings, actions } = context;
@@ -249,6 +326,10 @@
           h("input", { type: "number", name: "maxItems", min: "5", max: "60", value: String(settings.maxItems),
                        on: onChange((draft, value) => { draft.maxItems = Number(value); }) }))),
       h("p", { class: "hint" }, "Claude écrit le résumé avec votre compte Claude Code, sans aucun outil : il ne voit que les titres et extraits. Le coût compte sur votre forfait."),
+
+      h("h2", {}, "Session Claude"),
+      h("p", { class: "hint" }, "Ce que Claude reçoit quand vous envoyez un article avec « → session Claude ». Loom vous le montre encore dans sa feuille de lancement, où vous pouvez le retoucher pour cette fois."),
+      sessionPromptEditor(context),
 
       h("h2", {}, "Centres d'intérêt"),
       h("p", { class: "hint" }, "Mis en avant dans le tri et signalés à Claude."),

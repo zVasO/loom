@@ -368,7 +368,8 @@ export function answerFields(node, blocks = []) {
 export function variablesFor(workflow, id, blocks = []) {
   const groups = [
     { label: "PR", items: ["pr.number", "pr.title", "pr.url", "pr.author", "pr.base", "pr.head", "pr.body"] },
-    { label: "Run", items: ["ticket.key", "repo.name", "repo.path", "run.note", "iteration"] },
+    { label: "Run", items: ["run.task", "run.title", "run.note", "run.branch", "run.base", "ticket.key", "repo.name",
+      "repo.path", "iteration"] },
   ];
   const self = workflow.nodes.find((n) => n.id === id);
   if (self && self.type === "forEach") groups.push({ label: "This item", items: ["item", "index"] });
@@ -388,6 +389,28 @@ export function variablesFor(workflow, id, blocks = []) {
     .map((n) => `previous.${n.id}`);
   if (previous.length) groups.push({ label: "Previous pass", items: previous });
   return groups;
+}
+
+/** Where a workflow's runs work (ADR-0021): the project as it is, or a branch of their own. */
+export const WORKSPACES = [
+  { value: "project", label: "In the project — the steps read",
+    hint: "The project's folder, or a pull request's read-only checkout. Nothing is written unless an expert's tools allow it." },
+  { value: "worktree", label: "On a branch of its own — the steps write",
+    hint: "Each run makes a worktree on a loom/… branch and works there: your folder is left alone, the branch is what the run leaves." },
+];
+
+/**
+ * The agent steps whose conversation `id` may carry on (ADR-0021): those that
+ * run before it in the same mode. Itself is always possible — run again, it
+ * then keeps what it learned.
+ */
+export function continuable(workflow, id, blocks = []) {
+  const self = workflow.nodes.find((n) => n.id === id);
+  if (!self || self.type !== "agent") return [];
+  const mode = (node) => effectiveAgent(node.config || {}, blocks).mode || "headless";
+  return upstream(workflow, id)
+    .filter((n) => n.type === "agent" && mode(n) === mode(self))
+    .map((n) => ({ id: n.id, title: n.title || n.id }));
 }
 
 /** Steps a loop may run again: those before it. */

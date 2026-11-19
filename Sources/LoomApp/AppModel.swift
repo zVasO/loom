@@ -183,7 +183,29 @@ public final class AppModel {
         setBadges(current, for: id)
     }
 
-    public private(set) var sessions: [SessionItem] = []
+    public private(set) var sessions: [SessionItem] = [] {
+        didSet {
+            // Membership only: most writes here are a state, a title or a
+            // badge changing, and none of them may wake the views that only
+            // ask whether a session is live.
+            let unchanged = sessions.count == liveSessionIDs.count
+                && sessions.allSatisfy { liveSessionIDs.contains($0.id) }
+            if !unchanged { liveSessionIDs = Set(sessions.map(\.id)) }
+        }
+    }
+    /// The ids of the live sessions: `sessions` without everything that
+    /// changes while they run. Written when a session appears or goes, never
+    /// on a state change — what a view reads to know a session is live
+    /// without being redrawn at every transition of every session.
+    public private(set) var liveSessionIDs: Set<SessionID> = []
+
+    /// Whether the session runs right now. False for a dormant session (its
+    /// record is around, its process is not) and for an id nobody knows.
+    /// Reads `liveSessionIDs` only: a body calling it does not depend on
+    /// `sessions`.
+    public func isSessionLive(_ id: SessionID) -> Bool {
+        liveSessionIDs.contains(id)
+    }
     /// PRJ-03: the sidebar groups by project.
     public private(set) var projects: [ProjectRecord] = [] {
         didSet { if projects != oldValue { syncClaudeThemes() } }
@@ -235,6 +257,8 @@ public final class AppModel {
         AppModel.storedGrid(role: .session) ?? .default
     private var preferredReviewGrid: TerminalGeometry? = AppModel.storedGrid(role: .review)
     private var preferredSplitGrid: TerminalGeometry? = AppModel.storedGrid(role: .sessionSplit)
+    private var preferredPanelGrid: TerminalGeometry? = AppModel.storedGrid(role: .panel)
+    private var preferredMissionGrid: TerminalGeometry? = AppModel.storedGrid(role: .missionControl)
 
     private static func storedGrid(role: TerminalPaneRole) -> TerminalGeometry? {
         let cols = UserDefaults.standard.integer(forKey: role.colsKey)
@@ -263,6 +287,13 @@ public final class AppModel {
             guard layout.showsPanel else { return preferredGrid }
             let cols = TerminalMetrics.grid(fitting: CGSize(width: layout.terminalWidth, height: 0)).cols
             return TerminalGeometry(cols: cols, rows: preferredGrid.rows)
+        case .panel:
+            // Never measured: the Sessions width, a dozen rows.
+            return preferredPanelGrid ?? TerminalGeometry(cols: preferredGrid.cols, rows: 12)
+        case .missionControl:
+            // Never measured: the Sessions width, what the table leaves of its height.
+            return preferredMissionGrid
+                ?? TerminalGeometry(cols: preferredGrid.cols, rows: max(10, preferredGrid.rows * 3 / 5))
         }
     }
 
@@ -344,6 +375,8 @@ public final class AppModel {
         case .session: preferredGrid = grid
         case .review: preferredReviewGrid = grid
         case .sessionSplit: preferredSplitGrid = grid
+        case .panel: preferredPanelGrid = grid
+        case .missionControl: preferredMissionGrid = grid
         }
         UserDefaults.standard.set(cols, forKey: role.colsKey)
         UserDefaults.standard.set(rows, forKey: role.rowsKey)
@@ -573,6 +606,10 @@ public final class AppModel {
 
     /// All known records — counters and dates for the project cards.
     public private(set) var allRecords: [SessionRecord] = []
+    /// The ids of `allRecords`, written only when a record appears or goes:
+    /// "does this session still exist somewhere" is asked per PR row, and
+    /// must not depend on everything else a record holds.
+    private var knownRecordIDs: Set<SessionID> = []
 
     /// P1 perf: exists() scans ~/.claude/projects directories — memoized per
     /// session; a closed session's native file is settled, so entries only
@@ -616,24 +653,36 @@ public final class AppModel {
             ?? id
     }
 
+    /// Reads the records and the projects again. Called after every launch,
+    /// close, rename and identity change, most of which move one record:
+    /// each array is assigned only when it differs — an assignment wakes
+    /// every view reading it, and the PRs tab reads `projects`.
     private func reloadPersistedSessions() {
         let all = ((try? store?.allSessions()) ?? nil) ?? []
-        allRecords = all
+        if all != allRecords {
+            allRecords = all
+            let ids = Set(all.map(\.id))
+            if ids != knownRecordIDs { knownRecordIDs = ids }
+        }
         seedNativeExistsCache(for: all.filter {
             [.interrupted, .completed, .failed, .archived].contains($0.state)
         })
         // A closed session with no persisted conversation has nothing to show or
         // to resume: it doesn't clutter the lists (pre-fix identifier wrecks
         // disappear at the same time).
-        interruptedSessions = all.filter {
+        let interrupted = all.filter {
             $0.state == .interrupted && nativeSessionExists($0)
         }
-        historySessions = all.filter {
+        if interrupted != interruptedSessions { interruptedSessions = interrupted }
+        let history = all.filter {
             [.completed, .failed, .archived].contains($0.state) && nativeSessionExists($0)
         }
+        if history != historySessions { historySessions = history }
         let loadedProjects = (try? store?.activeProjects()) ?? nil
-        projects = loadedProjects ?? []
-        applySavedProjectOrder()
+        // Written once, already in the saved order: assigning the store's
+        // order and then the user's woke every reader twice per reload.
+        let ordered = Self.inSavedOrder(loadedProjects ?? [])
+        if ordered != projects { projects = ordered }
         // Only against a store that answered: an empty read is not proof
         // that every ranked session is gone.
         if !all.isEmpty {
@@ -648,9 +697,14 @@ public final class AppModel {
         // the query answered: a failed read is not an empty project list,
         // and must not wipe the tabs from disk.
         if let loadedProjects {
-            let kept = prTabs
-            prTabs.keep(projects: Set(loadedProjects.map(\.id)))
-            if prTabs != kept { savePRTabs() }
+            // On a copy: mutating `prTabs` in place notifies its readers even
+            // when no tab goes.
+            var kept = prTabs
+            kept.keep(projects: Set(loadedProjects.map(\.id)))
+            if kept != prTabs {
+                prTabs = kept
+                savePRTabs()
+            }
         }
     }
 
@@ -660,38 +714,68 @@ public final class AppModel {
         project(id).map { URL(fileURLWithPath: $0.path) }
     }
 
+    /// The PR's description, comments and reviews — cached, and fetched by
+    /// one `gh` at a time per PR: a caller that finds a call running joins
+    /// it (a workspace load restarted by the poll used to spawn every call
+    /// again). `refresh` always asks GitHub anew — what it wants may have
+    /// been written after the running call left.
     public func prDetail(_ number: Int, in projectID: ProjectID,
                          refresh: Bool = false) async -> GitHubService.PRDetail? {
         guard let repo = projectRepo(projectID) else { return nil }
         let key = prKey(number, projectID)
-        if !refresh, let cached = prDetailCache[key] { return cached }
-        let detail = try? await GitHubService().prDetail(number, in: repo)
+        if !refresh {
+            if let cached = prDetailCache[key] { return cached }
+            if let running = prDetailInFlight[key] { return await running.task.value }
+        }
+        let task: Task<GitHubService.PRDetail?, Never> = Task {
+            try? await GitHubService().prDetail(number, in: repo)
+        }
+        prDetailInFlight[key] = (task, Date())
+        let detail = await task.value
+        // Only the latest call for the PR fills the cache: one overtaken by
+        // a refresh, or forgotten because the PR moved after it left,
+        // answers its own caller and nobody else.
+        guard prDetailInFlight[key]?.task == task else { return detail }
+        prDetailInFlight[key] = nil
         if let detail { prDetailCache[key] = detail }
         return detail
     }
 
     /// The PR's diff, or the error explaining why there is none — a silently
-    /// empty diff hid the entire file explorer.
+    /// empty diff hid the entire file explorer. One fetch at a time per PR,
+    /// as for `prDetail`.
     public func prDiff(_ number: Int, baseBranch: String = "", in projectID: ProjectID,
                        refresh: Bool = false) async -> (diff: String, error: String?) {
         guard let repo = projectRepo(projectID) else { return ("", "No repo for this project") }
         let key = prKey(number, projectID)
-        if !refresh, let cached = prDiffCache[key] { return (cached, nil) }
+        if !refresh {
+            if let cached = prDiffCache[key] { return (cached, nil) }
+            if let running = prDiffInFlight[key] { return await running.task.value }
+        }
+        let task: Task<(diff: String, error: String?), Never> = Task {
+            await Self.fetchPRDiff(number, baseBranch: baseBranch, in: repo)
+        }
+        prDiffInFlight[key] = (task, Date())
+        let result = await task.value
+        guard prDiffInFlight[key]?.task == task else { return result }
+        prDiffInFlight[key] = nil
+        if result.error == nil, !result.diff.isEmpty { prDiffCache[key] = result.diff }
+        return result
+    }
+
+    private static func fetchPRDiff(_ number: Int, baseBranch: String,
+                                    in repo: URL) async -> (diff: String, error: String?) {
         do {
-            let diff = try await GitHubService().prDiff(number, in: repo)
-            if !diff.isEmpty { prDiffCache[key] = diff }
-            return (diff, nil)
+            return (try await GitHubService().prDiff(number, in: repo), nil)
         } catch {
             // The API refuses oversized diffs (HTTP 406) — git has no limit:
             // rebuild the diff locally from the fetched PR refs.
             do {
                 let base = baseBranch.isEmpty ? "main" : baseBranch
-                let diff = try await GitHubService().localDiff(number, baseBranch: base, in: repo)
-                if !diff.isEmpty { prDiffCache[key] = diff }
-                return (diff, nil)
+                return (try await GitHubService().localDiff(number, baseBranch: base, in: repo), nil)
             } catch let fallbackError {
-                return ("", Self.ghErrorText(error) + " — local fallback: "
-                        + Self.ghErrorText(fallbackError))
+                return ("", ghErrorText(error) + " — local fallback: "
+                        + ghErrorText(fallbackError))
             }
         }
     }
@@ -722,13 +806,23 @@ public final class AppModel {
         } catch { return Self.ghErrorText(error) }
     }
 
-    /// Review comments anchored to code, cached like the diff.
+    /// Review comments anchored to code, cached like the diff — and, like
+    /// it, fetched by one call at a time per PR.
     public func reviewComments(_ number: Int, in projectID: ProjectID,
                                refresh: Bool = false) async -> [GitHubService.ReviewComment] {
         guard let repo = projectRepo(projectID) else { return [] }
         let key = prKey(number, projectID)
-        if !refresh, let cached = prCommentsCache[key] { return cached }
-        let comments = (try? await GitHubService().reviewComments(number, in: repo)) ?? []
+        if !refresh {
+            if let cached = prCommentsCache[key] { return cached }
+            if let running = prCommentsInFlight[key] { return await running.task.value }
+        }
+        let task: Task<[GitHubService.ReviewComment], Never> = Task {
+            (try? await GitHubService().reviewComments(number, in: repo)) ?? []
+        }
+        prCommentsInFlight[key] = (task, Date())
+        let comments = await task.value
+        guard prCommentsInFlight[key]?.task == task else { return comments }
+        prCommentsInFlight[key] = nil
         prCommentsCache[key] = comments
         return comments
     }
@@ -762,8 +856,17 @@ public final class AppModel {
                           refresh: Bool = false) async -> GitHubService.FileViews? {
         guard let repo = projectRepo(projectID) else { return nil }
         let key = prKey(number, projectID)
-        if !refresh, let cached = prFileViewsCache[key] { return cached }
-        let views = try? await GitHubService().fileViews(number, in: repo)
+        if !refresh {
+            if let cached = prFileViewsCache[key] { return cached }
+            if let running = prFileViewsInFlight[key] { return await running.task.value }
+        }
+        let task: Task<GitHubService.FileViews?, Never> = Task {
+            try? await GitHubService().fileViews(number, in: repo)
+        }
+        prFileViewsInFlight[key] = (task, Date())
+        let views = await task.value
+        guard prFileViewsInFlight[key]?.task == task else { return views }
+        prFileViewsInFlight[key] = nil
         if let views { prFileViewsCache[key] = views }
         return views
     }
@@ -840,10 +943,33 @@ public final class AppModel {
     /// PRs whose review session is being prepared (worktree fetch + launch) —
     /// the UI shows progress instead of feeling frozen during the network fetch.
     public private(set) var prReviewLaunching: Set<String> = []
+    /// Reviews asked for by reference (a pasted URL) whose pull request is
+    /// still on its way from GitHub: no tab can show them yet. In the order
+    /// they were asked for; an entry goes when its tab opens, or when the
+    /// attempt ends (not found, a clone to confirm).
+    public internal(set) var prReviewsOpening: [PRReference] = []
+    /// The launch running for each PR, if any — see `launchPRReviewSession`.
+    @ObservationIgnored private var reviewLaunches: [String: Task<SessionID?, Never>] = [:]
     /// PR content caches: selecting an already-seen PR paints instantly instead
     /// of re-running two gh processes. Invalidated by refreshPRs / submissions.
-    private var prDetailCache: [String: GitHubService.PRDetail] = [:]
-    private var prDiffCache: [String: String] = [:]
+    /// Not observed, like `diffProducts`: a workspace seeds its state from
+    /// them in its init, and must not then be rebuilt at every write to any
+    /// PR's entry — what they hold reaches a view through its own load.
+    @ObservationIgnored private var prDetailCache: [String: GitHubService.PRDetail] = [:]
+    @ObservationIgnored private var prDiffCache: [String: String] = [:]
+    /// The `gh` call running for each PR's content, and when it left: a
+    /// second caller joins it instead of spawning the same call again.
+    @ObservationIgnored private var prDetailInFlight:
+        [String: (task: Task<GitHubService.PRDetail?, Never>, left: Date)] = [:]
+    @ObservationIgnored private var prDiffInFlight:
+        [String: (task: Task<(diff: String, error: String?), Never>, left: Date)] = [:]
+    @ObservationIgnored private var prCommentsInFlight:
+        [String: (task: Task<[GitHubService.ReviewComment], Never>, left: Date)] = [:]
+    @ObservationIgnored private var prFileViewsInFlight:
+        [String: (task: Task<GitHubService.FileViews?, Never>, left: Date)] = [:]
+    /// The PRs whose rows were handed to the diff pipeline — what a PR gone
+    /// from its list has to be evicted from.
+    @ObservationIgnored private var diffPipelineKeys: Set<String> = []
 
     /// What the diff view paints, per PR: the products of `DiffPipeline`,
     /// mirrored here so a workspace seeds its state SYNCHRONOUSLY in its init
@@ -868,9 +994,35 @@ public final class AppModel {
         prTourCache[prKey(number, projectID)]
     }
 
+    // The three below answer from memory, synchronously and unobserved: for
+    // a view's init, to seed its state before the first frame, as
+    // `cachedDiff` does. The load that follows still confirms each of them.
+
+    /// The PR's description, comments and reviews as last loaded. nil until
+    /// `prDetail` answered once, and again after the PR moved on GitHub or
+    /// left its list — never a reason to show "no description".
+    func cachedDetail(pr number: Int, in projectID: ProjectID) -> GitHubService.PRDetail? {
+        prDetailCache[prKey(number, projectID)]
+    }
+
+    /// The PR's review comments as last loaded. nil until `reviewComments`
+    /// answered once (an empty array is an answer: no comment), and again
+    /// after the PR moved or left its list.
+    func cachedReviewComments(pr number: Int, in projectID: ProjectID) -> [GitHubService.ReviewComment]? {
+        prCommentsCache[prKey(number, projectID)]
+    }
+
+    /// GitHub's "Viewed" state of the PR's files as last loaded or set. nil
+    /// until `fileViews` answered once, after the PR moved or left its list,
+    /// and when GitHub could not be asked.
+    func cachedFileViews(pr number: Int, in projectID: ProjectID) -> GitHubService.FileViews? {
+        prFileViewsCache[prKey(number, projectID)]
+    }
+
     /// Parsed and paired rows for a diff — cached across tab switches.
     func diffRows(pr number: Int, in projectID: ProjectID, diff: String) async -> DiffPipeline.Rows {
         let key = prKey(number, projectID)
+        diffPipelineKeys.insert(key)
         let rows = await diffPipeline.rows(for: key, diff: diff)
         // A refresh during the parse evicted the project's raw diffs: the
         // products of a diff the model no longer holds are not mirrored back,
@@ -894,8 +1046,8 @@ public final class AppModel {
         }
         return highlights
     }
-    private var prCommentsCache: [String: [GitHubService.ReviewComment]] = [:]
-    private var prFileViewsCache: [String: GitHubService.FileViews] = [:]
+    @ObservationIgnored private var prCommentsCache: [String: [GitHubService.ReviewComment]] = [:]
+    @ObservationIgnored private var prFileViewsCache: [String: GitHubService.FileViews] = [:]
     private var prListCache: PRListCache { PRListCache(directory: supportDirectory) }
     private var prFilterStore: PRFilterStore { PRFilterStore(directory: supportDirectory) }
 
@@ -907,6 +1059,9 @@ public final class AppModel {
     public internal(set) var projectRepoNames: [ProjectID: String] = [:]
     /// Projects whose remote is being read right now — one git process each.
     var repoNameLookups: Set<ProjectID> = []
+    /// The latest batch of those reads; it ends once every earlier batch
+    /// has too — what `resolvedProject(forRepo:)` waits on.
+    @ObservationIgnored var repoNameLookupTask: Task<Void, Never>?
     /// Where clones land (`<folder>/<name>`). Asked once, kept in Settings.
     /// Stored (not computed over UserDefaults) so the views tracking it
     /// repaint when it is chosen.
@@ -931,11 +1086,14 @@ public final class AppModel {
     @ObservationIgnored var prTabsSaveTask: Task<Void, Never>?
     /// One serial queue: the writes land in the order they were asked.
     static let prTabsWriteQueue = DispatchQueue(label: "loom.pr.tabs.write", qos: .utility)
-    /// The PR list folded away (a review took the room) — kept while the
-    /// app runs, whichever tab is on screen.
-    public var prSidebarHidden = false
-    /// Projects unfolded in the PRs sidebar — gh is queried for those only.
-    public var expandedPRProjects: Set<ProjectID> = []
+    /// Browse (the table of PRs) or Review (the open PR tabs). Persisted:
+    /// the PRs tab reopens where you were working.
+    var prMode: PRMode = PRMode(rawValue: UserDefaults.standard
+        .string(forKey: "loom.pr.mode") ?? "") ?? .browse {
+        didSet { UserDefaults.standard.set(prMode.rawValue, forKey: "loom.pr.mode") }
+    }
+    /// What the Browse table lists — gh is queried for that scope only.
+    var prBrowseScope: PRBrowseScope = .inbox
     /// The organizations' repositories, from disk at launch, then refreshed
     /// a day later or on demand.
     public internal(set) var catalog: RepoCatalogCache.Entry?
@@ -959,8 +1117,11 @@ public final class AppModel {
     public internal(set) var cloning: Set<String> = []
     /// A repository to clone before a PR can open: the view asks first.
     public var pendingClone: PendingClone?
-    /// Drafted review comments by PR key — mirrored on disk.
-    var reviewDrafts: [String: ReviewDraft] = [:]
+    /// Drafted review comments by PR key — mirrored on disk. Not observed:
+    /// the workspace keeps its PR's draft in its own state and reads it
+    /// again after every change it makes, so a comment drafted on one PR
+    /// redraws nothing else.
+    @ObservationIgnored var reviewDrafts: [String: ReviewDraft] = [:]
     var reviewDraftStore: ReviewDraftStore { ReviewDraftStore(directory: supportDirectory) }
 
     // MARK: Scheduled reviews — the logic lives in AutoReviewModel.swift
@@ -977,6 +1138,11 @@ public final class AppModel {
         public let repo: String
         /// The PR to open once the clone is a project — nil for a bare add.
         public let number: Int?
+        /// Opened from the Browse table: the PR gets a kept tab, in Review.
+        public var pin = false
+        /// A review was asked for (`startPRReview(reference:)`): once the
+        /// clone is a project the PR does not just open, its review starts.
+        public var startsReview = false
     }
 
     // MARK: PR filters
@@ -1154,20 +1320,52 @@ public final class AppModel {
         // A failed gh call must never be stamped fresh: the failure would then
         // be served from the cache for the whole TTL.
         guard let prs = try? await GitHubService().listPRs(in: repo, filter: filter) else { return }
-        let prefix = "\(projectID.rawValue.uuidString)#"
-        prDetailCache = prDetailCache.filter { !$0.key.hasPrefix(prefix) }
-        prDiffCache = prDiffCache.filter { !$0.key.hasPrefix(prefix) }
-        diffProducts = diffProducts.filter { !$0.key.hasPrefix(prefix) }
-        prTourCache = prTourCache.filter { !$0.key.hasPrefix(prefix) }
-        Task { await diffPipeline.evict(prefix: prefix) }
-        prCommentsCache = prCommentsCache.filter { !$0.key.hasPrefix(prefix) }
-        prFileViewsCache = prFileViewsCache.filter { !$0.key.hasPrefix(prefix) }
+        evictStaleContent(of: prs, replacing: prLists[key]?.prs ?? [], in: projectID)
         prLists[key] = PRListCache.Entry(fetchedAt: Date(), prs: prs, query: filter.query)
         savePRListCache()
         // The open tabs of this project take the fresh rows: title, head,
-        // checks, review state.
-        prTabs.refresh(from: prs, in: projectID)
-        savePRTabs()
+        // checks, review state. On a copy: a list that moved no open tab
+        // must not wake the readers of `prTabs`.
+        var tabs = prTabs
+        tabs.refresh(from: prs, in: projectID)
+        if tabs != prTabs {
+            prTabs = tabs
+            savePRTabs()
+        }
+    }
+
+    /// A list was refetched: forgets what was loaded for the PRs it shows
+    /// moved, and for the ones it no longer holds — and nothing else. The
+    /// whole project used to go, on every list fetch: the tab opened a
+    /// moment before lost its diff, its colours and a guided tour that had
+    /// cost an agent run, head moved or not.
+    private func evictStaleContent(of fresh: [GitHubService.PullRequest],
+                                   replacing previous: [GitHubService.PullRequest],
+                                   in projectID: ProjectID) {
+        // The row each PR's content was loaded for: its open tab's (whoever
+        // writes it — the poll, `dropPRContentIfMoved` — drops the content
+        // itself when the row moved), else this list's, else another
+        // filter's.
+        var known: [Int: GitHubService.PullRequest] = [:]
+        for (listKey, entry) in prLists where listKey.projectID == projectID {
+            for pr in entry.prs { known[pr.number] = pr }
+        }
+        for pr in previous { known[pr.number] = pr }
+        for tab in prTabs.tabs where tab.projectID == projectID { known[tab.pr.number] = tab.pr }
+        let listed = Dictionary(fresh.map { ($0.number, $0) }) { first, _ in first }
+        for number in GitHubService.staleContent(previous: previous, known: known, fresh: fresh) {
+            guard let row = listed[number] else {
+                // Gone from the list — merged, closed, out of the filter:
+                // nothing will ask for its parsed rows again.
+                let goneKey = prKey(number, projectID)
+                if diffPipelineKeys.remove(goneKey) != nil {
+                    Task { await diffPipeline.evict(key: goneKey) }
+                }
+                invalidatePRCaches(number, in: projectID, callsLeftBefore: .distantPast)
+                continue
+            }
+            invalidatePRCaches(movedTo: row, in: projectID)
+        }
     }
 
     public func isLaunchingReview(forPR number: Int, in projectID: ProjectID) -> Bool {
@@ -1180,20 +1378,31 @@ public final class AppModel {
 
     /// In-memory mirror of loom.pr.sessions: reviewSession(forPR:) runs per
     /// sidebar row per frame — deserializing UserDefaults there is waste.
-    private var prSessionMap: [String: String]?
+    /// Read once, here: filled lazily by the first caller, it was observed
+    /// state written in the middle of a view update.
+    private var prSessionMap: [String: String] =
+        (UserDefaults.standard.dictionary(forKey: "loom.pr.sessions") as? [String: String]) ?? [:]
 
     /// The review session attached to a PR, when it still exists somewhere
-    /// (live or resumable). Mapping persisted across launches.
+    /// (live or resumable). Mapping persisted across launches. nil when the
+    /// PR never had a review, or when its session is gone for good.
+    /// Depends on which sessions and records exist, not on what they hold:
+    /// a body calling it is not redrawn when a session changes state.
     public func reviewSession(forPR number: Int, in projectID: ProjectID) -> SessionID? {
-        if prSessionMap == nil {
-            prSessionMap = (UserDefaults.standard.dictionary(forKey: "loom.pr.sessions")
-                            as? [String: String]) ?? [:]
-        }
-        guard let raw = prSessionMap?[prKey(number, projectID)], let uuid = UUID(uuidString: raw)
+        guard let raw = prSessionMap[prKey(number, projectID)], let uuid = UUID(uuidString: raw)
         else { return nil }
         let id = SessionID(uuid)
-        let known = sessions.contains { $0.id == id } || allRecords.contains { $0.id == id }
+        let known = liveSessionIDs.contains(id) || knownRecordIDs.contains(id)
         return known ? id : nil
+    }
+
+    /// The PR's review session when it runs right now — what the drawer can
+    /// embed. nil when the PR has no review, and when its session is dormant
+    /// (closed, resumable: "Review session" wakes it).
+    public func liveReviewSession(forPR number: Int, in projectID: ProjectID) -> SessionID? {
+        guard let id = reviewSession(forPR: number, in: projectID), liveSessionIDs.contains(id)
+        else { return nil }
+        return id
     }
 
     /// The sessions born in the PR tab — review and guide sessions — that the
@@ -1201,11 +1410,7 @@ public final class AppModel {
     /// PR, and any session wearing a "PR #n" badge (the tab stamps one on
     /// both kinds, and a user can put one on a session of their own).
     public var codeReviewSessionIDs: Set<SessionID> {
-        // Read without caching: a getter that writes observed state runs
-        // inside a view update.
-        let map = prSessionMap ?? (UserDefaults.standard.dictionary(forKey: "loom.pr.sessions")
-                                   as? [String: String]) ?? [:]
-        var ids = Set(map.values.compactMap { UUID(uuidString: $0) }.map { SessionID($0) })
+        var ids = Set(prSessionMap.values.compactMap { UUID(uuidString: $0) }.map { SessionID($0) })
         for item in sessions where Self.wearsPRBadge(item.badges) { ids.insert(item.id) }
         for record in allRecords where Self.wearsPRBadge(record.badges) { ids.insert(record.id) }
         return ids
@@ -1281,7 +1486,7 @@ public final class AppModel {
     public func reviewSessions(forPR number: Int, in projectID: ProjectID) -> [SessionID] {
         let raw = prSessionHistoryMap[prKey(number, projectID)] ?? []
         let ids = raw.compactMap { UUID(uuidString: $0) }.map { SessionID($0) }
-            .filter { id in sessions.contains { $0.id == id } || allRecords.contains { $0.id == id } }
+            .filter { liveSessionIDs.contains($0) || knownRecordIDs.contains($0) }
         if ids.isEmpty, let active = reviewSession(forPR: number, in: projectID) { return [active] }
         return ids
     }
@@ -1301,9 +1506,56 @@ public final class AppModel {
     /// dedicated worktree, claude launched bare, badge "PR #n". `fresh`
     /// skips the reattach: a NEW session takes over the PR, the previous one
     /// stays where it is (sidebar, CODE REVIEW).
+    /// One launch per PR at a time: whoever asks while one runs — a click,
+    /// the URL prompt, a scheduled review — gets that launch's session.
     public func launchPRReviewSession(_ pr: GitHubService.PullRequest,
                                       in projectID: ProjectID,
                                       fresh: Bool = false) async -> SessionID? {
+        await reviewLaunchTask(pr, in: projectID, fresh: fresh).value
+    }
+
+    /// The launch of the PR's review: the one already running when there is
+    /// one, else started here. Synchronous, so that `isLaunchingReview` is
+    /// true before the caller's next line — the drawer it just opened has
+    /// its "preparing" state to show in the same frame.
+    @discardableResult
+    func reviewLaunchTask(_ pr: GitHubService.PullRequest, in projectID: ProjectID,
+                          fresh: Bool = false) -> Task<SessionID?, Never> {
+        singleReviewLaunch(prKey(pr.number, projectID)) {
+            await self.performPRReviewLaunch(pr, in: projectID, fresh: fresh, checkout: nil)
+        }
+    }
+
+    /// Runs `launch` as THE launch of the PR `key` names, unless one already
+    /// runs: that one is returned instead. The launch itself had no such
+    /// guard — two callers for a PR with no session yet both checked it out,
+    /// raced on one worktree and made a session each. Owns the PR's
+    /// "launching" state, from this call to the launch's last line.
+    @discardableResult
+    private func singleReviewLaunch(_ key: String,
+                                    _ launch: @escaping @MainActor () async -> SessionID?)
+        -> Task<SessionID?, Never> {
+        if let running = reviewLaunches[key] { return running }
+        prReviewLaunching.insert(key)
+        let task: Task<SessionID?, Never> = Task {
+            let id = await launch()
+            // Cleared by the launch itself, before it ends: a launch that
+            // is over can be joined by nobody.
+            self.reviewLaunches[key] = nil
+            self.prReviewLaunching.remove(key)
+            return id
+        }
+        reviewLaunches[key] = task
+        return task
+    }
+
+    /// The launch proper. `checkout`: the PR's worktree when the caller
+    /// already prepared it (a review started from a URL checks out while
+    /// `gh` answers for the row) — fetching it again would cost the network
+    /// a second time.
+    private func performPRReviewLaunch(_ pr: GitHubService.PullRequest,
+                                       in projectID: ProjectID, fresh: Bool,
+                                       checkout prepared: GitHubService.PRCheckout?) async -> SessionID? {
         if !fresh, let existing = reviewSession(forPR: pr.number, in: projectID) {
             if !sessions.contains(where: { $0.id == existing }) {
                 await resumeDormant(existing)
@@ -1317,19 +1569,25 @@ public final class AppModel {
             return existing
         }
         guard let manager, let repo = projectRepo(projectID) else { return nil }
-        let key = prKey(pr.number, projectID)
-        prReviewLaunching.insert(key)
-        defer { prReviewLaunching.remove(key) }
         let checkout: GitHubService.PRCheckout
-        do {
-            checkout = try await GitHubService().syncPRWorktree(pr.number, repo: repo,
-                                                                readOnly: reviewWorktreesReadOnly)
-        } catch {
-            startupError = "Could not check out PR #\(pr.number): \(Self.ghErrorText(error))"
-            return nil
+        if let prepared {
+            checkout = prepared
+        } else {
+            do {
+                checkout = try await GitHubService().syncPRWorktree(pr.number, repo: repo,
+                                                                    readOnly: reviewWorktreesReadOnly)
+            } catch {
+                startupError = "Could not check out PR #\(pr.number): \(Self.ghErrorText(error))"
+                return nil
+            }
         }
         let worktree = checkout.path
+        // The user's status line is up to three settings files to read and
+        // parse: off the main actor, while the command is installed.
+        let statusLineRead: Task<ClaudeStatusLine.UserCommand?, Never> =
+            Task.detached(priority: .userInitiated) { ClaudeStatusLine.user(cwd: worktree) }
         await installReviewCommand(for: pr, in: worktree)
+        let statusLine = await statusLineRead.value
         do {
             let sessionID = SessionID()
             let token = UUID().uuidString
@@ -1340,7 +1598,7 @@ public final class AppModel {
             var spec = SessionManager.SessionSpec(
                 command: adapter(for: sessionID).launchCommand(session: sessionID, initialPrompt: nil,
                                                hookToken: token,
-                                               userStatusLine: userStatusLine(in: worktree),
+                                               userStatusLine: statusLine,
                                                theme: claudeTheme(for: projectID)),
                 workingDirectory: worktree,
                 // Born at the drawer's grid: the first fit is then a no-op,
@@ -1378,6 +1636,116 @@ public final class AppModel {
         }
     }
 
+    // MARK: A review started by reference — a pasted URL, the command palette
+
+    /// The row the model already holds for a PR: its open tab's (the poll
+    /// keeps it true), else the one of the list fetched last that has it.
+    /// nil when the PR is in no tab and in no loaded list — its row then has
+    /// to be asked of GitHub.
+    func knownPullRequest(_ number: Int, in projectID: ProjectID) -> GitHubService.PullRequest? {
+        if let tab = prTabs.tab(PRTab.key(projectID, number)) { return tab.pr }
+        var best: (pr: GitHubService.PullRequest, fetchedAt: Date)?
+        for (listKey, entry) in prLists where listKey.projectID == projectID {
+            guard let pr = entry.prs.first(where: { $0.number == number }) else { continue }
+            if let current = best, current.fetchedAt >= entry.fetchedAt { continue }
+            best = (pr, entry.fetchedAt)
+        }
+        return best?.pr
+    }
+
+    /// The review of a project's PR known by its number alone — what
+    /// `startPRReview(reference:)` comes down to once the project is known.
+    /// Returns at once. With the row at hand (an open tab, a loaded list)
+    /// this is a click on "Start review". Without it, Review shows and the
+    /// PR is marked launching now; the row and the checkout are fetched
+    /// together, the tab and its drawer open when the row lands, and claude
+    /// starts when both are there.
+    func startPRReview(number: Int, in projectID: ProjectID, repo nameWithOwner: String?,
+                       asked reference: PRReference) {
+        if let pr = knownPullRequest(number, in: projectID) {
+            startPRReview(pr, in: projectID)
+            return
+        }
+        prMode = .review
+        let key = prKey(number, projectID)
+        // Asked a second time (Return pressed again): the first is on its way.
+        guard reviewLaunches[key] == nil else { return }
+        if !prReviewsOpening.contains(reference) { prReviewsOpening.append(reference) }
+        singleReviewLaunch(key) {
+            await self.launchReview(ofPR: number, in: projectID, repo: nameWithOwner, asked: reference)
+        }
+    }
+
+    /// The launch behind `startPRReview(number:…)`: fetches the row, checks
+    /// the PR out meanwhile, opens the tab, then launches. Failures go where
+    /// `openPR`'s go — the same words, the same place.
+    private func launchReview(ofPR number: Int, in projectID: ProjectID, repo nameWithOwner: String?,
+                              asked reference: PRReference) async -> SessionID? {
+        guard let folder = projectRepo(projectID) else {
+            prReviewsOpening.removeAll { $0 == reference }
+            startupError = "Could not load PR #\(number): the project is no longer in Loom."
+            return nil
+        }
+        // The checkout needs the number alone: it runs while `gh` answers
+        // for the row. Not for a PR that has its session already — a
+        // reattach brings the worktree to the head itself.
+        var checkoutTask: Task<GitHubService.PRCheckout, Error>?
+        if reviewSession(forPR: number, in: projectID) == nil {
+            let readOnly = reviewWorktreesReadOnly
+            checkoutTask = Task.detached(priority: .userInitiated) {
+                try await GitHubService().syncPRWorktree(number, repo: folder, readOnly: readOnly)
+            }
+        }
+        var row: GitHubService.PullRequest?
+        var failure = "Pull request #\(number) was not found."
+        do {
+            if let nameWithOwner {
+                row = try await GitHubService().pullRequest(number, repo: nameWithOwner)
+            } else {
+                // No remote name known: gh resolves the repository from the folder.
+                row = try await GitHubService().pullRequest(number, repo: nil, in: folder)
+            }
+        } catch {
+            failure = "Could not load PR #\(number): \(Self.ghErrorText(error))"
+        }
+        guard let pr = row else {
+            // The checkout may still be writing the worktree: this launch
+            // is not over — and no other may start on that folder — before
+            // it is. The "Opening" entry and the error wait for it too: an
+            // error shown while the launch still held the PR invited a
+            // retry, and that retry was dropped without a word.
+            _ = await checkoutTask?.result
+            prReviewsOpening.removeAll { $0 == reference }
+            startupError = failure
+            return nil
+        }
+        prReviewsOpening.removeAll { $0 == reference }
+        // A real row from the start: a placeholder in the tab would load the
+        // workspace once for it and once more for the row that replaces it.
+        notePRRowFetched(number, in: projectID)
+        let tabID = PRTab.key(projectID, number)
+        openPRTab(pr, in: projectID)
+        prMode = .review
+        let drawerWasOpen = prTabs.tab(tabID)?.drawerOpen ?? false
+        withAnimation(.hover) { setPRTabDrawer(open: true, for: tabID) }
+        // The project's list, as for any PR opened from outside it.
+        Task { await ensurePRs(for: projectID) }
+        var checkout: GitHubService.PRCheckout?
+        if let checkoutTask {
+            do {
+                checkout = try await checkoutTask.value
+            } catch {
+                startupError = "Could not check out PR #\(number): \(Self.ghErrorText(error))"
+                if !drawerWasOpen { setPRTabDrawer(open: false, for: tabID) }
+                return nil
+            }
+        }
+        let id = await performPRReviewLaunch(pr, in: projectID, fresh: false, checkout: checkout)
+        // No session to show: the drawer this opened closes again.
+        if id == nil, !drawerWasOpen { setPRTabDrawer(open: false, for: tabID) }
+        return id
+    }
+
     /// The /setup-pr-review command, rewritten at every launch AND every
     /// reattach, so the text in Settings is what claude reads. Installed even
     /// when it will not be typed automatically: the user can call it.
@@ -1410,15 +1778,12 @@ public final class AppModel {
         guard let repo = projectRepo(projectID) else { return }
         let key = prKey(pr.number, projectID)
         // One sync per worktree at a time: two fetches racing on the same
-        // worktree fight over its index lock.
-        guard !prReviewLaunching.contains(key), !prSyncing.contains(key) else { return }
+        // worktree fight over its index lock. The poll (quiet) also stands
+        // back while a launch runs; the launch — the one caller that is not
+        // quiet — is that launch, and holds the "Preparing…" state itself.
+        guard !prSyncing.contains(key), !(quietly && prReviewLaunching.contains(key)) else { return }
         prSyncing.insert(key)
-        // The poll syncs in the background: no "Preparing…" in the toolbar.
-        if !quietly { prReviewLaunching.insert(key) }
-        defer {
-            prSyncing.remove(key)
-            if !quietly { prReviewLaunching.remove(key) }
-        }
+        defer { prSyncing.remove(key) }
         let checkout: GitHubService.PRCheckout
         do {
             checkout = try await GitHubService().syncPRWorktree(pr.number, repo: repo,
@@ -1456,7 +1821,13 @@ public final class AppModel {
     }
 
     /// Forgets what the model holds about ONE PR — its row moved on GitHub.
-    private func invalidatePRCaches(_ number: Int, in projectID: ProjectID) {
+    /// A content call still on its way is forgotten too when it left before
+    /// `limit`: it may carry what the PR held before, so nobody joins it any
+    /// more and its answer fills no cache. A call that left later is kept —
+    /// the workspace reloading on the new row joins it instead of asking
+    /// GitHub a second time. By default no running call is trusted.
+    private func invalidatePRCaches(_ number: Int, in projectID: ProjectID,
+                                    callsLeftBefore limit: Date = .distantFuture) {
         let key = prKey(number, projectID)
         prDetailCache[key] = nil
         prDiffCache[key] = nil
@@ -1464,10 +1835,59 @@ public final class AppModel {
         prTourCache[key] = nil
         prCommentsCache[key] = nil
         prFileViewsCache[key] = nil
+        if let call = prDetailInFlight[key], call.left < limit { prDetailInFlight[key] = nil }
+        if let call = prDiffInFlight[key], call.left < limit { prDiffInFlight[key] = nil }
+        if let call = prCommentsInFlight[key], call.left < limit { prCommentsInFlight[key] = nil }
+        if let call = prFileViewsInFlight[key], call.left < limit { prFileViewsInFlight[key] = nil }
+    }
+
+    /// `invalidatePRCaches` for a PR whose row moved to `row`. A content
+    /// call that left after GitHub last stamped the PR read it as the row
+    /// describes it, and is kept: a tab opened on a row hours old learns the
+    /// PR moved a moment after its load began, and the reload that follows
+    /// must not ask for everything again.
+    private func invalidatePRCaches(movedTo row: GitHubService.PullRequest, in projectID: ProjectID) {
+        let key = prKey(row.number, projectID)
+        let running = prDetailInFlight[key] != nil || prDiffInFlight[key] != nil
+            || prCommentsInFlight[key] != nil || prFileViewsInFlight[key] != nil
+        // The stamp is parsed only when there is a call to judge.
+        invalidatePRCaches(row.number, in: projectID,
+                           callsLeftBefore: running ? Self.contentCallLimit(for: row) : .distantFuture)
+    }
+
+    /// A row is about to be written into a PR's tab by someone else than
+    /// the poll or a list fetch — a click in a list, a pasted URL, a
+    /// scheduled review. Those two drop what was loaded for the PR when its
+    /// row moves; a row written straight into the tab kept it, and nothing
+    /// dropped it afterwards: the poll and the next list fetch compare
+    /// GitHub with the row the tab then has. Measured against the row known
+    /// until now (the tab's, else a list's). With none — a tab closed since,
+    /// a PR in no loaded list — nothing says that what is cached was loaded
+    /// for this row, and it goes.
+    func dropPRContentIfMoved(to row: GitHubService.PullRequest, in projectID: ProjectID) {
+        if let known = knownPullRequest(row.number, in: projectID),
+           !row.contentMoved(since: known) { return }
+        invalidatePRCaches(movedTo: row, in: projectID)
+    }
+
+    /// The moment before which a call cannot be trusted to have read a PR
+    /// as its row now describes it: GitHub's update stamp, plus a margin for
+    /// two clocks that disagree. No call is trusted when the stamp cannot
+    /// be read.
+    private static func contentCallLimit(for pr: GitHubService.PullRequest) -> Date {
+        guard let stamped = ISO8601DateFormatter().date(from: pr.updatedAt) else { return .distantFuture }
+        return stamped.addingTimeInterval(30)
     }
 
     /// When each open PR was last checked against GitHub.
     @ObservationIgnored private var prCheckedAt: [String: Date] = [:]
+
+    /// The PR's row has just been fetched, by someone else than the poll
+    /// (opened from a URL, a review started by reference): the tab that
+    /// opens on it need not ask `gh` for the same row a second later.
+    func notePRRowFetched(_ number: Int, in projectID: ProjectID) {
+        prCheckedAt[prKey(number, projectID)] = Date()
+    }
 
     /// Bumped by a manual refresh: the workspace reloads on it even when
     /// GitHub reports nothing new.
@@ -1508,8 +1928,8 @@ public final class AppModel {
             prReloadGenerations[key, default: 0] += 1
         }
         if fresh != old {
-            if !force, fresh.headSHA != old.headSHA || fresh.updatedAt != old.updatedAt {
-                invalidatePRCaches(number, in: projectID)
+            if !force, fresh.contentMoved(since: old) {
+                invalidatePRCaches(movedTo: fresh, in: projectID)
             }
             prTabs.refresh(from: [fresh], in: projectID)
             savePRTabs()
@@ -1585,7 +2005,7 @@ public final class AppModel {
     /// Pasted, not typed: a paste never opens the slash-command menu, so the
     /// Return that follows submits instead of picking a suggestion.
     /// Returns whether the line went in.
-    func submitWhenReady(_ line: String, to id: SessionID,
+    func submitWhenReady(_ line: String, to id: SessionID, attaching files: [URL] = [],
                                  timeout: Duration = .seconds(120)) async -> Bool {
         guard let runtime = await manager?.runtime(for: id) else { return false }
         let surface = runtime.surface()
@@ -1594,13 +2014,29 @@ public final class AppModel {
         while clock.now < deadline, !Task.isCancelled {
             let sample = await runtime.readiness()
             if AgentReadiness.isReady(sample) {
-                surface.send(KeyTranslator.paste(line, bracketed: true) + "\r")
+                await Self.type(line, attaching: files, into: surface)
                 return true
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
         Self.log.warning("session \(id.rawValue.uuidString, privacy: .public) never became ready: line not submitted")
         return false
+    }
+
+    /// A message and its images into claude's input, then Return. An image
+    /// goes in as its path, pasted alone: claude turns a pasted image path
+    /// into an attachment ([Image #1]), as for a file dropped on its
+    /// terminal. A moment between pastes lets it read each file.
+    static func type(_ line: String, attaching files: [URL], into surface: TerminalSurface) async {
+        for file in files {
+            surface.send(KeyTranslator.paste(KeyTranslator.quoted(path: file.path), bracketed: true))
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        if !line.isEmpty {
+            surface.send(KeyTranslator.paste(line, bracketed: true))
+        }
+        if !files.isEmpty { try? await Task.sleep(for: .milliseconds(150)) }
+        surface.send("\r")
     }
 
     /// Types text into a session's input WITHOUT submitting — the same path as
@@ -1942,11 +2378,13 @@ public final class AppModel {
         return projects.contains { $0.id == id } ? id : nil
     }
 
-    private func applySavedProjectOrder() {
+    /// The projects in the order the user dragged them into; the ones never
+    /// ranked follow, in the store's order.
+    private static func inSavedOrder(_ records: [ProjectRecord]) -> [ProjectRecord] {
         guard let order = UserDefaults.standard.stringArray(forKey: "loom.projects.order")
-        else { return }
+        else { return records }
         let rank = Dictionary(order.enumerated().map { ($1, $0) }) { first, _ in first }
-        projects = projects.enumerated().sorted { lhs, rhs in
+        return records.enumerated().sorted { lhs, rhs in
             let l = rank[lhs.element.id.rawValue.uuidString] ?? Int.max
             let r = rank[rhs.element.id.rawValue.uuidString] ?? Int.max
             return l == r ? lhs.offset < rhs.offset : l < r
@@ -1957,7 +2395,10 @@ public final class AppModel {
     /// appears indented under it ("Term n"). Shells die with the app and
     /// are never offered for Resume (no native conversation).
     @discardableResult
-    public func launchShell(for parent: SessionItem, title: String? = nil) async -> SessionID? {
+    /// `grid`: the shape the shell is born at — the stack's launch grid by
+    /// default; the fleet panel passes its own.
+    public func launchShell(for parent: SessionItem, title: String? = nil,
+                            grid: TerminalGeometry? = nil) async -> SessionID? {
         guard let manager else { return nil }
         let record = (try? store?.session(id: parent.id)) ?? nil
         guard let directory = workingDirectory(worktreePath: record?.worktreePath,
@@ -1976,7 +2417,7 @@ public final class AppModel {
         var spec = SessionManager.SessionSpec(
             command: Command(executable: shell, arguments: ["-l"]),
             workingDirectory: directory,
-            geometry: launchGrid(forStack: parent.id),
+            geometry: grid ?? launchGrid(forStack: parent.id),
             samplingInterval: .seconds(1))
         spec.title = name
         spec.projectID = parent.projectID
@@ -2029,10 +2470,10 @@ public final class AppModel {
         saveStackChildren()
     }
 
-    public func reopenDormantShell(_ dormant: DormantShell) async -> SessionID? {
+    public func reopenDormantShell(_ dormant: DormantShell, grid: TerminalGeometry? = nil) async -> SessionID? {
         guard let parent = stackParent(dormant.parentID) else { return nil }
         dormantShells.removeAll { $0.id == dormant.id }
-        return await launchShell(for: parent, title: dormant.title)
+        return await launchShell(for: parent, title: dormant.title, grid: grid)
     }
 
     private func stackParent(_ id: SessionID) -> SessionItem? {
@@ -2107,6 +2548,10 @@ public final class AppModel {
     /// The side panel of each stack, keyed by its parent session
     /// (SidePanelModel.swift).
     var sidePanels: [SessionID: SidePanelState] = [:]
+
+    /// How each session shows — its terminal or its conversation — once the
+    /// user has chosen (SessionViewMode.swift).
+    var sessionViewModes: [SessionID: SessionViewMode] = [:]
 
     /// Each session agent's own browser (ADR-0014), created on its first use
     /// (AgentBrowserAPI.swift).
@@ -2406,6 +2851,7 @@ public final class AppModel {
         await manager?.archive(id)
         sessions.removeAll { $0.id == id }
         forgetSidePanel(id)
+        forgetViewMode(id)
         forgetAgentBrowser(id)
         // A live session archived from its card exits through `.archived`, a
         // terminal state the reducer never leaves: no `.completed` follows,
@@ -2435,9 +2881,63 @@ public final class AppModel {
         }
     }
 
+    /// Bumped on every state change the manager announces: what the fleet's
+    /// journal watches to read the store again.
+    public private(set) var transitionTick = 0
+
+    /// The hook socket is up: hooks reach their sessions.
+    public var hooksOnline: Bool { hookServer != nil }
+
+    /// The fleet's journal — the last transitions of every session, oldest
+    /// first, read off the main actor.
+    public func recentTransitions(limit: Int = 80) async -> [TransitionRecord] {
+        guard let store else { return [] }
+        return await Task.detached(priority: .utility) {
+            (try? store.recentTransitions(limit: limit)) ?? []
+        }.value
+    }
+
+    /// What the journal says a session waits on.
+    enum SessionWait: Equatable {
+        /// Nothing the agent announced.
+        case nothing
+        /// Its turn ended on a question: claude's input field is free, and
+        /// the next line typed there is the answer.
+        case question
+        /// A permission prompt is the last thing the agent announced: a line
+        /// typed now could answer it.
+        case permission
+    }
+
+    /// Why a session waits, if it does — asked before typing into it. A
+    /// question and a permission prompt are both `needsInput`, and a prompt
+    /// left unanswered does not even stay so: on the terminal's silence the
+    /// heuristic takes the state to `idle`. So what was guessed from a still
+    /// screen is passed over, and the last thing the agent said itself is
+    /// what counts.
+    func sessionWait(_ session: SessionID) async -> SessionWait {
+        let id = session.rawValue.uuidString
+        let rows = await recentTransitions(limit: 1_000).filter { $0.sessionID == id }
+        guard let last = rows.last else { return .nothing }
+        if last.to == .needsInput, last.event == SessionManager.stopOnQuestionLabel { return .question }
+        let said = rows.last { $0.source != .heuristic || $0.to == .working }
+        if let said, said.source == .hook, said.to == .needsInput,
+           said.event != SessionManager.stopOnQuestionLabel {
+            return .permission
+        }
+        return .nothing
+    }
+
+    /// Whether the session waits because its turn ended on a question (the
+    /// journal says so) rather than on a permission prompt.
+    func endedOnQuestion(_ session: SessionID) async -> Bool {
+        await sessionWait(session) == .question
+    }
+
     private func observeStates(of manager: SessionManager) async {
         let updates = await manager.stateUpdates()
         for await update in updates {
+            transitionTick &+= 1
             let index = sessions.firstIndex(where: { $0.id == update.id })
             // A terminal state must be processed even when the item is already
             // gone (optimistic close) — that is what turns the record into an
@@ -2619,7 +3119,8 @@ public final class AppModel {
     func launchWorkflowSession(directory: URL, projectID: ProjectID?, title: String, badges: [String],
                                prompt: String, instructions: String, untrusted: Bool,
                                role: APIWorkflowRole? = nil, model: String? = nil,
-                               sessionID: SessionID = SessionID()) async -> SessionID? {
+                               sessionID: SessionID = SessionID(),
+                               worktree: RunWorktree? = nil) async -> SessionID? {
         guard let manager else { return nil }
         do {
             let token = UUID().uuidString
@@ -2629,7 +3130,9 @@ public final class AppModel {
             if let role { launcher.tools.workflow = role }
             if let model, !model.isEmpty { launcher.model = model }
             var spec = SessionManager.SessionSpec(
-                command: launcher.launchCommand(session: sessionID, initialPrompt: prompt, hookToken: token,
+                // No prompt: the session opens on claude's field, for the person to type in.
+                command: launcher.launchCommand(session: sessionID, initialPrompt: prompt.isEmpty ? nil : prompt,
+                                               hookToken: token,
                                                userStatusLine: userStatusLine(in: directory),
                                                theme: claudeTheme(for: projectID)),
                 workingDirectory: directory,
@@ -2640,12 +3143,17 @@ public final class AppModel {
             spec.sessionID = sessionID
             spec.title = title
             spec.badges = SessionRecord.normalizedBadges(badges)
+            // The run's own worktree (ADR-0021): the record knows it is one —
+            // the git panel and the ship actions read worktreePath.
+            if let worktree {
+                spec.worktree = .existing(path: URL(fileURLWithPath: worktree.path), branch: worktree.branch)
+            }
             if untrusted { markRunsUntrustedCode(sessionID) }
             let id = try await manager.launch(spec)
             await cacheSurface(for: id)
             tokenRegistry.register(token: token, session: id)
             sessions.append(SessionItem(id: id, title: title, state: .starting, projectID: projectID,
-                                        branch: nil, badges: spec.badges))
+                                        branch: worktree?.branch, badges: spec.badges))
             reloadPersistedSessions()
             return id
         } catch {

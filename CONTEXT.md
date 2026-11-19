@@ -60,6 +60,10 @@ _Avoid_ : split view, tiroir (le tiroir est celui de l'onglet PR)
 L'enregistrement intégral et continu de la sortie d'un terminal, conservé après la fin de la session.
 _Avoid_ : log, historique (« historique » = la liste des sessions passées)
 
+**Vue conversation** :
+La seconde façon de voir une session dans l'onglet Sessions (ADR-0023) : la conversation de sa session native en messages — Markdown rendu, appels d'outils repliés, champ de réponse —, lue dans le fichier `.jsonl` que l'agent tient lui-même. L'autre est son terminal, où l'agent tourne et où l'on répond à ses demandes de permission ; « Terminal | Chat » passe de l'une à l'autre. Ce qu'on y écrit est tapé dans le terminal.
+_Avoid_ : transcript (c'est l'enregistrement d'un terminal), historique (la liste des sessions passées)
+
 **Reprise** :
 Relance d'une session `interrupted` via le mécanisme natif de l'agent (ex. `claude --resume <session native>`).
 _Avoid_ : restauration (les PTY ne survivent pas ; on reprend la conversation, pas le process)
@@ -71,6 +75,20 @@ _Avoid_ : quota, limite (la limite d'usage est autre chose)
 **Badge** :
 Étiquette courte et colorée portée par une session (`PR #42`, `review`, `wip`). Une session en porte zéro ou plusieurs, dans l'ordre d'attribution ; les définitions (nom + couleur) sont globales à l'app. Une métadonnée, jamais un état.
 _Avoid_ : label, tag
+
+### Onglet PRs
+
+**Mode Browse** :
+Le mode de l'onglet PRs où l'on trouve les pull requests : un rail de portées à gauche (en attente de moi, tous les projets, un projet, une recherche GitHub, les dépôts à ajouter) et un tableau triable. On n'y relit rien : une PR choisie part en Review.
+_Avoid_ : liste, sidebar, barre latérale (il n'y a plus de liste à côté du diff)
+
+**Mode Review** :
+Le mode de l'onglet PRs où l'on relit : un onglet par PR ouverte, l'espace de travail (aperçu, fichiers, diff), la session de review dans le **tiroir**. Les deux modes ne partagent jamais l'écran ; ⌘1 / ⌘2 basculent.
+_Avoid_ : détail, vue PR
+
+**Portée** :
+Ce que le tableau de Browse liste, choisie dans son rail. Les portées de projets passent par le filtre de PR ; « en attente de moi » et la recherche sont des requêtes GitHub à part.
+_Avoid_ : scope (terme du code), dossier
 
 ### États de session
 
@@ -121,6 +139,14 @@ Situation où un skill projet porte le même nom qu'un skill global et le rempla
 **Thème** :
 Ensemble de couleurs couvrant deux espaces : UI et Terminal. Résolu en cascade : thème global → override projet → hérité par les sessions.
 
+**Design (d'un thème)** :
+Ce qu'un thème dit au-delà de ses couleurs : rayon, espacement, polices, interlettrage, bords et ombre. Seul un thème qui l'apporte en a un (un import tweakcn, ADR-0022) ; sans lui, c'est la charte qui s'applique. Les vues lui passent la valeur de la charte et reçoivent la sienne.
+_Avoid_ : style (le « style de document » est celui des rapports), skin, look
+
+**Tournée des thèmes** :
+L'app réelle promenée sous chaque thème d'un plan, une image par écran (`LOOM_AUTOTEST=themes`, `Tests/ThemeTour`) — le contrôle à l'écran de ce qu'un thème importé fait à l'affichage.
+_Avoid_ : snapshot tests (rien n'est comparé à une image de référence), captures
+
 **Override projet** :
 Choix d'un projet de dévier du thème global — soit thème complet, soit accent seul.
 
@@ -154,7 +180,7 @@ _Avoid_ : permission dynamique, hôte optionnel
 ### Workflows
 
 **Workflow** :
-Un graphe nommé d'étapes, dessiné dans l'onglet Workflows (ADR-0017) : un départ, des étapes, des chemins entre elles. Plusieurs chemins sortants s'exécutent en parallèle ; plusieurs entrants attendent tous.
+Un graphe nommé d'étapes, dessiné dans l'onglet Workflows (ADR-0017) ou parti d'un gabarit (ADR-0021) : un départ, des étapes, des chemins entre elles. Plusieurs chemins sortants s'exécutent en parallèle ; plusieurs entrants attendent tous. Ses runs lisent le projet, ou travaillent sur leur propre branche.
 _Avoid_ : pipeline, automation, flow (seul)
 
 **Étape** (nœud) :
@@ -206,4 +232,20 @@ _Avoid_ : commande, action (seul)
 **Artefact** :
 Le rapport HTML qu'un run écrit, dans un thème de Loom.
 _Avoid_ : export, document (seul)
+
+**Gabarit** :
+Un workflow prêt à lancer que Loom propose dans la galerie de l'onglet Workflows (ADR-0021) : copié dans la bibliothèque, avec ses experts, quand on le lance ou qu'on l'ouvre. La bibliothèque, elle, démarre vide.
+_Avoid_ : modèle (c'est celui de claude), template (dans l'UI seulement), workflow par défaut
+
+**Tâche** (d'un run) :
+Ce qu'un run doit faire, dans les mots de la personne, saisi au lancement et cité par `{{run.task}}`. Elle nomme le run et sa branche.
+_Avoid_ : prompt (c'est celui d'une étape), note (la note accompagne, la tâche commande)
+
+**Branche du run** :
+Le worktree et la branche `loom/…` qu'un run crée pour lui quand son workflow travaille « sur sa propre branche » : ses étapes y écrivent, le dossier du projet ne bouge pas, et c'est ce que le run laisse.
+_Avoid_ : sandbox, espace de travail (dans l'UI : « where its runs work »)
+
+**Poursuivre** (une conversation) :
+Pour une étape, reprendre la conversation d'une étape d'avant — ou la sienne à la passe suivante — au lieu de démarrer un nouvel agent : la même session pour une étape visible, `claude -p --resume` pour une étape headless.
+_Avoid_ : reprise (c'est le lien qui remonte, ou celle d'une session interrompue), mémoire
 

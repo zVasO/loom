@@ -45,6 +45,8 @@ declare namespace TechWatchTypes {
     language: "fr" | "en";
     model: "haiku" | "sonnet" | "opus";
     maxItems: number;
+    /** The reader's own prompt for "→ session Claude", with {{variables}}; empty: the default one. */
+    sessionPrompt: string;
     keywords: string[];
     muted: string[];
     hn: { enabled: boolean; minPoints: number; query: string };
@@ -125,6 +127,7 @@ declare namespace TechWatchTypes {
     DEFAULT_SETTINGS: Settings;
     MODELS: string[];
     LANGUAGES: string[];
+    SESSION_PROMPT_MAX: number;
     sanitizeSettings(raw: unknown): Settings;
   }
 
@@ -172,7 +175,10 @@ declare namespace TechWatchTypes {
     buildDigestPrompt(items: Item[], options: { language: "fr" | "en"; keywords: string[]; now: number }):
       { system: string; prompt: string; itemIds: string[] };
     parseDigestResponse(text: string, knownIds: string[]): DigestBody;
-    buildSessionPrompt(item: Item, language: "fr" | "en"): string;
+    /** `template`: the reader's own prompt; absent or blank, the default one for `language`. */
+    buildSessionPrompt(item: Item, language: "fr" | "en", template?: string): string;
+    defaultSessionPrompt(language: "fr" | "en"): string;
+    SESSION_PROMPT_VARIABLES: ReadonlyArray<{ readonly name: string; readonly label: string }>;
     statusFor(unread: number): { text: string; tooltip: string } | null;
     systemPrompt(language: "fr" | "en"): string;
   }

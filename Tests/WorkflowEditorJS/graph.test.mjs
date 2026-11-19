@@ -177,3 +177,18 @@ test("a prompt may name what came right before (in.*), and an item in a for-each
     assert.ok(G.NODE_TYPES.includes(type) && G.KIND_LABELS[type] && G.defaultConfig(type), type);
   }
 });
+
+test("a step may carry on a conversation: its own, or an earlier agent's of the same mode (ADR-0021)", () => {
+  // intent → php, both headless: php may carry on from intent; intent has nobody before it.
+  assert.deepEqual(G.continuable(workflow, "php"), [{ id: "intent", title: "Intentions" }]);
+  assert.deepEqual(G.continuable(workflow, "intent"), []);
+  assert.deepEqual(G.continuable(workflow, "report"), [], "only an agent has a conversation");
+  // A visible session cannot go on in a headless conversation.
+  const mixed = { ...workflow, nodes: workflow.nodes.map((n) =>
+    (n.id === "intent" ? { ...n, config: { ...n.config, mode: "visible" } } : n)) };
+  assert.deepEqual(G.continuable(mixed, "php"), []);
+  // What a prompt may name of the run: its task, its branch, where it started.
+  const run = G.variablesFor(workflow, "php").find((g) => g.label === "Run").items;
+  for (const name of ["run.task", "run.title", "run.branch", "run.base", "run.note"]) assert.ok(run.includes(name), name);
+  assert.deepEqual(G.WORKSPACES.map((w) => w.value), ["project", "worktree"]);
+});

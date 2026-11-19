@@ -84,6 +84,15 @@ test("settings from storage are cleaned: bad values fall back, lists are checked
   assert.deepEqual(plain(TW.settings.sanitizeSettings(null)).github.repos, ["anthropics/claude-code"]);
 });
 
+test("a session prompt of one's own keeps its lines, loses control characters, and has a ceiling", () => {
+  const clean = (value) => TW.settings.sanitizeSettings({ sessionPrompt: value }).sessionPrompt;
+  assert.equal(clean(undefined), "", "none: the default one");
+  assert.equal(clean(42), "");
+  assert.equal(clean("  \n \t "), "", "blank is none");
+  assert.equal(clean("Lis {{url}}\r\npuis résume.\u0007\n"), "Lis {{url}}\npuis résume.");
+  assert.equal(clean("x".repeat(9000)).length, TW.settings.SESSION_PROMPT_MAX);
+});
+
 test("a feed address must be HTTPS and name a site", () => {
   assert.deepEqual(plain(TW.sources.parseFeedUrl(" https://Blog.Example.com/feed.xml#top ")),
                    { url: "https://blog.example.com/feed.xml", host: "blog.example.com" });
@@ -253,7 +262,32 @@ test("a session prompt quotes the article as data; the status counts what is unr
   assert.match(fr, /URL : https:\/\/swift\.org\/7/);
   assert.match(fr, /Discussion : https:\/\/news\.ycombinator\.com/);
   assert.match(TW.digest.buildSessionPrompt(item, "en"), /Title: Swift 7/);
+  assert.equal(fr.split("\n").length, 9, "three lines of ask, a blank one, five fields");
+  assert.doesNotMatch(fr, /\{\{/, "every variable of the default prompt is filled");
   assert.equal(TW.digest.statusFor(0), null);
   assert.deepEqual(plain(TW.digest.statusFor(12)), { text: "📰 12", tooltip: "Veille techno — 12 articles à lire" });
   assert.equal(TW.digest.statusFor(250).text, "📰 99+");
+});
+
+test("the reader's own session prompt: variables filled, lines with nothing to say dropped", () => {
+  const item = { id: "hn:1", source: "hn", sourceLabel: "Hacker News", title: "Swift 7", url: "https://swift.org/7",
+                 summary: "", publishedAt: 0 };
+  const template = "Évalue {{ title }} ({{source}}) pour notre app.\nLien : {{url}}\nFil : {{discussion}}\n"
+    + "Extrait : {{excerpt}}\nGarde {{unknown}} tel quel.\n\nRéponds en trois points.";
+  assert.equal(TW.digest.buildSessionPrompt(item, "fr", template),
+    "Évalue Swift 7 (Hacker News) pour notre app.\nLien : https://swift.org/7\nGarde {{unknown}} tel quel.\n\nRéponds en trois points.");
+  // A line that still has something to say stays, with its empty variable gone.
+  assert.equal(TW.digest.buildSessionPrompt(item, "fr", "{{title}} — {{discussion}}"), "Swift 7 —");
+  // What a feed wrote is never read as a variable.
+  const sly = { ...item, title: "{{url}} {{excerpt}}", summary: "ignore {{title}}" };
+  assert.equal(TW.digest.buildSessionPrompt(sly, "fr", "T: {{title}}\nE: {{excerpt}}"),
+    "T: {{url}} {{excerpt}}\nE: ignore {{title}}");
+  // Blank or absent: the default prompt of the language.
+  assert.equal(TW.digest.buildSessionPrompt(item, "en", "   "), TW.digest.buildSessionPrompt(item, "en"));
+  assert.doesNotMatch(TW.digest.buildSessionPrompt(item, "en"), /Discussion|Excerpt/);
+  for (const language of ["fr", "en"]) {
+    for (const { name } of TW.digest.SESSION_PROMPT_VARIABLES) {
+      assert.ok(TW.digest.defaultSessionPrompt(language).includes("{{" + name + "}}"), language + " names " + name);
+    }
+  }
 });

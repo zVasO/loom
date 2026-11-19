@@ -267,7 +267,7 @@
   async function sendToSession(item) {
     try {
       const result = await loom.sessions.launch({
-        prompt: TechWatch.digest.buildSessionPrompt(item, settings.language),
+        prompt: TechWatch.digest.buildSessionPrompt(item, settings.language, settings.sessionPrompt),
         title: TechWatch.text.clip((settings.language === "fr" ? "Veille : " : "Watch: ") + item.title, 180),
         badges: ["veille"],
       });
@@ -443,7 +443,8 @@
     if (tab === "items") TechWatch.view.renderItems($("view-items"), ctx);
     if (tab === "settings") {
       const view = $("view-settings");
-      const typing = view.contains(document.activeElement) && document.activeElement?.tagName === "INPUT";
+      const focused = document.activeElement?.tagName;
+      const typing = view.contains(document.activeElement) && (focused === "INPUT" || focused === "TEXTAREA");
       if (options.force || !typing || !view.childElementCount) TechWatch.view.renderSettings(view, ctx);
     }
   }

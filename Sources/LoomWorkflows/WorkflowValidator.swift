@@ -127,6 +127,15 @@ public enum WorkflowValidator {
             }
         }
         issues += edgeIssues(workflow, blocks: blocks, ruleSets: ruleSets)
+        issues += conversationIssues(workflow, blocks: blocks, predecessors: predecessors)
+        if workflow.workspace == .worktree, let step = workflow.nodes.first(where: {
+            if case .context(let config) = $0.kind { return config.source == .pullRequest }
+            return false
+        }) {
+            issues.append(.init(.error, "A workflow that works on its own branch does not load a pull request: "
+                                + "a PR's checkout is read only. Remove this step, or let the workflow work in the project.",
+                                node: step.id))
+        }
         if let proposal = workflow.proposal {
             issues.append(.init(.warning, "Proposed by \(proposal.by): validate it (Workflows › To review) before it can run."))
         }
@@ -179,6 +188,72 @@ public enum WorkflowValidator {
         for path in TemplateRenderer.paths(in: config.prompt) {
             if let problem = templateProblem(path, from: node, in: workflow, predecessors: predecessors) {
                 issues.append(.init(.warning, problem, node: node))
+            }
+        }
+        return issues
+    }
+
+    /// Steps that carry on a conversation (ADR-0021): the one they name must
+    /// exist, be an agent of the same kind of run, come before them — and no
+    /// two steps may write in one conversation at the same time.
+    private static func conversationIssues(_ workflow: Workflow, blocks: [WorkflowBlock],
+                                           predecessors: [String: [String]]) -> [WorkflowIssue] {
+        var issues: [WorkflowIssue] = []
+        func mode(_ id: String) -> AgentMode? {
+            guard case .agent(let config)? = workflow.node(id)?.kind else { return nil }
+            return BlockResolver.effective(config, blocks: blocks).mode
+        }
+        /// The step whose conversation `id` ends up in: the top of its chain.
+        func root(of id: String) -> String {
+            var seen: Set<String> = []
+            var current = id
+            while seen.insert(current).inserted, case .agent(let config)? = workflow.node(current)?.kind,
+                  let next = config.continues, next != current, workflow.node(next) != nil {
+                current = next
+            }
+            return current
+        }
+        var members: [String: [String]] = [:]
+        for node in workflow.nodes {
+            switch node.kind {
+            case .forEach(let config) where config.agent.continues != nil:
+                issues.append(.init(.error, "A step run for each item starts a new agent per item: it continues no conversation.",
+                                    node: node.id))
+            case .agent(let config):
+                guard let target = config.continues else { continue }
+                members[root(of: node.id), default: []].append(node.id)
+                guard target != node.id else { continue }
+                guard let other = mode(target) else {
+                    issues.append(.init(.error, workflow.node(target) == nil
+                                        ? "It continues the conversation of \(target), which no longer exists."
+                                        : "It continues \(target), which is not an agent step: only an agent has a conversation.",
+                                        node: node.id))
+                    continue
+                }
+                if other != mode(node.id) {
+                    issues.append(.init(.error, "It continues \(target), but one is a visible session and the other headless: "
+                                        + "give both the same mode.", node: node.id))
+                }
+                let upstream = WorkflowGraph.reachable(from: [node.id], next: predecessors)
+                if !upstream.contains(target) {
+                    issues.append(.init(.error, "It continues \(target), which does not run before it.", node: node.id))
+                }
+            default:
+                break
+            }
+        }
+        // One conversation, one step at a time: every pair in it must be in line.
+        for (top, steps) in members {
+            let all = steps.contains(top) ? steps : steps + [top]
+            for (index, a) in all.enumerated() {
+                for b in all.dropFirst(index + 1) {
+                    let beforeA = WorkflowGraph.reachable(from: [a], next: predecessors)
+                    let beforeB = WorkflowGraph.reachable(from: [b], next: predecessors)
+                    if !beforeA.contains(b), !beforeB.contains(a) {
+                        issues.append(.init(.error, "\(a) and \(b) carry on the same conversation and may run side by side: "
+                                            + "link one after the other.", node: b))
+                    }
+                }
             }
         }
         return issues

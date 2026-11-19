@@ -20,9 +20,9 @@ struct BadgeChip: View {
 
     var body: some View {
         Text(label)
-            .font(.system(size: 9, weight: .semibold))
+            .themeFont(size: 9, weight: .semibold)
             .foregroundStyle(color)
-            .padding(.horizontal, 6).padding(.vertical, 2)
+            .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(2))
             .background(color.opacity(0.14), in: Capsule())
             .lineLimit(1)
     }
@@ -77,7 +77,7 @@ struct BadgeRow: View {
 
     var body: some View {
         if !badges.isEmpty {
-            HStack(spacing: 4) {
+            HStack(spacing: DefaultTheme.space(4)) {
                 ForEach(badges, id: \.self) { name in
                     BadgeChip(label: name, color: model.badgeColor(for: name))
                 }
@@ -103,7 +103,7 @@ struct LogoMark: View {
         } else {
             Image(systemName: "square.stack.3d.down.right.fill")
                 .font(.system(size: size * 0.75))
-                .foregroundStyle(DefaultTheme.accent)
+                .foregroundStyle(DefaultTheme.accentInk)
         }
     }
 }
@@ -132,6 +132,7 @@ struct ContentView: View {
     @State private var settingsFocus: SettingsAnchor?
     @AppStorage("loom.shortcut.missionControl") private var keyMissionControl = "g"
     @AppStorage("loom.shortcut.palette") private var keyPalette = "k"
+    @AppStorage("loom.shortcut.review") private var keyReview = "r"
     @State private var selected: DetailSelection?
     @AppStorage("loom.session.restoreOnLaunch") private var restoreOnLaunch = true
     /// The session that was open at quit — reopened on the next launch.
@@ -139,6 +140,8 @@ struct ContentView: View {
     @State private var paletteShown = false
     @State private var usageShown = false
     @State private var newSessionSheetShown = false
+    /// The Sessions sidebar as one line per session (shared with SessionsView).
+    @AppStorage("loom.sessions.compact") private var compactSessions = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -187,6 +190,8 @@ struct ContentView: View {
         }
         .background(DefaultTheme.background)
         .preferredColorScheme(DefaultTheme.colorScheme)
+        .font(DefaultTheme.bodyFont)
+        .tint(DefaultTheme.controlTint)
         .onAppear {
             model.start()
             applyTheme()
@@ -202,6 +207,11 @@ struct ContentView: View {
         .onChange(of: tab) {
             applyTheme()
             model.extensions.isTabVisible = tab == .extensions
+            // The palette is not closed from here: a tab also changes on
+            // its own — a session launched a moment ago lands in Sessions —
+            // and closing it then took the field away mid-typing, the rest
+            // of the keystrokes going to the new terminal. The shortcuts
+            // that change the screen under it (⌘G, ⌘,) close it themselves.
         }
         .onChange(of: model.workflows.revealRequest) { tab = .workflows }
         // Every such request is about a schedule: Settings opens on them.
@@ -220,10 +230,28 @@ struct ContentView: View {
             selected = .session(id)
             tab = .sessions
         }))
+        // ⌘K: over the window's content — an extension's overlay included —
+        // not in a sheet (ADR-0024). Only the binding is handed over: this
+        // body does not run again when the palette opens or closes.
+        .overlay { palette }
         .onReceive(NotificationCenter.default.publisher(for: .loomThemeChanged)) { _ in
             applyTheme()
         }
         .task {
+            // The app under each theme of a plan, a picture per screen
+            // (ThemeTour): what a whole imported theme does to the display.
+            if ProcessInfo.processInfo.environment["LOOM_AUTOTEST"] == "themes" {
+                let tour = ThemeTour(model: model, driver: ThemeTour.Driver(
+                    show: { tab = $0 },
+                    select: { selected = $0 },
+                    focusSettings: { settingsFocus = $0 },
+                    present: { overlay in
+                        paletteShown = overlay == .palette
+                        usageShown = overlay == .usage
+                        newSessionSheetShown = overlay == .newSession
+                    }))
+                exit(await tour.run() ? 0 : 1)
+            }
             // The agent's browser against a real engine (ADR-0014, ADR-0016):
             // LOOM_AUTOTEST_ENGINE=webkit|chromium (WebKit when unsaid; Chromium
             // from LOOM_CHROMIUM, else the one Loom finds). A report in
@@ -272,14 +300,13 @@ struct ContentView: View {
             createSession(in: model.selectedProject)
         }
         .onReceive(NotificationCenter.default.publisher(for: .loomNewSessionInProject)) { _ in
-            // Not over the palette or another sheet: one at a time.
+            // Not over the palette or a sheet: one at a time.
             guard !paletteShown, !usageShown else { return }
             newSessionSheetShown = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .loomFrameRateChanged)) { _ in
             model.applyFrameRate()
         }
-        .sheet(isPresented: $paletteShown) { palette }
         .sheet(isPresented: $usageShown) { UsageSheet(model: model) { usageShown = false } }
         .alert("Incomplete startup", isPresented: .constant(model.startupError != nil)) {
             Button("OK") { model.clearError() }
@@ -321,25 +348,27 @@ struct ContentView: View {
     // MARK: - Navigation bar
 
     private var navbar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             // Space for the traffic lights (title bar hidden).
             Spacer().frame(width: 70)
             LogoMark(size: 20)
-            Text("Loom").font(.system(size: 14, weight: .semibold))
+            Text("Loom").themeFont(size: 14, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
             Text("beta")
-                .font(.system(size: 10, weight: .medium))
+                .themeFont(size: 10, weight: .medium)
                 .foregroundStyle(DefaultTheme.secondaryText)
-                .padding(.horizontal, 6).padding(.vertical, 2)
+                .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(2))
                 .background(DefaultTheme.surfaceRaised, in: Capsule())
 
             Spacer().frame(width: 18)
-            NavTab("Projects", isActive: tab == .projects) { tab = .projects }
-            NavTab("Sessions", isActive: tab == .sessions) { tab = .sessions }
-            NavTab("PRs", isActive: tab == .prs) { tab = .prs }
-            NavTab("Workflows", isActive: tab == .workflows) { tab = .workflows }
-            if !model.extensions.extensions.isEmpty {
-                NavTab("Extensions", isActive: tab == .extensions) { tab = .extensions }
+            HStack(spacing: DefaultTheme.space(2)) {
+                NavTab("Projects", icon: .folder, isActive: tab == .projects) { tab = .projects }
+                NavTab("Sessions", icon: .terminal, isActive: tab == .sessions) { tab = .sessions }
+                NavTab("PRs", icon: .gitPullRequest, isActive: tab == .prs) { tab = .prs }
+                NavTab("Workflows", icon: .workflow, isActive: tab == .workflows) { tab = .workflows }
+                if !model.extensions.extensions.isEmpty {
+                    NavTab("Extensions", icon: .blocks, isActive: tab == .extensions) { tab = .extensions }
+                }
             }
             // The +: pick the project — or any folder, which becomes one —
             // and whether the session gets its own worktree. ⌘N keeps the
@@ -350,8 +379,8 @@ struct ContentView: View {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(DefaultTheme.accentText)
-                    .frame(width: 26, height: 26)
-                    .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 7))
+                    .frame(width: DefaultTheme.size(26), height: DefaultTheme.size(26))
+                    .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                     .hoverBrightness()
             }
             .buttonStyle(.plain)
@@ -372,9 +401,19 @@ struct ContentView: View {
                 }
             }
 
+            // The hook socket: what state detection hangs on.
+            StatusTag(model.hooksOnline ? "Hooks online" : "Hooks offline",
+                      color: model.hooksOnline ? DefaultTheme.badgeColor(for: .working) : DefaultTheme.danger)
+                .help(model.hooksOnline
+                      ? "Claude Code hooks reach Loom: states come from the agent itself"
+                      : "The hook socket is down: states come from the heuristics only")
+
             // v2 — Mission Control: the fleet at a glance (⌘G). A TOGGLE:
             // press again to return to the view you came from.
             BarIconButton(systemImage: "square.grid.2x2", isActive: tab == .overview) {
+                // The shortcut still answers under the palette: it changes
+                // the screen the palette was opened on, and closes it.
+                paletteShown = false
                 if tab == .overview {
                     tab = tabBeforeOverview
                 } else {
@@ -393,15 +432,27 @@ struct ContentView: View {
                 selected = .webPane(pane)
             }
             .help("New browser pane in the current session's stack")
+            // A toggle: under the palette the window's shortcuts stay live,
+            // and ⌘K pressed again closes it.
             Button {
-                paletteShown = true
+                paletteShown.toggle()
             } label: {
-                Text("⌘\(keyPalette.uppercased())")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(DefaultTheme.secondaryText)
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
-                    .hoverBrightness(0.1)
+                HStack(spacing: DefaultTheme.space(8)) {
+                    AppIcon("magnifyingglass", size: 13)
+                    Text("Search…").themeFont(size: 12)
+                    Spacer(minLength: 8)
+                    HStack(spacing: DefaultTheme.space(3)) {
+                        KeyCap("⌘")
+                        KeyCap(keyPalette.uppercased())
+                    }
+                }
+                .foregroundStyle(DefaultTheme.secondaryText)
+                .padding(.leading, DefaultTheme.space(9)).padding(.trailing, DefaultTheme.space(5))
+                .frame(width: 168, height: DefaultTheme.size(26))
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).strokeBorder(DefaultTheme.line2, lineWidth: 1))
+                .hoverBrightness(0.04)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .keyboardShortcut(KeyEquivalent(keyPalette.first ?? "k"), modifiers: .command)
@@ -409,6 +460,8 @@ struct ContentView: View {
             BarIconButton(systemImage: "dollarsign") { usageShown = true }
                 .help("Usage & estimated costs")
             BarIconButton(systemImage: "gearshape", isActive: tab == .settings) {
+                // As for ⌘G: ⌘, pressed under the palette closes it.
+                paletteShown = false
                 if tab == .settings {
                     tab = tabBeforeSettings
                 } else {
@@ -419,7 +472,7 @@ struct ContentView: View {
             .keyboardShortcut(",", modifiers: .command)
             .help("Settings (⌘,)")
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, DefaultTheme.space(14))
         .frame(height: 52)
         .background(DefaultTheme.background)
         .contentShape(Rectangle())
@@ -431,8 +484,8 @@ struct ContentView: View {
         .background(TitleBarDoubleClick { toggleFullScreen() })
     }
 
-    /// keyWindow is nil while a sheet or the palette holds focus, and the
-    /// gesture would then do nothing at all.
+    /// keyWindow is nil while a sheet holds focus, and the gesture would
+    /// then do nothing at all.
     private func toggleFullScreen() {
         let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first
         window?.toggleFullScreen(nil)
@@ -465,19 +518,32 @@ struct ContentView: View {
                                      subtitle: "Shortcuts, themes, projects",
                                      section: "Navigation", shortcut: "⌘,") { tab = .settings })
 
+        actions.append(PaletteAction(id: PaletteAction.reviewID, icon: "sparkles",
+                                     title: "Review code",
+                                     subtitle: "Start a review from a pull request's URL",
+                                     section: "Actions",
+                                     shortcut: "⌘⇧\(keyReview.uppercased())",
+                                     prompt: reviewPrompt,
+                                     run: {}))
         actions.append(PaletteAction(id: "act.newSession", icon: "plus",
                                      title: "New claude session",
                                      subtitle: "In the current project",
                                      section: "Actions", shortcut: "⌘N") {
             createSession(in: model.selectedProject)
         })
+        actions.append(PaletteAction(id: "act.sessions.compact",
+                                     icon: compactSessions ? "rectangle.grid.1x2" : "list.bullet",
+                                     title: compactSessions ? "Sessions: show details" : "Sessions: compact list",
+                                     subtitle: compactSessions ? "Branch, state and tabs under each session"
+                                                               : "One line per session — its title only",
+                                     section: "Actions") { compactSessions.toggle() })
         actions.append(PaletteAction(id: "act.newSessionIn", icon: "plus.rectangle.on.folder",
                                      title: "New claude session in…",
                                      subtitle: "Choose the project first",
                                      section: "Actions", shortcut: "⌘⇧N") {
-            // Once the palette's own sheet is gone: a sheet asked for while
-            // another one closes is dropped.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { newSessionSheetShown = true }
+            // At once: the palette is not a sheet, there is none closing
+            // for this one to wait behind.
+            newSessionSheetShown = true
         })
         if case .session(let id) = selected,
            let item = model.sessions.first(where: { $0.id == id }) {
@@ -522,6 +588,20 @@ struct ContentView: View {
                                          subtitle: workflow.summary.isEmpty ? "Workflow" : workflow.summary,
                                          section: "Workflows") {
                 model.workflows.selectedWorkflowID = workflow.id
+                model.workflows.detail = .workflow
+                tab = .workflows
+                model.workflows.launchRequest = .init(workflowID: workflow.id, inputs: nil)
+            })
+        }
+        // The templates not in the library yet (ADR-0021): picked here, one
+        // joins it and its Run sheet opens.
+        for template in WorkflowTemplates.all
+        where !model.workflows.workflows.contains(where: { $0.name == template.name }) {
+            actions.append(PaletteAction(id: "wf.template.\(template.id)", icon: template.icon,
+                                         title: "Run workflow: \(template.name)",
+                                         subtitle: template.tagline,
+                                         section: "Workflows") {
+                guard let workflow = model.workflows.useTemplate(template) else { return }
                 model.workflows.detail = .workflow
                 tab = .workflows
                 model.workflows.launchRequest = .init(workflowID: workflow.id, inputs: nil)
@@ -581,9 +661,12 @@ struct ContentView: View {
             })
         }
 
-        let dormantIDs = Set(model.dormantSessions.map(\.id))
+        // Read once: the dormant list is a filter of every record against
+        // every live session.
+        let dormant = model.dormantSessions
+        let dormantIDs = Set(dormant.map(\.id))
         let entries = model.sessions.filter { !$0.isShell }.map { ($0.title, $0.id) }
-            + model.dormantSessions.map { ($0.title, $0.id) }
+            + dormant.map { ($0.title, $0.id) }
         for (title, id) in entries {
             actions.append(PaletteAction(id: "session.\(id.rawValue.uuidString)",
                                          icon: "sparkle",
@@ -597,24 +680,54 @@ struct ContentView: View {
         return actions
     }
 
+    /// "Review code": the palette asks for the pull request, the PRs tab
+    /// does the rest — what goes wrong shows there, where it already does.
+    private var reviewPrompt: PalettePrompt {
+        PalettePrompt(
+            title: "Pull request URL — or owner/repo#12",
+            hint: "Return starts the review. The PRs tab opens on it.",
+            prefill: {
+                // A pull request's URL just copied is the likely answer;
+                // anything else on the clipboard is not offered.
+                guard let copied = NSPasteboard.general.string(forType: .string),
+                      copied.utf8.count < 2_000 else { return nil }
+                let text = copied.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard text.contains("github.com/"), PRReference.parse(text) != nil else { return nil }
+                return text
+            },
+            submit: { text in
+                guard let reference = PRReference.parse(text) else {
+                    return "Not a pull request: paste its github.com URL, or owner/repo#12."
+                }
+                // The view first: the tab shows before gh has answered.
+                tab = .prs
+                paletteShown = false
+                model.startPRReview(reference: reference)
+                return nil
+            })
+    }
+
+    /// The palette's place in the window. The actions are built by the
+    /// overlay, while it shows: nothing is listed for a closed palette.
     private var palette: some View {
-        ActionPaletteView(actions: paletteActions,
-                          transcriptSearch: { await model.searchTranscripts($0) },
-                          onOpenSession: { openSessionByID($0) },
-                          isPresented: $paletteShown)
+        PaletteOverlay(isPresented: $paletteShown,
+                       actions: { paletteActions },
+                       transcriptSearch: { await model.searchTranscripts($0) },
+                       onOpenSession: { openSessionByID($0) })
     }
 
     /// Opens a session found by search: resumes it first when it is dormant.
+    /// The Sessions tab shows before anything is awaited: Return is answered
+    /// at once, and the session lands in the tab when claude has resumed.
     private func openSessionByID(_ id: SessionID) {
         paletteShown = false
+        tab = .sessions
         if model.sessions.contains(where: { $0.id == id }) {
             selected = .session(id)
-            tab = .sessions
         } else {
             Task {
                 await model.resumeDormant(id)
                 selected = .session(id)
-                tab = .sessions
             }
         }
     }
@@ -686,7 +799,7 @@ struct ProjectsView: View {
             ScrollView {
                 emptyState
                     .frame(maxWidth: 680)
-                    .padding(.horizontal, 32).padding(.top, 60)
+                    .padding(.horizontal, DefaultTheme.space(32)).padding(.top, DefaultTheme.space(60))
                     .frame(maxWidth: .infinity)
             }
             .background(DefaultTheme.background)
@@ -703,12 +816,11 @@ struct ProjectsView: View {
     // MARK: Project sidebar
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(3)) {
             Text("PROJECTS")
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
-                .foregroundStyle(DefaultTheme.groupHeader)
-                .padding(.horizontal, 10).padding(.top, 14).padding(.bottom, 6)
+                .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
+                .foregroundStyle(DefaultTheme.mutedText)
+                .padding(.horizontal, DefaultTheme.space(10)).padding(.top, DefaultTheme.space(14)).padding(.bottom, DefaultTheme.space(6))
             ForEach(model.projects, id: \.id) { project in
                 ProjectSidebarRow(project: project,
                                   isSelected: current?.id == project.id,
@@ -731,9 +843,9 @@ struct ProjectsView: View {
             }
             Spacer()
             GhostButton("Add project", systemImage: "plus") { pickProject() }
-                .padding(.bottom, 8)
+                .padding(.bottom, DefaultTheme.space(8))
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, DefaultTheme.space(8))
         .frame(width: 216)
         .background(DefaultTheme.background)
         .alert("Delete “\(removalTarget?.name ?? "")”?",
@@ -754,7 +866,7 @@ struct ProjectsView: View {
     private var detail: some View {
         ScrollView {
             if let project = current {
-                VStack(alignment: .leading, spacing: 26) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(26)) {
                     header(project)
                     tabBar
                     if let document = viewedDocument {
@@ -774,11 +886,18 @@ struct ProjectsView: View {
                     }
                 }
                 .frame(maxWidth: 860, alignment: .leading)
-                .padding(.horizontal, 36).padding(.top, 36).padding(.bottom, 44)
+                .padding(.horizontal, DefaultTheme.space(36)).padding(.top, DefaultTheme.space(36)).padding(.bottom, DefaultTheme.space(44))
                 .frame(maxWidth: .infinity)
             }
         }
         .background(DefaultTheme.background)
+        .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
+            guard let name = note.object as? String, name.hasPrefix("project-"),
+                  let wanted = ProjectTab.allCases.first(where: {
+                      $0.rawValue.lowercased() == String(name.dropFirst("project-".count))
+                  }) else { return }
+            projectTab = wanted
+        }
         .onChange(of: current?.id) {
             projectTab = .overview
             filesPath = ""
@@ -816,7 +935,7 @@ struct ProjectsView: View {
     /// The reference's tab row: accent underline on the active one.
     private var tabBar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 22) {
+            HStack(spacing: DefaultTheme.space(22)) {
                 ForEach(ProjectTab.allCases, id: \.self) { tabItem in
                     ProjectTabButton(title: tabItem.rawValue,
                                      isActive: projectTab == tabItem) {
@@ -833,41 +952,43 @@ struct ProjectsView: View {
     @ViewBuilder
     private func gitTab(_ project: ProjectRecord) -> some View {
         if let git = gitData {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
+                HStack(spacing: DefaultTheme.space(8)) {
                     MonoTag(git.branch, systemImage: "arrow.triangle.branch")
                     Text("· project root (worktrees live in their sessions)")
-                        .font(.system(size: 11))
+                        .themeFont(size: 11)
                         .foregroundStyle(DefaultTheme.mutedText)
                 }
                 if git.changes.isEmpty {
                     Text("No pending changes")
-                        .font(.system(size: 12))
+                        .themeFont(size: 12)
                         .foregroundStyle(DefaultTheme.secondaryText)
                 } else {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
                         ForEach(Array(git.changes.enumerated()), id: \.offset) { _, change in
-                            HStack(spacing: 8) {
+                            HStack(spacing: DefaultTheme.space(8)) {
                                 Text(String(describing: change.kind).prefix(1).uppercased())
-                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(DefaultTheme.accent)
+                                    .themeFont(size: 10, weight: .bold, design: .monospaced)
+                                    .foregroundStyle(DefaultTheme.accentInk)
                                     .frame(width: 14)
                                 Text(change.path)
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .themeFont(size: 11, design: .monospaced)
                                     .foregroundStyle(DefaultTheme.primaryText)
                                     .lineLimit(1)
                             }
                         }
                     }
-                    .padding(12)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                    .padding(DefaultTheme.space(12))
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+                    .cardEdge()
+                    .themeShadow(.sm, radius: 10)
                 }
             }
         } else {
-            HStack(spacing: 8) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 ProgressView().controlSize(.small)
                 Text("Reading the repository…")
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
         }
@@ -879,11 +1000,11 @@ struct ProjectsView: View {
         // Listed in the tab's task, off the main actor: a directory scan
         // used to run here, on every pass of the Projects view.
         let entries = loadedFiles
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 HoverIconButton(systemImage: "house", help: "Project root") { filesPath = "" }
                 Text("/" + filesPath)
-                    .font(.system(size: 11, design: .monospaced))
+                    .themeFont(size: 11, design: .monospaced)
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .lineLimit(1)
                 Spacer()
@@ -910,22 +1031,24 @@ struct ProjectsView: View {
                     }
                 }
             }
-            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+            .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+            .cardEdge()
+            .themeShadow(.sm, radius: 10)
         }
     }
 
     private func fileRow(name: String, isDirectory: Bool, action: @escaping () -> Void) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             Image(systemName: isDirectory ? "folder.fill" : "doc")
                 .font(.system(size: 11))
-                .foregroundStyle(isDirectory ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isDirectory ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
                 .frame(width: 16)
             Text(name)
-                .font(.system(size: 12, design: .monospaced))
+                .themeFont(size: 12, design: .monospaced)
                 .foregroundStyle(DefaultTheme.primaryText)
             Spacer()
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
+        .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(6))
         .contentShape(Rectangle())
         .hoverSurface(0.6)
         .onTapGesture(perform: action)
@@ -942,19 +1065,19 @@ struct ProjectsView: View {
         case .global: globals
         case .project: projets
         }
-        return VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 6) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(16)) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 filterPill("All (\(skills.count))", isActive: skillFilter == .all) { skillFilter = .all }
                 filterPill("Global (\(globals.count))", isActive: skillFilter == .global) { skillFilter = .global }
                 filterPill("Project (\(projets.count))", isActive: skillFilter == .project) { skillFilter = .project }
             }
             if filtered.isEmpty {
                 Text("No skills — add folders in .claude/skills (project) or ~/.claude/skills (global).")
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)],
-                      alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: DefaultTheme.space(12))],
+                      alignment: .leading, spacing: DefaultTheme.space(12)) {
                 ForEach(filtered, id: \.name) { skill in
                     SkillCard(skill: skill) {
                         if let path = skill.path {
@@ -981,16 +1104,16 @@ struct ProjectsView: View {
     /// Built-in viewer: back, title, path, Finder — mono content, light
     /// markdown for .md files (bold, code…), selectable.
     private func documentViewer(_ document: ViewedDocument) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(12)) {
+            HStack(spacing: DefaultTheme.space(10)) {
                 HoverIconButton(systemImage: "arrow.left", help: "Back") {
                     viewedDocument = nil
                 }
                 Text(document.title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .themeFont(size: 14, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Text(document.path.path)
-                    .font(.system(size: 10, design: .monospaced))
+                    .themeFont(size: 10, design: .monospaced)
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
                 Spacer()
@@ -1000,26 +1123,28 @@ struct ProjectsView: View {
             }
             if document.isText {
                 Text(renderedContent(document))
-                    .font(.system(size: 12, design: .monospaced))
+                    .themeFont(size: 12, design: .monospaced)
                     .foregroundStyle(DefaultTheme.primaryText.opacity(0.92))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12)
+                    .padding(DefaultTheme.space(16))
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
                         .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    .themeShadow(.sm, radius: 10)
             } else {
-                VStack(spacing: 8) {
-                    Image(systemName: "doc.zipper")
-                        .font(.system(size: 28))
+                VStack(spacing: DefaultTheme.space(8)) {
+                    AppIcon("doc.zipper", size: 33.5)
                         .foregroundStyle(DefaultTheme.secondaryText)
                     Text("Binary file — open it from the Finder")
-                        .font(.system(size: 12))
+                        .themeFont(size: 12)
                         .foregroundStyle(DefaultTheme.secondaryText)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 60)
-                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                .padding(.vertical, DefaultTheme.space(60))
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+                .cardEdge()
+                .themeShadow(.sm, radius: 10)
             }
         }
     }
@@ -1041,9 +1166,9 @@ struct ProjectsView: View {
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .themeFont(size: 11, weight: isActive ? .semibold : .regular)
                 .foregroundStyle(isActive ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
-                .padding(.horizontal, 11).padding(.vertical, 5)
+                .padding(.horizontal, DefaultTheme.space(11)).padding(.vertical, DefaultTheme.space(5))
                 .background(isActive ? DefaultTheme.surfaceRaised : .clear, in: Capsule())
                 .overlay(Capsule().stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
         }
@@ -1054,14 +1179,14 @@ struct ProjectsView: View {
 
     private func rulesTab(_ project: ProjectRecord) -> some View {
         let rules = loadedRules
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(16)) {
             if rules.isEmpty {
                 Text("No rule files (CLAUDE.md, AGENTS.md, CONTEXT.md…) at the root.")
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)],
-                      alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: DefaultTheme.space(12))],
+                      alignment: .leading, spacing: DefaultTheme.space(12)) {
                 ForEach(rules) { rule in
                     RuleCard(rule: rule) {
                         openDocument(at: URL(fileURLWithPath: project.path)
@@ -1073,19 +1198,18 @@ struct ProjectsView: View {
     }
 
     private func header(_ project: ProjectRecord) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "folder.fill")
-                .font(.system(size: 17))
-                .foregroundStyle(DefaultTheme.accent)
+        HStack(spacing: DefaultTheme.space(12)) {
+            AppIcon("folder.fill", size: 20.5)
+                .foregroundStyle(DefaultTheme.accentInk)
                 .frame(width: 40, height: 40)
-                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
-            VStack(alignment: .leading, spacing: 3) {
+                .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+            VStack(alignment: .leading, spacing: DefaultTheme.space(3)) {
                 Text(project.name)
-                    .font(.system(size: 21, weight: .bold))
+                    .themeFont(size: 21, weight: .bold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Text(project.path)
-                    .font(.system(size: 11, design: .monospaced))
+                    .themeFont(size: 11, design: .monospaced)
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
             }
@@ -1098,11 +1222,11 @@ struct ProjectsView: View {
 
     private func activeSection(_ project: ProjectRecord) -> some View {
         let items = model.sessions.filter { $0.projectID == project.id && !$0.isShell }
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(12)) {
             sectionHeader("ACTIVE", count: items.count,
                           color: DefaultTheme.badgeColor(for: .working))
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 12)],
-                      alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: DefaultTheme.space(12))],
+                      alignment: .leading, spacing: DefaultTheme.space(12)) {
                 ForEach(items) { item in
                     ActiveSessionCard(item: item) { onOpenSession(item.id) }
                 }
@@ -1122,10 +1246,10 @@ struct ProjectsView: View {
             .prefix(8)
         return Group {
             if !records.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
                     sectionHeader("RECENT", count: records.count,
                                   color: DefaultTheme.secondaryText)
-                    VStack(spacing: 2) {
+                    VStack(spacing: DefaultTheme.space(2)) {
                         ForEach(Array(records), id: \.id) { record in
                             RecentSessionRow(record: record) {
                                 Task {
@@ -1146,7 +1270,7 @@ struct ProjectsView: View {
     private func prsTab(_ project: ProjectRecord) -> some View {
         if !GitHubService.isAvailable {
             Text("Install the GitHub CLI (brew install gh) and authenticate (gh auth login) to review pull requests here.")
-                .font(.system(size: 12))
+                .themeFont(size: 12)
                 .foregroundStyle(DefaultTheme.secondaryText)
         } else {
             prListView(project)
@@ -1159,7 +1283,7 @@ struct ProjectsView: View {
         let prs = model.prs(for: project.id)
         let loading = model.isLoadingPRs(for: project.id)
         let filter = model.selectedPRFilter
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
             HStack {
                 sectionHeader(filter.id == PRFilter.all.id ? "OPEN PULL REQUESTS"
                               : filter.name.uppercased(),
@@ -1177,10 +1301,10 @@ struct ProjectsView: View {
                 Text(filter.id == PRFilter.all.id
                      ? "No open pull request — or gh is not authenticated for this repo."
                      : "No pull request matches “\(filter.name)” — or gh is not authenticated for this repo.")
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
-            VStack(spacing: 6) {
+            VStack(spacing: DefaultTheme.space(6)) {
                 ForEach(prs) { pr in
                     PRRow(pr: pr) {
                         onOpenPR(project.id, pr)
@@ -1192,48 +1316,48 @@ struct ProjectsView: View {
     }
 
     private func sectionHeader(_ title: String, count: Int, color: Color) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .kerning(0.8)
+                .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                 .foregroundStyle(DefaultTheme.secondaryText)
             Text("\(count)")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .themeFont(size: 10, weight: .semibold, design: .monospaced)
                 .foregroundStyle(color)
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(1))
+                .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
         }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: DefaultTheme.space(12)) {
             LogoMark(size: 72)
             Text("Add your first project")
-                .font(.system(size: 16, weight: .semibold))
+                .themeFont(size: 16, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
             Text("A local folder — if it contains a Git repo, each session\nwill work isolated on its own worktree.")
-                .font(.system(size: 12))
+                .themeFont(size: 12)
                 .foregroundStyle(DefaultTheme.secondaryText)
                 .multilineTextAlignment(.center)
             AccentButton("Add project", systemImage: "plus") { pickProject() }
-                .padding(.top, 6)
+                .padding(.top, DefaultTheme.space(6))
             if model.claudePath == nil {
-                VStack(spacing: 4) {
+                VStack(spacing: DefaultTheme.space(4)) {
                     Label("Claude Code not found", systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 12))
+                        .themeFont(size: 12)
                         .foregroundStyle(DefaultTheme.badgeColor(for: .needsInput))
                     Text("npm install -g @anthropic-ai/claude-code")
-                        .font(.system(size: 11, design: .monospaced))
+                        .themeFont(size: 11, design: .monospaced)
                         .foregroundStyle(DefaultTheme.secondaryText)
                         .textSelection(.enabled)
                 }
-                .padding(.top, 8)
+                .padding(.top, DefaultTheme.space(8))
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 60)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .padding(.vertical, DefaultTheme.space(60))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10)).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .themeShadow(.sm, radius: 10)
     }
 
     private func pickProject() {
@@ -1257,9 +1381,8 @@ struct StackTab: View {
     @State private var hovered = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 9))
+        HStack(spacing: DefaultTheme.space(6)) {
+            AppIcon(icon, size: 13)
                 .foregroundStyle(isDormant ? DefaultTheme.mutedText
                                  : isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
             ForEach(Array(badges.enumerated()), id: \.offset) { _, badge in
@@ -1267,23 +1390,25 @@ struct StackTab: View {
                     .help(badge.label)
             }
             Text(title)
-                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .themeFont(size: 12)
                 .foregroundStyle(isDormant ? DefaultTheme.secondaryText
                                  : isActive || hovered ? DefaultTheme.primaryText
                                                        : DefaultTheme.secondaryText)
                 .lineLimit(1)
                 .frame(maxWidth: 150, alignment: .leading)
                 .fixedSize(horizontal: true, vertical: false)
-            if hovered || isActive {
-                HoverIconButton(systemImage: "xmark", help: "Close", action: onClose)
-            }
+            // The cross keeps its slot: showing it on hover never widens the tab.
+            HoverIconButton(systemImage: "xmark", help: "Close", action: onClose)
+                .opacity(hovered || isActive ? 1 : 0)
+                .allowsHitTesting(hovered || isActive)
         }
-        .padding(.horizontal, 9).padding(.vertical, 5)
+        .padding(.horizontal, DefaultTheme.space(8))
+        .frame(height: DefaultTheme.size(24))
         .background(isActive ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                    in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7)
-            .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4))
+            .strokeBorder(isActive ? DefaultTheme.line : .clear, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
@@ -1306,31 +1431,30 @@ struct AgentBrowserStackTab: View {
     @State private var hovered = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 9))
-                .foregroundStyle(isActive ? DefaultTheme.accent : DefaultTheme.secondaryText)
+        HStack(spacing: DefaultTheme.space(6)) {
+            AppIcon("sparkles", size: 11)
+                .foregroundStyle(isActive ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
             Text("Agent")
-                .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                .themeFont(size: 11, weight: isActive ? .semibold : .regular)
                 .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
                 .lineLimit(1)
                 .fixedSize()
             if isRunning {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 6))
+                AppIcon("circle.fill", size: 7)
                     .foregroundStyle(DefaultTheme.badgeColor(for: .working))
                     .symbolEffect(.pulse)
                     .help("claude is using its browser")
             }
-            if hovered || isActive {
-                HoverIconButton(systemImage: "xmark", help: "Close the agent's browser", action: onClose)
-            }
+            // The cross keeps its slot: showing it on hover never widens the tab.
+            HoverIconButton(systemImage: "xmark", help: "Close the agent's browser", action: onClose)
+                .opacity(hovered || isActive ? 1 : 0)
+                .allowsHitTesting(hovered || isActive)
         }
-        .padding(.horizontal, 9).padding(.vertical, 5)
+        .padding(.horizontal, DefaultTheme.space(9)).padding(.vertical, DefaultTheme.space(5))
         .background(isActive ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                    in: RoundedRectangle(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7)
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
             .stroke(isActive ? DefaultTheme.cardBorder : .clear, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
@@ -1353,32 +1477,32 @@ struct SkillCard: View {
     @State private var hovered = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 13))
+        HStack(alignment: .top, spacing: DefaultTheme.space(10)) {
+            AppIcon("sparkles", size: 15.5)
                 .foregroundStyle(Color(red: 0.62, green: 0.55, blue: 0.95))
-                .frame(width: 30, height: 30)
+                .frame(width: DefaultTheme.size(30), height: DefaultTheme.size(30))
                 .background(Color(red: 0.62, green: 0.55, blue: 0.95).opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 5) {
+                            in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            VStack(alignment: .leading, spacing: DefaultTheme.space(5)) {
                 Text(skill.name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .themeFont(size: 13, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Text(skill.description)
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 scopeChip
             }
         }
-        .padding(14)
+        .padding(DefaultTheme.space(14))
         .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
         .background(hovered ? DefaultTheme.surfaceRaised : DefaultTheme.surface,
-                    in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10)
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
             .stroke(hovered ? DefaultTheme.accent.opacity(0.5) : DefaultTheme.cardBorder,
                     lineWidth: 1))
+        .themeShadow(.sm, radius: 10)
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
         .onHover { hovered = $0 }
@@ -1391,9 +1515,9 @@ struct SkillCard: View {
                               : Color(red: 0.416, green: 0.635, blue: 0.910)
         return Label(isProject ? "project" : "global",
                      systemImage: isProject ? "folder" : "globe")
-            .font(.system(size: 10, weight: .medium))
+            .themeFont(size: 10, weight: .medium)
             .foregroundStyle(color)
-            .padding(.horizontal, 8).padding(.vertical, 3)
+            .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(3))
             .background(color.opacity(0.14), in: Capsule())
     }
 }
@@ -1405,31 +1529,31 @@ struct RuleCard: View {
     @State private var hovered = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "doc.text")
-                .font(.system(size: 13))
-                .foregroundStyle(DefaultTheme.accent)
-                .frame(width: 30, height: 30)
+        HStack(alignment: .top, spacing: DefaultTheme.space(10)) {
+            AppIcon("doc.text", size: 15.5)
+                .foregroundStyle(DefaultTheme.accentInk)
+                .frame(width: DefaultTheme.size(30), height: DefaultTheme.size(30))
                 .background(DefaultTheme.accent.opacity(0.12),
-                            in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 5) {
+                            in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+            VStack(alignment: .leading, spacing: DefaultTheme.space(5)) {
                 Text(rule.name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .themeFont(size: 13, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Text(rule.content.prefix(300))
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(14)
+        .padding(DefaultTheme.space(14))
         .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
         .background(hovered ? DefaultTheme.surfaceRaised : DefaultTheme.surface,
-                    in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10)
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
             .stroke(hovered ? DefaultTheme.accent.opacity(0.5) : DefaultTheme.cardBorder,
                     lineWidth: 1))
+        .themeShadow(.sm, radius: 10)
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
         .onHover { hovered = $0 }
@@ -1445,28 +1569,28 @@ struct PRRow: View {
     @State private var hovered = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             Circle()
                 .fill(PRChips.checksColor(pr))
                 .frame(width: 7, height: 7)
                 .help(PRChips.checksSummary(pr))
             Text("#\(pr.number)")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(DefaultTheme.accent)
-            VStack(alignment: .leading, spacing: 2) {
+                .themeFont(size: 12, weight: .semibold, design: .monospaced)
+                .foregroundStyle(DefaultTheme.accentInk)
+            VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text(pr.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .themeFont(size: 13, weight: .medium)
                     .foregroundStyle(DefaultTheme.primaryText)
                     .lineLimit(1)
-                HStack(spacing: 8) {
+                HStack(spacing: DefaultTheme.space(8)) {
                     Text("@" + pr.author)
-                        .font(.system(size: 10, design: .monospaced))
+                        .themeFont(size: 10, design: .monospaced)
                         .foregroundStyle(DefaultTheme.mutedText)
                     MonoTag(pr.branch, systemImage: "arrow.triangle.branch",
                             color: DefaultTheme.mutedText)
                     if !pr.reviewers.isEmpty {
                         Label(PRChips.reviewers(pr), systemImage: "person.2")
-                            .font(.system(size: 10, design: .monospaced))
+                            .themeFont(size: 10, design: .monospaced)
                             .foregroundStyle(DefaultTheme.mutedText)
                             .lineLimit(1)
                     }
@@ -1477,33 +1601,34 @@ struct PRRow: View {
             ForEach(pr.labels.prefix(3), id: \.name) { PRChips.label($0) }
             if pr.isConflicting {
                 Text("conflicts")
-                    .font(.system(size: 9, weight: .semibold))
+                    .themeFont(size: 9, weight: .semibold)
                     .foregroundStyle(DefaultTheme.danger)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(2))
                     .background(DefaultTheme.danger.opacity(0.12), in: Capsule())
             }
             if pr.isDraft {
                 Text("draft")
-                    .font(.system(size: 9, weight: .semibold))
+                    .themeFont(size: 9, weight: .semibold)
                     .foregroundStyle(DefaultTheme.mutedText)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(2))
                     .background(DefaultTheme.surfaceRaised, in: Capsule())
             }
             if !pr.reviewDecision.isEmpty {
                 Text(pr.reviewDecision.replacingOccurrences(of: "_", with: " ").lowercased())
-                    .font(.system(size: 9, weight: .semibold))
+                    .themeFont(size: 9, weight: .semibold)
                     .foregroundStyle(pr.reviewDecision == "APPROVED" ? DefaultTheme.groupHeader
                                                                      : DefaultTheme.secondaryText)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(2))
                     .background(DefaultTheme.surfaceRaised, in: Capsule())
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
+        .padding(.horizontal, DefaultTheme.space(12)).padding(.vertical, DefaultTheme.space(10))
         .background(hovered ? DefaultTheme.surfaceRaised : DefaultTheme.surface,
-                    in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10)
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
             .stroke(hovered ? DefaultTheme.accent.opacity(0.5) : DefaultTheme.cardBorder,
                     lineWidth: 1))
+        .themeShadow(.sm, radius: 10)
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
         .onHover { hovered = $0 }
@@ -1526,71 +1651,71 @@ struct PRTourView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
+            HStack(spacing: DefaultTheme.space(8)) {
                 Image(systemName: "sparkles")
-                    .foregroundStyle(DefaultTheme.accent)
+                    .foregroundStyle(DefaultTheme.accentInk)
                 Text(tour.pitch)
-                    .font(.system(size: 13, weight: .medium))
+                    .themeFont(size: 13, weight: .medium)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Spacer()
                 Label(gauge.label, systemImage: "gauge.with.needle")
-                    .font(.system(size: 10, weight: .semibold))
+                    .themeFont(size: 10, weight: .semibold)
                     .foregroundStyle(gauge.color)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(3))
                     .background(gauge.color.opacity(0.14), in: Capsule())
             }
             ForEach(Array(tour.chapters.enumerated()), id: \.offset) { index, chapter in
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .top, spacing: DefaultTheme.space(10)) {
                     Text("\(index + 1)")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(DefaultTheme.accent)
+                        .themeFont(size: 11, weight: .bold, design: .monospaced)
+                        .foregroundStyle(DefaultTheme.accentInk)
                         .frame(width: 20, height: 20)
                         .background(DefaultTheme.accent.opacity(0.12), in: Circle())
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: DefaultTheme.space(3)) {
+                        HStack(spacing: DefaultTheme.space(8)) {
                             Text(chapter.title)
-                                .font(.system(size: 12, weight: .semibold))
+                                .themeFont(size: 12, weight: .semibold)
                                 .foregroundStyle(DefaultTheme.primaryText)
                             if !chapter.file.isEmpty {
                                 MonoTag(chapter.file, color: DefaultTheme.mutedText)
                             }
                         }
                         Text(chapter.explanation)
-                            .font(.system(size: 11))
+                            .themeFont(size: 11)
                             .foregroundStyle(DefaultTheme.secondaryText)
                     }
                 }
             }
             if !tour.warnings.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
                     ForEach(Array(tour.warnings.enumerated()), id: \.offset) { _, warning in
-                        HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 9))
+                        HStack(spacing: DefaultTheme.space(6)) {
+                            AppIcon("exclamationmark.triangle.fill", size: 11)
                                 .foregroundStyle(gauge.color)
                             Text("\(warning.file)\(warning.line.map { ":\($0)" } ?? "")")
-                                .font(.system(size: 10, design: .monospaced))
+                                .themeFont(size: 10, design: .monospaced)
                                 .foregroundStyle(DefaultTheme.primaryText)
                             Text(warning.note)
-                                .font(.system(size: 10))
+                                .themeFont(size: 10)
                                 .foregroundStyle(DefaultTheme.secondaryText)
                                 .lineLimit(1)
                         }
                     }
                 }
-                .padding(.top, 2)
+                .padding(.top, DefaultTheme.space(2))
             }
             GhostButton("Ask the guide", systemImage: "bubble.left.and.text.bubble.right") {
                 onAskGuide()
             }
             .help("Opens an interactive claude session, checked out on this PR, primed as its guide")
         }
-        .padding(14)
+        .padding(DefaultTheme.space(14))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 11))
-        .overlay(RoundedRectangle(cornerRadius: 11)
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
             .stroke(DefaultTheme.accent.opacity(0.35), lineWidth: 1))
+        .themeShadow(.sm, radius: 10)
     }
 }
 
@@ -1604,9 +1729,9 @@ struct ProjectTabButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 7) {
+            VStack(spacing: DefaultTheme.space(7)) {
                 Text(title)
-                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                    .themeFont(size: 12, weight: isActive ? .semibold : .regular)
                     .foregroundStyle(isActive || hovered ? DefaultTheme.primaryText
                                                          : DefaultTheme.secondaryText)
                 Rectangle()
@@ -1704,24 +1829,23 @@ struct ProjectSidebarRow: View {
     @State private var hovered = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: DefaultTheme.space(8)) {
             RoundedRectangle(cornerRadius: 1)
                 .fill(DefaultTheme.accent)
                 .frame(width: 2, height: 14)
                 .opacity(isSelected ? 1 : 0)
             Image(systemName: isSelected ? "folder.fill" : "folder")
                 .font(.system(size: 12))
-                .foregroundStyle(isSelected ? DefaultTheme.accent : DefaultTheme.secondaryText)
+                .foregroundStyle(isSelected ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
             Text(project.name)
-                .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                .themeFont(size: 13, weight: isSelected ? .semibold : .regular)
                 .foregroundStyle(isSelected || hovered ? DefaultTheme.primaryText
                                                        : DefaultTheme.secondaryText)
                 .lineLimit(1)
             Spacer()
             if hovered {
-                HStack(spacing: 4) {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 9))
+                HStack(spacing: DefaultTheme.space(4)) {
+                    AppIcon("line.3.horizontal", size: 11)
                         .foregroundStyle(DefaultTheme.mutedText)
                     HoverIconButton(systemImage: "xmark", help: "Delete project",
                                     action: onRemove)
@@ -1732,10 +1856,10 @@ struct ProjectSidebarRow: View {
                     .frame(width: 5, height: 5)
             }
         }
-        .padding(.horizontal, 7).padding(.vertical, 6)
+        .padding(.horizontal, DefaultTheme.space(7)).padding(.vertical, DefaultTheme.space(6))
         .background(isSelected ? DefaultTheme.surfaceRaised
                     : hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                    in: RoundedRectangle(cornerRadius: 7))
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
@@ -1750,10 +1874,10 @@ struct ActiveSessionCard: View {
     @State private var hovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
             StatusLabel(item.state)
             Text(item.title)
-                .font(.system(size: 13, weight: .semibold))
+                .themeFont(size: 13, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
                 .lineLimit(1)
             if let branch = item.branch {
@@ -1761,13 +1885,14 @@ struct ActiveSessionCard: View {
                         color: DefaultTheme.secondaryText)
             }
         }
-        .padding(14)
+        .padding(DefaultTheme.space(14))
         .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
         .background(hovered ? DefaultTheme.surfaceRaised : DefaultTheme.surface,
-                    in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10)
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
             .stroke(hovered ? DefaultTheme.accent.opacity(0.5) : DefaultTheme.cardBorder,
                     lineWidth: 1))
+        .themeShadow(.sm, radius: 10)
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
         .onHover { hovered = $0 }
@@ -1784,14 +1909,14 @@ struct QuickSessionCard: View {
     @State private var hovered = false
 
     var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
-                Text("Quick empty session").font(.system(size: 12, weight: .medium))
+        VStack(spacing: DefaultTheme.space(8)) {
+            HStack(spacing: DefaultTheme.space(7)) {
+                AppIcon("plus", size: 13)
+                Text("Quick empty session").themeFont(size: 12, weight: .medium)
             }
             .foregroundStyle(hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
             if let onCreateIn, hovered {
-                HStack(spacing: 6) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     placementButton("Project folder", systemImage: "folder") {
                         onCreateIn(.projectFolder)
                     }
@@ -1806,8 +1931,8 @@ struct QuickSessionCard: View {
         }
         .frame(maxWidth: .infinity, minHeight: 92)
         .background(hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear,
-                    in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10)
+                    in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
             .stroke(hovered ? DefaultTheme.accent.opacity(0.5) : DefaultTheme.cardBorder,
                     style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
         .contentShape(Rectangle())
@@ -1820,9 +1945,9 @@ struct QuickSessionCard: View {
                                  action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 10, weight: .medium))
+                .themeFont(size: 10, weight: .medium)
                 .foregroundStyle(DefaultTheme.secondaryText)
-                .padding(.horizontal, 8).padding(.vertical, 4)
+                .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(4))
                 .background(DefaultTheme.surfaceRaised, in: Capsule())
                 .contentShape(Capsule())
         }
@@ -1836,16 +1961,15 @@ struct RecentSessionRow: View {
     let onOpen: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             Text(DefaultTheme.label(for: record.state).uppercased())
-                .font(.system(size: 9, weight: .semibold))
-                .kerning(0.4)
+                .themeFont(size: 9, weight: .semibold, kerning: 0.4)
                 .foregroundStyle(DefaultTheme.badgeColor(for: record.state))
-                .padding(.horizontal, 6).padding(.vertical, 2)
+                .padding(.horizontal, DefaultTheme.space(6)).padding(.vertical, DefaultTheme.space(2))
                 .background(DefaultTheme.badgeColor(for: record.state).opacity(0.15),
-                            in: RoundedRectangle(cornerRadius: 4))
+                            in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
             Text(record.title)
-                .font(.system(size: 12, weight: .medium))
+                .themeFont(size: 12, weight: .medium)
                 .foregroundStyle(DefaultTheme.primaryText)
                 .lineLimit(1)
             if let branch = record.branch {
@@ -1854,13 +1978,13 @@ struct RecentSessionRow: View {
             }
             Spacer()
             Text(Self.relative(record.createdAt))
-                .font(.system(size: 10, design: .monospaced))
+                .themeFont(size: 10, design: .monospaced)
                 .foregroundStyle(DefaultTheme.mutedText)
         }
-        .padding(.horizontal, 10).padding(.vertical, 8)
+        .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(8))
         .contentShape(Rectangle())
         .hoverSurface(0.6)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
         .onTapGesture(perform: onOpen)
     }
 
@@ -1899,6 +2023,25 @@ struct SessionsView: View {
     /// group per run, its orchestrator first — off, they sit with their project.
     @AppStorage("loom.sessions.groupWorkflows") private var groupWorkflows = true
     @AppStorage("loom.sessions.workflowsFolded") private var workflowsFolded = false
+    /// The sidebar's sessions reduced to one line each — the title and
+    /// nothing else: no branch, no state, no row for their terminals and
+    /// browsers (those stay in the tab bar of the session once it is open).
+    @AppStorage("loom.sessions.compact") private var compactSessions = false
+    /// The cards reduced one by one to their title line, as the list's
+    /// switch reduces them all: the ids, comma-separated, kept across
+    /// launches.
+    @AppStorage("loom.sessions.collapsedCards") private var collapsedCardsRaw = ""
+
+    private var collapsedCards: Set<String> {
+        Set(collapsedCardsRaw.split(separator: ",").map(String.init))
+    }
+
+    private func toggleCollapsed(_ id: SessionID) {
+        var cards = collapsedCards
+        let key = id.rawValue.uuidString
+        if cards.contains(key) { cards.remove(key) } else { cards.insert(key) }
+        withAnimation(.hover) { collapsedCardsRaw = cards.sorted().joined(separator: ",") }
+    }
 
     /// A sidebar group's identity: its fold state and the drag confinement.
     private static func groupKey(_ projectID: ProjectID?, review: Bool = false) -> String {
@@ -1921,6 +2064,12 @@ struct SessionsView: View {
     }
     /// Close requested but not yet confirmed: every close cross goes through here.
     @State private var pendingClose: PendingClose?
+
+    /// The session the detail shows, if it shows one.
+    private var currentSessionID: SessionID? {
+        if case .session(let id) = selected { return id }
+        return nil
+    }
 
     struct PendingClose {
         var message: String
@@ -1959,6 +2108,10 @@ struct SessionsView: View {
                 case nil:
                     placeholder
                 }
+                // The fleet under whatever the stack shows: another session's
+                // terminal, the journal, Mission Control's table (⌘J folds it).
+                FleetPanel(model: model, currentSessionID: currentSessionID,
+                           onOpen: { selected = .session($0) })
             }
         }
         .alert("Close this tab?",
@@ -1982,6 +2135,12 @@ struct SessionsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .loomToggleSidePanel)) { _ in
             if case .session(let id) = selected {
                 model.toggleSidePanel(for: model.stackParentID(of: id))
+            }
+        }
+        // ⌘⇧M: the selected session as its terminal, or as its conversation.
+        .onReceive(NotificationCenter.default.publisher(for: .loomToggleSessionView)) { _ in
+            if case .session(let id) = selected {
+                model.toggleViewMode(for: id)
             }
         }
         // ⌘T only exists in a terminal or browser context, and NECESSARILY
@@ -2056,7 +2215,7 @@ struct SessionsView: View {
     private var stackTabStrip: some View {
         if let context = stripContext {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 3) {
+                HStack(spacing: DefaultTheme.space(3)) {
                     switch context.kind {
                     case .terminal:
                         if let parent = context.parent {
@@ -2133,9 +2292,9 @@ struct SessionsView: View {
                             selected = .webPane(model.openBrowserPane(for: context.parent?.id))
                         }
                     }
-                    .padding(.leading, 3)
+                    .padding(.leading, DefaultTheme.space(3))
                 }
-                .padding(.horizontal, 8).padding(.vertical, 5)
+                .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(5))
             }
             .background(DefaultTheme.background)
             Divider().overlay(DefaultTheme.cardBorder)
@@ -2143,11 +2302,11 @@ struct SessionsView: View {
     }
 
     private var placeholder: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: DefaultTheme.space(8)) {
             Text("No open session")
                 .foregroundStyle(DefaultTheme.secondaryText)
             Text("Pick one on the left, or ⌘K")
-                .font(.system(size: 12))
+                .themeFont(size: 12)
                 .foregroundStyle(DefaultTheme.mutedText)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2156,7 +2315,19 @@ struct SessionsView: View {
 
     private var sidebar: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(14)) {
+                HStack(spacing: DefaultTheme.space(6)) {
+                    Text("SESSIONS")
+                        .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
+                        .foregroundStyle(DefaultTheme.mutedText)
+                    Spacer()
+                    HoverIconButton(systemImage: compactSessions ? "rectangle.grid.1x2" : "list.bullet",
+                                    help: compactSessions ? "Show each session's branch, state and tabs"
+                                                          : "Compact: one line per session, its title only") {
+                        compactSessions.toggle()
+                    }
+                }
+                .padding(.horizontal, DefaultTheme.space(2))
                 let globalPanes = model.browserPanes.filter { $0.parentID == nil }
                 if !globalPanes.isEmpty {
                     group("BROWSER", projectID: nil) {
@@ -2211,7 +2382,7 @@ struct SessionsView: View {
                     workflowsSection(workflowGroups)
                 }
             }
-            .padding(12)
+            .padding(DefaultTheme.space(12))
         }
         .frame(width: 280)
         .background(DefaultTheme.background)
@@ -2297,13 +2468,29 @@ struct SessionsView: View {
                               shells: [AppModel.SessionItem],
                               dormantShells: [AppModel.DormantShell],
                               panes: [AppModel.BrowserPane]) -> some View {
-        VStack(spacing: 0) {
+        // Compact, the line stands for the whole stack: it is the selected
+        // one whichever of its tabs the detail shows.
+        let ownSelected = selected == .session(item.id)
+        let shellSelected = shells.contains { selected == .session($0.id) }
+        let paneSelected = panes.contains { selected == .webPane($0.id) }
+        let agentSelected = selected == .agentBrowser(item.id)
+        let childSelected = shellSelected || paneSelected || agentSelected
+        // Reduced by the list's switch, or this card alone.
+        let ownCollapse = collapsedCards.contains(item.id.rawValue.uuidString)
+        let compact = compactSessions || ownCollapse
+        let cardSelected = ownSelected || (compact && childSelected)
+        let radius = DefaultTheme.radius(compact ? 6 : 10)
+        return VStack(spacing: 0) {
             SidebarSessionCard(
                 model: model,
                 item: item,
                 childCount: shells.count + dormantShells.count + panes.count,
-                isSelected: selected == .session(item.id),
+                isSelected: cardSelected,
                 agentBrowsing: model.agentBrowsers[item.id]?.activity?.isRunning == true,
+                compact: compact,
+                // The list's switch rules them all: no card of its own then.
+                collapse: compactSessions ? nil : (ownCollapse ? .expand : .collapse),
+                onToggleCollapse: { toggleCollapsed(item.id) },
                 onSelect: {
                     if item.isDormant {
                         Task {
@@ -2338,28 +2525,33 @@ struct SessionsView: View {
                         }
                 })
                 .equatable()
-                .stackChrome(isSelected: selected == .session(item.id))
+                .stackChrome(isSelected: cardSelected)
             // Individual tabs live in the HORIZONTAL bar: the vertical
-            // stack only shows one group row per type.
-            if !shells.isEmpty || !dormantShells.isEmpty {
-                Divider().overlay(DefaultTheme.cardBorder)
-                terminalGroupRow(parent: item, shells: shells, dormants: dormantShells)
-                    .stackChrome(isSelected: shells.contains { selected == .session($0.id) })
-            }
-            if !panes.isEmpty {
-                Divider().overlay(DefaultTheme.cardBorder)
-                webGroupRow(parent: item, panes: panes)
-                    .stackChrome(isSelected: panes.contains { selected == .webPane($0.id) })
-            }
-            if !item.isShell, model.hasAgentBrowser(item.id) {
-                Divider().overlay(DefaultTheme.cardBorder)
-                agentBrowserRow(parent: item)
-                    .stackChrome(isSelected: selected == .agentBrowser(item.id))
+            // stack only shows one group row per type — and none at all
+            // when the sessions are reduced to their title.
+            if !compact {
+                if !shells.isEmpty || !dormantShells.isEmpty {
+                    Divider().overlay(DefaultTheme.cardBorder)
+                    terminalGroupRow(parent: item, shells: shells, dormants: dormantShells)
+                        .stackChrome(isSelected: shells.contains { selected == .session($0.id) })
+                }
+                if !panes.isEmpty {
+                    Divider().overlay(DefaultTheme.cardBorder)
+                    webGroupRow(parent: item, panes: panes)
+                        .stackChrome(isSelected: panes.contains { selected == .webPane($0.id) })
+                }
+                if !item.isShell, model.hasAgentBrowser(item.id) {
+                    Divider().overlay(DefaultTheme.cardBorder)
+                    agentBrowserRow(parent: item)
+                        .stackChrome(isSelected: selected == .agentBrowser(item.id))
+                }
             }
         }
         .background(DefaultTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: radius))
+        .overlay(RoundedRectangle(cornerRadius: radius).stroke(DefaultTheme.cardBorder, lineWidth: 1))
+        // No theme shadow: these are a sidebar's rows, a few points apart —
+        // a hard shadow welded each one to the next.
     }
 
     /// SES-04: THE stack's terminal group — a single row, the tab detail
@@ -2368,32 +2560,31 @@ struct SessionsView: View {
                                   shells: [AppModel.SessionItem],
                                   dormants: [AppModel.DormantShell]) -> some View {
         let count = shells.count + dormants.count
-        return HStack(spacing: 8) {
-            Image(systemName: "terminal")
-                .font(.system(size: 11))
-                .foregroundStyle(shells.isEmpty ? DefaultTheme.mutedText : DefaultTheme.accent)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
+        return HStack(spacing: DefaultTheme.space(8)) {
+            AppIcon("terminal", size: 13)
+                .foregroundStyle(shells.isEmpty ? DefaultTheme.mutedText : DefaultTheme.accentInk)
+            VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     Text(count > 1 ? "Terminals" : (shells.first?.title ?? dormants.first?.title ?? "Terminal"))
-                        .font(.system(size: 12, weight: .medium))
+                        .themeFont(size: 12, weight: .medium)
                         .foregroundStyle(shells.isEmpty ? DefaultTheme.secondaryText
                                                         : DefaultTheme.primaryText)
                     if count > 1 {
                         Text("\(count)")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .themeFont(size: 10, weight: .semibold, design: .monospaced)
                             .foregroundStyle(DefaultTheme.secondaryText)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .padding(.horizontal, DefaultTheme.space(5)).padding(.vertical, DefaultTheme.space(1))
                             .background(DefaultTheme.surfaceRaised, in: Capsule())
                     }
                 }
                 Label(parent.title, systemImage: "link")
-                    .font(.system(size: 10))
+                    .themeFont(size: 10)
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
             }
             Spacer()
         }
-        .padding(10)
+        .padding(DefaultTheme.space(10))
         .contentShape(Rectangle())
         .hoverSurface(0.6)
         .stackQuickActions(
@@ -2425,31 +2616,30 @@ struct SessionsView: View {
     /// WEB-03: THE stack's browser group — same principle.
     private func webGroupRow(parent: AppModel.SessionItem,
                              panes: [AppModel.BrowserPane]) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "globe")
-                .font(.system(size: 11))
-                .foregroundStyle(DefaultTheme.accent)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
+        HStack(spacing: DefaultTheme.space(8)) {
+            AppIcon("globe", size: 13)
+                .foregroundStyle(DefaultTheme.accentInk)
+            VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     Text(panes.count > 1 ? "Web" : (panes.first?.title ?? "Web"))
-                        .font(.system(size: 12, weight: .medium))
+                        .themeFont(size: 12, weight: .medium)
                         .foregroundStyle(DefaultTheme.primaryText)
                     if panes.count > 1 {
                         Text("\(panes.count)")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .themeFont(size: 10, weight: .semibold, design: .monospaced)
                             .foregroundStyle(DefaultTheme.secondaryText)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .padding(.horizontal, DefaultTheme.space(5)).padding(.vertical, DefaultTheme.space(1))
                             .background(DefaultTheme.surfaceRaised, in: Capsule())
                     }
                 }
                 Label(parent.title, systemImage: "link")
-                    .font(.system(size: 10))
+                    .themeFont(size: 10)
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
             }
             Spacer()
         }
-        .padding(10)
+        .padding(DefaultTheme.space(10))
         .contentShape(Rectangle())
         .hoverSurface(0.6)
         .stackQuickActions(
@@ -2476,35 +2666,37 @@ struct SessionsView: View {
         let browser = model.agentBrowsers[parent.id]
         let running = browser?.activity?.isRunning == true
         let pages = model.agentBrowserPageCount(parent.id)
-        return HStack(spacing: 8) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 11))
-                .foregroundStyle(DefaultTheme.accent)
+        return HStack(spacing: DefaultTheme.space(8)) {
+            AppIcon("sparkles", size: 13)
+                .foregroundStyle(DefaultTheme.accentInk)
                 .symbolEffect(.pulse, isActive: running)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text("Agent browser")
-                    .font(.system(size: 12, weight: .medium))
+                    .themeFont(size: 12, weight: .medium)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Label(parent.title, systemImage: "link")
-                    .font(.system(size: 10))
+                    .themeFont(size: 10)
                     .foregroundStyle(DefaultTheme.mutedText)
                     .lineLimit(1)
                 if running, let summary = browser?.activity?.summary, !summary.isEmpty {
                     Text(summary)
-                        .font(.system(size: 10))
+                        .themeFont(size: 10)
                         .foregroundStyle(DefaultTheme.badgeColor(for: .working))
                         .lineLimit(1)
                 } else if pages > 0 {
                     Text("\(pages) page\(pages > 1 ? "s" : "")")
-                        .font(.system(size: 10, design: .monospaced))
+                        .themeFont(size: 10, design: .monospaced)
                         .foregroundStyle(DefaultTheme.secondaryText)
                 }
             }
             Spacer()
         }
-        .padding(10)
+        .padding(DefaultTheme.space(10))
         .contentShape(Rectangle())
         .hoverSurface(0.6)
+        // The cross on hover, like every other row of the stack — with the
+        // same confirmation as Close in the menu: its pages are lost.
+        .stackQuickActions(onClose: { confirmCloseAgentBrowser(parent.id) })
         .onTapGesture { selected = .agentBrowser(parent.id) }
         .contextMenu {
             Button("Open as a tab") { selected = .agentBrowser(parent.id) }
@@ -2542,29 +2734,28 @@ struct SessionsView: View {
 
     private func paneRowBody(_ pane: AppModel.BrowserPane, parentTitle: String?,
                              parent: AppModel.SessionItem?) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "globe")
-                .font(.system(size: 11))
-                .foregroundStyle(DefaultTheme.accent)
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: DefaultTheme.space(8)) {
+            AppIcon("globe", size: 13)
+                .foregroundStyle(DefaultTheme.accentInk)
+            VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                 Text(pane.title)
-                    .font(.system(size: 12, weight: .medium))
+                    .themeFont(size: 12, weight: .medium)
                     .foregroundStyle(DefaultTheme.primaryText)
                 if let parentTitle {
                     Label(parentTitle, systemImage: "link")
-                        .font(.system(size: 10))
+                        .themeFont(size: 10)
                         .foregroundStyle(DefaultTheme.mutedText)
                         .lineLimit(1)
                 }
                 if !pane.controller.tabs.isEmpty {
                     Text("\(pane.controller.tabs.count) tab\(pane.controller.tabs.count > 1 ? "s" : "")")
-                        .font(.system(size: 10, design: .monospaced))
+                        .themeFont(size: 10, design: .monospaced)
                         .foregroundStyle(DefaultTheme.secondaryText)
                 }
             }
             Spacer()
         }
-        .padding(10)
+        .padding(DefaultTheme.space(10))
         .contentShape(Rectangle())
         .hoverSurface(0.6)
         .stackQuickActions(
@@ -2592,22 +2783,21 @@ struct SessionsView: View {
                        @ViewBuilder content: () -> some View) -> some View {
         let foldKey = key ?? title
         let collapsed = collapsedGroups.contains(foldKey)
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(compactSessions ? 3 : 6)) {
             HStack {
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) {
                         if collapsed { collapsedGroups.remove(foldKey) } else { collapsedGroups.insert(foldKey) }
                     }
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: DefaultTheme.space(6)) {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 8, weight: .bold))
                             .rotationEffect(.degrees(collapsed ? -90 : 0))
                         Text(title)
-                            .font(.system(size: 10, weight: .semibold))
-                            .kerning(0.8)
+                            .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                     }
-                    .foregroundStyle(DefaultTheme.groupHeader)
+                    .foregroundStyle(DefaultTheme.mutedText)
                     .contentShape(Rectangle())
                     .hoverBrightness(0.2)
                 }
@@ -2620,7 +2810,7 @@ struct SessionsView: View {
                     }
                 }
             }
-            .padding(.horizontal, 2)
+            .padding(.horizontal, DefaultTheme.space(2))
             if !collapsed {
                 content()
             }
@@ -2651,34 +2841,32 @@ struct SessionsView: View {
     /// section, one group per run.
     private func workflowsSection(_ groups: [WorkflowGroup]) -> some View {
         let count = groups.reduce(0) { $0 + $1.items.filter { !$0.isShell }.count }
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
             Divider().overlay(DefaultTheme.cardBorder)
-                .padding(.top, 4)
+                .padding(.top, DefaultTheme.space(4))
             Button {
                 withAnimation(.easeInOut(duration: 0.15)) { workflowsFolded.toggle() }
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .bold))
                         .rotationEffect(.degrees(workflowsFolded ? -90 : 0))
-                    Image(systemName: "point.3.connected.trianglepath.dotted")
-                        .font(.system(size: 9, weight: .semibold))
+                    AppIcon("point.3.connected.trianglepath.dotted", size: 11)
                     Text("WORKFLOWS")
-                        .font(.system(size: 10, weight: .semibold))
-                        .kerning(0.8)
+                        .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                     Text("\(count)")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .themeFont(size: 9, weight: .semibold, design: .monospaced)
                         .foregroundStyle(DefaultTheme.secondaryText)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .padding(.horizontal, DefaultTheme.space(5)).padding(.vertical, DefaultTheme.space(1))
                         .background(DefaultTheme.surfaceRaised, in: Capsule())
                     Spacer()
                 }
-                .foregroundStyle(DefaultTheme.groupHeader)
+                .foregroundStyle(DefaultTheme.mutedText)
                 .contentShape(Rectangle())
                 .hoverBrightness(0.2)
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 2)
+            .padding(.horizontal, DefaultTheme.space(2))
             .help("The orchestrators and visible steps of workflow runs")
             .contextMenu {
                 Button("Show them with their projects") { groupWorkflows = false }
@@ -2698,34 +2886,32 @@ struct SessionsView: View {
     /// whole section, then one group per project, as above.
     private func codeReviewSection(_ groups: [ReviewGroup]) -> some View {
         let count = groups.reduce(0) { $0 + $1.items.filter { !$0.isShell }.count }
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
             Divider().overlay(DefaultTheme.cardBorder)
-                .padding(.top, 4)
+                .padding(.top, DefaultTheme.space(4))
             Button {
                 withAnimation(.easeInOut(duration: 0.15)) { reviewsFolded.toggle() }
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: DefaultTheme.space(6)) {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .bold))
                         .rotationEffect(.degrees(reviewsFolded ? -90 : 0))
-                    Image(systemName: "checklist")
-                        .font(.system(size: 9, weight: .semibold))
+                    AppIcon("checklist", size: 11)
                     Text("CODE REVIEW")
-                        .font(.system(size: 10, weight: .semibold))
-                        .kerning(0.8)
+                        .themeFont(size: 10.5, weight: .medium, design: .monospaced, kerning: 0.53)
                     Text("\(count)")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .themeFont(size: 9, weight: .semibold, design: .monospaced)
                         .foregroundStyle(DefaultTheme.secondaryText)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .padding(.horizontal, DefaultTheme.space(5)).padding(.vertical, DefaultTheme.space(1))
                         .background(DefaultTheme.surfaceRaised, in: Capsule())
                     Spacer()
                 }
-                .foregroundStyle(DefaultTheme.groupHeader)
+                .foregroundStyle(DefaultTheme.mutedText)
                 .contentShape(Rectangle())
                 .hoverBrightness(0.2)
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 2)
+            .padding(.horizontal, DefaultTheme.space(2))
             .help("Sessions opened from the PRs tab")
             .contextMenu {
                 Button("Show them with their projects") { groupReviews = false }
@@ -2749,12 +2935,27 @@ struct SessionsView: View {
 private struct StackChrome: ViewModifier {
     let isSelected: Bool
     func body(content: Content) -> some View {
+        // Under a theme of its own radius, the ring runs alongside the
+        // card's corner, two points in — and the tint stays inside it: a
+        // stadium ring over a square tint left wedges at its corners.
+        let redraws = DefaultTheme.redraws
+        let ring = redraws ? max(0, DefaultTheme.radius(10) - DefaultTheme.space(2)) : DefaultTheme.radius(6)
         content
-            .background(isSelected ? DefaultTheme.accent.opacity(0.08) : .clear)
+            .background {
+                if isSelected {
+                    if redraws {
+                        RoundedRectangle(cornerRadius: ring)
+                            .fill(DefaultTheme.accent.opacity(0.08))
+                            .padding(DefaultTheme.space(2))
+                    } else {
+                        DefaultTheme.accent.opacity(0.08)
+                    }
+                }
+            }
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: ring)
                     .stroke(isSelected ? DefaultTheme.accent : .clear, lineWidth: 1)
-                    .padding(2))
+                    .padding(DefaultTheme.space(2)))
     }
 }
 
@@ -2801,6 +3002,9 @@ struct SessionDetailView: View {
     @State private var lastDraggedWidth: CGFloat?
     /// The detail's width, for settling a reveal the agent asked for.
     @State private var detailWidth: CGFloat = 0
+    /// Bumped when the terminal comes back in place of the chat view: it
+    /// takes the keyboard again, whoever holds it.
+    @State private var terminalFocusRequest = 0
 
     private struct PanelDrag: Equatable {
         var startWidth: CGFloat
@@ -2821,6 +3025,10 @@ struct SessionDetailView: View {
     private var parentID: SessionID { model.stackParentID(of: sessionID) }
 
     private var panel: SidePanelState { model.sidePanel(for: parentID) }
+
+    /// The terminal, or the conversation as a chat (ADR-0023). The model's:
+    /// this view is rebuilt at every tab switch.
+    private var viewMode: SessionViewMode { model.viewMode(for: sessionID) }
 
     private func sideLayout(width: CGFloat) -> SidePanelLayout {
         // The drag's last width bridges the frame between the gesture's reset
@@ -2885,14 +3093,31 @@ struct SessionDetailView: View {
                     ZStack(alignment: .trailing) {
                         // Always the first child: toggling the panel never
                         // recreates the terminal (no focus grab, no first-fit race).
-                        TerminalPane(model: model, sessionID: sessionID,
-                                     role: split ? .sessionSplit : .session,
-                                     fitSuspended: panelDrag != nil,
-                                     otherShape: other)
+                        if viewMode == .chat {
+                            // The chat view REPLACES the terminal, in its
+                            // frame: laid over a mounted pane, it would lose
+                            // its clicks and its wheel to the terminal's
+                            // window-wide monitors. The surface is the
+                            // model's: the pane that comes back paints it as
+                            // after a tab switch, and its first fit — the
+                            // same frame, the same grid — is dropped by the
+                            // runtime. No resize, no repaint.
+                            SessionChatPane(model: model, sessionID: sessionID,
+                                            onShowTerminal: { model.setViewMode(.terminal, for: sessionID) })
+                        } else {
+                            TerminalPane(model: model, sessionID: sessionID,
+                                         role: split ? .sessionSplit : .session,
+                                         fitSuspended: panelDrag != nil,
+                                         otherShape: other,
+                                         focusRequest: terminalFocusRequest)
+                        }
                         if gitShown {
                             gitPanel
                                 .frame(width: min(380, columnWidth))
-                                .shadow(color: .black.opacity(0.45), radius: 20, x: -8)
+                                // A light theme takes a third of it: the same
+                                // black smeared a grey cloud over the terminal.
+                                .shadow(color: .black.opacity(DefaultTheme.colorScheme == .dark ? 0.45 : 0.14),
+                                        radius: 20, x: -8)
                                 .transition(.move(edge: .trailing))
                         }
                     }
@@ -2913,6 +3138,8 @@ struct SessionDetailView: View {
                 }
                 .animation(nil, value: split)
                 .animation(nil, value: layout.panelWidth)
+                // Nor a fade between the terminal and the chat view.
+                .animation(nil, value: viewMode)
                 .onAppear { detailWidth = geo.size.width }
                 .onChange(of: geo.size.width) { _, width in detailWidth = width }
             }
@@ -2933,6 +3160,10 @@ struct SessionDetailView: View {
         }
         .onChange(of: panel.pendingReveal, initial: true) { settlePendingReveal() }
         .onChange(of: detailWidth) { settlePendingReveal() }
+        // Back from the chat view, the terminal is where typing goes.
+        .onChange(of: viewMode) { _, mode in
+            if mode == .terminal { terminalFocusRequest += 1 }
+        }
         .task(id: InfoKey(shown: infoShown, state: item?.state)) {
             guard infoShown else { return }
             let snapshot = await model.sessionInfoSnapshot(sessionID)
@@ -2943,17 +3174,17 @@ struct SessionDetailView: View {
     }
 
     private var breadcrumb: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             HoverIconButton(systemImage: "arrow.left", help: "Back to project") {
                 onBack(item?.projectID)
             }
             Divider().frame(height: 16).overlay(DefaultTheme.cardBorder)
             Text(model.project(item?.projectID)?.name ?? "Session")
-                .font(.system(size: 12, weight: .medium))
+                .themeFont(size: 12, weight: .medium)
                 .foregroundStyle(DefaultTheme.secondaryText)
             Text("/").foregroundStyle(DefaultTheme.mutedText)
             Text(item?.title ?? "Session")
-                .font(.system(size: 12, weight: .semibold))
+                .themeFont(size: 12, weight: .semibold)
                 .foregroundStyle(DefaultTheme.primaryText)
                 .lineLimit(1)
             if let branch = item?.branch {
@@ -2968,6 +3199,10 @@ struct SessionDetailView: View {
                 StatusLabel(state)
             }
             Spacer()
+            // A shell has no conversation: its terminal is all there is to show.
+            if item?.isShell != true {
+                SessionViewModeToggle(mode: viewMode) { model.setViewMode($0, for: sessionID) }
+            }
             // v3 — pipeline: queue the next goal, it launches when this ends.
             GhostButton(systemImage: "arrow.turn.down.right") {
                 followUpDraft = model.followUps[sessionID] ?? ""
@@ -2981,15 +3216,15 @@ struct SessionDetailView: View {
             }
             .help("Chain: when this session ends, start the next one")
             .popover(isPresented: $followUpShown, arrowEdge: .bottom) {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
                     Text("When this session ends…")
-                        .font(.system(size: 12, weight: .semibold))
+                        .themeFont(size: 12, weight: .semibold)
                         .foregroundStyle(DefaultTheme.primaryText)
                     TextField("…start a new session with this goal", text: $followUpDraft)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .padding(8)
-                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 7))
+                        .themeFont(size: 12)
+                        .padding(DefaultTheme.space(8))
+                        .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                         .frame(width: 320)
                         .onSubmit {
                             model.setFollowUp(followUpDraft, for: sessionID)
@@ -3008,9 +3243,11 @@ struct SessionDetailView: View {
                         }
                     }
                 }
-                .padding(14)
+                .padding(DefaultTheme.space(14))
                 .background(DefaultTheme.surface)
                 .preferredColorScheme(DefaultTheme.colorScheme)
+                .font(DefaultTheme.bodyFont)
+                .tint(DefaultTheme.controlTint)
             }
             // The browser beside the terminal (the stack's side panel). A
             // pulsing dot: the agent is using its browser out of sight — the
@@ -3039,8 +3276,8 @@ struct SessionDetailView: View {
                 Task { await model.stopSession(sessionID) }
             }
         }
-        .padding(.horizontal, 14)
-        .frame(height: 42)
+        .padding(.horizontal, DefaultTheme.space(14))
+        .frame(height: DefaultTheme.size(42))
         .background(DefaultTheme.background)
         .task(id: UsageKey(state: item?.state, native: nativeID)) { await watchUsage() }
     }
@@ -3050,7 +3287,7 @@ struct SessionDetailView: View {
         Button { contextShown = true } label: {
             ContextRing(fraction: usage?.fraction,
                         color: usage?.level.color ?? DefaultTheme.mutedText)
-                .padding(3)
+                .padding(DefaultTheme.space(3))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -3059,6 +3296,18 @@ struct SessionDetailView: View {
         } ?? "Context window — nothing recorded yet")
         .sheet(isPresented: $contextShown) {
             ContextWindowSheet(model: model, sessionID: sessionID) { contextShown = false }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
+            switch note.object as? String {
+            case "git":
+                gitShown.toggle()
+                if gitShown { Task { gitData = await model.gitPanel(for: sessionID) } }
+            case "context": contextShown = true
+            case "context-close": contextShown = false
+            case "chat": model.setViewMode(.chat, for: sessionID)
+            case "terminal": model.setViewMode(.terminal, for: sessionID)
+            default: break
+            }
         }
     }
 
@@ -3087,23 +3336,23 @@ struct SessionDetailView: View {
         let workingDir = record?.worktreePath
             ?? model.project(item?.projectID ?? record?.projectID)?.path
         let lastActivity = infoLastActivity
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
             HStack {
                 Text("Context Usage")
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
                 Spacer()
                 Text(usage.map { ContextWindowSheet.percent($0.fraction) } ?? "—")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .themeFont(size: 13, weight: .semibold, design: .rounded)
                     .foregroundStyle(usage?.level.color ?? DefaultTheme.mutedText)
             }
             ContextBar(fraction: usage?.fraction ?? 0,
                        color: usage?.level.color ?? DefaultTheme.mutedText, height: 7)
             Text(usage.map { "\(UsageSheet.tokens($0.contextTokens)) / \(UsageSheet.tokens($0.windowTokens))" }
                  ?? "No turn recorded yet")
-                .font(.system(size: 11, design: .monospaced))
+                .themeFont(size: 11, design: .monospaced)
                 .foregroundStyle(DefaultTheme.secondaryText)
-            Divider().overlay(DefaultTheme.cardBorder).padding(.vertical, 2)
+            Divider().overlay(DefaultTheme.cardBorder).padding(.vertical, DefaultTheme.space(2))
             // The native conversation — what `claude --resume` accepts, so the
             // one worth copying. The Loom id only shows when it differs.
             infoRow("Session ID", nativeID.rawValue.uuidString.lowercased()) {
@@ -3132,9 +3381,9 @@ struct SessionDetailView: View {
             if let branch = record?.branch { infoRow("Branch", branch) }
             infoRow("Agent", record?.agentID ?? "claude-code")
             infoRow("Model", usage?.model ?? "—")
-            HStack(spacing: 10) {
+            HStack(spacing: DefaultTheme.space(10)) {
                 Text("Status")
-                    .font(.system(size: 11))
+                    .themeFont(size: 11)
                     .foregroundStyle(DefaultTheme.secondaryText)
                     .frame(width: 110, alignment: .leading)
                 StatusLabel(item?.state ?? record?.state ?? .starting)
@@ -3155,21 +3404,23 @@ struct SessionDetailView: View {
                 }
             }
         }
-        .padding(16)
+        .padding(DefaultTheme.space(16))
         .frame(width: 520, alignment: .leading)
         .background(DefaultTheme.surface)
         .preferredColorScheme(DefaultTheme.colorScheme)
+        .font(DefaultTheme.bodyFont)
+        .tint(DefaultTheme.controlTint)
     }
 
     private func infoRow(_ label: String, _ value: String,
                          @ViewBuilder trailing: () -> some View = { EmptyView() }) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: DefaultTheme.space(10)) {
             Text(label)
-                .font(.system(size: 11))
+                .themeFont(size: 11)
                 .foregroundStyle(DefaultTheme.secondaryText)
                 .frame(width: 110, alignment: .leading)
             Text(value)
-                .font(.system(size: 11, design: .monospaced))
+                .themeFont(size: 11, design: .monospaced)
                 .foregroundStyle(DefaultTheme.primaryText)
                 .textSelection(.enabled)
                 .lineLimit(2)
@@ -3185,10 +3436,10 @@ struct SessionDetailView: View {
     }()
 
     private var gitPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
             HStack {
                 Text("Changes")
-                    .font(.system(size: 12, weight: .semibold))
+                    .themeFont(size: 12, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Spacer()
                 GhostButton(systemImage: "arrow.clockwise") {
@@ -3199,7 +3450,7 @@ struct SessionDetailView: View {
             Divider().overlay(DefaultTheme.cardBorder)
             if let gitData {
                 if gitData.changes.isEmpty {
-                    Text("Clean worktree").font(.system(size: 12))
+                    Text("Clean worktree").themeFont(size: 12)
                         .foregroundStyle(DefaultTheme.secondaryText)
                 } else {
                     ForEach(gitData.changes, id: \.path) { change in
@@ -3208,7 +3459,7 @@ struct SessionDetailView: View {
                     }
                     ScrollView {
                         Text(gitData.diff)
-                            .font(.system(size: 11, design: .monospaced))
+                            .themeFont(size: 11, design: .monospaced)
                             .foregroundStyle(DefaultTheme.primaryText)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)
@@ -3216,12 +3467,12 @@ struct SessionDetailView: View {
                 }
             } else {
                 Text("No worktree for this session")
-                    .font(.system(size: 12))
+                    .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
             }
             Spacer()
         }
-        .padding(12)
+        .padding(DefaultTheme.space(12))
         .frame(maxWidth: 380)
         .frame(maxHeight: .infinity)
         .background(DefaultTheme.background)
@@ -3230,15 +3481,16 @@ struct SessionDetailView: View {
     /// v2 — Ship: commit, publish and open a PR without leaving the session.
     /// Every outcome is reported verbatim (stderr included) — no phantom success.
     private var shipSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 TextField("Commit message…", text: $shipMessage)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 7))
-                    .overlay(RoundedRectangle(cornerRadius: 7)
-                        .stroke(DefaultTheme.cardBorder, lineWidth: 1))
+                    .themeFont(size: 12)
+                    .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
+                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
+                        .stroke(DefaultTheme.fieldBorder, lineWidth: 1))
+                    .themeShadow(.xs, radius: 6)
                 AccentButton("Commit") {
                     let message = shipMessage.trimmingCharacters(in: .whitespaces)
                     guard !message.isEmpty else { shipOutput = "Write a commit message first."; return }
@@ -3252,7 +3504,7 @@ struct SessionDetailView: View {
                     }
                 }
             }
-            HStack(spacing: 6) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 GhostButton("Push", systemImage: "arrow.up.circle") {
                     shipBusy = true
                     Task {
@@ -3289,7 +3541,7 @@ struct SessionDetailView: View {
             }
             if let shipOutput {
                 Text(shipOutput)
-                    .font(.system(size: 10, design: .monospaced))
+                    .themeFont(size: 10, design: .monospaced)
                     .foregroundStyle(shipOutput.hasSuffix("✓") ? DefaultTheme.groupHeader
                                                                : DefaultTheme.secondaryText)
                     .textSelection(.enabled)
@@ -3309,6 +3561,59 @@ struct SessionDetailView: View {
     }
 }
 
+/// "Terminal | Chat" in a session's breadcrumb: the fleet filter's well
+/// (2 pt inset, 22 pt segments), an icon before each word.
+private struct SessionViewModeToggle: View {
+    let mode: SessionViewMode
+    let onSelect: (SessionViewMode) -> Void
+
+    var body: some View {
+        HStack(spacing: DefaultTheme.space(2)) {
+            Segment(title: "Terminal", systemImage: "terminal", isOn: mode == .terminal) {
+                onSelect(.terminal)
+            }
+            .help("The terminal claude runs in (⌘⇧M)")
+            Segment(title: "Chat", systemImage: "bubble.left", isOn: mode == .chat) {
+                onSelect(.chat)
+            }
+            .help("The conversation as messages, with a field to answer from (⌘⇧M)")
+        }
+        .padding(DefaultTheme.space(2))
+        .background(DefaultTheme.background, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).strokeBorder(DefaultTheme.line, lineWidth: 1))
+        .fixedSize()
+    }
+
+    private struct Segment: View {
+        let title: String
+        let systemImage: String
+        let isOn: Bool
+        let action: () -> Void
+        @State private var hovered = false
+
+        var body: some View {
+            Button(action: action) {
+                HStack(spacing: DefaultTheme.space(5)) {
+                    AppIcon(systemImage, size: 12)
+                    Text(title.uppercased())
+                        .themeFont(size: 11, weight: .medium, design: .monospaced, tracking: 0.55)
+                }
+                .foregroundStyle(isOn || hovered ? DefaultTheme.primaryText : DefaultTheme.mutedText)
+                .padding(.horizontal, DefaultTheme.space(8))
+                .frame(height: DefaultTheme.size(22))
+                .background(isOn ? DefaultTheme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(4)))
+                .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4))
+                    .strokeBorder(isOn ? DefaultTheme.line2 : .clear, lineWidth: 1))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovered = $0 }
+            .animation(.hover, value: hovered)
+            .animation(.hover, value: isOn)
+        }
+    }
+}
+
 /// Quick actions of a stack row, revealed on hover: small block on the
 /// right (terminal, browser, cross) — available on ALL tabs.
 struct StackQuickActionsModifier: ViewModifier {
@@ -3321,7 +3626,7 @@ struct StackQuickActionsModifier: ViewModifier {
         content
             .overlay(alignment: .topTrailing) {
                 if hovered {
-                    HStack(spacing: 2) {
+                    HStack(spacing: DefaultTheme.space(2)) {
                         if let onNewTerminal {
                             HoverIconButton(systemImage: "terminal",
                                             help: "New terminal in this worktree",
@@ -3335,10 +3640,10 @@ struct StackQuickActionsModifier: ViewModifier {
                         HoverIconButton(systemImage: "xmark", help: "Close",
                                         action: onClose)
                     }
-                    .padding(.horizontal, 5).padding(.vertical, 4)
+                    .padding(.horizontal, DefaultTheme.space(5)).padding(.vertical, DefaultTheme.space(4))
                     .background(DefaultTheme.surfaceRaised,
-                                in: RoundedRectangle(cornerRadius: 6))
-                    .padding(6)
+                                in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
+                    .padding(DefaultTheme.space(6))
                 }
             }
             .onHover { hovered = $0 }
@@ -3366,13 +3671,24 @@ struct HoverIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 10))
-                .foregroundStyle(hovered ? DefaultTheme.accent : DefaultTheme.secondaryText)
+            // A 16 pt box — the height of a line of text — so revealing it on
+            // hover never grows its row; the hover pill bleeds 3 pt around it,
+            // drawn without taking any room.
+            AppIcon(systemImage, size: 12)
+                .foregroundStyle(hovered ? DefaultTheme.primaryText : DefaultTheme.secondaryText)
+                .frame(width: 16, height: 16)
+                .background {
+                    RoundedRectangle(cornerRadius: DefaultTheme.radius(4))
+                        .fill(hovered ? DefaultTheme.surfaceRaised : .clear)
+                        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(4))
+                            .strokeBorder(hovered ? DefaultTheme.line : .clear, lineWidth: 1))
+                        .padding(-3)
+                }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
+        .animation(.hover, value: hovered)
         .help(help)
     }
 }
@@ -3402,6 +3718,13 @@ struct SidebarSessionCard: View, Equatable {
     let isSelected: Bool
     /// Its agent is driving its browser right now (ADR-0014).
     var agentBrowsing = false
+    /// One line: the title, nothing else — no badge, branch or state. What
+    /// is left out is a hover away, in the line's tooltip.
+    var compact = false
+    /// What the card's own chevron does: nil while the list's switch has
+    /// reduced every card.
+    var collapse: CollapseAction? = nil
+    var onToggleCollapse: () -> Void = {}
     let onSelect: () -> Void
     let onNewTerminal: () -> Void
     let onOpenBrowser: () -> Void
@@ -3415,22 +3738,42 @@ struct SidebarSessionCard: View, Equatable {
     /// on every session transition, and ~25 of these used to re-run each time.
     static func == (lhs: SidebarSessionCard, rhs: SidebarSessionCard) -> Bool {
         lhs.item == rhs.item && lhs.childCount == rhs.childCount && lhs.isSelected == rhs.isSelected
-            && lhs.agentBrowsing == rhs.agentBrowsing
+            && lhs.agentBrowsing == rhs.agentBrowsing && lhs.compact == rhs.compact
+            && lhs.collapse == rhs.collapse
+    }
+
+    enum CollapseAction: Equatable {
+        case collapse, expand
+    }
+
+    /// What the compact line leaves out, for its tooltip: "working · loom/fix-cache · 2 tabs".
+    private var compactSummary: String {
+        var parts = [DefaultTheme.label(for: item.state)]
+        if let branch = item.branch { parts.append(branch) }
+        if !item.badges.isEmpty { parts.append(item.badges.joined(separator: ", ")) }
+        if childCount > 0 { parts.append("\(childCount) tab\(childCount == 1 ? "" : "s")") }
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 Text(item.title)
-                    .font(.system(size: 12, weight: .medium))
+                    .themeFont(size: 12, weight: .medium)
                     .foregroundStyle(DefaultTheme.primaryText)
                     .lineLimit(1)
-                BadgeRow(model: model, badges: item.badges)
+                if !compact { BadgeRow(model: model, badges: item.badges) }
                 Spacer()
                 if hovered {
                     // Same cluster as the stack rows: identical spacing
                     // everywhere, whatever the tab type.
-                    HStack(spacing: 2) {
+                    HStack(spacing: DefaultTheme.space(2)) {
+                        if let collapse {
+                            HoverIconButton(systemImage: collapse == .collapse ? "chevron.up" : "chevron.down",
+                                            help: collapse == .collapse ? "Reduce this card to its title"
+                                                                        : "Show this card's branch, state and tabs",
+                                            action: onToggleCollapse)
+                        }
                         HoverIconButton(systemImage: "terminal",
                                         help: "New terminal in this worktree",
                                         action: onNewTerminal)
@@ -3441,39 +3784,48 @@ struct SidebarSessionCard: View, Equatable {
                                         help: "Close session",
                                         action: onClose)
                     }
+                    // No taller than the title: revealing it never moves the card.
+                    .frame(height: 14)
                 }
             }
-            if let branch = item.branch {
-                MonoTag(branch, systemImage: "arrow.triangle.branch",
-                        color: DefaultTheme.secondaryText)
-            }
-            HStack(spacing: 6) {
-                StatusLabel(item.state)
-                if agentBrowsing {
-                    Image(systemName: "globe")
-                        .font(.system(size: 9))
-                        .foregroundStyle(DefaultTheme.accent)
-                        .help("claude is using its browser")
+            if !compact {
+                if let branch = item.branch {
+                    MonoTag(branch, systemImage: "arrow.triangle.branch",
+                            color: DefaultTheme.secondaryText)
                 }
-                if childCount > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
-                        Text("\(childCount)").font(.system(size: 10))
+                HStack(spacing: DefaultTheme.space(6)) {
+                    StatusLabel(item.state)
+                    if agentBrowsing {
+                        Image(systemName: "globe")
+                            .font(.system(size: 9))
+                            .foregroundStyle(DefaultTheme.accentInk)
+                            .help("claude is using its browser")
                     }
-                    .foregroundStyle(DefaultTheme.secondaryText)
+                    if childCount > 0 {
+                        HStack(spacing: DefaultTheme.space(2)) {
+                            AppIcon("chevron.down", size: 8.5)
+                            Text("\(childCount)").themeFont(size: 10)
+                        }
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                    }
                 }
             }
         }
-        .padding(10)
+        .padding(.horizontal, DefaultTheme.space(10))
+        .padding(.vertical, DefaultTheme.space(compact ? 6 : 10))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(hovered ? DefaultTheme.surfaceRaised.opacity(0.5) : .clear)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
         .animation(.hover, value: hovered)
+        .help(compact ? compactSummary : "")
         .contextMenu {
             BadgeMenu(model: model, sessionID: item.id, current: item.badges)
             Button("Rename…", action: onRename)
+            if let collapse {
+                Button(collapse == .collapse ? "Reduce to Title" : "Show Details", action: onToggleCollapse)
+            }
             Button("New terminal", action: onNewTerminal)
             Button("Dedicated browser", action: onOpenBrowser)
             Button("Archive", action: onArchive)
@@ -3503,11 +3855,11 @@ struct GoalFieldView: View {
     /// The reference's central gesture: describing the goal HERE launches the
     /// session — the prompt goes straight into the agent's terminal.
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DefaultTheme.space(10)) {
             TextField("What are we building? Describe your goal — Enter starts a session…",
                       text: $draft.text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 14))
+                .themeFont(size: 14)
                 .foregroundStyle(DefaultTheme.primaryText)
                 .focused($goalFocused)
                 .onSubmit { submitGoal() }
@@ -3517,14 +3869,14 @@ struct GoalFieldView: View {
                 model.setWorktreeEnabled(!model.worktreeEnabled(for: project.id), for: project.id)
             } label: {
                 let enabled = model.worktreeEnabled(for: project.id)
-                HStack(spacing: 5) {
+                HStack(spacing: DefaultTheme.space(5)) {
                     Image(systemName: "arrow.triangle.branch")
                         .font(.system(size: 11, weight: .semibold))
                     Text("worktree")
-                        .font(.system(size: 11, weight: .medium))
+                        .themeFont(size: 11, weight: .medium)
                 }
                 .foregroundStyle(enabled ? DefaultTheme.accentText : DefaultTheme.secondaryText)
-                .padding(.horizontal, 8).padding(.vertical, 4)
+                .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(4))
                 .background(enabled ? DefaultTheme.accent : DefaultTheme.surfaceRaised,
                             in: Capsule())
             }
@@ -3539,10 +3891,10 @@ struct GoalFieldView: View {
                 }
             } label: {
                 Text("×\(draft.fanOut)")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(draft.fanOut > 1 ? DefaultTheme.accent : DefaultTheme.secondaryText)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                    .themeFont(size: 12, weight: .semibold, design: .monospaced)
+                    .foregroundStyle(draft.fanOut > 1 ? DefaultTheme.accentInk : DefaultTheme.secondaryText)
+                    .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(4))
+                    .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -3551,7 +3903,7 @@ struct GoalFieldView: View {
             // Launch = Enter, with the project's default placement. The menu
             // beside it launches THIS goal the other way, once, without
             // flipping the project's default.
-            HStack(spacing: 2) {
+            HStack(spacing: DefaultTheme.space(2)) {
                 AccentButton("Launch") { submitGoal() }
                 Menu {
                     Button {
@@ -3569,8 +3921,8 @@ struct GoalFieldView: View {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(DefaultTheme.accentText)
-                        .frame(width: 22, height: 30)
-                        .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: 7))
+                        .frame(width: DefaultTheme.size(22), height: DefaultTheme.size(30))
+                        .background(DefaultTheme.accent, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -3578,11 +3930,12 @@ struct GoalFieldView: View {
                 .help("Launch this goal in the folder or on a worktree, whatever the default")
             }
         }
-        .padding(.horizontal, 18).padding(.vertical, 17)
-        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12)
+        .padding(.horizontal, DefaultTheme.space(18)).padding(.vertical, DefaultTheme.space(17))
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
             .stroke(goalFocused ? DefaultTheme.accent.opacity(0.6) : DefaultTheme.cardBorder,
                     lineWidth: 1))
+        .themeShadow(.sm, radius: 10)
         .animation(.hover, value: goalFocused)
     }
 

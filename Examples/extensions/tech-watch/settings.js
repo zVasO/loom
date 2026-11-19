@@ -16,6 +16,7 @@
     language: "fr",
     model: "sonnet",
     maxItems: 40,
+    sessionPrompt: "",
     keywords: [],
     muted: [],
     hn: { enabled: true, minPoints: 100, query: "" },
@@ -27,6 +28,8 @@
 
   const MODELS = ["haiku", "sonnet", "opus"];
   const LANGUAGES = ["fr", "en"];
+  /** A session prompt is a few lines: past this, it is cut. */
+  const SESSION_PROMPT_MAX = 4000;
 
   /**
    * @param {unknown} value @param {number} min @param {number} max @param {number} fallback
@@ -50,6 +53,19 @@
       if (out.length >= max) break;
     }
     return out;
+  }
+
+  /**
+   * The reader's own session prompt, as typed: its line breaks kept, control
+   * characters out, cut at SESSION_PROMPT_MAX. Empty means "the default one".
+   * @param {unknown} value
+   */
+  function promptTemplate(value) {
+    if (typeof value !== "string") return "";
+    const text = value.replace(/\r\n?/g, "\n")
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+    return text.trim() ? text.slice(0, SESSION_PROMPT_MAX).trimEnd() : "";
   }
 
   /** @param {string} text */
@@ -77,6 +93,7 @@
       language: LANGUAGES.includes(source.language) ? source.language : DEFAULT_SETTINGS.language,
       model: MODELS.includes(source.model) ? source.model : DEFAULT_SETTINGS.model,
       maxItems: clampInt(source.maxItems, 5, 60, DEFAULT_SETTINGS.maxItems),
+      sessionPrompt: promptTemplate(source.sessionPrompt),
       keywords: stringList(source.keywords, word, 30),
       muted: stringList(source.muted, word, 30),
       hn: {
@@ -98,5 +115,5 @@
     };
   }
 
-  TechWatch.settings = Object.freeze({ DEFAULT_SETTINGS, MODELS, LANGUAGES, sanitizeSettings });
+  TechWatch.settings = Object.freeze({ DEFAULT_SETTINGS, MODELS, LANGUAGES, SESSION_PROMPT_MAX, sanitizeSettings });
 })();

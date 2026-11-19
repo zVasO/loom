@@ -18,12 +18,16 @@ extension AppModel {
         }
         guard !missing.isEmpty else { return }
         repoNameLookups.formUnion(missing.map(\.id))
-        Task {
+        let earlier = repoNameLookupTask
+        repoNameLookupTask = Task {
             for project in missing {
                 let remote = await GitService().remoteURL(in: URL(fileURLWithPath: project.path))
                 projectRepoNames[project.id] = remote.flatMap(GitHubRepoName.parse(remoteURL:)) ?? ""
                 repoNameLookups.remove(project.id)
             }
+            // Over only once the batches before it are: whoever waits on
+            // the latest one then waits on every lookup asked so far.
+            _ = await earlier?.value
         }
     }
 
@@ -37,6 +41,24 @@ extension AppModel {
     /// case-insensitive; a remote may spell the owner differently.
     public func project(forRepo nameWithOwner: String) -> ProjectRecord? {
         projects.first { repoName(for: $0.id)?.caseInsensitiveCompare(nameWithOwner) == .orderedSame }
+    }
+
+    /// `project(forRepo:)`, once every project's remote has been read. Just
+    /// after launch the remotes are still being looked up, one git process
+    /// each: answering "no project" then offered to clone a repository that
+    /// is one. nil only when no project clones it.
+    func resolvedProject(forRepo nameWithOwner: String) async -> ProjectRecord? {
+        if let project = project(forRepo: nameWithOwner) { return project }
+        resolveProjectRepoNames()
+        var waited: Task<Void, Never>?
+        // A batch started meanwhile (a project just added) is waited on too;
+        // the same one never twice.
+        while !repoNameLookups.isEmpty, let lookups = repoNameLookupTask, lookups != waited {
+            await lookups.value
+            waited = lookups
+            if let project = project(forRepo: nameWithOwner) { return project }
+        }
+        return project(forRepo: nameWithOwner)
     }
 
     // MARK: Catalog — the organizations and their repositories
@@ -139,44 +161,55 @@ extension AppModel {
         }
     }
 
-    /// The clone the view confirmed: clone, then open the PR it was for.
+    /// The clone the view confirmed: clone, then open the PR it was for —
+    /// or start its review, when that is what was asked for.
     /// Takes the value: the dialog's dismissal clears `pendingClone` before
     /// any task started from its button runs.
     public func confirmClone(_ pending: PendingClone?) async {
         guard let pending else { return }
         if pendingClone == pending { pendingClone = nil }
         guard let projectID = await addRepositoryAsProject(pending.repo) else { return }
-        if let number = pending.number {
-            await openPR(number, in: projectID, repo: pending.repo)
+        guard let number = pending.number else { return }
+        if pending.startsReview {
+            // The intent carried through the dialog: the clone is a project
+            // now, and the review goes on as if it always had been.
+            startPRReview(number: number, in: projectID, repo: pending.repo,
+                          asked: PRReference(repo: pending.repo, number: number))
+        } else {
+            await openPR(number, in: projectID, repo: pending.repo, pin: pending.pin)
         }
     }
 
     // MARK: Opening a PR from outside a list — inbox, search, pasted URL
 
     /// Opens a PR of a repository named `owner/name`: in its project when one
-    /// clones it, else after asking to clone it first.
-    public func openPR(repo nameWithOwner: String, number: Int) async {
+    /// clones it, else after asking to clone it first. `pin`: a kept tab,
+    /// shown in Review — what the Browse table asks for.
+    public func openPR(repo nameWithOwner: String, number: Int, pin: Bool = false) async {
         if let project = project(forRepo: nameWithOwner) {
-            await openPR(number, in: project.id, repo: nameWithOwner)
+            await openPR(number, in: project.id, repo: nameWithOwner, pin: pin)
         } else {
-            pendingClone = PendingClone(repo: nameWithOwner, number: number)
+            pendingClone = PendingClone(repo: nameWithOwner, number: number, pin: pin)
         }
     }
 
     /// A pasted URL or shorthand. A bare number means the selected project.
-    public func openPR(reference: PRReference) async {
+    public func openPR(reference: PRReference, pin: Bool = false) async {
         if let repo = reference.repo {
-            await openPR(repo: repo, number: reference.number)
+            await openPR(repo: repo, number: reference.number, pin: pin)
         } else if let projectID = selectedProject ?? projects.first?.id {
-            await openPR(reference.number, in: projectID, repo: repoName(for: projectID))
+            await openPR(reference.number, in: projectID, repo: repoName(for: projectID), pin: pin)
         } else {
             startupError = "Add a project first — a bare PR number needs a repository."
         }
     }
 
     /// Fetches the full row (the search knows neither branch nor checks) and
-    /// hands it to the tab through the same channel a project row uses.
-    private func openPR(_ number: Int, in projectID: ProjectID, repo nameWithOwner: String?) async {
+    /// hands it to the tab through the same channel a project row uses — or,
+    /// pinned, straight to a kept tab: several opened at once from the table
+    /// must not overwrite each other in the one-slot channel.
+    private func openPR(_ number: Int, in projectID: ProjectID, repo nameWithOwner: String?,
+                        pin: Bool = false) async {
         do {
             let pr: GitHubService.PullRequest?
             if let nameWithOwner {
@@ -191,7 +224,16 @@ extension AppModel {
                 startupError = "Pull request #\(number) was not found."
                 return
             }
-            pendingPR = PendingPR(projectID: projectID, pr: pr)
+            // The tab opening on this row finds it checked a moment ago: it
+            // used to ask `gh` for the very same row at once.
+            notePRRowFetched(number, in: projectID)
+            if pin {
+                openPRTab(pr, in: projectID)
+                prMode = .review
+                Task { await ensurePRs(for: projectID) }
+            } else {
+                pendingPR = PendingPR(projectID: projectID, pr: pr)
+            }
         } catch {
             startupError = "Could not load PR #\(number): \(Self.ghErrorText(error))"
         }
@@ -251,12 +293,15 @@ extension AppModel {
 
     /// A click in a list: previewed (the next click reuses the tab).
     public func showPR(_ pr: GitHubService.PullRequest, in projectID: ProjectID) {
+        // Before the tab takes the row: what was loaded for another one goes.
+        dropPRContentIfMoved(to: pr, in: projectID)
         prTabs.show(pr, in: projectID)
         savePRTabs()
     }
 
     /// Shown and pinned: a review starts, a row is double-clicked.
     public func openPRTab(_ pr: GitHubService.PullRequest, in projectID: ProjectID) {
+        dropPRContentIfMoved(to: pr, in: projectID)
         prTabs.open(pr, in: projectID)
         savePRTabs()
     }
@@ -268,9 +313,9 @@ extension AppModel {
 
     public func closePRTab(_ id: String) {
         prTabs.close(id)
-        // The last tab gone, the folded list is the only thing left to
-        // click — and the toggle that unfolds it lives on the toolbar.
-        if prTabs.isEmpty { prSidebarHidden = false }
+        // The last tab gone, Review has nothing left to show: back to the
+        // table the next PR will be picked from.
+        if prTabs.isEmpty { prMode = .browse }
         savePRTabs()
     }
 
@@ -325,6 +370,10 @@ extension AppModel {
 
     // MARK: Review drafts — comments that wait for the verdict
 
+    /// The comments drafted on the PR and not sent yet; nil when none was
+    /// ever drafted, and once they are sent or discarded. Unobserved (see
+    /// `reviewDrafts`): safe to read in a view's init, and to be read again
+    /// by whoever changes it.
     public func reviewDraft(for number: Int, in projectID: ProjectID) -> ReviewDraft? {
         reviewDrafts[prKey(number, projectID)]
     }

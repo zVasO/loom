@@ -67,6 +67,24 @@ public struct NodeRecord: Codable, Equatable, Sendable {
     }
 }
 
+/// Where an agent step's conversation lives once it ran (ADR-0021): the
+/// Loom session of a visible step, claude's own conversation of a headless
+/// one. Kept across passes — a step's record starts afresh at each pass,
+/// its conversation does not — so a step that `continues` picks it up.
+public struct StepConversation: Codable, Equatable, Sendable {
+    /// A visible step's Loom session.
+    public var sessionID: String?
+    /// A headless step's claude conversation, as `claude -p --resume` takes it.
+    public var claudeSessionID: String?
+
+    public init(sessionID: String? = nil, claudeSessionID: String? = nil) {
+        self.sessionID = sessionID
+        self.claudeSessionID = claudeSessionID
+    }
+
+    public var isEmpty: Bool { sessionID == nil && claudeSessionID == nil }
+}
+
 /// Where a run stands: every step's record, the passes each loop made, the
 /// answers of the passes before, the branches conditions took.
 public struct RunState: Codable, Equatable, Sendable {
@@ -77,13 +95,27 @@ public struct RunState: Codable, Equatable, Sendable {
     public var history: [String: [JSONValue]]
     /// Condition id → the branch it took.
     public var branches: [String: Branch]
+    /// Step id → the conversation it last ran in (ADR-0021).
+    public var conversations: [String: StepConversation]
 
     public init(nodes: [String: NodeRecord] = [:], iterations: [String: Int] = [:],
-                history: [String: [JSONValue]] = [:], branches: [String: Branch] = [:]) {
+                history: [String: [JSONValue]] = [:], branches: [String: Branch] = [:],
+                conversations: [String: StepConversation] = [:]) {
         self.nodes = nodes
         self.iterations = iterations
         self.history = history
         self.branches = branches
+        self.conversations = conversations
+    }
+
+    /// Runs saved before conversations were kept have no such key.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(nodes: try c.decodeIfPresent([String: NodeRecord].self, forKey: .nodes) ?? [:],
+                  iterations: try c.decodeIfPresent([String: Int].self, forKey: .iterations) ?? [:],
+                  history: try c.decodeIfPresent([String: [JSONValue]].self, forKey: .history) ?? [:],
+                  branches: try c.decodeIfPresent([String: Branch].self, forKey: .branches) ?? [:],
+                  conversations: try c.decodeIfPresent([String: StepConversation].self, forKey: .conversations) ?? [:])
     }
 
     public func status(_ id: String) -> NodeStatus { nodes[id]?.status ?? .pending }
@@ -124,6 +156,38 @@ public struct WorkflowPlanner: Sendable {
 
     public func initialState() -> RunState {
         RunState(nodes: Dictionary(uniqueKeysWithValues: workflow.nodes.map { ($0.id, NodeRecord()) }))
+    }
+
+    /// The step an agent step carries on from, as written on it — its own
+    /// id when it only keeps its own conversation from pass to pass.
+    public func continued(by id: String) -> String? {
+        switch workflow.node(id)?.kind {
+        case .agent(let config)?: config.continues
+        default: nil
+        }
+    }
+
+    /// The conversation a step picks up when it starts (ADR-0021): its own
+    /// from an earlier pass, else that of the step it continues — followed
+    /// up the chain, a step that continued another having run in the same
+    /// one. nil: it starts a new one (it continues nothing, or nothing it
+    /// continues ran yet).
+    public func conversation(for id: String, in state: RunState) -> StepConversation? {
+        guard continued(by: id) != nil else { return nil }
+        var seen: Set<String> = []
+        var current: String? = id
+        while let step = current, seen.insert(step).inserted {
+            if let found = state.conversations[step], !found.isEmpty { return found }
+            current = continued(by: step)
+        }
+        return nil
+    }
+
+    /// The step finished in this conversation: the steps that continue it,
+    /// and its own next pass, find it here.
+    public func remember(_ conversation: StepConversation, of id: String, in state: inout RunState) {
+        guard !conversation.isEmpty else { return }
+        state.conversations[id] = conversation
     }
 
     /// The pass a step is in: 1, then 2 after its loop ran it again…
