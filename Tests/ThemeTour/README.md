@@ -48,6 +48,13 @@ swift run --skip-build LoomApp
   un clone de ce dépôt.
 - `LOOM_TOUR_PERMISSION=1` : la session du worktree finit sur une demande de permission
   dessinée comme celle de claude ; les écrans `chat` montrent alors la carte qui y répond.
+- `scroll` : aucun écran, mais la sonde de défilement. La liste principale de chaque écran long
+  (réglages, chat, diff de l'onglet Git) est balayée image par image ; `tour.json` note sous
+  `scroll` ce que le fil principal met à produire une image après chaque pas (`workMedian`,
+  `workP95`, `workMax`, et `workOver16` : les images qui dépassent les 16,7 ms d'un écran à
+  60 Hz). Un ordre de grandeur, sur une machine virtuelle et un build de débogage ; il sert à
+  comparer deux versions, pas à promettre un chiffre. `LOOM_TOUR_LONG=1` donne au faux claude
+  un long diff et une longue conversation.
 - `bin/claude` remplace claude là où il n'y en a pas (un runner) : il peint l'écran d'une
   session, et modifie un fichier quand la session a son propre worktree — le panneau Git a un
   diff à montrer. Il écrit aussi une conversation inventée (deux échanges, du Markdown avec

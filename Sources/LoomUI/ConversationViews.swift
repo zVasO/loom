@@ -76,6 +76,11 @@ public struct ConversationList: View {
     @State private var atBottom = true
     /// How many of the last rows are laid out.
     @State private var shown = ConversationList.page
+    /// The one row whose text can be selected: the one the pointer rests
+    /// on. Selectable text is a platform view per paragraph, and a list
+    /// where every row had it cost a third of each scrolled frame.
+    @State private var armed: String?
+    @State private var arming: Task<Void, Never>?
 
     /// The scroll view's own space: where the end of the conversation is measured.
     private static let scroll = "loom.conversation.scroll"
@@ -140,7 +145,7 @@ public struct ConversationList: View {
                     // ones come a page at a time, on request.
                     VStack(alignment: .leading, spacing: 0) {
                         if hiddenCount > 0 {
-                            EarlierMessagesButton(count: hiddenCount) { shown += Self.page }
+                            EarlierMessagesButton(count: hiddenCount) { shown += Self.page * 2 }
                                 .padding(.bottom, DefaultTheme.space(14))
                         }
                         rows(lastUser: lastUser, bubble: bubble)
@@ -189,9 +194,25 @@ public struct ConversationList: View {
         }
     }
 
-    /// How many of the last rows are laid out, and how many more a click
-    /// on "earlier messages" brings.
-    private static let page = 80
+    /// How many of the last rows are laid out; a click on "earlier
+    /// messages" brings twice as many more. Every row laid out is paid for
+    /// at each scrolled frame, read or not: measured on the tour's Mac,
+    /// 80 rows of Markdown took 15 ms of a frame's 16, 30 take 2.
+    private static let page = 30
+
+    /// The pointer came onto a row, or left it. A row is armed for
+    /// selection once the pointer has rested on it a moment — never while
+    /// rows only pass under it, as they do while the list scrolls — and
+    /// stays so until another one is: a selection outlives the pointer.
+    private func hover(_ inside: Bool, on id: String) {
+        arming?.cancel()
+        guard inside, armed != id else { return }
+        arming = Task {
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled else { return }
+            armed = id
+        }
+    }
     private var hiddenCount: Int { max(0, entries.count - shown) }
 
     /// The rows, in either stack.
@@ -202,10 +223,12 @@ public struct ConversationList: View {
                                  isOpen: opened.contains(entry.id),
                                  isRunning: isWorking && index > lastUser,
                                  bubbleWidth: bubble,
+                                 isSelectable: armed == entry.id,
                                  onToggle: { toggle(entry.id) })
                 // A value: when claude's file grows, only the
                 // rows that changed are drawn again.
                 .equatable()
+                .onHover { hover($0, on: entry.id) }
                 .padding(.top, gap(before: index))
         }
         ForEach(pending) { sent in
@@ -265,20 +288,31 @@ private struct ConversationEntryRow: View, Equatable {
     let isOpen: Bool
     let isRunning: Bool
     let bubbleWidth: CGFloat
+    /// Its text can be selected: the row the pointer rests on.
+    var isSelectable = false
     /// Outside the comparison: it only reaches the list's own state.
     let onToggle: () -> Void
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.entry == rhs.entry && lhs.isOpen == rhs.isOpen && lhs.isRunning == rhs.isRunning
-            && lhs.bubbleWidth == rhs.bubbleWidth
+            && lhs.bubbleWidth == rhs.bubbleWidth && lhs.isSelectable == rhs.isSelectable
     }
 
     var body: some View {
+        // Through the environment: every text of the row follows.
+        if isSelectable {
+            content.textSelection(.enabled)
+        } else {
+            content
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch entry.kind {
         case .assistant(let text):
             MarkdownBlockView(text, size: 13)
                 .scrollingCode()
-                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .user(let text):
             UserBubble(text: text, images: entry.images, key: entry.id, maxWidth: bubbleWidth)
@@ -314,7 +348,6 @@ private struct UserBubble: View {
                 Text(text)
                     .themeFont(size: 13)
                     .foregroundStyle(DefaultTheme.primaryText)
-                    .textSelection(.enabled)
                     .padding(.horizontal, DefaultTheme.space(12))
                     .padding(.vertical, DefaultTheme.space(10))
                     .background(DefaultTheme.surfaceRaised,
@@ -432,7 +465,6 @@ private struct ToolTextBlock: View {
             (isShell && !isError ? Text(ShellHighlighter.attributed(text)) : Text(text))
                 .themeFont(size: 11.5, design: .monospaced)
                 .foregroundStyle(isError ? DefaultTheme.danger : DefaultTheme.primaryText.opacity(0.85))
-                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(DefaultTheme.space(10))
         }
@@ -463,7 +495,6 @@ private struct ThoughtRow: View {
                 Text(text)
                     .themeFont(size: 12)
                     .foregroundStyle(DefaultTheme.secondaryText)
-                    .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, DefaultTheme.space(23))
                     .padding(.bottom, DefaultTheme.space(4))

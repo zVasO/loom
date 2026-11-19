@@ -368,6 +368,30 @@ What to measure first on a Mac, in this order:
 6. **Browse**: a filter keystroke and a sort click over 300 rows, and over
    the catalog of a large organisation.
 
+## Scrolling, measured (2026-11-19)
+
+The tour's `scroll` stop sweeps each long screen a frame at a time and
+clocks what the main thread spends producing the frame (layout, SwiftUI's
+update, drawing, the commit). On the CI Mac — a virtual machine, a debug
+build: figures to compare, not to promise — per frame, median / 95th
+percentile, and frames over the 16.7 ms of a 60 Hz display, out of 300:
+
+| Screen | Median | p95 | Over 16.7 ms |
+| --- | --- | --- | --- |
+| Settings | 2.2 ms | 7.0 ms | 6 |
+| Git tab, the review's diff view | 8.6 ms | 22.8 ms | 49 |
+| Chat, 80 rows, every text selectable (before) | 15.1 ms | 28.8 ms | 129 |
+| Chat, 80 rows, no selectable text | 9.5 ms | 22.5 ms | 83 |
+| Chat, 30 rows, every text selectable | 6.0 ms | 25.8 ms | 61 |
+| Chat, 30 rows, no selectable text (kept) | 2.0 ms | 9.2 ms | 1 |
+
+A scrolled frame is paid for by every row laid out, on screen or not, and
+selectable text — a platform view per paragraph — is a third of it. The
+chat therefore lays out its last 30 messages (earlier ones on request),
+and only the row the pointer rests on has selectable text. Theme shadows
+(a blur and a mask per card) are drawn once into a texture instead of at
+every frame; that cost is the render server's and is not in these figures.
+
 ## Left open
 
 - Browse still re-runs on every session transition: `browseRows(in:)` reads
