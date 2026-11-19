@@ -288,6 +288,33 @@ public enum ClaudeConversation {
         return result
     }
 
+    /// The ids of what the user said.
+    public static func userEntryIDs(_ entries: [ConversationEntry]) -> Set<String> {
+        Set(entries.compactMap { entry -> String? in
+            if case .user = entry.kind { return entry.id }
+            return nil
+        })
+    }
+
+    /// Which messages, sent and shown before claude wrote them, are still
+    /// unwritten. `known[i]`: the user's entries that existed when message
+    /// `i` was sent. Each user entry arrived since accounts for one sent
+    /// message, the oldest first — whatever its text: claude does not
+    /// always write a message as it was typed (an image's mark, a path, a
+    /// correction made on the way), and a message matched by its text
+    /// stayed on screen beside the one claude wrote.
+    public static func unwritten(known: [Set<String>], entries: [ConversationEntry]) -> [Bool] {
+        let said = entries.filter { if case .user = $0.kind { return true } else { return false } }.map(\.id)
+        var claimed: Set<String> = []
+        return known.map { before in
+            guard let arrival = said.first(where: { !before.contains($0) && !claimed.contains($0) }) else {
+                return true
+            }
+            claimed.insert(arrival)
+            return false
+        }
+    }
+
     /// An image block's bytes: `{"type":"image","source":{"type":"base64",
     /// "media_type":"image/png","data":"…"}}`.
     static func imageData(_ block: [String: Any]) -> Data? {

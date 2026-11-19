@@ -314,4 +314,19 @@ struct ClaudeConversationReaderTests {
         let merged = ClaudeConversation.mergingEchoes([first, second, later])
         #expect(merged.map(\.id) == ["b", "c"])
     }
+
+    @Test("a sent message is written once a new message of the user's is in the file, whatever its text")
+    func unwritten() {
+        let old = ConversationEntry(id: "u1", kind: .user("Before"))
+        let answer = ConversationEntry(id: "a1", kind: .assistant("Yes."))
+        let known = ClaudeConversation.userEntryIDs([old, answer])
+        #expect(known == ["u1"])
+        // Nothing new: still pending. An answer alone is not the message.
+        #expect(ClaudeConversation.unwritten(known: [known], entries: [old, answer]) == [true])
+        // Written with another wording: no longer pending.
+        let written = ConversationEntry(id: "u2", kind: .user("L'upload a été supprimé entre-temps, non ?"))
+        #expect(ClaudeConversation.unwritten(known: [known], entries: [old, answer, written]) == [false])
+        // Two sent, one arrived: the oldest is the one written.
+        #expect(ClaudeConversation.unwritten(known: [known, known], entries: [old, answer, written]) == [false, true])
+    }
 }
