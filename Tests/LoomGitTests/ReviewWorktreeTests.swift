@@ -180,3 +180,23 @@ private func git(_ arguments: [String], in dir: URL) async throws -> String {
     let data = out.fileHandleForReading.readDataToEndOfFile()
     return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
 }
+
+@Suite("GitService — history and diff sections")
+struct GitHistoryParsingTests {
+    @Test("a log line becomes a commit; a broken one is skipped")
+    func log() {
+        let output = "abc123\u{1F}abc\u{1F}Fix: a | b\u{1F}Ada\u{1F}1700000000\nbroken line"
+        let commits = GitService.parseLog(output)
+        #expect(commits.count == 1)
+        #expect(commits.first?.subject == "Fix: a | b" && commits.first?.shortHash == "abc")
+        #expect(commits.first?.date == Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
+    @Test("a diff is cut per file")
+    func sections() {
+        let diff = "diff --git a/A.swift b/A.swift\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/dir/B.md b/dir/B.md\n+new"
+        let found = GitService.sections(ofDiff: diff)
+        #expect(found.map(\.path) == ["A.swift", "dir/B.md"])
+        #expect(found[0].text.hasSuffix("+b") && found[1].text.hasSuffix("+new"))
+    }
+}

@@ -244,7 +244,8 @@ final class ThemeTour {
         let store = ThemeStore.shared
         current = stop
         let name: String
-        if let builtIn = ThemeFamily.builtins.first(where: { $0.name.lowercased() == stop.theme.lowercased() }) {
+        if let builtIn = (ThemeFamily.builtins + ThemeFamily.gallery)
+            .first(where: { $0.name.lowercased() == stop.theme.lowercased() }) {
             name = builtIn.name
         } else {
             guard let directory = environment["LOOM_TOUR_THEMES"] else {

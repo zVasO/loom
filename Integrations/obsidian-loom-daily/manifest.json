@@ -1,0 +1,9 @@
+{
+  "id": "loom-daily",
+  "name": "Loom Daily",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Every 30 minutes, a few lines in your daily note on what your Claude Code sessions (Loom's included) have been doing.",
+  "author": "Loom",
+  "isDesktopOnly": true
+}

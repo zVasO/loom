@@ -107,7 +107,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-26]
+        # 24.04, not latest: Playwright 1.56 installs no Chromium on 26.04.
+        os: [ubuntu-24.04, macos-26]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -143,6 +144,9 @@ jobs:
           if [ -n "$failed" ]; then echo "::error::failed:$failed"; exit 1; fi
       - name: Extension SDK and examples
         working-directory: Examples/extensions
+        run: npm test
+      - name: Obsidian plugin (Loom Daily)
+        working-directory: Integrations/obsidian-loom-daily
         run: npm test
       # The workflow editor (ADR-0017): its bundle is versioned — it must match
       # its sources — and it runs on a real Chromium, offline.

@@ -312,7 +312,11 @@ extension AppModel {
     }
 
     public func closePRTab(_ id: String) {
+        // The tab and its review session go together: closing one closes
+        // the other. The session stays resumable, in RECENT.
+        let review = prTabs.tab(id).flatMap { liveReviewSession(forPR: $0.pr.number, in: $0.projectID) }
         prTabs.close(id)
+        if let review { Task { await stopSession(review) } }
         // The last tab gone, Review has nothing left to show: back to the
         // table the next PR will be picked from.
         if prTabs.isEmpty { prMode = .browse }
@@ -320,7 +324,10 @@ extension AppModel {
     }
 
     public func closeOtherPRTabs(_ id: String) {
+        let reviews = prTabs.tabs.filter { $0.id != id }
+            .compactMap { liveReviewSession(forPR: $0.pr.number, in: $0.projectID) }
         prTabs.closeOthers(id)
+        for review in reviews { Task { await stopSession(review) } }
         savePRTabs()
     }
 

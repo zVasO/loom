@@ -1,0 +1,9 @@
+{
+  "name": "obsidian-loom-daily",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Obsidian plugin: a few lines in the daily note on what the Claude Code sessions did.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

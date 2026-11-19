@@ -2039,6 +2039,22 @@ public final class AppModel {
         surface.send("\r")
     }
 
+    /// Escape was sent to a working session. claude fires no hook for an
+    /// interrupted turn, and the screen's silence takes the state engine
+    /// several seconds to believe: once the prompt is back and the output
+    /// settled, the turn is over — said as a Stop would say it.
+    func noteInterrupted(_ id: SessionID) async {
+        guard let runtime = await manager?.runtime(for: id) else { return }
+        for _ in 0..<16 {
+            guard sessions.first(where: { $0.id == id })?.state == .working else { return }
+            if AgentReadiness.isReady(await runtime.readiness()) {
+                await manager?.apply(.hook(.stop(awaitsReply: false)), to: id)
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
     /// Types text into a session's input WITHOUT submitting — the same path as
     /// ⌘V: bracketed when the program asked for it, so claude treats the
     /// newlines as one pasted block instead of submitting on each one.
@@ -2848,6 +2864,7 @@ public final class AppModel {
 
     /// SES-07: archives and moves to history.
     public func archiveSession(_ id: SessionID) async {
+        closeReviewTab(of: id)
         await manager?.archive(id)
         sessions.removeAll { $0.id == id }
         forgetSidePanel(id)
@@ -3202,7 +3219,25 @@ public final class AppModel {
     /// ladder still runs — the exit observer finishes their bookkeeping.
     private var pendingCloseProjects: [SessionID: ProjectID?] = [:]
 
+    /// The open PR tab a session is the review of, if any: the mapping's
+    /// keys are the tabs' ids.
+    func reviewTabID(of id: SessionID) -> String? {
+        let raw = id.rawValue.uuidString
+        guard let key = prSessionMap.first(where: { $0.value == raw })?.key, prTabs.contains(key) else { return nil }
+        return key
+    }
+
+    /// A review closed from its session takes its PR tab with it. The tab
+    /// goes first, so that closing it finds no session left to stop.
+    private func closeReviewTab(of id: SessionID) {
+        guard let tab = reviewTabID(of: id) else { return }
+        prTabs.close(tab)
+        if prTabs.isEmpty { prMode = .browse }
+        savePRTabs()
+    }
+
     public func stopSession(_ id: SessionID) async {
+        closeReviewTab(of: id)
         // OPTIMISTIC close: the tab disappears NOW — claude's exit takes
         // seconds (stop hooks, plugin teardown) and the ladder guarantees
         // death (double Ctrl+C, then SIGTERM/SIGKILL). The card returns as
@@ -3222,9 +3257,7 @@ public final class AppModel {
 
     // MARK: - Ship (v2): commit / push / PR from a session worktree
 
-    private func worktreeURL(for id: SessionID) -> URL? {
-        ((try? store?.session(id: id)) ?? nil)?.worktreePath.map(URL.init(fileURLWithPath:))
-    }
+    private func worktreeURL(for id: SessionID) -> URL? { gitDirectory(for: id) }
 
     /// Each action returns nil on success, or the error text to display —
     /// the panel reports the truth, never a phantom success.
@@ -3271,11 +3304,31 @@ public final class AppModel {
         return String(describing: error)
     }
 
+    /// Where a session's git lives: its own worktree, else its project's
+    /// folder — a session launched in the project has no worktree of its
+    /// own, and its Git panel showed nothing.
+    func gitDirectory(for id: SessionID) -> URL? {
+        let record = (try? store?.session(id: id)) ?? nil
+        if let path = record?.worktreePath { return URL(fileURLWithPath: path) }
+        let projectID = record?.projectID ?? sessions.first { $0.id == id }?.projectID
+        return projectRepo(projectID)
+    }
+
+    /// The latest commits of the session's branch.
+    public func gitHistory(for id: SessionID, limit: Int = 150) async -> [GitService.Commit] {
+        guard let directory = gitDirectory(for: id) else { return [] }
+        return (try? await GitService().log(in: directory, limit: limit)) ?? []
+    }
+
+    /// A commit's message, files and patch.
+    public func gitCommit(_ hash: String, for id: SessionID) async -> String {
+        guard let directory = gitDirectory(for: id) else { return "" }
+        return (try? await GitService().show(hash, in: directory)) ?? ""
+    }
+
     /// GIT-03: status + diff of the session's worktree, read-only.
     public func gitPanel(for id: SessionID) async -> GitPanelData? {
-        let record = (try? store?.session(id: id)) ?? nil
-        guard let path = record?.worktreePath else { return nil }
-        let worktree = URL(fileURLWithPath: path)
+        guard let worktree = gitDirectory(for: id) else { return nil }
         let git = GitService()
         let changes = (try? await git.status(in: worktree)) ?? []
         let diff = (try? await git.diff(in: worktree, changes: changes)) ?? ""
