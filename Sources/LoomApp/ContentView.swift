@@ -2126,8 +2126,13 @@ struct SessionsView: View {
                 }
                 // The fleet under whatever the stack shows: another session's
                 // terminal, the journal, Mission Control's table (⌘J folds it).
-                FleetPanel(model: model, currentSessionID: currentSessionID,
-                           onOpen: { selected = .session($0) })
+                // Not under the Git tab: a diff is read on the whole height.
+                if case .git = selected {
+                    EmptyView()
+                } else {
+                    FleetPanel(model: model, currentSessionID: currentSessionID,
+                               onOpen: { selected = .session($0) })
+                }
             }
         }
         .alert("Close this tab?",
