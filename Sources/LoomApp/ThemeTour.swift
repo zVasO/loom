@@ -97,17 +97,18 @@ final class ThemeTour {
         .appearance, .themes, .documents, .projects,
     ]
     private static let screens: [String] = ["projects", "project-git", "project-files", "sessions", "chat",
-                                            "chat-narrow", "git-panel", "side-panel", "context", "overview",
+                                            "chat-narrow", "git-panel", "git-history", "side-panel", "context", "overview",
                                             "prs", "workflows", "extensions"]
         + settingsStops.map { "settings-" + $0.rawValue }
         + ["theme-import", "palette", "palette-review", "new-session", "usage"]
-    private static let coreScreens: Set<String> = ["projects", "sessions", "chat", "chat-narrow", "git-panel", "overview",
+    private static let coreScreens: Set<String> = ["projects", "sessions", "chat", "chat-narrow", "git-panel",
+                                                   "git-history", "overview",
                                                    "workflows", "settings-general", "settings-themes",
                                                    "theme-import", "palette", "palette-review"]
     /// How long a screen takes to settle before its picture, in milliseconds.
     /// The chat view finds and reads the conversation's file first.
     private static let settling: [String: Int] = ["sessions": 1_200, "chat": 2_500, "chat-narrow": 2_500,
-                                                  "git-panel": 1_500,
+                                                  "git-panel": 1_500, "git-history": 3_500,
                                                   "project-git": 1_500, "theme-import": 2_500]
 
     private let model: AppModel
@@ -312,6 +313,15 @@ final class ThemeTour {
         case "project-git", "project-files":
             driver.show(.projects)
             ask(screen)
+        case "git-history":
+            // The Git tab, then its history: the latest commit and its files.
+            driver.show(.sessions)
+            driver.select(sessions.first.map { DetailSelection.git($0) })
+            if let first = sessions.first { model.gitTabs.insert(first) }
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(600))
+                self?.ask("git-history")
+            }
         case "sessions", "chat", "chat-narrow", "side-panel", "git-panel", "context":
             driver.show(.sessions)
             driver.select(sessions.first.map { DetailSelection.session($0) })
@@ -365,7 +375,7 @@ final class ThemeTour {
         case "project-git", "project-files":
             ask("project-overview")
             return false
-        case "git-panel":
+        case "git-panel", "git-history":
             // The Git tab took the session's place: back to its terminal.
             driver.select(sessions.first.map { DetailSelection.session($0) })
             return true

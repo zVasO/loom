@@ -29,6 +29,10 @@ struct SessionGitTab: View {
     @State private var commits: [GitService.Commit]?
     @State private var commit: GitService.Commit?
     @State private var commitText: String?
+    /// The picked commit's files, and the one whose diff shows (nil: all).
+    @State private var commitFiles: [GitService.FileSection] = []
+    @State private var commitFile: String?
+    @State private var commitMessage = ""
     /// The diff shown, as the review's diff view takes it: parsed and paired
     /// rows, then their syntax colours.
     @State private var rows: DiffPipeline.Rows?
@@ -80,6 +84,16 @@ struct SessionGitTab: View {
             colours = coloured
         }
         .onDisappear { model.forgetGitDiff(for: sessionID) }
+        // The theme tour's "git-history": the latest commit, its files.
+        .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
+            guard note.object as? String == "git-history" else { return }
+            side = .history
+            Task {
+                let found = await model.gitHistory(for: sessionID)
+                commits = found
+                if let first = found.first { show(first) }
+            }
+        }
     }
 
     private func reload() async {
@@ -268,9 +282,16 @@ struct SessionGitTab: View {
     private func show(_ entry: GitService.Commit) {
         commit = entry
         commitText = nil
+        commitFiles = []
+        commitFile = nil
+        commitMessage = ""
         Task {
             let text = await model.gitCommit(entry.hash, for: sessionID)
-            if commit == entry { commitText = text }
+            guard commit == entry else { return }
+            let parts = GitService.commitParts(text)
+            commitMessage = parts.message
+            commitFiles = GitService.fileSections(ofDiff: parts.patch)
+            commitText = parts.patch
         }
     }
 
@@ -312,8 +333,8 @@ struct SessionGitTab: View {
         case .history:
             if commit == nil {
                 placeholder("Pick a commit to see what it changed.")
-            } else if let commitText {
-                diffView(preamble: Self.preamble(of: commitText))
+            } else if commitText != nil {
+                commitDetail
             } else {
                 ProgressView().controlSize(.small)
             }
@@ -334,20 +355,97 @@ struct SessionGitTab: View {
             guard let file else { return diff }
             return GitService.sections(ofDiff: diff).first { $0.path == file }?.text ?? diff
         case .history:
-            return commitText.map { Self.patch(of: $0) } ?? ""
+            guard let commitText else { return "" }
+            guard let commitFile else { return commitText }
+            return commitFiles.first { $0.path == commitFile }?.text ?? commitText
         }
     }
 
-    /// `git show` writes the author, the message and the files' statistics
-    /// before the patch.
-    static func preamble(of show: String) -> String {
-        guard let range = show.range(of: "diff --git ") else { return show }
-        return String(show[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    /// A commit, as GitHub Desktop lays it out: what it says on top, the
+    /// files it touched in a column, the diff of the one picked beside it.
+    private var commitDetail: some View {
+        VStack(spacing: 0) {
+            if let commit {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
+                    Text(commit.subject)
+                        .themeFont(size: 13, weight: .semibold)
+                        .foregroundStyle(DefaultTheme.primaryText)
+                        .textSelection(.enabled)
+                    let rest = commitMessage.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+                        .dropFirst().joined().trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !rest.isEmpty {
+                        Text(rest)
+                            .themeFont(size: 11.5)
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                            .textSelection(.enabled)
+                            .lineLimit(6)
+                    }
+                    HStack(spacing: DefaultTheme.space(6)) {
+                        Text(commit.shortHash)
+                            .themeFont(size: 10.5, design: .monospaced)
+                            .foregroundStyle(DefaultTheme.accentInk)
+                        Text("\(commit.author) · \(commit.date.formatted(date: .abbreviated, time: .shortened))")
+                            .themeFont(size: 10.5)
+                            .foregroundStyle(DefaultTheme.mutedText)
+                        Text("\(commitFiles.count) file\(commitFiles.count == 1 ? "" : "s")")
+                            .themeFont(size: 10.5)
+                            .foregroundStyle(DefaultTheme.mutedText)
+                        counts(additions: commitFiles.reduce(0) { $0 + $1.additions },
+                               deletions: commitFiles.reduce(0) { $0 + $1.deletions })
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(10))
+                Divider().overlay(DefaultTheme.cardBorder)
+            }
+            if commitFiles.isEmpty {
+                placeholder("This commit changes no file (a merge).")
+            } else {
+                HStack(spacing: 0) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
+                            row(selected: commitFile == nil, action: { commitFile = nil }) {
+                                AppIcon("square.stack", size: 11).foregroundStyle(DefaultTheme.secondaryText)
+                                Text("All files (\(commitFiles.count))").themeFont(size: 12, weight: .medium)
+                            }
+                            ForEach(commitFiles) { entry in
+                                row(selected: commitFile == entry.path, action: { commitFile = entry.path }) {
+                                    AppIcon(Self.symbol(for: entry.kind), size: 11)
+                                        .foregroundStyle(DefaultTheme.secondaryText)
+                                    Text(entry.path)
+                                        .themeFont(size: 11.5, design: .monospaced)
+                                        .lineLimit(1)
+                                        .truncationMode(.head)
+                                    Spacer(minLength: DefaultTheme.space(4))
+                                    counts(additions: entry.additions, deletions: entry.deletions)
+                                }
+                                .help(entry.path)
+                            }
+                        }
+                        .padding(DefaultTheme.space(8))
+                    }
+                    .frame(width: 280)
+                    .background(DefaultTheme.background)
+                    Divider().overlay(DefaultTheme.cardBorder)
+                    diffView(preamble: nil)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
     }
 
-    static func patch(of show: String) -> String {
-        guard let range = show.range(of: "diff --git ") else { return "" }
-        return String(show[range.lowerBound...])
+    /// "+12 −3", in the colours a diff uses.
+    private func counts(additions: Int, deletions: Int) -> some View {
+        HStack(spacing: DefaultTheme.space(4)) {
+            if additions > 0 {
+                Text("+\(additions)").foregroundStyle(DefaultTheme.badgeColor(for: .working))
+            }
+            if deletions > 0 {
+                Text("−\(deletions)").foregroundStyle(DefaultTheme.danger)
+            }
+        }
+        .themeFont(size: 10.5, design: .monospaced)
+        .fixedSize()
     }
 
     /// The review's own diff view: side by side or unified, syntax colours,
