@@ -333,9 +333,15 @@ struct SessionChatPane: View {
         draft = ""
         images = []
         let data = files.compactMap { try? Data(contentsOf: $0) }
-        pending.append(PendingMessage(entry: ConversationEntry(id: "pending-\(UUID().uuidString)",
-                                                               kind: .user(text), images: data),
-                                      sentAt: Date()))
+        let id = "pending-\(UUID().uuidString)"
+        pending.append(PendingMessage(entry: ConversationEntry(id: id, kind: .user(text), images: data),
+                                      known: ClaudeConversation.userEntryIDs(entries)))
+        // Never for good: a message claude never writes (refused, lost)
+        // does not stay on screen as if it were on its way.
+        Task {
+            try? await Task.sleep(for: .seconds(60))
+            pending.removeAll { $0.entry.id == id }
+        }
     }
 
     /// "Send now", while claude works: its turn is interrupted (Esc, as in
@@ -386,25 +392,13 @@ struct SessionChatPane: View {
         surface.send(ClaudeTerminalPrompt.answer(option))
     }
 
-    /// A pending message is let go once claude's file holds it — its text,
-    /// which claude may have prefixed with "[Image #1]", or for images
-    /// alone, a message with images — or after half a minute.
+    /// A pending message is let go once claude's file holds a message of
+    /// the user's that was not there when it was sent — whatever its text.
     private func dropDelivered() {
         guard !pending.isEmpty else { return }
-        let said = entries.suffix(40).filter { if case .user = $0.kind { return true } else { return false } }
-        let now = Date()
-        pending.removeAll { message in
-            if now.timeIntervalSince(message.sentAt) > 30 { return true }
-            let text = ClaudeConversation.comparable(message.text)
-            return said.contains { entry in
-                guard case .user(let written) = entry.kind,
-                      (entry.timestamp ?? now) >= message.sentAt.addingTimeInterval(-5) else { return false }
-                // Images alone: the next message with images is it.
-                if text.isEmpty { return !entry.images.isEmpty }
-                let shown = ClaudeConversation.comparable(written)
-                return shown == text || shown.contains(text)
-            }
-        }
+        let waiting = ClaudeConversation.unwritten(known: pending.map(\.known), entries: entries)
+        let kept = zip(pending, waiting).filter { $0.1 }.map { $0.0 }
+        if kept.count != pending.count { pending = kept }
     }
 
     /// Hands the message to claude through the session's terminal: a
@@ -531,11 +525,8 @@ private final class ChatReadCache {
 /// A message sent and not yet in claude's file.
 private struct PendingMessage {
     var entry: ConversationEntry
-    var sentAt: Date
-    var text: String {
-        if case .user(let text) = entry.kind { return text }
-        return ""
-    }
+    /// The user's messages claude's file held when this one was sent.
+    var known: Set<String>
 }
 
 /// What one read off the main actor hands back.

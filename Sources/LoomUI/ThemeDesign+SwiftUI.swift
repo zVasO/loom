@@ -162,6 +162,13 @@ struct ThemeShadowModifier: ViewModifier {
                         }
                         .compositingGroup()
                 }
+                // Drawn once into a texture, with room for its reach: a blur
+                // and a mask recomputed for every card at every scrolled
+                // frame is what made a page of cards drag under a theme
+                // with shadows.
+                .padding(reach + 8)
+                .drawingGroup()
+                .padding(-(reach + 8))
                 .allowsHitTesting(false)
             }
         }

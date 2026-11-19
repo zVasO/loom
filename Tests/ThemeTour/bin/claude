@@ -38,6 +38,15 @@ printf '%s\n' \
 if [ -f .git ] && [ -f README.md ]; then
   printf '\n## Themes\n\nAn imported theme is followed to the letter.\n' >> README.md
   printf 'struct Radius {\n    let card = 14\n    let control = 8\n}\n' > Radius.swift
+  # LOOM_TOUR_LONG: a diff long enough to scroll through.
+  if [ -n "$LOOM_TOUR_LONG" ]; then
+    i=0
+    while [ $i -lt 900 ]; do
+      printf '    /// Step %s of the pass: what it reads, and what it leaves.\n    func step%s(_ input: [String: Int]) -> Int { input.values.reduce(%s, +) }\n\n' "$i" "$i" "$i"
+      i=$((i + 1))
+    done > Long.swift
+    sed -i '' -e 's/^import /import  /' Sources/LoomUI/Components.swift Sources/LoomUI/DefaultTheme.swift 2>/dev/null || true
+  fi
 fi
 # The conversation of the session, where claude keeps it and where the chat
 # view looks for it: one file per native session, named after the id Loom
@@ -64,6 +73,15 @@ if [ -n "$session" ]; then
 {"parentUuid":"00000000-0000-4000-8000-000000000007","isSidechain":false,"sessionId":"@SESSION@","type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAfUlEQVR42u3YoQ0AIAwAwQ5CgkMwF5K12QOLIJUYLvkJTn601pUUCAABAgQIECBAgHQFKqUqCRAgQIAAAQIECJAAAQIECBCgszXmmwABAgQIECBAgAABAgQIECBAgPwgQIAAAQIECBAgCoAAAQIECBAgQAIECBAgQIAA/dQG9YNqrLoSa20AAAAASUVORK5CYII="}},{"type":"text","text":"[Image #1] Does a built-in theme still draw as before?"}]},"uuid":"00000000-0000-4000-8000-000000000008","timestamp":"2026-09-02T18:13:41.950Z"}
 {"parentUuid":"00000000-0000-4000-8000-000000000008","isSidechain":false,"sessionId":"@SESSION@","type":"assistant","message":{"id":"msg_tour_04","type":"message","role":"assistant","content":[{"type":"text","text":"Yes. A theme without a design of its own hands every charter value back unchanged, and the tour pictures it beside the imported ones.\n\n### What was checked\n\n| Point | In the code | Verdict |\n| --- | --- | --- |\n| #1 Built-in themes | **Confirmed.** `ThemePalette.design` is nil for every built-in family, so `radius(_:)`, `space(_:)` and `themeFont` hand the charter's own values back unchanged. | Agreed: nothing to do. Nine static screens compare pixel for pixel with the pictures taken before the change. |\n| #4 Colours only | **Confirmed**, with a nuance: the theme's `--border` and `--input` still apply, because an edge is a colour. | Agreed in part. The radius, the spacing and the fonts stay Loom's; say so in the preview's summary line. |\n| #9 Letter-spacing | Consistent with what tweakcn shows at 14 px (« supposed »). | Nuance: under 14 pt a tighter theme lets go, down to nothing at 10 pt. |\n\n| Point | Verdict |\n| --- | --- |\n| #7 Fonts | Agreed. Only the sans and the mono are fetched from Google Fonts, and only for the theme in use — a family Google does not know is noted and never asked for again. |\n| #15 Shadows | Agreed. A sidebar's session cards carry none: a hard shadow welded each card to the next. |\n"}]},"uuid":"00000000-0000-4000-8000-000000000009","timestamp":"2026-09-02T18:13:44.281Z"}
 JSONL
+  # LOOM_TOUR_LONG: the same exchange many times over, a conversation to scroll.
+  if [ -n "$LOOM_TOUR_LONG" ]; then
+    base=$(grep -n 'msg_tour_04' "$folder/$id.jsonl" | head -1 | cut -d: -f1)
+    i=0
+    while [ $i -lt 40 ]; do
+      sed -n "$((base - 1)),${base}p" "$folder/$id.jsonl" | sed -e "s/-0000000000\([0-9][0-9]\)\"/-10${i}00000\1\"/g"
+      i=$((i + 1))
+    done > "$folder/$id.more" && cat "$folder/$id.more" >> "$folder/$id.jsonl" && rm "$folder/$id.more"
+  fi
 fi
 # LOOM_TOUR_PERMISSION: the worktree's session then ends on a permission
 # prompt, drawn as claude draws one, and says which key answered it.

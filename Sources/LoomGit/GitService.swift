@@ -193,8 +193,56 @@ public struct GitService: Sendable {
     public func show(_ hash: String, in directory: URL) async throws -> String {
         // A hash only: nothing a caller passes becomes an option.
         guard !hash.isEmpty, hash.allSatisfy(\.isHexDigit) else { return "" }
-        return try await run(["show", "--stat", "--patch", "--format=%an, %ad%n%n%B", "--date=relative", hash],
-                             in: directory)
+        // The message, a record separator, then the patch: the files and
+        // their counts are read from the patch itself (`fileSections`).
+        return try await run(["show", "--patch", "--format=%B%x1e", hash], in: directory)
+    }
+
+    /// What `show` returns, parted: the commit's message and its patch.
+    public static func commitParts(_ show: String) -> (message: String, patch: String) {
+        guard let separator = show.firstIndex(of: "\u{1E}") else {
+            return ("", show)
+        }
+        let message = show[..<separator].trimmingCharacters(in: .whitespacesAndNewlines)
+        let rest = show[show.index(after: separator)...]
+        let patch = rest.range(of: "diff --git ").map { String(rest[$0.lowerBound...]) } ?? ""
+        return (message, patch)
+    }
+
+    /// One file of a diff: its path, what happened to it, how many lines it
+    /// gained and lost, and its own part of the patch.
+    public struct FileSection: Sendable, Equatable, Identifiable {
+        public let path: String
+        public let kind: FileChange.Kind
+        public let additions: Int
+        public let deletions: Int
+        public let text: String
+        public var id: String { path }
+    }
+
+    /// A diff as its files, in the patch's order — what a commit touched.
+    public static func fileSections(ofDiff diff: String) -> [FileSection] {
+        sections(ofDiff: diff).map { section in
+            var kind = FileChange.Kind.modified
+            var additions = 0
+            var deletions = 0
+            var inHunk = false
+            for line in section.text.split(separator: "\n", omittingEmptySubsequences: false) {
+                if line.hasPrefix("@@") {
+                    inHunk = true
+                } else if !inHunk {
+                    if line.hasPrefix("new file mode") { kind = .added }
+                    if line.hasPrefix("deleted file mode") { kind = .deleted }
+                    if line.hasPrefix("rename from") { kind = .renamed }
+                } else if line.hasPrefix("+") {
+                    additions += 1
+                } else if line.hasPrefix("-") {
+                    deletions += 1
+                }
+            }
+            return FileSection(path: section.path, kind: kind, additions: additions,
+                               deletions: deletions, text: section.text)
+        }
     }
 
     /// A unified diff cut into its files: the path and that file's part.

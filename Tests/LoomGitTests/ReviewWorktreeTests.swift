@@ -200,3 +200,47 @@ struct GitHistoryParsingTests {
         #expect(found[0].text.hasSuffix("+b") && found[1].text.hasSuffix("+new"))
     }
 }
+
+@Suite("GitService — a commit as its files")
+struct GitCommitFilesTests {
+    @Test("the message and the patch are parted at the separator")
+    func parts() {
+        let show = "Fix the cache\n\nIt kept a stale row.\n\u{1E}\n\ndiff --git a/A.swift b/A.swift\n@@ -1 +1 @@\n-a\n+b"
+        let parts = GitService.commitParts(show)
+        #expect(parts.message == "Fix the cache\n\nIt kept a stale row.")
+        #expect(parts.patch.hasPrefix("diff --git a/A.swift"))
+        #expect(GitService.commitParts("Merge\n\u{1E}\n").patch.isEmpty)
+    }
+
+    @Test("each file: its kind, its lines gained and lost — headers are not counted")
+    func files() {
+        let diff = """
+        diff --git a/A.swift b/A.swift
+        index 1..2 100644
+        --- a/A.swift
+        +++ b/A.swift
+        @@ -1,2 +1,3 @@
+         keep
+        -old
+        +new
+        +more
+        diff --git a/New.md b/New.md
+        new file mode 100644
+        --- /dev/null
+        +++ b/New.md
+        @@ -0,0 +1 @@
+        +hello
+        diff --git a/Gone.txt b/Gone.txt
+        deleted file mode 100644
+        --- a/Gone.txt
+        +++ /dev/null
+        @@ -1 +0,0 @@
+        -bye
+        """
+        let files = GitService.fileSections(ofDiff: diff)
+        #expect(files.map(\.path) == ["A.swift", "New.md", "Gone.txt"])
+        #expect(files.map(\.kind) == [.modified, .added, .deleted])
+        #expect(files.map(\.additions) == [2, 1, 0])
+        #expect(files.map(\.deletions) == [1, 0, 1])
+    }
+}

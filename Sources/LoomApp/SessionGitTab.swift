@@ -29,6 +29,16 @@ struct SessionGitTab: View {
     @State private var commits: [GitService.Commit]?
     @State private var commit: GitService.Commit?
     @State private var commitText: String?
+    /// The picked commit's files, and the one whose diff shows (nil: all).
+    @State private var commitFiles: [GitService.FileSection] = []
+    @State private var commitFile: String?
+    @State private var commitMessage = ""
+    /// The diff shown, as the review's diff view takes it: parsed and paired
+    /// rows, then their syntax colours.
+    @State private var rows: DiffPipeline.Rows?
+    @State private var colours = DiffHighlights.none
+    @State private var unified = UserDefaults.standard.bool(forKey: "loom.diff.unified")
+    @Environment(\.colorScheme) private var colorScheme
     @State private var message = ""
     @State private var output: String?
     @State private var busy = false
@@ -54,6 +64,35 @@ struct SessionGitTab: View {
         .task(id: sessionID) { await reload() }
         .task(id: side) {
             if side == .history, commits == nil { commits = await model.gitHistory(for: sessionID) }
+        }
+        // The text on show, or the scheme, changed: its rows, then its
+        // colours — the diff reads plain until they land.
+        .task(id: DiffKey(text: shownText, dark: colorScheme == .dark)) {
+            let text = shownText
+            guard !text.isEmpty else {
+                rows = nil
+                return
+            }
+            let parsed = await model.gitDiffRows(for: sessionID, diff: text)
+            guard !Task.isCancelled else { return }
+            if rows?.hash != parsed.hash {
+                rows = parsed
+                colours = .none
+            }
+            let coloured = await model.gitDiffHighlights(for: sessionID, rows: parsed, dark: colorScheme == .dark)
+            guard !Task.isCancelled else { return }
+            colours = coloured
+        }
+        .onDisappear { model.forgetGitDiff(for: sessionID) }
+        // The theme tour's "git-history": the latest commit, its files.
+        .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
+            guard note.object as? String == "git-history" else { return }
+            side = .history
+            Task {
+                let found = await model.gitHistory(for: sessionID)
+                commits = found
+                if let first = found.first { show(first) }
+            }
         }
     }
 
@@ -243,9 +282,16 @@ struct SessionGitTab: View {
     private func show(_ entry: GitService.Commit) {
         commit = entry
         commitText = nil
+        commitFiles = []
+        commitFile = nil
+        commitMessage = ""
         Task {
             let text = await model.gitCommit(entry.hash, for: sessionID)
-            if commit == entry { commitText = text }
+            guard commit == entry else { return }
+            let parts = GitService.commitParts(text)
+            commitMessage = parts.message
+            commitFiles = GitService.fileSections(ofDiff: parts.patch)
+            commitText = parts.patch
         }
     }
 
@@ -280,24 +326,179 @@ struct SessionGitTab: View {
         switch side {
         case .changes:
             if let data, !data.changes.isEmpty {
-                GitDiffText(text: shownDiff(data.diff)).padding(DefaultTheme.space(10))
+                diffView(preamble: nil)
             } else {
                 placeholder(loaded ? "Nothing to show: the worktree is clean." : "Reading the repository…")
             }
         case .history:
             if commit == nil {
                 placeholder("Pick a commit to see what it changed.")
-            } else if let commitText {
-                GitDiffText(text: commitText).padding(DefaultTheme.space(10))
+            } else if commitText != nil {
+                commitDetail
             } else {
                 ProgressView().controlSize(.small)
             }
         }
     }
 
-    private func shownDiff(_ diff: String) -> String {
-        guard let file else { return diff }
-        return GitService.sections(ofDiff: diff).first { $0.path == file }?.text ?? diff
+    private struct DiffKey: Equatable {
+        var text: String
+        var dark: Bool
+    }
+
+    /// The unified diff on show: the changes (one file's, or all), or the
+    /// picked commit's patch.
+    private var shownText: String {
+        switch side {
+        case .changes:
+            guard let diff = data?.diff else { return "" }
+            guard let file else { return diff }
+            return GitService.sections(ofDiff: diff).first { $0.path == file }?.text ?? diff
+        case .history:
+            guard let commitText else { return "" }
+            guard let commitFile else { return commitText }
+            return commitFiles.first { $0.path == commitFile }?.text ?? commitText
+        }
+    }
+
+    /// A commit, as GitHub Desktop lays it out: what it says on top, the
+    /// files it touched in a column, the diff of the one picked beside it.
+    private var commitDetail: some View {
+        VStack(spacing: 0) {
+            if let commit {
+                VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
+                    Text(commit.subject)
+                        .themeFont(size: 13, weight: .semibold)
+                        .foregroundStyle(DefaultTheme.primaryText)
+                        .textSelection(.enabled)
+                    let rest = commitMessage.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+                        .dropFirst().joined().trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !rest.isEmpty {
+                        Text(rest)
+                            .themeFont(size: 11.5)
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                            .textSelection(.enabled)
+                            .lineLimit(6)
+                    }
+                    HStack(spacing: DefaultTheme.space(6)) {
+                        Text(commit.shortHash)
+                            .themeFont(size: 10.5, design: .monospaced)
+                            .foregroundStyle(DefaultTheme.accentInk)
+                        Text("\(commit.author) · \(commit.date.formatted(date: .abbreviated, time: .shortened))")
+                            .themeFont(size: 10.5)
+                            .foregroundStyle(DefaultTheme.mutedText)
+                        Text("\(commitFiles.count) file\(commitFiles.count == 1 ? "" : "s")")
+                            .themeFont(size: 10.5)
+                            .foregroundStyle(DefaultTheme.mutedText)
+                        counts(additions: commitFiles.reduce(0) { $0 + $1.additions },
+                               deletions: commitFiles.reduce(0) { $0 + $1.deletions })
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(10))
+                Divider().overlay(DefaultTheme.cardBorder)
+            }
+            if commitFiles.isEmpty {
+                placeholder("This commit changes no file (a merge).")
+            } else {
+                HStack(spacing: 0) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
+                            row(selected: commitFile == nil, action: { commitFile = nil }) {
+                                AppIcon("square.stack", size: 11).foregroundStyle(DefaultTheme.secondaryText)
+                                Text("All files (\(commitFiles.count))").themeFont(size: 12, weight: .medium)
+                            }
+                            ForEach(commitFiles) { entry in
+                                row(selected: commitFile == entry.path, action: { commitFile = entry.path }) {
+                                    AppIcon(Self.symbol(for: entry.kind), size: 11)
+                                        .foregroundStyle(DefaultTheme.secondaryText)
+                                    // The path takes the room: the counts line up at the edge.
+                                    Text(entry.path)
+                                        .themeFont(size: 11.5, design: .monospaced)
+                                        .lineLimit(1)
+                                        .truncationMode(.head)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    counts(additions: entry.additions, deletions: entry.deletions)
+                                }
+                                .help(entry.path)
+                            }
+                        }
+                        .padding(DefaultTheme.space(8))
+                    }
+                    .frame(width: 280)
+                    .background(DefaultTheme.background)
+                    Divider().overlay(DefaultTheme.cardBorder)
+                    diffView(preamble: nil)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+    }
+
+    /// "+12 −3", in the colours a diff uses.
+    private func counts(additions: Int, deletions: Int) -> some View {
+        HStack(spacing: DefaultTheme.space(4)) {
+            if additions > 0 {
+                Text("+\(additions)").foregroundStyle(DefaultTheme.badgeColor(for: .working))
+            }
+            if deletions > 0 {
+                Text("−\(deletions)").foregroundStyle(DefaultTheme.danger)
+            }
+        }
+        .themeFont(size: 10.5, design: .monospaced)
+        .fixedSize()
+    }
+
+    /// The review's own diff view: side by side or unified, syntax colours,
+    /// folding files, a selection to copy or hand to claude.
+    private func diffView(preamble: String?) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if let preamble, !preamble.isEmpty {
+                    Text(preamble)
+                        .themeFont(size: 11.5, design: .monospaced)
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(DefaultTheme.space(12))
+                }
+                if let rows, !rows.files.isEmpty {
+                    SplitDiffView(files: rows.files,
+                                  onExplain: { snippet in
+                                      send("Explain these lines (\(snippet.label)):\n```diff\n\(snippet.code)\n```")
+                                  },
+                                  onAsk: { snippet, question in
+                                      send("About these lines (\(snippet.label)): \(question)\n```diff\n\(snippet.code)\n```")
+                                  },
+                                  onAddToSession: { snippet in
+                                      let text = "\(snippet.label)\n```diff\n\(snippet.code)\n```\n"
+                                      Task { await model.typeIntoSession(text, id: sessionID) }
+                                      onShowSession()
+                                  },
+                                  unified: unified,
+                                  highlights: colours)
+                        .padding(.horizontal, DefaultTheme.space(12))
+                        .padding(.vertical, DefaultTheme.space(10))
+                } else if rows == nil, !shownText.isEmpty {
+                    ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(DefaultTheme.space(24))
+                }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            HoverIconButton(systemImage: unified ? "rectangle.split.2x1" : "list.bullet.rectangle",
+                            help: unified ? "Split view (old | new)" : "Unified view (full-width lines)") {
+                unified.toggle()
+                UserDefaults.standard.set(unified, forKey: "loom.diff.unified")
+            }
+            .padding(DefaultTheme.space(8))
+        }
+    }
+
+    /// A question about the lines picked goes to the session's claude, and
+    /// the session shows.
+    private func send(_ text: String) {
+        Task { _ = await model.submitWhenReady(text, to: sessionID, timeout: .seconds(15)) }
+        onShowSession()
     }
 
     private func placeholder(_ text: String) -> some View {

@@ -58,11 +58,14 @@ final class ThemeTour {
         var core = false
         /// The keyboard walk instead of the screens.
         var keys = false
+        /// The scroll probe instead of the screens.
+        var scroll = false
 
         var label: String {
             var parts = [theme, dark ? "dark" : "light"]
             if colorsOnly { parts.append("colours") }
             if keys { parts.append("keys") }
+            if scroll { parts.append("scroll") }
             return parts.joined(separator: "-")
         }
 
@@ -77,6 +80,7 @@ final class ThemeTour {
                 case "colours", "colors": colorsOnly = true
                 case "core": core = true
                 case "keys": keys = true
+                case "scroll": scroll = true
                 default: return nil
                 }
             }
@@ -93,17 +97,18 @@ final class ThemeTour {
         .appearance, .themes, .documents, .projects,
     ]
     private static let screens: [String] = ["projects", "project-git", "project-files", "sessions", "chat",
-                                            "chat-narrow", "git-panel", "side-panel", "context", "overview",
+                                            "chat-narrow", "git-panel", "git-history", "side-panel", "context", "overview",
                                             "prs", "workflows", "extensions"]
         + settingsStops.map { "settings-" + $0.rawValue }
         + ["theme-import", "palette", "palette-review", "new-session", "usage"]
-    private static let coreScreens: Set<String> = ["projects", "sessions", "chat", "chat-narrow", "git-panel", "overview",
+    private static let coreScreens: Set<String> = ["projects", "sessions", "chat", "chat-narrow", "git-panel",
+                                                   "git-history", "overview",
                                                    "workflows", "settings-general", "settings-themes",
                                                    "theme-import", "palette", "palette-review"]
     /// How long a screen takes to settle before its picture, in milliseconds.
     /// The chat view finds and reads the conversation's file first.
     private static let settling: [String: Int] = ["sessions": 1_200, "chat": 2_500, "chat-narrow": 2_500,
-                                                  "git-panel": 1_500,
+                                                  "git-panel": 1_500, "git-history": 3_500,
                                                   "project-git": 1_500, "theme-import": 2_500]
 
     private let model: AppModel
@@ -168,7 +173,7 @@ final class ThemeTour {
             let folder = output.appendingPathComponent(String(format: "%02d-%@", number + 1, stop.label))
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             var shots: [String] = []
-            let screens = stop.keys ? [] : Self.screens.filter { !stop.core || Self.coreScreens.contains($0) }
+            let screens = stop.keys || stop.scroll ? [] : Self.screens.filter { !stop.core || Self.coreScreens.contains($0) }
             for (order, screen) in screens.enumerated() {
                 enter(screen)
                 try? await Task.sleep(for: .milliseconds(Self.settling[screen] ?? 800))
@@ -189,7 +194,11 @@ final class ThemeTour {
                 entry["keyboard"] = walkNotes
                 entry["stalls"] = walkStalls
             }
-            log("\(stop.label): \(shots.count) of \(stop.keys ? shots.count : screens.count) screens")
+            if stop.scroll {
+                entry["scroll"] = await scrollWalk(into: folder)
+                shots = walkShots
+            }
+            log("\(stop.label): \(shots.count) of \(stop.keys || stop.scroll ? shots.count : screens.count) screens")
             entry["screens"] = shots
             index.append(entry)
         }
@@ -304,6 +313,15 @@ final class ThemeTour {
         case "project-git", "project-files":
             driver.show(.projects)
             ask(screen)
+        case "git-history":
+            // The Git tab, then its history: the latest commit and its files.
+            driver.show(.sessions)
+            driver.select(sessions.first.map { DetailSelection.git($0) })
+            if let first = sessions.first { model.gitTabs.insert(first) }
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(600))
+                self?.ask("git-history")
+            }
         case "sessions", "chat", "chat-narrow", "side-panel", "git-panel", "context":
             driver.show(.sessions)
             driver.select(sessions.first.map { DetailSelection.session($0) })
@@ -357,7 +375,7 @@ final class ThemeTour {
         case "project-git", "project-files":
             ask("project-overview")
             return false
-        case "git-panel":
+        case "git-panel", "git-history":
             // The Git tab took the session's place: back to its terminal.
             driver.select(sessions.first.map { DetailSelection.session($0) })
             return true
@@ -373,6 +391,103 @@ final class ThemeTour {
         default:
             return false
         }
+    }
+
+    // MARK: The scroll probe
+
+    /// How smoothly each long screen scrolls: its scroll view is swept down
+    /// and back a frame at a time, and the time between two frames is what
+    /// the main thread took to lay out and draw one. 16–18 ms is a frame
+    /// kept; past 34, one was dropped (`tour.json`, `scroll`). With
+    /// `LOOM_TOUR_SAMPLE`, the threads are sampled during each sweep.
+    private func scrollWalk(into folder: URL) async -> [[String: Any]] {
+        walkShots = []
+        walkNotes = []
+        var results: [[String: Any]] = []
+        let session = sessions.first.map { DetailSelection.session($0) }
+        let probes: [(String, @MainActor () -> Void)] = [
+            ("settings", { [driver] in driver.show(.settings); driver.focusSettings(.general) }),
+            ("terminal", { [driver] in driver.show(.sessions); driver.select(session) }),
+            ("chat", { [weak self, driver] in driver.show(.sessions); driver.select(session); self?.ask("chat") }),
+            ("git-diff", { [weak self, driver] in
+                driver.show(.sessions); driver.select(session); self?.ask("terminal"); self?.ask("git")
+            }),
+            ("projects", { [driver] in driver.show(.projects) }),
+            ("prs", { [driver] in driver.show(.prs) }),
+            ("overview", { [driver] in driver.show(.overview) }),
+        ]
+        for (name, enter) in probes {
+            enter()
+            try? await Task.sleep(for: .milliseconds(name == "git-diff" ? 4_000 : 2_500))
+            await picture("scroll-" + name, in: folder, after: 0)
+            await sample("scroll-" + name, seconds: 6, into: folder)
+            results.append(await sweep(name))
+        }
+        return results
+    }
+
+    /// The tallest scrolling area of the window: the screen's main list.
+    private func mainScrollView() -> NSScrollView? {
+        var best: NSScrollView?
+        var bestArea: CGFloat = 0
+        func visit(_ view: NSView) {
+            if let scroll = view as? NSScrollView, let document = scroll.documentView,
+               document.frame.height > scroll.contentView.bounds.height + 40 {
+                let area = scroll.frame.width * scroll.frame.height
+                if area > bestArea {
+                    best = scroll
+                    bestArea = area
+                }
+            }
+            view.subviews.forEach(visit)
+        }
+        if let root = window?.contentView { visit(root) }
+        return best
+    }
+
+    private func sweep(_ name: String) async -> [String: Any] {
+        guard let scroll = mainScrollView(), let document = scroll.documentView else {
+            return ["screen": name, "found": false]
+        }
+        let clip = scroll.contentView
+        let range = max(0, document.frame.height - clip.bounds.height)
+        let step: CGFloat = 36
+        let frames = 150
+        var intervals: [Double] = []
+        // What the main thread spends producing one frame after the scroll
+        // moved: layout, SwiftUI's update, drawing, the commit — timed by
+        // asking for them at once instead of waiting for the next turn.
+        var work: [Double] = []
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: 0))
+        scroll.reflectScrolledClipView(clip)
+        try? await Task.sleep(for: .milliseconds(400))
+        var last = ProcessInfo.processInfo.systemUptime
+        for frame in 0..<(frames * 2) {
+            let travelled = CGFloat(frame < frames ? frame : frames * 2 - frame) * step
+            // The document may have grown: a lazy list learns its height as it goes.
+            let limit = max(0, (scroll.documentView?.frame.height ?? 0) - clip.bounds.height)
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(limit, travelled)))
+            scroll.reflectScrolledClipView(clip)
+            let began = ProcessInfo.processInfo.systemUptime
+            window?.contentView?.layoutSubtreeIfNeeded()
+            window?.displayIfNeeded()
+            CATransaction.flush()
+            work.append((ProcessInfo.processInfo.systemUptime - began) * 1_000)
+            try? await Task.sleep(for: .milliseconds(16))
+            let now = ProcessInfo.processInfo.systemUptime
+            intervals.append((now - last) * 1_000)
+            last = now
+        }
+        func at(_ values: [Double], _ fraction: Double) -> Double {
+            let sorted = values.sorted()
+            return (sorted[min(sorted.count - 1, Int(Double(sorted.count) * fraction))] * 10).rounded() / 10
+        }
+        func at(_ fraction: Double) -> Double { at(intervals, fraction) }
+        return ["screen": name, "found": true, "range": Int(range),
+                "workMedian": at(work, 0.5), "workP95": at(work, 0.95), "workMax": at(work, 1),
+                "workOver16": work.filter { $0 > 16.7 }.count,
+                "median": at(0.5), "p95": at(0.95), "max": at(1),
+                "dropped": intervals.filter { $0 > 34 }.count, "frames": intervals.count]
     }
 
     // MARK: The keyboard walk
