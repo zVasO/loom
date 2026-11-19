@@ -74,6 +74,8 @@ public struct ConversationList: View {
     @State private var opened: Set<String> = []
     /// False once the reader scrolled up: the list then stays where they are.
     @State private var atBottom = true
+    /// How many of the last rows are laid out.
+    @State private var shown = ConversationList.page
 
     /// The scroll view's own space: where the end of the conversation is measured.
     private static let scroll = "loom.conversation.scroll"
@@ -131,18 +133,19 @@ public struct ConversationList: View {
         return ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(spacing: 0) {
-                    // Lazy only for a long conversation, which holds more
-                    // paragraphs than the Markdown cache. A lazy stack
-                    // anchored at the bottom could open on an empty
-                    // viewport — black until a scroll — when the rows came
-                    // in just after it: a short one is laid out whole.
-                    if entries.count + pending.count > Self.eagerLimit {
-                        LazyVStack(alignment: .leading, spacing: 0) { rows(lastUser: lastUser, bubble: bubble) }
-                            .padding(.vertical, DefaultTheme.space(16))
-                    } else {
-                        VStack(alignment: .leading, spacing: 0) { rows(lastUser: lastUser, bubble: bubble) }
-                            .padding(.vertical, DefaultTheme.space(16))
+                    // Never lazy: a lazy stack anchored at the bottom opened
+                    // on an empty viewport — black until a scroll — whenever
+                    // its guess of the rows' heights was off. The last
+                    // messages are laid out whole instead, and the earlier
+                    // ones come a page at a time, on request.
+                    VStack(alignment: .leading, spacing: 0) {
+                        if hiddenCount > 0 {
+                            EarlierMessagesButton(count: hiddenCount) { shown += Self.page }
+                                .padding(.bottom, DefaultTheme.space(14))
+                        }
+                        rows(lastUser: lastUser, bubble: bubble)
                     }
+                    .padding(.vertical, DefaultTheme.space(16))
                     // Outside the lazy stack, and last: the end must report
                     // where it is even a long way under the viewport, and
                     // scrolling to it must show everything above it.
@@ -186,13 +189,15 @@ public struct ConversationList: View {
         }
     }
 
-    /// Under this many rows the list is laid out whole.
-    private static let eagerLimit = 120
+    /// How many of the last rows are laid out, and how many more a click
+    /// on "earlier messages" brings.
+    private static let page = 80
+    private var hiddenCount: Int { max(0, entries.count - shown) }
 
     /// The rows, in either stack.
     @ViewBuilder
     private func rows(lastUser: Int, bubble: CGFloat) -> some View {
-        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+        ForEach(Array(entries.enumerated()).dropFirst(hiddenCount), id: \.element.id) { index, entry in
             ConversationEntryRow(entry: entry,
                                  isOpen: opened.contains(entry.id),
                                  isRunning: isWorking && index > lastUser,
@@ -467,6 +472,26 @@ private struct ThoughtRow: View {
     }
 }
 
+/// At the top of a long conversation: the messages before the ones shown.
+private struct EarlierMessagesButton: View {
+    let count: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text("Show earlier messages (\(count))")
+                .themeFont(size: 11.5)
+                .foregroundStyle(DefaultTheme.secondaryText)
+                .padding(.horizontal, DefaultTheme.space(10))
+                .frame(height: DefaultTheme.size(24))
+                .background(DefaultTheme.surfaceRaised, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+    }
+}
+
 /// Shown once the reader scrolled up: the way back to what claude says now.
 private struct JumpToLatestButton: View {
     let action: () -> Void
@@ -561,6 +586,13 @@ public struct ConversationComposer: View {
                 .focused($focused)
                 .onKeyPress(.return, phases: [.down, .repeat]) { press in
                     handleReturn(press)
+                }
+                // Escape stops claude while it works, and is always taken:
+                // left to the window, it leaves full screen.
+                .onKeyPress(.escape) {
+                    if isComposing { return .ignored }
+                    onStop?()
+                    return .handled
                 }
                 // Reached only if the key press above was not offered Return.
                 .onSubmit { send() }

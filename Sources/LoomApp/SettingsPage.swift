@@ -1368,7 +1368,8 @@ private struct ThemeGallery: View {
     /// The "Whole theme" switch — for a theme of the user's that brings
     /// more than colours.
     private func wholeThemeAction(_ family: ThemeFamily) -> ((Bool) -> Void)? {
-        guard !family.isBuiltIn, family.hasDesign else { return nil }
+        // A gallery theme has a design too: it can be followed for its colours only.
+        guard family.hasDesign else { return nil }
         return { whole in Self.setWholeTheme(whole, for: family) }
     }
 

@@ -153,6 +153,10 @@ struct SessionChatPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DefaultTheme.contentBackground)
+        // Escape is claude's Stop here, as in its terminal — never the
+        // window's "leave full screen", which is what an Escape nobody
+        // takes does.
+        .onExitCommand { if isLive, item?.state == .working { stop() } }
         // An image dropped anywhere on the chat waits in the composer.
         .onDrop(of: ComposerImage.dropTypes, isTargeted: $dropping) { providers in
             Task {
@@ -361,10 +365,17 @@ struct SessionChatPane: View {
     /// is what waits.
     private func interrupt() async {
         guard let surface = await model.surface(for: sessionID) else { return }
-        surface.send("\u{1B}")
+        // As the terminal's own key: claude negotiates a keyboard protocol
+        // under which a bare ESC byte is not the Escape key, and the turn
+        // went on — "working" until Escape was pressed in the terminal.
+        let escape = KeyStroke(keyCode: 53, characters: "\u{1B}")
+        surface.send(KeyTranslator.encode(escape, modes: surface.modes) ?? "\u{1B}")
         for _ in 0..<30 where item?.state == .working {
             try? await Task.sleep(for: .milliseconds(100))
         }
+        // No hook says a turn was interrupted: the screen does, once quiet.
+        // Asked for now rather than at the sampler's leisure.
+        await model.noteInterrupted(sessionID)
     }
 
     /// An option of the card: its key, typed into the terminal.

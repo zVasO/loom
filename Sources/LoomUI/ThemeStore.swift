@@ -526,7 +526,7 @@ public final class ThemeStore {
         let mode = AppearanceMode(rawValue: UserDefaults.standard
             .string(forKey: Self.appearanceKey) ?? "") ?? .system
         let saved = UserDefaults.standard.string(forKey: Self.globalKey) ?? ThemeFamily.loom.name
-        let family = ThemeFamily.resolve(saved, in: ThemeFamily.builtins) ?? .loom
+        let family = ThemeFamily.resolve(saved, in: ThemeFamily.builtins + ThemeFamily.gallery) ?? .loom
 
         systemIsDark = isDark
         appearanceMode = mode
@@ -569,7 +569,8 @@ public final class ThemeStore {
     /// Fetches, in the background, the fonts a family of the user's names
     /// and this Mac does not have.
     private func ensureFonts(ofFamilyNamed name: String) {
-        guard let family = customFamilies.first(where: { $0.name == name }) else { return }
+        // The gallery's themes name fonts too, like an imported one.
+        guard let family = families.first(where: { $0.name == name }), family != .loom else { return }
         let stacks = Self.fontStacks(of: family)
         guard !stacks.isEmpty else { return }
         Task { await ThemeFonts.shared.ensure(stacks: stacks) }
@@ -596,7 +597,12 @@ public final class ThemeStore {
 
     // MARK: Families
 
-    public var families: [ThemeFamily] { ThemeFamily.builtins + customFamilies }
+    /// The classics, the gallery, then the user's. A gallery theme saved by
+    /// the user (followed for its colours only) is the user's from then on.
+    public var families: [ThemeFamily] {
+        let own = Set(customFamilies.map(\.name))
+        return ThemeFamily.builtins + ThemeFamily.gallery.filter { !own.contains($0.name) } + customFamilies
+    }
 
     public func family(named name: String) -> ThemeFamily? {
         ThemeFamily.resolve(name, in: families)

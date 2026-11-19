@@ -154,6 +154,70 @@ public struct GitService: Sendable {
         _ = try await run(["push", "-u", "origin", branch], in: worktree)
     }
 
+    // MARK: - History
+
+    public struct Commit: Sendable, Equatable, Identifiable {
+        public let hash: String
+        public let shortHash: String
+        public let subject: String
+        public let author: String
+        public let date: Date
+        public var id: String { hash }
+        public init(hash: String, shortHash: String, subject: String, author: String, date: Date) {
+            self.hash = hash
+            self.shortHash = shortHash
+            self.subject = subject
+            self.author = author
+            self.date = date
+        }
+    }
+
+    /// The branch's latest commits, newest first.
+    public func log(in directory: URL, limit: Int = 150) async throws -> [Commit] {
+        let output = try await run(["log", "-n", String(limit), "--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%at"],
+                                   in: directory)
+        return Self.parseLog(output)
+    }
+
+    /// One commit per line, fields parted by U+001F.
+    public static func parseLog(_ output: String) -> [Commit] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: "\u{1F}", omittingEmptySubsequences: false).map(String.init)
+            guard fields.count == 5, let seconds = TimeInterval(fields[4]) else { return nil }
+            return Commit(hash: fields[0], shortHash: fields[1], subject: fields[2], author: fields[3],
+                          date: Date(timeIntervalSince1970: seconds))
+        }
+    }
+
+    /// A commit: its message, the files it touched, its patch.
+    public func show(_ hash: String, in directory: URL) async throws -> String {
+        // A hash only: nothing a caller passes becomes an option.
+        guard !hash.isEmpty, hash.allSatisfy(\.isHexDigit) else { return "" }
+        return try await run(["show", "--stat", "--patch", "--format=%an, %ad%n%n%B", "--date=relative", hash],
+                             in: directory)
+    }
+
+    /// A unified diff cut into its files: the path and that file's part.
+    public static func sections(ofDiff diff: String) -> [(path: String, text: String)] {
+        var sections: [(path: String, text: String)] = []
+        var current: [Substring] = []
+        var path = ""
+        func flush() {
+            if !current.isEmpty, !path.isEmpty { sections.append((path, current.joined(separator: "\n"))) }
+            current = []
+        }
+        for line in diff.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("diff --git ") {
+                flush()
+                // "diff --git a/x b/x": the path after " b/".
+                path = line.range(of: " b/", options: .backwards).map { String(line[$0.upperBound...]) } ?? String(line)
+            }
+            current.append(line)
+        }
+        flush()
+        return sections
+    }
+
     // MARK: - Execution
 
     @discardableResult

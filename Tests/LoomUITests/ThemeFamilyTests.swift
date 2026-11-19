@@ -124,3 +124,32 @@ struct ThemeFamilyTests {
         #expect(store.load().isEmpty)
     }
 }
+
+@Suite("ThemeFamily.gallery — the themes with a design of their own")
+struct ThemeGalleryTests {
+    @Test("fifteen of them, named apart from the classics and from each other")
+    func names() {
+        #expect(ThemeFamily.bold.count == 10 && ThemeFamily.comfort.count == 5)
+        let names = (ThemeFamily.builtins + ThemeFamily.gallery).map(\.name)
+        #expect(Set(names).count == names.count)
+    }
+
+    @Test("every token is a colour, every variant has a design with fonts, and reads")
+    func legible() {
+        for family in ThemeFamily.gallery {
+            for tokens in [family.light, family.dark] {
+                for token in tokens.all {
+                    #expect(ThemeTokens.rgb(token) != nil, Comment(rawValue: family.name + " " + token))
+                }
+                #expect(tokens.design?.fontSans != nil && tokens.design?.fontMono != nil,
+                        Comment(rawValue: family.name))
+                #expect(ThemeTokens.contrast(tokens.primaryText, tokens.contentBackground) >= 7,
+                        Comment(rawValue: family.name))
+                #expect(ThemeTokens.contrast(tokens.secondaryText, tokens.contentBackground) >= 3.5,
+                        Comment(rawValue: family.name))
+                #expect(ThemeTokens.contrast(tokens.accentText, tokens.accent) >= 4.5,
+                        Comment(rawValue: family.name))
+            }
+        }
+    }
+}

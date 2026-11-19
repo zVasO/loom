@@ -3113,7 +3113,7 @@ struct SessionDetailView: View {
                         }
                         if gitShown {
                             gitPanel
-                                .frame(width: min(380, columnWidth))
+                                .frame(width: min(480, columnWidth))
                                 // A light theme takes a third of it: the same
                                 // black smeared a grey cloud over the terminal.
                                 .shadow(color: .black.opacity(DefaultTheme.colorScheme == .dark ? 0.45 : 0.14),
@@ -3438,7 +3438,7 @@ struct SessionDetailView: View {
     private var gitPanel: some View {
         VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
             HStack {
-                Text("Changes")
+                Text("Git")
                     .themeFont(size: 12, weight: .semibold)
                     .foregroundStyle(DefaultTheme.primaryText)
                 Spacer()
@@ -3448,32 +3448,12 @@ struct SessionDetailView: View {
             }
             shipSection
             Divider().overlay(DefaultTheme.cardBorder)
-            if let gitData {
-                if gitData.changes.isEmpty {
-                    Text("Clean worktree").themeFont(size: 12)
-                        .foregroundStyle(DefaultTheme.secondaryText)
-                } else {
-                    ForEach(gitData.changes, id: \.path) { change in
-                        MonoTag(change.path, systemImage: symbol(for: change.kind),
-                                color: DefaultTheme.secondaryText)
-                    }
-                    ScrollView {
-                        Text(gitData.diff)
-                            .themeFont(size: 11, design: .monospaced)
-                            .foregroundStyle(DefaultTheme.primaryText)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
-                }
-            } else {
-                Text("No worktree for this session")
-                    .themeFont(size: 12)
-                    .foregroundStyle(DefaultTheme.secondaryText)
-            }
-            Spacer()
+            // What changed, file by file, and the branch's history.
+            SessionGitPanelBody(model: model, sessionID: sessionID, data: gitData)
+            Spacer(minLength: 0)
         }
         .padding(DefaultTheme.space(12))
-        .frame(maxWidth: 380)
+        .frame(maxWidth: 480)
         .frame(maxHeight: .infinity)
         .background(DefaultTheme.background)
     }
@@ -3547,16 +3527,6 @@ struct SessionDetailView: View {
                     .textSelection(.enabled)
                     .lineLimit(4)
             }
-        }
-    }
-
-    private func symbol(for kind: FileChange.Kind) -> String {
-        switch kind {
-        case .modified: "pencil"
-        case .added: "plus"
-        case .deleted: "minus"
-        case .renamed: "arrow.right"
-        case .untracked: "questionmark"
         }
     }
 }
