@@ -3250,6 +3250,9 @@ public final class AppModel {
         await manager?.stop(id, ladder: .close)
     }
 
+    /// The sessions whose Git tab is open in their stack: one per session.
+    var gitTabs: Set<SessionID> = []
+
     public struct GitPanelData {
         public let changes: [FileChange]
         public let diff: String

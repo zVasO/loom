@@ -68,8 +68,10 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   (`ThemeGallery.swift` : polices, rayon, espacement, bords, ombres) — dix audacieux (Neon City,
   Brutal, Vaporwave, Phosphor, Blaze, Bauhaus, Outrun, Candy, Blueprint, Velvet) et cinq pour les
   longues sessions (Paper, Dusk, Sage, E-Ink, Night Shift).
-- **Panneau Git d'une session** : Changes (fichiers, diff en couleurs, par fichier) et History (les
-  commits de la branche, le patch de chacun), commit / push / PR au-dessus.
+- **Onglet Git d'une session** : le bouton Git ouvre un onglet dans la pile de la session (un seul
+  par session, comme le navigateur de l'agent), en pleine largeur — à gauche Changes (les fichiers)
+  ou History (les commits de la branche), à droite le diff en couleurs du fichier ou du commit
+  choisi ; commit / push / review / PR en haut.
 - **Journal Obsidian** (`Integrations/obsidian-loom-daily`) : un plugin Obsidian qui, toutes les
   30 minutes, résume en une puce par session ce que les sessions claude ont fait, sous `## Loom` dans
   la note du jour ; réglé dans Obsidian.

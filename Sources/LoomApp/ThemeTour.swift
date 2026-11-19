@@ -358,7 +358,8 @@ final class ThemeTour {
             ask("project-overview")
             return false
         case "git-panel":
-            ask("git")
+            // The Git tab took the session's place: back to its terminal.
+            driver.select(sessions.first.map { DetailSelection.session($0) })
             return true
         case "context":
             ask("context-close")

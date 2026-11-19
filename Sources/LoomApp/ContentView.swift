@@ -120,6 +120,8 @@ enum DetailSelection: Hashable {
     /// The agent's own browser (ADR-0014), shown as a tab of its stack:
     /// a view onto its pages, never a "Web n" of yours.
     case agentBrowser(SessionID)
+    /// A session's Git, a tab of its stack: one per session.
+    case git(SessionID)
 }
 
 struct ContentView: View {
@@ -2086,7 +2088,12 @@ struct SessionsView: View {
                 case .session(let sessionID):
                     SessionDetailView(model: model, sessionID: sessionID,
                                       onBack: onShowProject,
-                                      selectedAfterReview: { selected = .session($0) })
+                                      selectedAfterReview: { selected = .session($0) },
+                                      onOpenGit: {
+                                          let parent = model.stackParentID(of: sessionID)
+                                          model.gitTabs.insert(parent)
+                                          selected = .git(parent)
+                                      })
                         .id(sessionID)
                 case .webPane(let paneID):
                     if let pane = model.browserPane(paneID) {
@@ -2105,6 +2112,15 @@ struct SessionsView: View {
                     } else {
                         placeholder
                     }
+                case .git(let parentID):
+                    SessionGitTab(model: model, sessionID: parentID,
+                                  onShowSession: { selected = .session(parentID) },
+                                  onClose: {
+                                      model.gitTabs.remove(parentID)
+                                      selected = .session(parentID)
+                                  },
+                                  onReviewStarted: { selected = .session($0) })
+                        .id(parentID)
                 case nil:
                     placeholder
                 }
@@ -2168,6 +2184,12 @@ struct SessionsView: View {
                !live.contains(where: { $0.id == id }) {
                 selected = nil
             }
+            // A Git tab does not outlive its session.
+            if case .git(let id) = selected, !live.contains(where: { $0.id == id }) {
+                selected = nil
+            }
+            let gone = model.gitTabs.filter { id in !live.contains { $0.id == id } }
+            if !gone.isEmpty { model.gitTabs.subtract(gone) }
         }
         // The agent's browser gone (its session archived): back to the session.
         .onChange(of: model.agentBrowsers.keys.count) {
@@ -2203,6 +2225,9 @@ struct SessionsView: View {
             return (pane.parentID.flatMap(stackParentItem), .web)
         case .agentBrowser(let parentID):
             return (stackParentItem(parentID), .web)
+        case .git:
+            // One per session: no bar of its own.
+            return nil
         case nil:
             return nil
         }
@@ -2474,7 +2499,8 @@ struct SessionsView: View {
         let shellSelected = shells.contains { selected == .session($0.id) }
         let paneSelected = panes.contains { selected == .webPane($0.id) }
         let agentSelected = selected == .agentBrowser(item.id)
-        let childSelected = shellSelected || paneSelected || agentSelected
+        let gitSelected = selected == .git(item.id)
+        let childSelected = shellSelected || paneSelected || agentSelected || gitSelected
         // Reduced by the list's switch, or this card alone.
         let ownCollapse = collapsedCards.contains(item.id.rawValue.uuidString)
         let compact = compactSessions || ownCollapse
@@ -2544,6 +2570,11 @@ struct SessionsView: View {
                     Divider().overlay(DefaultTheme.cardBorder)
                     agentBrowserRow(parent: item)
                         .stackChrome(isSelected: selected == .agentBrowser(item.id))
+                }
+                if model.gitTabs.contains(item.id) {
+                    Divider().overlay(DefaultTheme.cardBorder)
+                    gitRow(parent: item)
+                        .stackChrome(isSelected: gitSelected)
                 }
             }
         }
@@ -2658,6 +2689,33 @@ struct SessionsView: View {
         .onTapGesture {
             if let first = panes.first { selected = .webPane(first.id) }
         }
+    }
+
+    /// The session's Git tab in its stack.
+    private func gitRow(parent: AppModel.SessionItem) -> some View {
+        HStack(spacing: DefaultTheme.space(8)) {
+            AppIcon("arrow.triangle.branch", size: 13)
+                .foregroundStyle(DefaultTheme.accentInk)
+            VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
+                Text("Git")
+                    .themeFont(size: 12, weight: .medium)
+                    .foregroundStyle(DefaultTheme.primaryText)
+                Label(parent.title, systemImage: "link")
+                    .themeFont(size: 10)
+                    .foregroundStyle(DefaultTheme.mutedText)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(DefaultTheme.space(10))
+        .contentShape(Rectangle())
+        .hoverSurface(0.6)
+        .stackQuickActions(onClose: {
+            model.gitTabs.remove(parent.id)
+            if selected == .git(parent.id) { selected = .session(parent.id) }
+        })
+        .onTapGesture { selected = .git(parent.id) }
+        .help("Changes, history and diffs of this session's repository")
     }
 
     /// The agent's own browser (ADR-0014) in its stack: its pages, what it
@@ -2973,14 +3031,11 @@ struct SessionDetailView: View {
     let onBack: (ProjectID?) -> Void
     /// v3 — opens the reviewer session that the Ship panel just launched.
     var selectedAfterReview: ((SessionID) -> Void)?
+    /// Opens the session's Git tab.
+    var onOpenGit: () -> Void = {}
     @State private var infoShown = false
     @State private var infoRecord: SessionRecord?
     @State private var infoLastActivity: Date?
-    @State private var gitShown = false
-    @State private var gitData: AppModel.GitPanelData?
-    @State private var shipMessage = ""
-    @State private var shipOutput: String?
-    @State private var shipBusy = false
     @State private var followUpShown = false
     @State private var followUpDraft = ""
     /// The session's window, read from claude's own records: shared by the
@@ -3110,15 +3165,6 @@ struct SessionDetailView: View {
                                          fitSuspended: panelDrag != nil,
                                          otherShape: other,
                                          focusRequest: terminalFocusRequest)
-                        }
-                        if gitShown {
-                            gitPanel
-                                .frame(width: min(480, columnWidth))
-                                // A light theme takes a third of it: the same
-                                // black smeared a grey cloud over the terminal.
-                                .shadow(color: .black.opacity(DefaultTheme.colorScheme == .dark ? 0.45 : 0.14),
-                                        radius: 20, x: -8)
-                                .transition(.move(edge: .trailing))
                         }
                     }
                     .frame(width: columnWidth)
@@ -3268,10 +3314,8 @@ struct SessionDetailView: View {
                 .help(agentOffscreen ? "claude is using its browser — show it (⌘⇧B)"
                       : panel.isOpen ? "Hide the browser (⌘⇧B)" : "Show a browser beside the terminal (⌘⇧B)")
             }
-            GhostButton("Git", systemImage: "arrow.triangle.branch") {
-                withAnimation(.hover) { gitShown.toggle() }
-                if gitShown { Task { gitData = await model.gitPanel(for: sessionID) } }
-            }
+            GhostButton("Git", systemImage: "arrow.triangle.branch") { onOpenGit() }
+                .help("Changes, history and diffs — in a tab of this session")
             GhostButton("Stop", systemImage: "stop.circle", role: .destructive) {
                 Task { await model.stopSession(sessionID) }
             }
@@ -3299,9 +3343,7 @@ struct SessionDetailView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
             switch note.object as? String {
-            case "git":
-                gitShown.toggle()
-                if gitShown { Task { gitData = await model.gitPanel(for: sessionID) } }
+            case "git": onOpenGit()
             case "context": contextShown = true
             case "context-close": contextShown = false
             case "chat": model.setViewMode(.chat, for: sessionID)
@@ -3434,101 +3476,6 @@ struct SessionDetailView: View {
         formatter.dateFormat = "dd/MM/yyyy HH:mm:ss"
         return formatter
     }()
-
-    private var gitPanel: some View {
-        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
-            HStack {
-                Text("Git")
-                    .themeFont(size: 12, weight: .semibold)
-                    .foregroundStyle(DefaultTheme.primaryText)
-                Spacer()
-                GhostButton(systemImage: "arrow.clockwise") {
-                    Task { gitData = await model.gitPanel(for: sessionID) }
-                }
-            }
-            shipSection
-            Divider().overlay(DefaultTheme.cardBorder)
-            // What changed, file by file, and the branch's history.
-            SessionGitPanelBody(model: model, sessionID: sessionID, data: gitData)
-            Spacer(minLength: 0)
-        }
-        .padding(DefaultTheme.space(12))
-        .frame(maxWidth: 480)
-        .frame(maxHeight: .infinity)
-        .background(DefaultTheme.background)
-    }
-
-    /// v2 — Ship: commit, publish and open a PR without leaving the session.
-    /// Every outcome is reported verbatim (stderr included) — no phantom success.
-    private var shipSection: some View {
-        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
-            HStack(spacing: DefaultTheme.space(6)) {
-                TextField("Commit message…", text: $shipMessage)
-                    .textFieldStyle(.plain)
-                    .themeFont(size: 12)
-                    .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
-                    .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
-                    .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
-                        .stroke(DefaultTheme.fieldBorder, lineWidth: 1))
-                    .themeShadow(.xs, radius: 6)
-                AccentButton("Commit") {
-                    let message = shipMessage.trimmingCharacters(in: .whitespaces)
-                    guard !message.isEmpty else { shipOutput = "Write a commit message first."; return }
-                    shipBusy = true
-                    Task {
-                        let error = await model.shipCommit(sessionID, message: message)
-                        shipOutput = error ?? "Committed ✓"
-                        if error == nil { shipMessage = "" }
-                        gitData = await model.gitPanel(for: sessionID)
-                        shipBusy = false
-                    }
-                }
-            }
-            HStack(spacing: DefaultTheme.space(6)) {
-                GhostButton("Push", systemImage: "arrow.up.circle") {
-                    shipBusy = true
-                    Task {
-                        let error = await model.shipPush(sessionID)
-                        shipOutput = error ?? "Pushed to origin ✓"
-                        shipBusy = false
-                    }
-                }
-                GhostButton("Review", systemImage: "eyes") {
-                    Task {
-                        if let id = await model.launchReviewSession(reviewing: sessionID) {
-                            selectedAfterReview?(id)
-                        }
-                    }
-                }
-                .help("A second claude reviews this worktree's diff")
-                if GitHubService.ghPath != nil {
-                    GhostButton("Create PR", systemImage: "arrow.triangle.pull") {
-                        shipBusy = true
-                        Task {
-                            if let result = await model.shipCreatePR(sessionID) {
-                                shipOutput = result.message
-                                if result.success,
-                                   let url = URL(string: result.message.split(separator: "\n").last.map(String.init) ?? "") {
-                                    NSWorkspace.shared.open(url)
-                                }
-                            }
-                            shipBusy = false
-                        }
-                    }
-                }
-                if shipBusy { ProgressView().controlSize(.small) }
-                Spacer()
-            }
-            if let shipOutput {
-                Text(shipOutput)
-                    .themeFont(size: 10, design: .monospaced)
-                    .foregroundStyle(shipOutput.hasSuffix("✓") ? DefaultTheme.groupHeader
-                                                               : DefaultTheme.secondaryText)
-                    .textSelection(.enabled)
-                    .lineLimit(4)
-            }
-        }
-    }
 }
 
 /// "Terminal | Chat" in a session's breadcrumb: the fleet filter's well
