@@ -33,15 +33,45 @@ public struct ConversationEntry: Identifiable, Equatable, Sendable {
         /// Nil while the tool runs. Capped.
         public var result: String?
         public var isError: Bool
+        /// Set when the call starts a sub-agent (the Task / Agent tool):
+        /// what it was asked, and — once claude says it — which one it is.
+        public var agent: AgentCall?
 
         public init(toolUseID: String, name: String, summary: String, input: String,
-                    result: String? = nil, isError: Bool = false) {
+                    result: String? = nil, isError: Bool = false, agent: AgentCall? = nil) {
             self.toolUseID = toolUseID
             self.name = name
             self.summary = summary
             self.input = input
             self.result = result
             self.isError = isError
+            self.agent = agent
+        }
+    }
+
+    /// A sub-agent started by a tool call: its brief, and what links the
+    /// call to the sub-agent's own conversation.
+    public struct AgentCall: Equatable, Sendable {
+        /// The short name claude gave the task: "Find the flaky test".
+        public var description: String
+        /// The kind of agent: "Explore", "general-purpose"…
+        public var type: String
+        /// The brief, as written to the sub-agent.
+        public var prompt: String
+        /// The sub-agent's id, known once its result is in.
+        public var agentID: String?
+        /// What the result says of the run, when it does.
+        public var toolUses: Int?
+        public var durationMs: Int?
+
+        public init(description: String, type: String, prompt: String, agentID: String? = nil,
+                    toolUses: Int? = nil, durationMs: Int? = nil) {
+            self.description = description
+            self.type = type
+            self.prompt = prompt
+            self.agentID = agentID
+            self.toolUses = toolUses
+            self.durationMs = durationMs
         }
     }
 

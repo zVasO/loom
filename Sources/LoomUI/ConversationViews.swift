@@ -7,6 +7,9 @@ import SwiftUI
 // a line each. The views take values and closures only — reading claude's
 // file and typing into the session's terminal are the app's.
 
+/// Reads a sub-agent's own conversation: what it did, in order.
+public typealias ConversationAgentLoader = @Sendable (ConversationEntry.AgentCall) async -> [ConversationEntry]?
+
 /// The list's arithmetic and vocabulary, kept pure for the tests.
 enum ConversationLayout {
     /// The widest the column of messages gets: prose stays readable in a
@@ -28,6 +31,26 @@ enum ConversationLayout {
     /// still reads as set to one side.
     static func bubbleWidth(viewportWidth: CGFloat, margin: CGFloat) -> CGFloat {
         max(0, min(columnWidth, viewportWidth - 2 * margin)) * 0.8
+    }
+
+    /// Posted by the theme tour: the list opens every sub-agent's card.
+    static let openAgents = Notification.Name("loom.conversation.openAgents")
+
+    /// "42 s", "3 min 12 s": how long a sub-agent ran.
+    static func duration(milliseconds: Int) -> String {
+        let seconds = max(0, milliseconds / 1_000)
+        if seconds < 60 { return "\(seconds) s" }
+        let rest = seconds % 60
+        return rest == 0 ? "\(seconds / 60) min" : "\(seconds / 60) min \(rest) s"
+    }
+
+    /// What a sub-agent's card says of its run: "Explore · 14 tools · 42 s".
+    static func agentFacts(_ agent: ConversationEntry.AgentCall, steps: Int?) -> String {
+        var parts: [String] = []
+        if !agent.type.isEmpty { parts.append(agent.type) }
+        if let tools = agent.toolUses ?? steps, tools > 0 { parts.append("\(tools) tool\(tools == 1 ? "" : "s")") }
+        if let milliseconds = agent.durationMs { parts.append(duration(milliseconds: milliseconds)) }
+        return parts.joined(separator: " · ")
     }
 
     /// The icon of a tool's family, as an SF Symbol name for `AppIcon`.
@@ -67,6 +90,10 @@ public struct ConversationList: View {
     private let pending: [ConversationEntry]
     private let emptyTitle: String
     private let emptyDetail: String
+    /// Reads what a sub-agent did, for the card of the call that started
+    /// it: nil while claude has written nothing of it. The app's — these
+    /// views read no file.
+    private let loadAgent: ConversationAgentLoader?
 
     /// The tool calls and thoughts the reader opened. Here, not in the
     /// rows: a lazy stack lets go of a row that scrolls away, and the
@@ -97,7 +124,8 @@ public struct ConversationList: View {
     /// The scrolling list of a conversation, newest at the bottom and kept
     /// there while the reader is at the bottom.
     public init(entries: [ConversationEntry], isWorking: Bool, pending: [ConversationEntry] = [],
-                emptyTitle: String, emptyDetail: String) {
+                emptyTitle: String, emptyDetail: String, loadAgent: ConversationAgentLoader? = nil) {
+        self.loadAgent = loadAgent
         self.entries = entries
         self.isWorking = isWorking
         self.pending = pending
@@ -165,6 +193,13 @@ public struct ConversationList: View {
             // On arriving, and when the pane changes size: to the end, once
             // laid out — what the anchor alone sometimes misses.
             .onAppear { pin(proxy) }
+            // The theme tour: every sub-agent's card, open.
+            .onReceive(NotificationCenter.default.publisher(for: ConversationLayout.openAgents)) { _ in
+                for entry in entries {
+                    if case .tool(let call) = entry.kind, call.agent != nil { opened.insert(entry.id) }
+                }
+                pin(proxy)
+            }
             .onChange(of: viewport) { _, _ in if atBottom { pin(proxy) } }
             // The anchor holds the bottom when the content grows; this covers
             // what it does not see. A reader who scrolled up is never moved.
@@ -224,6 +259,7 @@ public struct ConversationList: View {
                                  isRunning: isWorking && index > lastUser,
                                  bubbleWidth: bubble,
                                  isSelectable: armed == entry.id,
+                                 loadAgent: loadAgent,
                                  onToggle: { toggle(entry.id) })
                 // A value: when claude's file grows, only the
                 // rows that changed are drawn again.
@@ -290,12 +326,16 @@ private struct ConversationEntryRow: View, Equatable {
     let bubbleWidth: CGFloat
     /// Its text can be selected: the row the pointer rests on.
     var isSelectable = false
+    /// Reads a sub-agent's conversation. Compared by its presence only: it
+    /// comes once the session's file is found, after the first rows.
+    var loadAgent: ConversationAgentLoader? = nil
     /// Outside the comparison: it only reaches the list's own state.
     let onToggle: () -> Void
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.entry == rhs.entry && lhs.isOpen == rhs.isOpen && lhs.isRunning == rhs.isRunning
             && lhs.bubbleWidth == rhs.bubbleWidth && lhs.isSelectable == rhs.isSelectable
+            && (lhs.loadAgent == nil) == (rhs.loadAgent == nil)
     }
 
     var body: some View {
@@ -319,7 +359,12 @@ private struct ConversationEntryRow: View, Equatable {
         case .thinking(let text):
             ThoughtRow(text: text, isOpen: isOpen, onToggle: onToggle)
         case .tool(let call):
-            ToolCallRow(call: call, isOpen: isOpen, isRunning: isRunning, onToggle: onToggle)
+            if let agent = call.agent {
+                AgentCallCard(call: call, agent: agent, isOpen: isOpen, isRunning: isRunning,
+                              bubbleWidth: bubbleWidth, load: loadAgent, onToggle: onToggle)
+            } else {
+                ToolCallRow(call: call, isOpen: isOpen, isRunning: isRunning, onToggle: onToggle)
+            }
         case .notice(let text):
             Text(text)
                 .themeFont(size: 10.5, design: .monospaced)
@@ -447,6 +492,216 @@ extension ToolCallRow {
             return Text("Bash ") + Text(ShellHighlighter.attributed(String(call.summary.dropFirst(5))))
         }
         return Text(call.summary)
+    }
+}
+
+// MARK: - Sub-agents
+
+/// A sub-agent claude started: a card for its call — what it was asked,
+/// whether it still runs, how much it did — that opens on what it did:
+/// its tool calls and what it said, as the conversation above shows
+/// claude's own. A sub-agent's sub-agents open the same way, inside.
+private struct AgentCallCard: View {
+    let call: ConversationEntry.ToolCall
+    let agent: ConversationEntry.AgentCall
+    let isOpen: Bool
+    let isRunning: Bool
+    let bubbleWidth: CGFloat
+    let load: ConversationAgentLoader?
+    let onToggle: () -> Void
+
+    /// What the sub-agent did; nil until read, or while claude has written nothing.
+    @State private var transcript: [ConversationEntry]?
+    @State private var loaded = false
+    @State private var briefOpen = false
+    @State private var hovered = false
+
+    /// Still at work: no result yet, in the turn being written.
+    private var running: Bool { call.result == nil && isRunning }
+
+    private struct LoadKey: Equatable {
+        var open: Bool
+        var running: Bool
+        var agentID: String?
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            if isOpen {
+                Divider().overlay(DefaultTheme.cardBorder)
+                opened
+            }
+        }
+        .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(10)))
+        .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(10))
+            .strokeBorder(running ? DefaultTheme.badgeColor(for: .working).opacity(0.5) : DefaultTheme.line2,
+                          lineWidth: 1))
+        // Read when the card opens, and again while the sub-agent works:
+        // its file grows as it goes.
+        .task(id: LoadKey(open: isOpen, running: running, agentID: agent.agentID)) {
+            guard isOpen, let load else { return }
+            repeat {
+                let read = await load(agent)
+                guard !Task.isCancelled else { return }
+                if transcript != read { transcript = read }
+                loaded = true
+                guard running else { return }
+                try? await Task.sleep(for: .milliseconds(1_500))
+            } while !Task.isCancelled
+        }
+    }
+
+    private var header: some View {
+        Button(action: onToggle) {
+            HStack(spacing: DefaultTheme.space(8)) {
+                AppIcon(isOpen ? "chevron.down" : "chevron.right", size: 11)
+                    .foregroundStyle(DefaultTheme.mutedText)
+                AppIcon("person.2", size: 14)
+                    .foregroundStyle(DefaultTheme.accentInk)
+                VStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
+                    Text(agent.description.isEmpty ? "Sub-agent" : agent.description)
+                        .themeFont(size: 12.5, weight: .semibold)
+                        .foregroundStyle(DefaultTheme.primaryText)
+                        .lineLimit(1)
+                    let facts = ConversationLayout.agentFacts(agent, steps: steps)
+                    if !facts.isEmpty {
+                        Text(facts)
+                            .themeFont(size: 10.5, design: .monospaced)
+                            .foregroundStyle(DefaultTheme.mutedText)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: DefaultTheme.space(8))
+                if running {
+                    HStack(spacing: DefaultTheme.space(5)) {
+                        ProgressView().controlSize(.mini)
+                        Text("working")
+                            .themeFont(size: 10.5, design: .monospaced)
+                            .foregroundStyle(DefaultTheme.badgeColor(for: .working))
+                    }
+                } else if call.isError {
+                    Text("failed")
+                        .themeFont(size: 10.5, design: .monospaced)
+                        .foregroundStyle(DefaultTheme.danger)
+                } else if call.result != nil {
+                    AppIcon("checkmark", size: 11)
+                        .foregroundStyle(DefaultTheme.badgeColor(for: .working))
+                }
+            }
+            .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(8))
+            .background(hovered ? DefaultTheme.wash2 : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(isOpen ? "Fold the sub-agent" : "See what this sub-agent did")
+    }
+
+    /// The tool calls read so far, for a card whose result has not said.
+    private var steps: Int? {
+        guard let transcript else { return nil }
+        return transcript.filter { if case .tool = $0.kind { return true } else { return false } }.count
+    }
+
+    @ViewBuilder
+    private var opened: some View {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(10)) {
+            brief
+            if let transcript, !transcript.isEmpty {
+                SubagentTranscript(entries: transcript, isRunning: running, bubbleWidth: bubbleWidth, load: load)
+            } else if let result = call.result, !result.isEmpty {
+                // No file of its own (an older claude): what it handed back.
+                MarkdownBlockView(result, size: 12.5)
+                    .scrollingCode()
+                    .textSelection(.enabled)
+            } else if loaded || load == nil {
+                Text(running ? "The sub-agent has written nothing yet." : "Nothing was kept of this sub-agent.")
+                    .themeFont(size: 11.5)
+                    .foregroundStyle(DefaultTheme.mutedText)
+            } else {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .padding(DefaultTheme.space(12))
+    }
+
+    /// What the sub-agent was asked: a line, the whole on request.
+    private var brief: some View {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
+            FoldedRowHeader(isOpen: briefOpen, isError: false, onToggle: { briefOpen.toggle() }) {
+                Text("Brief")
+                    .themeFont(size: 11.5, weight: .medium)
+                if !briefOpen {
+                    Text(agent.prompt.replacingOccurrences(of: "\n", with: " "))
+                        .themeFont(size: 11.5)
+                        .foregroundStyle(DefaultTheme.mutedText)
+                        .lineLimit(1)
+                }
+            }
+            if briefOpen {
+                MarkdownBlockView(agent.prompt, size: 12)
+                    .scrollingCode()
+                    .textSelection(.enabled)
+                    .padding(.leading, DefaultTheme.space(23))
+            }
+        }
+    }
+}
+
+/// What a sub-agent did, inside its card: the rows of the conversation,
+/// set against a rule down the side. The last ones are laid out; the
+/// earlier ones come on request, as in the conversation itself.
+private struct SubagentTranscript: View {
+    let entries: [ConversationEntry]
+    let isRunning: Bool
+    let bubbleWidth: CGFloat
+    let load: ConversationAgentLoader?
+
+    @State private var opened: Set<String> = []
+    @State private var shown = 24
+
+    private var hidden: Int { max(0, entries.count - shown) }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: DefaultTheme.space(10)) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(DefaultTheme.accent.opacity(0.35))
+                .frame(width: 2)
+            VStack(alignment: .leading, spacing: 0) {
+                if hidden > 0 {
+                    EarlierMessagesButton(count: hidden) { shown += 48 }
+                        .padding(.bottom, DefaultTheme.space(10))
+                }
+                ForEach(Array(entries.enumerated()).dropFirst(hidden), id: \.element.id) { index, entry in
+                    ConversationEntryRow(entry: entry,
+                                         isOpen: opened.contains(entry.id),
+                                         isRunning: isRunning,
+                                         bubbleWidth: bubbleWidth * 0.9,
+                                         isSelectable: true,
+                                         loadAgent: load,
+                                         onToggle: {
+                                             if opened.contains(entry.id) {
+                                                 opened.remove(entry.id)
+                                             } else {
+                                                 opened.insert(entry.id)
+                                             }
+                                         })
+                        .equatable()
+                        .padding(.top, gap(before: index, first: hidden))
+                }
+                if isRunning {
+                    StatusLabel(.working).padding(.top, DefaultTheme.space(10))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func gap(before index: Int, first: Int) -> CGFloat {
+        guard index > first else { return 0 }
+        let tight = entries[index].kind.isFolded && entries[index - 1].kind.isFolded
+        return tight ? DefaultTheme.space(4) : DefaultTheme.space(10)
     }
 }
 
