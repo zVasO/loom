@@ -412,11 +412,12 @@ struct SessionGitTab: View {
                                 row(selected: commitFile == entry.path, action: { commitFile = entry.path }) {
                                     AppIcon(Self.symbol(for: entry.kind), size: 11)
                                         .foregroundStyle(DefaultTheme.secondaryText)
+                                    // The path takes the room: the counts line up at the edge.
                                     Text(entry.path)
                                         .themeFont(size: 11.5, design: .monospaced)
                                         .lineLimit(1)
                                         .truncationMode(.head)
-                                    Spacer(minLength: DefaultTheme.space(4))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                     counts(additions: entry.additions, deletions: entry.deletions)
                                 }
                                 .help(entry.path)
