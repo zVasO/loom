@@ -1034,6 +1034,21 @@ public final class AppModel {
         return rows
     }
 
+    /// The rows of a session's own diff (its Git tab), through the pipeline
+    /// the PR diffs go through: parsed and paired once per text, off the
+    /// main actor. One entry per session — the diff shown replaces the last.
+    func gitDiffRows(for id: SessionID, diff: String) async -> DiffPipeline.Rows {
+        await diffPipeline.rows(for: "git:" + id.rawValue.uuidString, diff: diff)
+    }
+
+    func gitDiffHighlights(for id: SessionID, rows: DiffPipeline.Rows, dark: Bool) async -> DiffHighlights {
+        await diffPipeline.highlights(for: "git:" + id.rawValue.uuidString, rows: rows, dark: dark)
+    }
+
+    func forgetGitDiff(for id: SessionID) {
+        Task { await diffPipeline.evict(key: "git:" + id.rawValue.uuidString) }
+    }
+
     /// Colours for those rows in the given scheme — cached across tab switches.
     func diffHighlights(pr number: Int, in projectID: ProjectID,
                         rows: DiffPipeline.Rows, dark: Bool) async -> DiffHighlights {

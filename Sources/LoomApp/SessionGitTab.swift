@@ -29,6 +29,12 @@ struct SessionGitTab: View {
     @State private var commits: [GitService.Commit]?
     @State private var commit: GitService.Commit?
     @State private var commitText: String?
+    /// The diff shown, as the review's diff view takes it: parsed and paired
+    /// rows, then their syntax colours.
+    @State private var rows: DiffPipeline.Rows?
+    @State private var colours = DiffHighlights.none
+    @State private var unified = UserDefaults.standard.bool(forKey: "loom.diff.unified")
+    @Environment(\.colorScheme) private var colorScheme
     @State private var message = ""
     @State private var output: String?
     @State private var busy = false
@@ -55,6 +61,25 @@ struct SessionGitTab: View {
         .task(id: side) {
             if side == .history, commits == nil { commits = await model.gitHistory(for: sessionID) }
         }
+        // The text on show, or the scheme, changed: its rows, then its
+        // colours — the diff reads plain until they land.
+        .task(id: DiffKey(text: shownText, dark: colorScheme == .dark)) {
+            let text = shownText
+            guard !text.isEmpty else {
+                rows = nil
+                return
+            }
+            let parsed = await model.gitDiffRows(for: sessionID, diff: text)
+            guard !Task.isCancelled else { return }
+            if rows?.hash != parsed.hash {
+                rows = parsed
+                colours = .none
+            }
+            let coloured = await model.gitDiffHighlights(for: sessionID, rows: parsed, dark: colorScheme == .dark)
+            guard !Task.isCancelled else { return }
+            colours = coloured
+        }
+        .onDisappear { model.forgetGitDiff(for: sessionID) }
     }
 
     private func reload() async {
@@ -280,7 +305,7 @@ struct SessionGitTab: View {
         switch side {
         case .changes:
             if let data, !data.changes.isEmpty {
-                GitDiffText(text: shownDiff(data.diff)).padding(DefaultTheme.space(10))
+                diffView(preamble: nil)
             } else {
                 placeholder(loaded ? "Nothing to show: the worktree is clean." : "Reading the repository…")
             }
@@ -288,16 +313,93 @@ struct SessionGitTab: View {
             if commit == nil {
                 placeholder("Pick a commit to see what it changed.")
             } else if let commitText {
-                GitDiffText(text: commitText).padding(DefaultTheme.space(10))
+                diffView(preamble: Self.preamble(of: commitText))
             } else {
                 ProgressView().controlSize(.small)
             }
         }
     }
 
-    private func shownDiff(_ diff: String) -> String {
-        guard let file else { return diff }
-        return GitService.sections(ofDiff: diff).first { $0.path == file }?.text ?? diff
+    private struct DiffKey: Equatable {
+        var text: String
+        var dark: Bool
+    }
+
+    /// The unified diff on show: the changes (one file's, or all), or the
+    /// picked commit's patch.
+    private var shownText: String {
+        switch side {
+        case .changes:
+            guard let diff = data?.diff else { return "" }
+            guard let file else { return diff }
+            return GitService.sections(ofDiff: diff).first { $0.path == file }?.text ?? diff
+        case .history:
+            return commitText.map { Self.patch(of: $0) } ?? ""
+        }
+    }
+
+    /// `git show` writes the author, the message and the files' statistics
+    /// before the patch.
+    static func preamble(of show: String) -> String {
+        guard let range = show.range(of: "diff --git ") else { return show }
+        return String(show[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func patch(of show: String) -> String {
+        guard let range = show.range(of: "diff --git ") else { return "" }
+        return String(show[range.lowerBound...])
+    }
+
+    /// The review's own diff view: side by side or unified, syntax colours,
+    /// folding files, a selection to copy or hand to claude.
+    private func diffView(preamble: String?) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if let preamble, !preamble.isEmpty {
+                    Text(preamble)
+                        .themeFont(size: 11.5, design: .monospaced)
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(DefaultTheme.space(12))
+                }
+                if let rows, !rows.files.isEmpty {
+                    SplitDiffView(files: rows.files,
+                                  onExplain: { snippet in
+                                      send("Explain these lines (\(snippet.label)):\n```diff\n\(snippet.code)\n```")
+                                  },
+                                  onAsk: { snippet, question in
+                                      send("About these lines (\(snippet.label)): \(question)\n```diff\n\(snippet.code)\n```")
+                                  },
+                                  onAddToSession: { snippet in
+                                      let text = "\(snippet.label)\n```diff\n\(snippet.code)\n```\n"
+                                      Task { await model.typeIntoSession(text, id: sessionID) }
+                                      onShowSession()
+                                  },
+                                  unified: unified,
+                                  highlights: colours)
+                        .padding(.horizontal, DefaultTheme.space(12))
+                        .padding(.vertical, DefaultTheme.space(10))
+                } else if rows == nil, !shownText.isEmpty {
+                    ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(DefaultTheme.space(24))
+                }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            HoverIconButton(systemImage: unified ? "rectangle.split.2x1" : "list.bullet.rectangle",
+                            help: unified ? "Split view (old | new)" : "Unified view (full-width lines)") {
+                unified.toggle()
+                UserDefaults.standard.set(unified, forKey: "loom.diff.unified")
+            }
+            .padding(DefaultTheme.space(8))
+        }
+    }
+
+    /// A question about the lines picked goes to the session's claude, and
+    /// the session shows.
+    private func send(_ text: String) {
+        Task { _ = await model.submitWhenReady(text, to: sessionID, timeout: .seconds(15)) }
+        onShowSession()
     }
 
     private func placeholder(_ text: String) -> some View {
