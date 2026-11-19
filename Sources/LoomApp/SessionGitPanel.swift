@@ -186,8 +186,8 @@ struct SessionGitPanelBody: View {
 }
 
 /// A diff or a commit, line by line in the theme's colours: additions,
-/// deletions, hunk headers, file headers. Scrolls both ways; long files are
-/// laid out as they come into view.
+/// deletions, hunk headers, file headers. Long files are laid out as they
+/// come into view.
 struct GitDiffText: View {
     let text: String
 
@@ -197,7 +197,9 @@ struct GitDiffText: View {
     var body: some View {
         let all = text.split(separator: "\n", omittingEmptySubsequences: false)
         let lines = Array(all.prefix(Self.lineLimit))
-        ScrollView([.vertical, .horizontal]) {
+        // Lines wrap: scrolling both ways set the text off to one side of
+        // a panel this narrow.
+        ScrollView(.vertical) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                     Text(line.isEmpty ? " " : String(line))
@@ -206,7 +208,6 @@ struct GitDiffText: View {
                         .padding(.horizontal, DefaultTheme.space(6))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Self.fill(for: line))
-                        .fixedSize(horizontal: true, vertical: false)
                 }
                 if all.count > lines.count {
                     Text("… \(all.count - lines.count) more lines")

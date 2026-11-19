@@ -64,6 +64,12 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   Une image collée (⌘V) ou déposée sur le chat attend en vignette au-dessus du champ ;
   envoyée, elle part comme un chemin collé dans claude (qui en fait une pièce jointe,
   `[Image #1]`) et s'affiche dans le message, relue dans le fichier de claude.
+- **Thèmes livrés** : les classiques (Loom, Dracula, Nord…) et quinze thèmes à design propre
+  (`ThemeGallery.swift` : polices, rayon, espacement, bords, ombres) — dix audacieux (Neon City,
+  Brutal, Vaporwave, Phosphor, Blaze, Bauhaus, Outrun, Candy, Blueprint, Velvet) et cinq pour les
+  longues sessions (Paper, Dusk, Sage, E-Ink, Night Shift).
+- **Panneau Git d'une session** : Changes (fichiers, diff en couleurs, par fichier) et History (les
+  commits de la branche, le patch de chacun), commit / push / PR au-dessus.
 - **Journal Obsidian** (`Integrations/obsidian-loom-daily`) : un plugin Obsidian qui, toutes les
   30 minutes, résume en une puce par session ce que les sessions claude ont fait, sous `## Loom` dans
   la note du jour ; réglé dans Obsidian.
