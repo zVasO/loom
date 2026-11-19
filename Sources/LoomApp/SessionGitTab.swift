@@ -39,6 +39,8 @@ struct SessionGitTab: View {
     @State private var colours = DiffHighlights.none
     @State private var unified = UserDefaults.standard.bool(forKey: "loom.diff.unified")
     @Environment(\.colorScheme) private var colorScheme
+    /// The list of files and commits folded away: the diff takes the tab.
+    @AppStorage("loom.git.listHidden") private var listHidden = false
     @State private var message = ""
     @State private var output: String?
     @State private var busy = false
@@ -52,9 +54,11 @@ struct SessionGitTab: View {
             header
             Divider().overlay(DefaultTheme.cardBorder)
             HStack(spacing: 0) {
-                sidebar
-                    .frame(width: 320)
-                Divider().overlay(DefaultTheme.cardBorder)
+                if !listHidden {
+                    sidebar
+                        .frame(width: 264)
+                    Divider().overlay(DefaultTheme.cardBorder)
+                }
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -105,29 +109,23 @@ struct SessionGitTab: View {
 
     // MARK: Header — where we are, and Ship
 
+    /// One row: where we are, Ship, and what the diff below looks like. The
+    /// rest of the tab is the diff's.
     private var header: some View {
-        VStack(alignment: .leading, spacing: DefaultTheme.space(8)) {
-            HStack(spacing: DefaultTheme.space(8)) {
+        VStack(alignment: .leading, spacing: DefaultTheme.space(6)) {
+            HStack(spacing: DefaultTheme.space(6)) {
                 GhostButton(title, systemImage: "chevron.left", action: onShowSession)
                     .help("Back to the session")
-                AppIcon("arrow.triangle.branch", size: 13).foregroundStyle(DefaultTheme.accentInk)
-                Text("Git").themeFont(size: 13, weight: .semibold).foregroundStyle(DefaultTheme.primaryText)
-                Spacer(minLength: 0)
-                if busy { ProgressView().controlSize(.small) }
-                GhostButton(systemImage: "arrow.clockwise") { Task { await reload() } }
-                    .help("Read the repository again")
-                GhostButton(systemImage: "xmark", action: onClose)
-                    .help("Close the Git tab")
-            }
-            HStack(spacing: DefaultTheme.space(6)) {
+                    .frame(maxWidth: 220, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 TextField("Commit message…", text: $message)
                     .textFieldStyle(.plain)
                     .themeFont(size: 12)
-                    .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
+                    .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(5))
                     .background(DefaultTheme.surface, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
                     .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6))
                         .stroke(DefaultTheme.fieldBorder, lineWidth: 1))
-                    .frame(maxWidth: 520)
+                    .frame(minWidth: 120, maxWidth: 380)
                     .onSubmit { commitAll() }
                 AccentButton("Commit") { commitAll() }
                 GhostButton("Push", systemImage: "arrow.up.circle") {
@@ -152,6 +150,21 @@ struct SessionGitTab: View {
                     }
                 }
                 Spacer(minLength: 0)
+                if busy { ProgressView().controlSize(.small) }
+                HoverIconButton(systemImage: "sidebar.left",
+                                help: listHidden ? "Show the list of files and commits"
+                                                 : "Hide the list: the diff takes the whole tab") {
+                    withAnimation(.hover) { listHidden.toggle() }
+                }
+                HoverIconButton(systemImage: unified ? "rectangle.split.2x1" : "list.bullet.rectangle",
+                                help: unified ? "Split view (old | new)" : "Unified view (full-width lines)") {
+                    unified.toggle()
+                    UserDefaults.standard.set(unified, forKey: "loom.diff.unified")
+                }
+                HoverIconButton(systemImage: "arrow.clockwise", help: "Read the repository again") {
+                    Task { await reload() }
+                }
+                HoverIconButton(systemImage: "xmark", help: "Close the Git tab", action: onClose)
             }
             // Every outcome verbatim, stderr included: no phantom success.
             if let output {
@@ -159,10 +172,10 @@ struct SessionGitTab: View {
                     .themeFont(size: 11, design: .monospaced)
                     .foregroundStyle(output.hasSuffix("✓") ? DefaultTheme.groupHeader : DefaultTheme.secondaryText)
                     .textSelection(.enabled)
-                    .lineLimit(4)
+                    .lineLimit(3)
             }
         }
-        .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(10))
+        .padding(.horizontal, DefaultTheme.space(10)).padding(.vertical, DefaultTheme.space(6))
         .background(DefaultTheme.background)
     }
 
@@ -202,7 +215,10 @@ struct SessionGitTab: View {
                 LazyVStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
                     switch side {
                     case .changes: fileRows
-                    case .history: commitRows
+                    case .history:
+                        // A commit picked: the list becomes its files, one
+                        // column for both — the diff keeps the rest.
+                        if commit != nil { commitFileRows } else { commitRows }
                     }
                 }
             }
@@ -334,7 +350,11 @@ struct SessionGitTab: View {
             if commit == nil {
                 placeholder("Pick a commit to see what it changed.")
             } else if commitText != nil {
-                commitDetail
+                if commitFiles.isEmpty {
+                    placeholder("This commit changes no file (a merge).")
+                } else {
+                    diffView(preamble: nil)
+                }
             } else {
                 ProgressView().controlSize(.small)
             }
@@ -361,75 +381,72 @@ struct SessionGitTab: View {
         }
     }
 
-    /// A commit, as GitHub Desktop lays it out: what it says on top, the
-    /// files it touched in a column, the diff of the one picked beside it.
-    private var commitDetail: some View {
-        VStack(spacing: 0) {
-            if let commit {
-                VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
-                    Text(commit.subject)
-                        .themeFont(size: 13, weight: .semibold)
-                        .foregroundStyle(DefaultTheme.primaryText)
-                        .textSelection(.enabled)
-                    let rest = commitMessage.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
-                        .dropFirst().joined().trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !rest.isEmpty {
-                        Text(rest)
-                            .themeFont(size: 11.5)
-                            .foregroundStyle(DefaultTheme.secondaryText)
-                            .textSelection(.enabled)
-                            .lineLimit(6)
-                    }
-                    HStack(spacing: DefaultTheme.space(6)) {
-                        Text(commit.shortHash)
-                            .themeFont(size: 10.5, design: .monospaced)
-                            .foregroundStyle(DefaultTheme.accentInk)
-                        Text("\(commit.author) · \(commit.date.formatted(date: .abbreviated, time: .shortened))")
-                            .themeFont(size: 10.5)
-                            .foregroundStyle(DefaultTheme.mutedText)
-                        Text("\(commitFiles.count) file\(commitFiles.count == 1 ? "" : "s")")
-                            .themeFont(size: 10.5)
-                            .foregroundStyle(DefaultTheme.mutedText)
-                        counts(additions: commitFiles.reduce(0) { $0 + $1.additions },
-                               deletions: commitFiles.reduce(0) { $0 + $1.deletions })
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, DefaultTheme.space(14)).padding(.vertical, DefaultTheme.space(10))
-                Divider().overlay(DefaultTheme.cardBorder)
+    /// The picked commit in the list's column: the way back to the commits,
+    /// what it says, then its files — a click shows that file's diff.
+    @ViewBuilder
+    private var commitFileRows: some View {
+        if let commit {
+            GhostButton("Commits", systemImage: "chevron.left") {
+                self.commit = nil
+                commitText = nil
+                commitFiles = []
+                commitFile = nil
             }
-            if commitFiles.isEmpty {
-                placeholder("This commit changes no file (a merge).")
-            } else {
-                HStack(spacing: 0) {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: DefaultTheme.space(2)) {
-                            row(selected: commitFile == nil, action: { commitFile = nil }) {
-                                AppIcon("square.stack", size: 11).foregroundStyle(DefaultTheme.secondaryText)
-                                Text("All files (\(commitFiles.count))").themeFont(size: 12, weight: .medium)
-                            }
-                            ForEach(commitFiles) { entry in
-                                row(selected: commitFile == entry.path, action: { commitFile = entry.path }) {
-                                    AppIcon(Self.symbol(for: entry.kind), size: 11)
-                                        .foregroundStyle(DefaultTheme.secondaryText)
-                                    // The path takes the room: the counts line up at the edge.
-                                    Text(entry.path)
-                                        .themeFont(size: 11.5, design: .monospaced)
-                                        .lineLimit(1)
-                                        .truncationMode(.head)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    counts(additions: entry.additions, deletions: entry.deletions)
-                                }
-                                .help(entry.path)
-                            }
-                        }
-                        .padding(DefaultTheme.space(8))
+            VStack(alignment: .leading, spacing: DefaultTheme.space(4)) {
+                Text(commit.subject)
+                    .themeFont(size: 12.5, weight: .semibold)
+                    .foregroundStyle(DefaultTheme.primaryText)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                let rest = commitMessage.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+                    .dropFirst().joined().trimmingCharacters(in: .whitespacesAndNewlines)
+                if !rest.isEmpty {
+                    Text(rest)
+                        .themeFont(size: 11)
+                        .foregroundStyle(DefaultTheme.secondaryText)
+                        .textSelection(.enabled)
+                        .lineLimit(8)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(spacing: DefaultTheme.space(6)) {
+                    Text(commit.shortHash)
+                        .themeFont(size: 10.5, design: .monospaced)
+                        .foregroundStyle(DefaultTheme.accentInk)
+                    Text(commit.date.formatted(date: .abbreviated, time: .shortened))
+                        .themeFont(size: 10.5)
+                        .foregroundStyle(DefaultTheme.mutedText)
+                        .lineLimit(1)
+                }
+                Text(commit.author)
+                    .themeFont(size: 10.5)
+                    .foregroundStyle(DefaultTheme.mutedText)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, DefaultTheme.space(8)).padding(.vertical, DefaultTheme.space(6))
+            if commitText == nil {
+                ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+            } else if !commitFiles.isEmpty {
+                row(selected: commitFile == nil, action: { commitFile = nil }) {
+                    AppIcon("square.stack", size: 11).foregroundStyle(DefaultTheme.secondaryText)
+                    Text("All files (\(commitFiles.count))")
+                        .themeFont(size: 12, weight: .medium)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    counts(additions: commitFiles.reduce(0) { $0 + $1.additions },
+                           deletions: commitFiles.reduce(0) { $0 + $1.deletions })
+                }
+                ForEach(commitFiles) { entry in
+                    row(selected: commitFile == entry.path, action: { commitFile = entry.path }) {
+                        AppIcon(Self.symbol(for: entry.kind), size: 11)
+                            .foregroundStyle(DefaultTheme.secondaryText)
+                        // The path takes the room: the counts line up at the edge.
+                        Text(entry.path)
+                            .themeFont(size: 11.5, design: .monospaced)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        counts(additions: entry.additions, deletions: entry.deletions)
                     }
-                    .frame(width: 280)
-                    .background(DefaultTheme.background)
-                    Divider().overlay(DefaultTheme.cardBorder)
-                    diffView(preamble: nil)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .help(entry.path)
                 }
             }
         }
@@ -477,20 +494,13 @@ struct SessionGitTab: View {
                                   },
                                   unified: unified,
                                   highlights: colours)
-                        .padding(.horizontal, DefaultTheme.space(12))
-                        .padding(.vertical, DefaultTheme.space(10))
+                        // Close to the edges: the width is the code's.
+                        .padding(.horizontal, DefaultTheme.space(6))
+                        .padding(.vertical, DefaultTheme.space(6))
                 } else if rows == nil, !shownText.isEmpty {
                     ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(DefaultTheme.space(24))
                 }
             }
-        }
-        .overlay(alignment: .topTrailing) {
-            HoverIconButton(systemImage: unified ? "rectangle.split.2x1" : "list.bullet.rectangle",
-                            help: unified ? "Split view (old | new)" : "Unified view (full-width lines)") {
-                unified.toggle()
-                UserDefaults.standard.set(unified, forKey: "loom.diff.unified")
-            }
-            .padding(DefaultTheme.space(8))
         }
     }
 
