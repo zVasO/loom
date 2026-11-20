@@ -7,7 +7,10 @@ Page statique, sans build : `index.html` (HTML, CSS et JS inline) et `favicon.sv
 python3 -m http.server -d site 8080   # puis http://localhost:8080
 ```
 
-Déploiement : servir le dossier `site/` tel quel (GitHub Pages, Netlify, S3…).
+Déploiement : le workflow `.github/workflows/pages.yml` publie le dossier `site/` sur
+GitHub Pages à chaque push sur `main` qui le modifie (ou à la main, depuis l'onglet
+Actions). Pages doit être activé une fois dans les réglages du dépôt, avec « GitHub
+Actions » comme source. Ailleurs (Netlify, S3…), servir le dossier tel quel.
 
 ## Dépendances externes
 
