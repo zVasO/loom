@@ -39,7 +39,7 @@ public struct ClaudeTerminalPrompt: Equatable, Sendable {
             let line = lines[index]
             if line.isEmpty || isRule(line) {
                 index -= 1
-            } else if option(in: line) == nil, hints < 2, isHint(line) {
+            } else if option(in: line) == nil, hints < 3, isHint(line) {
                 hints += 1
                 index -= 1
             } else {
@@ -57,7 +57,10 @@ public struct ClaudeTerminalPrompt: Equatable, Sendable {
                 found.append((parsed.number, label, parsed.marked))
                 wrapped = []
                 if parsed.number == 1 { index -= 1; break }
-            } else if !found.isEmpty, !line.isEmpty, wrapped.count < 3, !isRule(line) {
+            } else if !line.isEmpty, wrapped.count < 4, !isRule(line) {
+                // The wrapped end of the option above — the last option's
+                // too: in a narrow terminal it runs onto a line of its own,
+                // and a dialog that ended on such a line was not read at all.
                 wrapped.append(line)
             } else {
                 return nil
@@ -115,8 +118,10 @@ public struct ClaudeTerminalPrompt: Equatable, Sendable {
     /// What claude prints under a menu: how to leave it, how to amend.
     static func isHint(_ line: String) -> Bool {
         let lower = line.lowercased()
-        return line.count <= 80 && (lower.contains("esc") || lower.contains("tab to")
-            || lower.contains("enter to") || lower.contains("ctrl"))
+        return line.count <= 100 && (lower.contains("esc") || lower.contains("tab to")
+            || lower.contains("enter to") || lower.contains("ctrl") || lower.contains("to navigate")
+            || lower.contains("to select") || lower.contains("to cancel") || lower.contains("↑")
+            || lower.contains("shift+"))
     }
 
     /// "❯ 1. Yes", "  2. No, and tell Claude…".

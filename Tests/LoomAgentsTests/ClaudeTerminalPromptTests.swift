@@ -75,4 +75,44 @@ struct ClaudeTerminalPromptTests {
         #expect(ClaudeTerminalPrompt.parse(lines: ["Proceed?", "❯ 2. Yes", "  3. No"]) == nil)
         #expect(ClaudeTerminalPrompt.parse(lines: ["❯ 1. Yes", "  2. No"]) == nil)
     }
+
+    @Test("a narrow terminal: the last option wraps onto a line of its own, and the dialog still reads")
+    func wrappedLastOption() throws {
+        let screen = [
+            " Bash command",
+            "",
+            "   docker exec -it web sh",
+            "",
+            " Do you want to proceed?",
+            " ❯ 1. Yes",
+            "   2. Yes, and don't ask again for docker exec",
+            "   commands in /Users/ada/loom",
+            "   3. No, and tell Claude what to do",
+            "   differently",
+            "",
+        ]
+        let prompt = try #require(ClaudeTerminalPrompt.parse(lines: screen))
+        #expect(prompt.options.count == 3)
+        #expect(prompt.options[2].label == "No, and tell Claude what to do differently")
+        #expect(prompt.context == ["Bash command", "docker exec -it web sh"])
+    }
+
+    @Test("a question with options and its navigation hints")
+    func question() throws {
+        let screen = [
+            " Which database should the tests use?",
+            "",
+            " ❯ 1. SQLite",
+            "      In memory, fastest",
+            "   2. Postgres",
+            "      What production runs",
+            "   3. Type something.",
+            "",
+            " Enter to select · ↑/↓ to navigate · Esc to cancel",
+        ]
+        let prompt = try #require(ClaudeTerminalPrompt.parse(lines: screen))
+        #expect(prompt.question == "Which database should the tests use?")
+        #expect(prompt.options.map(\.number) == [1, 2, 3])
+        #expect(prompt.options[0].label == "SQLite In memory, fastest")
+    }
 }

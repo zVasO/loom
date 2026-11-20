@@ -57,7 +57,11 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   jamais dans l'écran, et suit un `/resume` ou un `/clear`. Ce qu'on y écrit est
   tapé dans le terminal de la session, où claude continue de tourner. Une demande
   de permission (ou une question à options) que claude dessine dans son terminal
-  s'affiche dans le chat en carte, un bouton par option (ADR-0025). Pendant que
+  s'affiche dans le chat en carte, un bouton par option, que la session se dise au
+  travail ou non (ADR-0025). Un sous-agent lancé par claude a sa carte : ce qu'on lui
+  a demandé, s'il travaille encore, combien d'outils et de temps ; ouverte, elle
+  montre sa propre conversation (ses appels d'outils, ce qu'il dit), suivie pendant
+  qu'il travaille. Pendant que
   claude travaille, Stop l'interrompt (Échap) et l'éclair envoie le message tout de
   suite au lieu de le mettre en file. Un message envoyé s'affiche aussitôt, en
   attendant que claude l'écrive ; la conversation suit le fichier dès qu'il change.

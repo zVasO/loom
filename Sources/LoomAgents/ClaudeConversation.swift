@@ -13,8 +13,8 @@ import Foundation
 public enum ClaudeConversation {
 
     /// The entries of a conversation, in order, from the text of its file.
-    public static func entries(fromJSONL text: String) -> [ConversationEntry] {
-        var reader = Reader()
+    public static func entries(fromJSONL text: String, sidechain: Bool = false) -> [ConversationEntry] {
+        var reader = Reader(sidechain: sidechain)
         reader.consume(text)
         return reader.entries
     }
@@ -33,8 +33,16 @@ public enum ClaudeConversation {
         private var lineCount: Int = 0
         private var file: URL?
         private var offset: UInt64 = 0
+        /// Reading a sub-agent's own file: every line of it is a sidechain.
+        private var sidechain = false
+        /// What the line being read says of the sub-agent a tool result ends.
+        private var lineAgent: (id: String?, toolUses: Int?, durationMs: Int?)?
 
         public init() {}
+
+        public init(sidechain: Bool) {
+            self.sidechain = sidechain
+        }
 
         /// Complete lines of JSONL, appended to what was read before. True
         /// when entries changed.
@@ -76,7 +84,7 @@ public enum ClaudeConversation {
         }
 
         public mutating func reset() {
-            self = Reader()
+            self = Reader(sidechain: sidechain)
         }
 
         // MARK: Lines
@@ -97,7 +105,12 @@ public enum ClaudeConversation {
         /// What one line adds. Most add nothing: a sub-agent's own exchange,
         /// what claude code notes for itself, the bookkeeping of a turn.
         private mutating func apply(_ object: [String: Any]) -> Bool {
-            if object["isSidechain"] as? Bool == true { return false }
+            if !sidechain, object["isSidechain"] as? Bool == true { return false }
+            lineAgent = nil
+            if let outcome = object["toolUseResult"] as? [String: Any] {
+                lineAgent = (outcome["agentId"] as? String, outcome["totalToolUseCount"] as? Int,
+                             outcome["totalDurationMs"] as? Int)
+            }
             guard let type = object["type"] as? String else { return false }
             let line = (object["uuid"] as? String) ?? "line-\(lineCount)"
             let stamp = object["timestamp"] as? String
@@ -158,10 +171,17 @@ public enum ClaudeConversation {
                     let name = (block["name"] as? String) ?? "Tool"
                     let input = (block["input"] as? [String: Any]) ?? [:]
                     let toolUseID = (block["id"] as? String) ?? ""
-                    let call = ConversationEntry.ToolCall(
+                    var call = ConversationEntry.ToolCall(
                         toolUseID: toolUseID, name: name,
                         summary: ClaudeConversation.summary(of: name, input: input),
                         input: ClaudeConversation.readable(input, of: name))
+                    // A sub-agent: its brief travels with the call.
+                    if name == "Task" || name == "Agent", let prompt = input["prompt"] as? String {
+                        call.agent = ConversationEntry.AgentCall(
+                            description: (input["description"] as? String) ?? "",
+                            type: (input["subagent_type"] as? String) ?? "",
+                            prompt: prompt)
+                    }
                     if append(.tool(call), id: id, stamp: stamp) {
                         if !toolUseID.isEmpty { calls[toolUseID] = entries.count - 1 }
                         changed = true
@@ -234,6 +254,11 @@ public enum ClaudeConversation {
             call.result = ClaudeConversation.capped(ClaudeConversation.resultText(block["content"]),
                                                     limit: ClaudeConversation.resultLimit)
             call.isError = (block["is_error"] as? Bool) ?? false
+            if call.agent != nil, let lineAgent {
+                call.agent?.agentID = lineAgent.id
+                call.agent?.toolUses = lineAgent.toolUses
+                call.agent?.durationMs = lineAgent.durationMs
+            }
             guard call != pending else { return false }
             entries[index].kind = .tool(call)
             return true

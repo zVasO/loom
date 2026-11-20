@@ -10,6 +10,10 @@ Dans la vue conversation (ADR-0023), une demande de permission ne se voyait pas 
 
 **Stop et Envoyer maintenant tapent Échap.** Pendant que claude travaille, Stop envoie Échap — l'interruption de claude. Envoyer maintenant fait de même, attend la fin du tour, puis envoie le message par `submitWhenReady` au lieu de le laisser en file derrière le tour.
 
+**Un menu à l'écran est un menu, quel que soit l'état.** La carte ne dépend plus de l'état de la session : un menu laissé quelques secondes se relisait « au travail » dès que l'écran bougeait dessous, et la carte disparaissait alors que claude attendait. La lecture accepte aussi une dernière option qui passe à la ligne (terminal étroit) et jusqu'à trois lignes d'aide sous le menu. Une option cliquée cache la carte ; si l'écran montre encore le même menu quatre secondes plus tard (la touche s'est perdue), elle revient.
+
+**Un sous-agent s'ouvre comme un appel d'outil.** claude garde la conversation de chaque sous-agent à côté de celle de la session (`<session>/subagents/agent-<id>.jsonl`, un dossier plus bas pour ceux d'un workflow, avec `agent-<id>.meta.json`). `ClaudeConversation` marque l'appel `Task`/`Agent` (`ToolCall.agent` : description, type, consigne, puis l'identifiant et les totaux que le résultat donne) ; `ClaudeSubagents` retrouve le fichier — par l'identifiant, ou par la consigne tant que le sous-agent travaille et que rien d'autre ne le relie à l'appel — et le lit avec le même lecteur. Le chat en fait une carte ; ouverte, elle montre les dernières lignes du sous-agent (24, les précédentes à la demande), relues toutes les 1,5 s tant qu'il travaille. Les sous-agents d'un sous-agent s'ouvrent de même, dedans.
+
 ## Conséquences
 
 - Une demande dont le dessin change (une version de claude qui numérote autrement, un marqueur nouveau) n'est plus reconnue : le bandeau « claude is asking for a permission in the terminal » revient alors, comme avant.

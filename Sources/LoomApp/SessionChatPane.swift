@@ -34,6 +34,9 @@ struct SessionChatPane: View {
     /// The session's terminal: where a choice claude asks for is read, and
     /// where its answer, Stop and the messages are typed.
     @State private var surface: TerminalSurface?
+    /// The conversation's file, once found: a sub-agent's own conversation
+    /// is kept beside it.
+    @State private var sessionFile: URL?
     /// An option clicked: the card waits for the screen to move on.
     @State private var answered: ClaudeTerminalPrompt?
     /// The choice the terminal's screen shows, read by `watchScreen`, not
@@ -90,7 +93,10 @@ struct SessionChatPane: View {
     /// options — when the session is not working. Read off the terminal,
     /// which the pane watches for as long as it shows.
     private var prompt: ClaudeTerminalPrompt? {
-        guard isLive, item?.state != .working, let onScreen, onScreen != answered else { return nil }
+        // Whatever the state says: a dialog on screen is a dialog. A prompt
+        // left a few seconds reads "working" again when claude's screen
+        // moves under it, and the card then went missing while claude waited.
+        guard isLive, let onScreen, onScreen != answered else { return nil }
         return onScreen
     }
 
@@ -132,7 +138,8 @@ struct SessionChatPane: View {
             ConversationList(entries: entries, isWorking: item?.state == .working,
                              pending: pending.map(\.entry),
                              emptyTitle: "No conversation yet",
-                             emptyDetail: "What you and claude say will show here. The first message can be sent from below.")
+                             emptyDetail: "What you and claude say will show here. The first message can be sent from below.",
+                             loadAgent: agentLoader)
             if let prompt {
                 ConversationPromptCard(question: prompt.question, context: prompt.context,
                                        options: prompt.options.map { .init(number: $0.number, label: $0.label) },
@@ -187,8 +194,13 @@ struct SessionChatPane: View {
         .task(id: FollowKey(native: sessionID, live: isLive)) { await watchScreen() }
         // In claude's file at last: no longer shown as pending.
         .onChange(of: entries) { dropDelivered() }
-        // The screen moved on from the prompt answered: a new one may come.
-        .onChange(of: item?.state) { answered = nil }
+        // A click on an option that claude did not take (the key was lost)
+        // must not hide the dialog for good: it shows again after a moment.
+        .task(id: answered) {
+            guard answered != nil else { return }
+            try? await Task.sleep(for: .seconds(4))
+            if !Task.isCancelled { answered = nil }
+        }
         // The failure is about the text as it was sent: edited, it is a new message.
         // Kept per session as it is typed: another tab, another session and
         // back, the message waits where it was left.
@@ -200,6 +212,11 @@ struct SessionChatPane: View {
             ChatDrafts.shared.images[sessionID] = images.isEmpty ? nil : images
         }
         .onAppear { restoreDraft() }
+        // The theme tour's "chat-agents": the sub-agents' cards, open.
+        .onReceive(NotificationCenter.default.publisher(for: .loomTourShow)) { note in
+            guard note.object as? String == "chat-agents" else { return }
+            NotificationCenter.default.post(name: Notification.Name("loom.conversation.openAgents"), object: nil)
+        }
         .onChange(of: sessionID) { restoreDraft() }
     }
 
@@ -235,6 +252,7 @@ struct SessionChatPane: View {
         var reader = kept?.reader ?? ClaudeConversation.Reader()
         // Found once: looking for it lists every folder of ~/.claude/projects.
         var file: URL? = kept?.file
+        if let known = kept?.file, sessionFile != known { sessionFile = known }
         // Woken by claude's writes: what it says shows as it lands, not at
         // the next tick. The ticks stay, slower, for what the watch misses
         // (a file replaced under it).
@@ -254,6 +272,7 @@ struct SessionChatPane: View {
             guard !Task.isCancelled else { return }   // a restarted read wins
             reader = result.reader
             file = result.file
+            if sessionFile != result.file { sessionFile = result.file }
             if result.changed || kept == nil {
                 ChatReadCache.shared[native] = ChatReadCache.Kept(reader: reader, file: file)
             }
@@ -288,10 +307,24 @@ struct SessionChatPane: View {
                 let lines = screen.lines.map { String($0.cells.map(\.character)) }
                 let read = ClaudeTerminalPrompt.parse(lines: lines)
                 if onScreen != read { onScreen = read }
+                // The dialog answered is gone from the screen: the same
+                // question asked again later is a new one, and shows.
+                if answered != nil, read != answered { answered = nil }
             }
             try? await Task.sleep(for: .milliseconds(200))
         }
         await watching
+    }
+
+    /// Reads a sub-agent's conversation, off the main actor: its file sits
+    /// beside the session's.
+    private var agentLoader: ConversationAgentLoader? {
+        guard let sessionFile else { return nil }
+        return { call in
+            await Task.detached(priority: .userInitiated) {
+                ClaudeSubagents.transcript(of: call, sessionFile: sessionFile)
+            }.value
+        }
     }
 
     /// Asks the journal what the session waits on: a question leaves

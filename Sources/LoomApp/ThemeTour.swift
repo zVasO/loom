@@ -97,17 +97,20 @@ final class ThemeTour {
         .appearance, .themes, .documents, .projects,
     ]
     private static let screens: [String] = ["projects", "project-git", "project-files", "sessions", "chat",
+                                            "chat-agents",
                                             "chat-narrow", "git-panel", "git-history", "side-panel", "context", "overview",
                                             "prs", "workflows", "extensions"]
         + settingsStops.map { "settings-" + $0.rawValue }
         + ["theme-import", "palette", "palette-review", "new-session", "usage"]
-    private static let coreScreens: Set<String> = ["projects", "sessions", "chat", "chat-narrow", "git-panel",
+    private static let coreScreens: Set<String> = ["projects", "sessions", "chat", "chat-agents", "chat-narrow",
+                                                   "git-panel",
                                                    "git-history", "overview",
                                                    "workflows", "settings-general", "settings-themes",
                                                    "theme-import", "palette", "palette-review"]
     /// How long a screen takes to settle before its picture, in milliseconds.
     /// The chat view finds and reads the conversation's file first.
     private static let settling: [String: Int] = ["sessions": 1_200, "chat": 2_500, "chat-narrow": 2_500,
+                                                  "chat-agents": 4_000,
                                                   "git-panel": 1_500, "git-history": 3_500,
                                                   "project-git": 1_500, "theme-import": 2_500]
 
@@ -322,11 +325,18 @@ final class ThemeTour {
                 try? await Task.sleep(for: .milliseconds(600))
                 self?.ask("git-history")
             }
-        case "sessions", "chat", "chat-narrow", "side-panel", "git-panel", "context":
+        case "sessions", "chat", "chat-narrow", "chat-agents", "side-panel", "git-panel", "context":
             driver.show(.sessions)
             driver.select(sessions.first.map { DetailSelection.session($0) })
-            if screen == "chat" || screen == "chat-narrow" {
+            if screen == "chat" || screen == "chat-narrow" || screen == "chat-agents" {
                 ask("chat")
+                if screen == "chat-agents" {
+                    // Once the conversation is read: its sub-agents' cards, open.
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .milliseconds(1_800))
+                        self?.ask("chat-agents")
+                    }
+                }
                 // The fleet panel folded: the conversation gets the height
                 // to show more than its last answer. And once beside the
                 // browser: half the width, where a table has to wrap.
@@ -361,7 +371,7 @@ final class ThemeTour {
     /// Undoes what a screen put over the window. True when something was.
     private func leave(_ screen: String) -> Bool {
         switch screen {
-        case "chat", "chat-narrow":
+        case "chat", "chat-narrow", "chat-agents":
             // The screens after it are the terminal's, over the fleet panel.
             if screen == "chat-narrow" {
                 NotificationCenter.default.post(name: .loomToggleSidePanel, object: nil)

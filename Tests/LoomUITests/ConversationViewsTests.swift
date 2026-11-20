@@ -1,3 +1,4 @@
+import LoomCore
 import Testing
 @testable import LoomUI
 
@@ -37,5 +38,21 @@ struct ConversationLayoutTests {
         #expect(ConversationLayout.bubbleWidth(viewportWidth: 540, margin: 20) == 400)
         #expect(ConversationLayout.bubbleWidth(viewportWidth: 2000, margin: 20) == 608)
         #expect(ConversationLayout.bubbleWidth(viewportWidth: 10, margin: 20) == 0)
+    }
+}
+
+@Suite("ConversationLayout — a sub-agent's card")
+struct ConversationAgentFactsTests {
+    @Test("how long it ran, and what the card says of it")
+    func facts() {
+        #expect(ConversationLayout.duration(milliseconds: 42_000) == "42 s")
+        #expect(ConversationLayout.duration(milliseconds: 192_000) == "3 min 12 s")
+        #expect(ConversationLayout.duration(milliseconds: 120_000) == "2 min")
+        var agent = ConversationEntry.AgentCall(description: "Find it", type: "Explore", prompt: "…")
+        #expect(ConversationLayout.agentFacts(agent, steps: nil) == "Explore")
+        #expect(ConversationLayout.agentFacts(agent, steps: 3) == "Explore · 3 tools")
+        agent.toolUses = 1
+        agent.durationMs = 61_000
+        #expect(ConversationLayout.agentFacts(agent, steps: 9) == "Explore · 1 tool · 1 min 1 s")
     }
 }
