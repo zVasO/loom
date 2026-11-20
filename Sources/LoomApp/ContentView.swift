@@ -141,6 +141,7 @@ struct ContentView: View {
     @AppStorage("loom.session.lastOpened") private var lastOpenedSession = ""
     @State private var paletteShown = false
     @State private var usageShown = false
+    @State private var activityShown = false
     @State private var newSessionSheetShown = false
     /// The Sessions sidebar as one line per session (shared with SessionsView).
     @AppStorage("loom.sessions.compact") private var compactSessions = false
@@ -250,6 +251,7 @@ struct ContentView: View {
                     present: { overlay in
                         paletteShown = overlay == .palette
                         usageShown = overlay == .usage
+                        activityShown = overlay == .activity
                         newSessionSheetShown = overlay == .newSession
                     }))
                 exit(await tour.run() ? 0 : 1)
@@ -303,13 +305,14 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .loomNewSessionInProject)) { _ in
             // Not over the palette or a sheet: one at a time.
-            guard !paletteShown, !usageShown else { return }
+            guard !paletteShown, !usageShown, !activityShown else { return }
             newSessionSheetShown = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .loomFrameRateChanged)) { _ in
             model.applyFrameRate()
         }
         .sheet(isPresented: $usageShown) { UsageSheet(model: model) { usageShown = false } }
+        .sheet(isPresented: $activityShown) { ActivitySheet(scope: .everywhere) { activityShown = false } }
         .alert("Incomplete startup", isPresented: .constant(model.startupError != nil)) {
             Button("OK") { model.clearError() }
         } message: {
@@ -459,6 +462,8 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .keyboardShortcut(KeyEquivalent(keyPalette.first ?? "k"), modifiers: .command)
             // Every claude session on this machine, not just Loom's own.
+            BarIconButton(systemImage: "chart.bar") { activityShown = true }
+                .help("Activity: the MCP servers, skills, hooks and tools your sessions use most")
             BarIconButton(systemImage: "dollarsign") { usageShown = true }
                 .help("Usage & estimated costs")
             BarIconButton(systemImage: "gearshape", isActive: tab == .settings) {
@@ -3053,6 +3058,7 @@ struct SessionDetailView: View {
         loadedUsage?.reportingWindow(model.reportedWindows[sessionID])
     }
     @State private var contextShown = false
+    @State private var activityShown = false
     /// The panel's width as the user last dragged it — 0 = never.
     @AppStorage(AppModel.sidePanelWidthKey) private var storedPanelWidth: Double = 0
     /// The divider drag in progress — reset by SwiftUI on cancel as on end,
@@ -3246,6 +3252,18 @@ struct SessionDetailView: View {
             }
             .popover(isPresented: $infoShown, arrowEdge: .bottom) { sessionInfoPanel }
             contextRing
+            // A shell has no claude: nothing to count.
+            if item?.isShell != true {
+                HoverIconButton(systemImage: "chart.bar",
+                                help: "What this session uses most: MCP servers, skills, sub-agents, hooks, tools") {
+                    activityShown = true
+                }
+                .sheet(isPresented: $activityShown) {
+                    ActivitySheet(scope: .session(native: nativeID, title: item?.title ?? "Session")) {
+                        activityShown = false
+                    }
+                }
+            }
             if let state = item?.state {
                 StatusLabel(state)
             }
@@ -3351,6 +3369,8 @@ struct SessionDetailView: View {
             case "git": onOpenGit()
             case "context": contextShown = true
             case "context-close": contextShown = false
+            case "session-activity": activityShown = true
+            case "session-activity-close": activityShown = false
             case "chat": model.setViewMode(.chat, for: sessionID)
             case "terminal": model.setViewMode(.terminal, for: sessionID)
             default: break
