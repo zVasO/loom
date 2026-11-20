@@ -93,12 +93,10 @@ struct ThemeDocumentSettings: View {
         }
     }
 
+    /// No scroll of its own: the Settings page's wheel stays the page's.
     private func code(_ text: Binding<String>, minHeight: CGFloat) -> some View {
-        TextEditor(text: text)
-            .themeFont(size: 11, design: .monospaced)
-            .scrollContentBackground(.hidden)
-            .padding(DefaultTheme.space(6))
-            .frame(minHeight: minHeight)
+        GrowingTextView(text: text, fontSize: 11, minHeight: minHeight)
+            .padding(DefaultTheme.space(2))
             .background(DefaultTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: DefaultTheme.radius(6)))
             .overlay(RoundedRectangle(cornerRadius: DefaultTheme.radius(6)).stroke(DefaultTheme.fieldBorder, lineWidth: 1))
             .themeShadow(.xs, radius: 6)
