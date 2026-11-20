@@ -40,7 +40,7 @@ import SwiftUI
 final class ThemeTour {
 
     /// What shows over the window: a sheet — or the palette, drawn in it.
-    enum Overlay { case palette, usage, newSession }
+    enum Overlay { case palette, usage, activity, newSession }
 
     /// What the tour asks of the window: `ContentView` holds that state.
     struct Driver {
@@ -98,18 +98,19 @@ final class ThemeTour {
     ]
     private static let screens: [String] = ["projects", "project-git", "project-files", "sessions", "chat",
                                             "chat-agents",
-                                            "chat-narrow", "git-panel", "git-history", "side-panel", "context", "overview",
+                                            "chat-narrow", "git-panel", "git-history", "side-panel", "context", "session-activity", "overview",
                                             "prs", "workflows", "extensions"]
         + settingsStops.map { "settings-" + $0.rawValue }
-        + ["theme-import", "palette", "palette-review", "new-session", "usage"]
+        + ["theme-import", "palette", "palette-review", "new-session", "usage", "activity"]
     private static let coreScreens: Set<String> = ["projects", "sessions", "chat", "chat-agents", "chat-narrow",
                                                    "git-panel",
-                                                   "git-history", "overview",
+                                                   "git-history", "session-activity", "activity", "overview",
                                                    "workflows", "settings-general", "settings-themes",
                                                    "theme-import", "palette", "palette-review"]
     /// How long a screen takes to settle before its picture, in milliseconds.
     /// The chat view finds and reads the conversation's file first.
     private static let settling: [String: Int] = ["sessions": 1_200, "chat": 2_500, "chat-narrow": 2_500,
+                                                  "session-activity": 2_000, "activity": 2_500,
                                                   "chat-agents": 4_000,
                                                   "git-panel": 1_500, "git-history": 3_500,
                                                   "project-git": 1_500, "theme-import": 2_500]
@@ -325,7 +326,8 @@ final class ThemeTour {
                 try? await Task.sleep(for: .milliseconds(600))
                 self?.ask("git-history")
             }
-        case "sessions", "chat", "chat-narrow", "chat-agents", "side-panel", "git-panel", "context":
+        case "sessions", "chat", "chat-narrow", "chat-agents", "side-panel", "git-panel", "context",
+             "session-activity":
             driver.show(.sessions)
             driver.select(sessions.first.map { DetailSelection.session($0) })
             if screen == "chat" || screen == "chat-narrow" || screen == "chat-agents" {
@@ -350,6 +352,8 @@ final class ThemeTour {
                 ask("git")
             } else if screen == "context" {
                 ask("context")
+            } else if screen == "session-activity" {
+                ask("session-activity")
             }
         case "theme-import":
             driver.show(.settings)
@@ -364,6 +368,7 @@ final class ThemeTour {
         case "palette-review": ask("palette-review")
         case "new-session": driver.present(.newSession)
         case "usage": driver.present(.usage)
+        case "activity": driver.present(.activity)
         default: break
         }
     }
@@ -392,10 +397,13 @@ final class ThemeTour {
         case "context":
             ask("context-close")
             return true
+        case "session-activity":
+            ask("session-activity-close")
+            return true
         case "theme-import":
             ask("theme-import-close")
             return true
-        case "palette", "palette-review", "new-session", "usage":
+        case "palette", "palette-review", "new-session", "usage", "activity":
             driver.present(nil)
             return true
         default:

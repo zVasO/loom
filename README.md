@@ -68,6 +68,13 @@ Release signée/notariée : `./scripts/release-wizard.sh` (guide interactif, 8 �
   Une image collée (⌘V) ou déposée sur le chat attend en vignette au-dessus du champ ;
   envoyée, elle part comme un chemin collé dans claude (qui en fait une pièce jointe,
   `[Image #1]`) et s'affiche dans le message, relue dans le fichier de claude.
+- **Activité** : ce que les sessions utilisent le plus — serveurs MCP (et leurs outils),
+  skills, sous-agents, hooks, commandes slash, outils — classé par nombre d'appels, avec
+  les erreurs et ce qui est proposé sans jamais être appelé. Les barres de l'en-tête d'une
+  session l'ouvrent pour cette session (ses sous-agents compris) ; celles de la barre du
+  haut, pour toutes les sessions claude de la machine sur 7, 30 ou 90 jours. Tout est lu
+  dans les fichiers de claude (`ClaudeActivity`), rien ne sort de la machine. Un hook n'est
+  compté que si claude en a écrit une ligne.
 - **Thèmes livrés** : les classiques (Loom, Dracula, Nord…) et quinze thèmes à design propre
   (`ThemeGallery.swift` : polices, rayon, espacement, bords, ombres) — dix audacieux (Neon City,
   Brutal, Vaporwave, Phosphor, Blaze, Bauhaus, Outrun, Candy, Blueprint, Velvet) et cinq pour les
